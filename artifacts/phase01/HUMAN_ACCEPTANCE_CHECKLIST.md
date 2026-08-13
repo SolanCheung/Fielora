@@ -1,6 +1,6 @@
 # Phase 01 Human Experience Acceptance
 
-待验收构建：`Fielora-V0.1-Phase01-win-x64.zip`  
+待验收构建：`Fielora-V0.1-Phase01-win-x64.zip`
 SHA-256：`04a0d539d11324e941f2f4c7bee39628ad919dcb7e0326afb8525ebc1b7220f9`
 
 请将 ZIP 解压到一个新目录，直接双击根目录内的 `Fielora.exe`。不需要安装 Node、pnpm 或 Rust。

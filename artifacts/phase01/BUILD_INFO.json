@@ -72,8 +72,8 @@
   "evidence": [
     {
       "path": "artifacts/phase01/FULL_GATE.log",
-      "bytes": 18768,
-      "sha256": "26ecc788e6ba5bf56fd777259f154ce85cc59ad7fa1ff712e6601b8b0274bb64"
+      "bytes": 9288,
+      "sha256": "778cc71940b308229931933ed720b86c4a6aaa10a6ae74196842e9cd2bfc8744"
     },
     {
       "path": "artifacts/phase01/PACKAGED_ACCEPTANCE.json",
