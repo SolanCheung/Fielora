@@ -1,0 +1,222 @@
+我看了 Google 官方当前的 Chrome「What’s New」页面和今年几次官方发布。你截图里看到的确实不是小修小补，**Chrome 正在明显从“网页查看器”往“生产力工作环境”方向走**。官方当前 What's New 已经把 **垂直标签页、PDF 直接签名/批注、Google Wallet 增强自动填充、一个标签页内同时显示两个页面 Split View** 放在核心新特性里。([google.com](https://www.google.com/intl/en_uk/chrome/see-whats-new/))
+
+其中和 Fielora 最值得注意的是 **Split View**。Google 对它的定义就是减少在两个 Tab/窗口之间来回切换，可以拖一个 Tab 到窗口左右边缘，或者右键链接直接在当前 Tab 中分屏。Google 2 月的官方文章还明确举了“边看视频边记笔记”“开发者一边看文档一边写代码”等场景。([blog.google](https://blog.google/products-and-platforms/products/chrome/chrome-productivity-improvements/)) 这实际上已经开始吃掉我们原型里“中央区域同时容纳多个工作 Pane”的最低层价值。
+
+第二个变化是你截图左边已经正在使用的 **Vertical Tabs**。Google 4 月正式推出垂直标签页，可以完整显示标题、管理 Tab Group，并明确把它定位成重度多任务用户的效率能力。([blog.google](https://blog.google/products-and-platforms/products/chrome/new-chrome-productivity-features/)) 所以我们刚刚那版 Fielora 如果只是：
+
+> 左边 Field / Tab + 中间网页 + 右边 AI
+
+现在视觉上会越来越像 Chrome 自己。
+
+更关键的是 **Google 并没有只做这些 UI 功能**。Gemini in Chrome 的官方路线已经包含：常驻 AI Side Panel、跨多个 Tab 比较和总结、Gmail/Calendar/YouTube/Maps/Shopping/Flights 等 Connected Apps、基于历史对话和个人信息的 Personal Intelligence，以及能够执行多步骤网页工作的 **Auto Browse**。Google 举的实例甚至包括预约、填表、收集报税文件、费用报销、订阅管理、驾照续期，以及登录后的网页操作。([blog.google](https://blog.google/products-and-platforms/products/chrome/gemini-3-auto-browse/))
+
+这对 Fielora 有一个非常重要的结论：
+
+> **我们之前决定“不和 Chrome 比 AI Sidebar、分屏、多 Tab、网页 Agent”是完全正确的，而且现在必须执行得更彻底。**
+
+### 这会直接影响我们刚刚的 Fielora UI
+
+你看 Chrome 现在已经是：
+
+```text id="hbb24v"
+Vertical Tabs
++
+Tab Groups
++
+Split View
++
+Reading Mode
++
+PDF Workspace
++
+Gemini Side Panel
++
+Connected Apps
++
+Auto Browse
+```
+
+那么 Fielora 再做：
+
+```text id="cktpme"
+左侧栏
++
+Tabs
++
+多 Pane
++
+右侧 Agent
+```
+
+**外形和基本能力都会越来越容易被 Chrome 覆盖。**
+
+所以我反而认为你刚才要求把 Fielora 页面继续简化，是非常关键的一步。
+
+Fielora 的 UI 不应该靠“多几个面板”体现高级，而应该靠**整个工作环境如何围绕 Field 发生变化**体现差异。
+
+---
+
+## Chrome 与 Fielora 应该形成这样的边界
+
+| Chrome 正在解决 | Fielora 应该解决 |
+|---|---|
+| 一个 Tab 看两个网页 | **一个 Field 怎样组织完成整个目标所需的工作面** |
+| Vertical Tabs | **工作的一级单位不再是 Tab，而是 Field** |
+| Tab Groups | **不是按网页分组，而是维护完整任务状态** |
+| Gemini Side Panel | **Agent 与人直接处在同一个 Field，不是旁边的助手** |
+| 浏览当前网页上下文 | **理解 Goal + State + Object + Relation + Evidence** |
+| Personal Intelligence | **记住“你是谁”以及历史上下文** |
+| Auto Browse | **执行网页任务** |
+| Connected Apps | **调用已有 App 能力** |
+| —— | **从用户操作中编译新的 Capability** |
+| —— | **把工作过程逐渐沉淀成可复用软件能力** |
+| —— | **离开几天回来直接恢复 Current Reality** |
+| —— | **DXE 根据任务状态自动重新组成 Working Surface** |
+
+尤其有一个区别我们必须死死守住：
+
+### Chrome 的中心仍然是 Page / Tab。
+
+即使一个 Tab 现在能拆成两个页面，本质还是：
+
+```text id="klet9a"
+Browser
+  ↓
+Tab
+  ↓
+Pages
+```
+
+Fielora应该是：
+
+```text id="w4x3k7"
+Field
+ ↓
+Goal
+ ↓
+Current State
+ ↓
+Working Surface
+ ├─ Web
+ ├─ Document
+ ├─ Code
+ ├─ Data
+ ├─ Agent
+ └─ Capability
+```
+
+**这是两个完全不同的抽象层级。**
+
+---
+
+## 而且 Chrome 这次更新反过来给了我们一个很好的产品启示
+
+Google 没有为了 Split View 发明一套非常复杂的新 UI。
+
+它只是让用户：
+
+> 把另一个 Tab 拖到旁边。
+
+非常自然。
+
+这正是我们 Fielora 应该学习的：
+
+> **能力可以很复杂，但交互必须非常自然。**
+
+例如我们不应该让用户面对：
+
+```text id="5l8mse"
+Field State
+Object Graph
+Capability Graph
+Evidence
+Agent Runtime
+Activity
+Surface Mode
+```
+
+这些都是**系统内部应该知道的东西**。
+
+用户最好只是看到：
+
+```text id="pq7qna"
+Fielora / Build V0.1
+Build ▾
+
+        当前正在工作的东西
+
+Ask, search, open, change or do...
+```
+
+然后他说：
+
+> “开始实现。”
+
+工作面自然变成：
+
+```text id="edawz3"
+需求 | Code | Preview
+```
+
+他说：
+
+> “先查查 Chrome 是怎么做的。”
+
+变成：
+
+```text id="jjaxbf"
+Spec | Chrome | Sources
+```
+
+他说：
+
+> “这个判断有依据吗？”
+
+Sources 临时出现。
+
+Agent 开始工作时 Activity 临时出现。
+
+这才真正比 Chrome 的 Split View 高一层：
+
+**Chrome 是用户决定怎么分屏；Fielora 是 Field 根据任务决定当前应该怎样组成工作空间。**
+
+---
+
+还有一个我觉得值得我们马上调整的地方：**Loose Browsing 不应该成为 Fielora 的主要视觉形态。**
+
+从你这张 Chrome 截图看，Google现在把垂直 Tab 做得已经很好。Fielora 没必要重新发明另一套普通浏览器的 Tab 管理。
+
+可以变成：
+
+```text id="skde22"
+左侧
+
+FIELD
+Fielora
+Internalization
+Axiomatic World
+
+─────────
+
+BROWSE
+当前普通 Tab...
+```
+
+或者进入某个 Field 后，左边甚至只留下 Field；Field 内的网页是**当前 Working Set**，而不是始终让用户看到几十个 Tab。
+
+这能进一步让 Fielora 看起来不像“Chrome 换皮”。
+
+---
+
+所以 Google 这次更新对我们不是坏消息，反而帮我们验证了一件事情：
+
+**浏览器本身正在迅速吸收垂直标签、分屏、AI、Agent、App Integration。**
+
+这些功能很快都会变成浏览器的“基础能力”。
+
+Fielora 真正值得做的部分必须继续往上走：
+
+> **Chrome 在升级“浏览”。  
+> Fielora 要重新定义“工作”。**
+
+我认为下一版 Fielora 原型也应该基于这个新判断继续改，而不是只做现在这张图的视觉美化：**直接把 Chrome 已经做得很好的 Browser UI 降成背景，把 Field 的动态工作面真正做成第一视觉主体。** memcite

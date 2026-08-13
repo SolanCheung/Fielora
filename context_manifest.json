@@ -1,0 +1,132 @@
+{
+  "project": "Fielora",
+  "version": "v0.1-repo-bootstrap-toolchain-gate-2026-08-13",
+  "purpose": "Codex first-read context package",
+  "required_reading": [
+    "README.md",
+    "AGENTS.md",
+    "docs/context/00_CONVERSATION_INDEX.md",
+    "docs/context/01_CONVERSATION_TIMELINE.md",
+    "docs/context/02_PROJECT_REALITY.md",
+    "docs/context/03_DECISIONS.md",
+    "docs/context/04_REJECTED_DEFERRED.md",
+    "docs/context/05_SOURCE_ARCHIVE.md",
+    "docs/context/sources/Fielora_功能讨论_原始片段.txt",
+    "docs/product/COMPETITIVE_BOUNDARIES.md",
+    "docs/product/FIELORA_V0.1_INTERACTION_SPEC_CN.md",
+    "docs/architecture/TECHNICAL_BASELINE_V0.1.md",
+    "docs/architecture/TECHNICAL_ARCHITECTURE_V0.1.md",
+    "docs/architecture/CORE_CONTRACTS_V0.1.md",
+    "docs/architecture/SCHEMA_FREEZE_V0.1.md",
+    "docs/architecture/PHASE_01_IMPLEMENTATION_SPEC_V0.1.md",
+    "docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md",
+    "docs/context/READING_GATE.md"
+  ],
+  "historical_visual_assets": [
+    "docs/context/assets/03ce617b-d945-4291-945e-90b68dcf2594.png",
+    "docs/context/assets/d7531766-eb68-43f6-817f-83a5c9ae85ff.png",
+    "docs/context/assets/fielora_字段运行时规范界面.png",
+    "docs/context/assets/费洛拉字段运行时工作台.png",
+    "docs/context/assets/费洛拉生产力工作台界面.png"
+  ],
+  "first_prompt": "CODEX_FIRST_PROMPT.md",
+  "rule": "No product-code changes until CODEX_READING_REPORT.md is reviewed by the user.",
+  "files": {
+    "README.md": {
+      "sha256": "d5bf7ecef46dc9c5e785f7fd6b4c1647e65cc344b1172f14fbe15850ce150aa3",
+      "bytes": 1555
+    },
+    "AGENTS.md": {
+      "sha256": "1aa927887a13fa9cd3b78ff0700550152daebc517b8ce36901313af50ad5a95f",
+      "bytes": 5855
+    },
+    "docs/context/00_CONVERSATION_INDEX.md": {
+      "sha256": "2050e297b89da6d87160892bc72141a59eaeaa287e10b56e9d2e6cc3ae409d9c",
+      "bytes": 3017
+    },
+    "docs/context/01_CONVERSATION_TIMELINE.md": {
+      "sha256": "2485e6dc01c908573248200161479fb88aa9d529357087f12a974ff1d9b15ea8",
+      "bytes": 7576
+    },
+    "docs/context/02_PROJECT_REALITY.md": {
+      "sha256": "247ac2ce1384495d9cfeb3d8c73facf8e5cdeeb3a0befa5e3e81d937c4a681b7",
+      "bytes": 13527
+    },
+    "docs/context/03_DECISIONS.md": {
+      "sha256": "96849ee385d6f79711d676a8306428d3eded59a9c67582654c4178e4e3c854c9",
+      "bytes": 7152
+    },
+    "docs/context/04_REJECTED_DEFERRED.md": {
+      "sha256": "6336e081956b1d9c1390c971527ea8d6beea60c8b2840110c919184be6b5c650",
+      "bytes": 4233
+    },
+    "docs/context/05_SOURCE_ARCHIVE.md": {
+      "sha256": "3932c1e4aee3dbf298eab2205684b422330b5d59d9b94d2150a5441df242e7c0",
+      "bytes": 1273
+    },
+    "docs/context/sources/Fielora_功能讨论_原始片段.txt": {
+      "sha256": "7cdefd1cb3d4aa3e825e7a1e8e182d66cb5fd59b936dc5026ff69df729aec227",
+      "bytes": 6975
+    },
+    "docs/product/COMPETITIVE_BOUNDARIES.md": {
+      "sha256": "1809162315ad662dcb1d1a164a03865a7acfaa87269a8ffc0889b3ebcc1ff18d",
+      "bytes": 1839
+    },
+    "docs/product/FIELORA_V0.1_INTERACTION_SPEC_CN.md": {
+      "sha256": "e2a4e79ccc403d3fa7edcbab36326cbacfd57d67448e31922242e96ca325e15b",
+      "bytes": 12618
+    },
+    "docs/architecture/TECHNICAL_BASELINE_V0.1.md": {
+      "sha256": "243d229ea997a6cab72ecf6a76ddcb39cb364bbba520b2ee60eeaa81d8c1cba1",
+      "bytes": 9468
+    },
+    "docs/architecture/TECHNICAL_ARCHITECTURE_V0.1.md": {
+      "sha256": "bee3b2bd732ca9b900c9814e4532288b3727096c9ad3c900a503074fb0edf68d",
+      "bytes": 25855
+    },
+    "docs/architecture/CORE_CONTRACTS_V0.1.md": {
+      "sha256": "4d5de24df4a37bcfb8767a2211d3f6ba522874d4ec7dc5e6df1280eb803e8b2a",
+      "bytes": 18748
+    },
+    "docs/architecture/SCHEMA_FREEZE_V0.1.md": {
+      "sha256": "4fc210799b21ebb00d73cc8430185ea7a786a4b9bc65d7af30b51bc8a50c40de",
+      "bytes": 10893
+    },
+    "docs/architecture/PHASE_01_IMPLEMENTATION_SPEC_V0.1.md": {
+      "sha256": "8efb8ba284866768c821ac2f04c4e308de8a853d59f52bfb0d75a5f387cf79b8",
+      "bytes": 13136
+    },
+    "docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md": {
+      "sha256": "f8099f0b9c05880667c02e649c6f595767d9050ec75b247115b8860ef1a213b8",
+      "bytes": 5063
+    },
+    "docs/context/READING_GATE.md": {
+      "sha256": "6b1bc0fd47c8a3268809a4061bce6f130cc1d882902361327bcd11aa6e341016",
+      "bytes": 1712
+    },
+    "CODEX_FIRST_PROMPT.md": {
+      "sha256": "78bc7f4c1c4cf2e878858bbb415ea8a0a61a75be019dc044c776413838103520",
+      "bytes": 1933
+    },
+    "docs/context/assets/03ce617b-d945-4291-945e-90b68dcf2594.png": {
+      "sha256": "a624f52f6786c7f371f647007a8ca448b8f5d8cf923f51fe813a36cc5ac4f6b1",
+      "bytes": 1780205
+    },
+    "docs/context/assets/d7531766-eb68-43f6-817f-83a5c9ae85ff.png": {
+      "sha256": "1b0bc3ed7c740d48ef8fa493da63f16fca474f79432b7c172f131a90d3a53bde",
+      "bytes": 322457
+    },
+    "docs/context/assets/fielora_字段运行时规范界面.png": {
+      "sha256": "69c2ee3dc6424b2727ffc42df6d5cbd78a3ceb1eacd159b871956b4faa11e432",
+      "bytes": 980023
+    },
+    "docs/context/assets/费洛拉字段运行时工作台.png": {
+      "sha256": "49473a5ea999fac69f91ddbceed87fc9893a51cd0fb804ae25f52c592edd8261",
+      "bytes": 1111338
+    },
+    "docs/context/assets/费洛拉生产力工作台界面.png": {
+      "sha256": "be8573063d78b86bb8e55823595ca180120fa0510ae20de49384bbd8ba31de17",
+      "bytes": 1166283
+    }
+  }
+}
