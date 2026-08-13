@@ -100,6 +100,8 @@ test('protocol failures recover without crashing and conflict remains conflict',
   assert.equal((await h.next()).error.code, -32601);
   h.send('wrong', 'system.health', {}, '2.0');
   assert.equal((await h.next()).error.data.code, 'protocol_error');
+  h.send('minor', 'system.health', {}, '1.9');
+  assert.equal((await h.next()).result.state, 'READY');
   h.send('create', 'command.field.create', { title: 'Conflict', goal: null });
   const created = await h.next(); await h.next();
   h.send('first', 'command.field.update_focus', { field_id: created.result.id, expected_revision: 1, focus: 'A' });

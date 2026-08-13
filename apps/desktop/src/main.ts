@@ -54,7 +54,9 @@ function registerBridgeHandlers(): void {
     if (dbPath) await shell.openPath(path.join(path.dirname(path.dirname(dbPath)), 'logs'));
   });
   ipcMain.handle(channels.coreQuit, (event) => { assertBridgeEvent(event); app.quit(); });
-  ipcMain.handle(channels.testKillCore, (event) => { assertBridgeEvent(event); supervisor.killForTest(); });
+  if (process.env.FIELORA_E2E === '1') {
+    ipcMain.handle(channels.testKillCore, (event) => { assertBridgeEvent(event); supervisor.killForTest(); });
+  }
 }
 
 async function registerApplicationProtocol(): Promise<void> {
@@ -105,6 +107,9 @@ async function createWindow(): Promise<void> {
   appWindow.webContents.on('will-navigate', (event, url) => {
     if (!isAllowedNavigation(url, trustedOrigin)) event.preventDefault();
   });
+  appWindow.webContents.on('will-redirect', (event, url) => {
+    if (!isAllowedNavigation(url, trustedOrigin)) event.preventDefault();
+  });
   appWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   appWindow.once('ready-to-show', () => appWindow?.show());
   if (app.isPackaged) await appWindow.loadURL('fielora://app/index.html');
@@ -120,7 +125,7 @@ else {
     if (app.isPackaged) await registerApplicationProtocol();
     await createWindow();
     supervisor.on('notification', (message) => appWindow?.webContents.send(channels.coreEvent, (message as { params: unknown }).params));
-    supervisor.on('health', () => appWindow?.webContents.send(channels.coreEvent, { event: 'event.core.health' }));
+    supervisor.on('health', (payload) => appWindow?.webContents.send(channels.coreEvent, { event: 'event.core.health', ...payload }));
     void supervisor.start().catch((error) => console.error('Core startup failed', error));
   });
 }

@@ -5,7 +5,6 @@ use ts_rs::TS;
 macro_rules! typed_id {
     ($name:ident) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-        #[ts(export)]
         pub struct $name(pub String);
 
         impl $name {
@@ -30,14 +29,12 @@ typed_id!(SurfaceSnapshotId);
 typed_id!(TraceId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct ProtocolVersion {
     pub major: u16,
     pub minor: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct FipcErrorData {
     pub code: String,
     pub trace_id: String,
@@ -47,11 +44,9 @@ pub struct FipcErrorData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct HelloRequest {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct HelloResponse {
     pub core_version: String,
     pub protocol: ProtocolVersion,
@@ -60,14 +55,12 @@ pub struct HelloResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct CreateFieldRequest {
     pub title: String,
     pub goal: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct UpdateFocusRequest {
     pub field_id: FieldId,
     #[ts(type = "number")]
@@ -77,7 +70,6 @@ pub struct UpdateFocusRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct SaveSurfaceSnapshotRequest {
     pub field_id: FieldId,
     #[ts(type = "unknown")]
@@ -86,13 +78,11 @@ pub struct SaveSurfaceSnapshotRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct FieldReferenceRequest {
     pub field_id: FieldId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct FieldSummary {
     pub id: FieldId,
     pub title: String,
@@ -107,7 +97,6 @@ pub struct FieldSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct FieldView {
     pub id: FieldId,
     pub owner_principal_id: PrincipalId,
@@ -127,7 +116,7 @@ pub struct FieldView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[ts(export, rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FieldLifecycle {
     Active,
     Completed,
@@ -136,7 +125,7 @@ pub enum FieldLifecycle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[ts(export, rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FieldMode {
     Explore,
     Think,
@@ -146,7 +135,6 @@ pub enum FieldMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct SurfaceSnapshotView {
     pub id: SurfaceSnapshotId,
     pub field_id: FieldId,
@@ -161,14 +149,12 @@ pub struct SurfaceSnapshotView {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct SurfaceResumeView {
     pub field: FieldView,
     pub snapshot: Option<SurfaceSnapshotView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct DomainEventDTO {
     pub event: String,
     pub field_id: FieldId,
@@ -180,7 +166,7 @@ pub struct DomainEventDTO {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[ts(export, rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CoreHealthState {
     Starting,
     Ready,
@@ -190,7 +176,6 @@ pub enum CoreHealthState {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
 pub struct HealthDTO {
     pub state: CoreHealthState,
     pub core_version: String,

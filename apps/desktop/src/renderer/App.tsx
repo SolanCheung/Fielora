@@ -28,7 +28,8 @@ export function App() {
   useEffect(() => {
     void refreshHealth();
     const timer = window.setInterval(() => void refreshHealth(), 350);
-    const unsubscribe = window.fielora.core.subscribe(() => {
+    const unsubscribe = window.fielora.core.subscribe((event) => {
+      if (event.event === 'event.core.health' && 'error' in event && event.error) setError(event.error);
       void refreshHealth();
       void refreshFields();
     });
@@ -36,6 +37,13 @@ export function App() {
   }, [refreshFields, refreshHealth]);
 
   useEffect(() => { if (health?.state === 'READY') void refreshFields(); }, [health?.state, refreshFields]);
+
+  useEffect(() => {
+    if (health?.state !== 'READY' || !selected?.id) return;
+    void window.fielora.field.get({ field_id: selected.id }).then(setSelected).catch((reason) => {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    });
+  }, [health?.state, selected?.id]);
 
   async function createField(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

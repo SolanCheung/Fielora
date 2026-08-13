@@ -12,6 +12,11 @@ import type {
 } from '@fielora/contracts';
 
 export type Unsubscribe = () => void;
+export type DesktopCoreEvent = DomainEventDTO | {
+  event: 'event.core.health';
+  state: HealthDTO['state'];
+  error?: string;
+};
 
 export interface FieloraBridge {
   field: {
@@ -26,7 +31,7 @@ export interface FieloraBridge {
   };
   core: {
     getHealth(): Promise<HealthDTO>;
-    subscribe(listener: (event: DomainEventDTO) => void): Unsubscribe;
+    subscribe(listener: (event: DesktopCoreEvent) => void): Unsubscribe;
     retry(): Promise<void>;
     openLogs(): Promise<void>;
     quit(): Promise<void>;

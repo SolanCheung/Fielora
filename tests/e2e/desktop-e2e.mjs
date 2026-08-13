@@ -6,8 +6,8 @@ import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
 const mode = process.argv[2] ?? 'dev';
-const packaged = mode === 'packaged';
-const appPath = path.join(root, 'apps', 'desktop', 'out', 'Fielora-win32-x64', 'Fielora.exe');
+const packaged = mode === 'packaged' || mode === 'portable';
+const appPath = process.env.FIELORA_PACKAGED_APP ?? path.join(root, 'apps', 'desktop', 'out', 'Fielora-win32-x64', 'Fielora.exe');
 let port = 9400 + Math.floor(Math.random() * 300);
 const localAppData = await mkdtemp(path.join(tmpdir(), `fielora-${mode}-e2e-`));
 const evidenceDir = path.join(root, 'artifacts', 'phase01');
@@ -175,7 +175,7 @@ try {
   assert.ok(health.db_path.startsWith(path.join(localAppData, 'Fielora', 'data')));
   if (packaged) {
     const processPath = spawnSync('powershell.exe', ['-NoProfile', '-Command', `(Get-Process -Id ${health.pid}).Path`], { encoding: 'utf8' }).stdout.trim();
-    assert.equal(path.normalize(processPath), path.join(root, 'apps', 'desktop', 'out', 'Fielora-win32-x64', 'resources', 'fielora-core.exe'));
+    assert.equal(path.normalize(processPath), path.join(path.dirname(appPath), 'resources', 'fielora-core.exe'));
   }
 
   const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' });
@@ -191,11 +191,12 @@ try {
   assert.equal((await cdp.evaluate(`window.fielora.field.list()`)).find((field) => field.title === title).current_focus, focus);
 
   if (packaged) {
-    await writeFile(path.join(evidenceDir, 'PACKAGED_ACCEPTANCE.json'), `${JSON.stringify({
+    const acceptanceName = mode === 'portable' ? 'PORTABLE_ACCEPTANCE.json' : 'PACKAGED_ACCEPTANCE.json';
+    await writeFile(path.join(evidenceDir, acceptanceName), `${JSON.stringify({
       status: 'PASS',
       application: appPath,
       trusted_origin: origin,
-      core_path: path.join(root, 'apps', 'desktop', 'out', 'Fielora-win32-x64', 'resources', 'fielora-core.exe'),
+      core_path: path.join(path.dirname(appPath), 'resources', 'fielora-core.exe'),
       database_path: health.db_path,
       field: title,
       focus,

@@ -25,5 +25,6 @@ Invoke-Gate 'desktop-e2e' { pnpm test:e2e }
 Invoke-Gate 'package' { pnpm --filter '@fielora/desktop' package }
 Invoke-Gate 'packaged-smoke' { pnpm test:packaged }
 Invoke-Gate 'portable' { pnpm make:portable }
+Invoke-Gate 'portable-smoke' { pnpm test:portable }
 
 Write-Output 'PHASE01_ENGINEERING_GATE=PASS'

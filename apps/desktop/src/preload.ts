@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { channels } from './channels';
 import type { FieloraBridge } from './types';
+import type { DesktopCoreEvent } from './types';
 
 const bridge: FieloraBridge = {
   field: {
@@ -16,7 +17,7 @@ const bridge: FieloraBridge = {
   core: {
     getHealth: () => ipcRenderer.invoke(channels.coreHealth),
     subscribe: (listener) => {
-      const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload);
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: DesktopCoreEvent) => listener(payload);
       ipcRenderer.on(channels.coreEvent, wrapped);
       return () => ipcRenderer.removeListener(channels.coreEvent, wrapped);
     },

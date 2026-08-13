@@ -46,11 +46,14 @@ struct BoundedLogWriter {
 
 impl Write for BoundedLogWriter {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        self.file.lock().unwrap().write(buffer)
+        self.file.lock().unwrap().write_all(buffer)?;
+        io::stderr().lock().write_all(buffer)?;
+        Ok(buffer.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.file.lock().unwrap().flush()
+        self.file.lock().unwrap().flush()?;
+        io::stderr().lock().flush()
     }
 }
 
@@ -236,7 +239,12 @@ fn handle_frame(runtime: &mut Runtime, bytes: &[u8]) -> Dispatch {
         }
     };
     let trace_id = request.meta.trace_id.clone();
-    if request.meta.protocol != "1.0" {
+    let protocol = request
+        .meta
+        .protocol
+        .split_once('.')
+        .and_then(|(major, minor)| Some((major.parse::<u16>().ok()?, minor.parse::<u16>().ok()?)));
+    if protocol.is_none_or(|(major, _minor)| major != PROTOCOL.major) {
         return Dispatch::Continue(vec![error_response(
             request.id,
             -32600,
@@ -570,5 +578,17 @@ mod tests {
         assert_eq!(frames.len(), 2);
         assert!(matches!(frames[0], ParsedFrame::Oversized));
         assert!(matches!(&frames[1], ParsedFrame::Frame(frame) if frame == b"{}"));
+    }
+
+    #[test]
+    fn protocol_accepts_newer_minor_but_rejects_wrong_major() {
+        let newer_minor = "1.9".split_once('.').and_then(|(major, minor)| {
+            Some((major.parse::<u16>().ok()?, minor.parse::<u16>().ok()?))
+        });
+        let wrong_major = "2.0".split_once('.').and_then(|(major, minor)| {
+            Some((major.parse::<u16>().ok()?, minor.parse::<u16>().ok()?))
+        });
+        assert!(newer_minor.is_some_and(|(major, _)| major == PROTOCOL.major));
+        assert!(wrong_major.is_none_or(|(major, _)| major != PROTOCOL.major));
     }
 }

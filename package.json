@@ -22,6 +22,7 @@
     "test:e2e": "pnpm build:core:debug && node tests/e2e/desktop-e2e.mjs dev",
     "make:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-portable.ps1",
     "test:packaged": "node tests/e2e/desktop-e2e.mjs packaged",
+    "test:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-portable.ps1",
     "verify:phase01": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-phase01.ps1"
   }
 }
