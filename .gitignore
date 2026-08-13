@@ -7,7 +7,11 @@ dist/
 out/
 target/
 coverage/
-artifacts/
+artifacts/*
+!artifacts/phase01/
+artifacts/phase01/*
+!artifacts/phase01/*.md
+!artifacts/phase01/*.json
 test-results/
 playwright-report/
 
@@ -33,6 +37,10 @@ logs/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Electron Forge local output
+apps/desktop/.webpack/
+apps/desktop/out/
 
 # Temporary files
 *.tmp

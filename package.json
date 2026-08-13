@@ -1,0 +1,27 @@
+{
+  "name": "fielora",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": "24.18.1",
+    "pnpm": "11.21.0"
+  },
+  "scripts": {
+    "dev": "pnpm build:core:debug && pnpm --filter @fielora/desktop start",
+    "build": "pnpm typecheck && pnpm build:core:release && pnpm --filter @fielora/desktop package",
+    "build:core:debug": "cargo build -p fielora-core",
+    "build:core:release": "cargo build --release -p fielora-core",
+    "contracts:generate": "cargo run -p fielora-contracts --example export_ts",
+    "contracts:check": "pnpm contracts:generate && git diff --exit-code -- packages/contracts/generated",
+    "typecheck": "pnpm --filter @fielora/desktop typecheck",
+    "lint": "pnpm --filter @fielora/desktop lint",
+    "test": "pnpm test:ts && cargo test --workspace",
+    "test:ts": "pnpm --filter @fielora/desktop test",
+    "test:integration": "pnpm build:core:debug && node --test tests/integration/core.integration.test.mjs",
+    "test:e2e": "pnpm build:core:debug && node tests/e2e/desktop-e2e.mjs dev",
+    "make:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-portable.ps1",
+    "test:packaged": "node tests/e2e/desktop-e2e.mjs packaged",
+    "verify:phase01": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-phase01.ps1"
+  }
+}
