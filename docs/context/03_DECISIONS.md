@@ -88,3 +88,4 @@
 | D-082 | Phase 02 产品实现提交 `baeb73298bd8ffca007dc365394b45ff1c4ae819` 已严格实现 Frozen Implementation Spec、Contract Delta 与 Migration 0002；三份 Frozen 规格原文、FIPC/1 transport 与 `ProtocolVersion 1.0` 均未修改 | IMPLEMENTED |
 | D-083 | Phase 02 一次完整 Static、Unit、Rust、Integration、Desktop E2E、Package、Packaged Smoke、Portable 与 Portable Smoke 链路全部通过；Engineering Gate 与 Desktop Reality Gate 为 PASS | VERIFIED |
 | D-084 | Phase 02 Human Experience Gate 仍为 `PENDING_USER`，Final Acceptance 为 `NOT_YET_GRANTED`；Engineering/Implementation 完成不等于 `PHASE_02: COMPLETE` | PENDING USER |
+| D-085 | Fielora 采用双模式验证：日常开发与人工体验长期运行 `pnpm dev`；只有正式阶段 Gate 才生成并验证 packaged/portable build。Packaging-sensitive 基础设施变更可提前触发风险定向的 targeted packaged smoke，但不能替代正式 Gate | CONFIRMED |

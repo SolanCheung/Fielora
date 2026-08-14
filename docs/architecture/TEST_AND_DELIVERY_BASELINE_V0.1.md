@@ -14,6 +14,17 @@
 
 仓库最终应提供统一开发入口，例如 `pnpm dev`，启动 Renderer dev server、Electron Main、Rust Core。具体实现由 Technical Architecture 决定。
 
+### 2.1 双模式验证
+
+Fielora 采用双模式验证：
+
+- **Continuous Dev / Experience Mode**：日常开发、交互调试与人工体验长期运行 `pnpm dev`。应用可以持续打开并保留本地 Reality；普通迭代不要求反复打包或解压。
+- **Formal Phase Gate Mode**：只有正式阶段 Gate 才生成并验证 packaged build 与 Portable ZIP，并完成该阶段规定的 Package、Packaged Smoke、Portable Smoke 与 Human Experience Acceptance。
+
+例外：若变更具有 packaging-sensitive 风险，可以在正式阶段 Gate 前触发 targeted packaged smoke。此类变更包括但不限于 Electron/Forge packaging 配置、Main/Preload entry、ASAR/resource path、bundled sidecar 定位、production protocol/origin、userData/persistence path、签名/权限、Electron runtime 升级，以及仅在 packaged 状态出现的环境或生命周期逻辑。
+
+Targeted packaged smoke 应按风险验证受影响链路，不要求在每次普通 UI/Core 迭代时生成完整 portable artifact，也不能替代正式阶段 Gate 的完整证据链。
+
 ## 3. Static Gate
 
 至少覆盖 TypeScript typecheck/lint、Rust fmt check（规则在 Technical Architecture 冻结）以及配置/契约的静态校验。Static 只证明静态约束通过，不替代 Unit 或运行时验证。
@@ -51,7 +62,7 @@ V0.1 唯一正式 E2E 验收平台是 Windows 11 x64。架构测试需防止 Cor
 
 ## 8. Package
 
-每个开发 Phase 需要生成 Packaged Build。
+每个开发 Phase 的正式 Gate 需要生成 Packaged Build；普通开发迭代默认使用长期运行的 `pnpm dev`，不重复打包。
 
 每个开发 Phase 必须生成 Portable ZIP、Test Report、Build Info、Known Issues。Installer 固定在 Phase 03、Phase 08、Final Alpha 构建验证；Fielora V0.1 Alpha 最终交付必须同时包含 Portable ZIP + Installer。
 
@@ -72,6 +83,8 @@ Portable Windows Build 是每个 Phase 的硬 Gate，方便人工测试、问题
 ## 10. Packaged Smoke
 
 必须验证 App 能启动、Rust Sidecar 路径正确、resource path 正确、persistence path 正确、不依赖 dev-only env、Browser 能打开、Capture 能保存、Field 能恢复、packaged app 不因权限差异失败。
+
+完整 Packaged Smoke 属于正式阶段 Gate。Packaging-sensitive 基础设施变更可提前运行只覆盖相关风险的 targeted packaged smoke；该 targeted 结果属于增量风险证据，不取代正式 Gate 的完整 Packaged Smoke。
 
 Phase 01 还必须真实验证：production 只接受 `fielora://app` trusted origin；dev 只接受当次精确 Forge loopback origin；remote/wrong-origin/subframe bridge 被拒绝；Browse WebContents 没有 Fielora preload/bridge；关闭 parent stdin 且不发送 `system.shutdown` 时 Rust Sidecar 在 2 秒内退出并且没有 orphan。
 

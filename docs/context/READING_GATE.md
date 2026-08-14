@@ -66,3 +66,4 @@ Codex 必须能准确解释：
 - Phase 02 Implementation Authorization 如何取代旧的未授权状态，但不改变任何 Frozen semantics；
 - 为什么 Engineering Gate 与 Desktop Reality Gate PASS 仍不等于 Human Experience Gate 或 Phase 02 Final Acceptance；
 - 当前 Phase 02 artifact、实现 commit、Migration 0002 canonical hash、已验证范围与 Known Issues 分别是什么。
+- 为什么日常开发与人工体验长期运行 `pnpm dev`，而 packaged/portable 只在正式阶段 Gate 生成验证；哪些 packaging-sensitive 基础设施变更可以触发 targeted packaged smoke，以及它为什么不替代完整 Gate。

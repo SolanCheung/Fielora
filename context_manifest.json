@@ -58,12 +58,12 @@
       "bytes": 10149
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "0811995d2bf9ede12b1995deb858e22ba358992882941194698910ac8d2bfd58",
-      "bytes": 19015
+      "sha256": "23dba08dba787a51e0013b0e636fb015938bc1846678482ef73fe6d5bba62837",
+      "bytes": 19568
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "08596a1a47887172699456f0e5094a20dcd2fc888320b14bfa98ed8936dabf17",
-      "bytes": 11679
+      "sha256": "f8b879383e5698628f3460e07aabba67f5fa4a4e54dd5826d863f1379ef0b979",
+      "bytes": 11979
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
       "sha256": "6336e081956b1d9c1390c971527ea8d6beea60c8b2840110c919184be6b5c650",
@@ -146,12 +146,12 @@
       "bytes": 2475
     },
     "docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md": {
-      "sha256": "f8099f0b9c05880667c02e649c6f595767d9050ec75b247115b8860ef1a213b8",
-      "bytes": 5063
+      "sha256": "8110a1feb86faf37cdeb10297caf67d8c39a49483689e56096401a84de83b13b",
+      "bytes": 6489
     },
     "docs/context/READING_GATE.md": {
-      "sha256": "3e6fb579db247e00986e7187a274671bdc5702f3320dd980765335aa7d9b9ab1",
-      "bytes": 2895
+      "sha256": "b654dd96a9ffb3fcec524f72b84381fb6bb1872cf05fb1e3246cd55d71cdde1d",
+      "bytes": 3146
     },
     "CODEX_FIRST_PROMPT.md": {
       "sha256": "78bc7f4c1c4cf2e878858bbb415ea8a0a61a75be019dc044c776413838103520",
