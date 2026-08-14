@@ -1,6 +1,6 @@
 # Phase 02 Human Gate UI Correction Report
 
-状态：`POST_CORRECTION_FULL_GATE_PASS / FINAL_ACCEPTANCE_PENDING`
+状态：`POST_CORRECTION_FULL_GATE_PASS / HUMAN_EXPERIENCE_PASS / FINAL_ACCEPTANCE_GRANTED`
 
 日期：2026-08-14
 
@@ -46,4 +46,4 @@ Human Gate 前的 dev 体验确认底层 Reality persistence 正常，但默认 
 - post-correction packaged/portable standard + legacy screenshots：人工检查 PASS；
 - Portable SHA-256：`24bf2bae54cf029ae748da0f8f7f6f6fb8c73a0e7049ebe76744017055d02a93`。
 
-因此 correction 的正式成品 revalidation 已完成；Human Experience 与 Phase 02 Final Acceptance 仍等待用户裁决。
+因此 correction 的正式成品 revalidation 已完成；用户随后裁决 Human Experience Gate PASS、Final Acceptance GRANTED、`PHASE_02: COMPLETE`。

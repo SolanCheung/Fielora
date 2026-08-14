@@ -6,7 +6,7 @@
 
 日期：2026-08-14
 
-实现 Gate：Phase 01 Engineering / Desktop Reality / Human Experience 全部 PASS；用户于 2026-08-14 裁决 `PHASE_01: COMPLETE`。Phase 02 已批准 Freeze，但实现未授权、未开始
+实现 Gate：Phase 01 COMPLETE；Phase 02 Engineering / Desktop Reality / Human Experience / Post-correction Full Gate 全部 PASS，用户于 2026-08-14 裁决 `PHASE_02: COMPLETE`；Phase 03 未授权
 
 ## 1. 架构目标
 
@@ -99,7 +99,7 @@ Phase 01 Repo Bootstrap 使用：
 
 版本事实已经通过官方发布渠道核验：Electron 43.4.0 于 2026-08-11 发布；Node 24 是 LTS 且 24.18.1 存在；Rust 1.97.1 于 2026-07-16 发布；pnpm 11.21.0 是 2026-08-09 的已签名正式发布；rusqlite 0.40.2 已在 crates.io 正式发布、未撤回且支持 `bundled` feature。
 
-本机 Toolchain Gate 已执行：Node 由 `D:\AppInstall\nvm\nvm` 下的 NVM 管理，24.18.1 已安装并 active；pnpm 11.21.0 已准备；Rust 1.97.1 已设为 default，rustfmt/clippy components 已安装。精确版本 metadata、产品 workspace 与依赖已随 Phase 01 实现提交并通过验收；Phase 02 仍未授权、未开始。
+本机 Toolchain Gate 已执行：Node 由 `D:\AppInstall\nvm\nvm` 下的 NVM 管理，24.18.1 已安装并 active；pnpm 11.21.0 已准备；Rust 1.97.1 已设为 default，rustfmt/clippy components 已安装。精确版本 metadata、产品 workspace 与依赖已随 Phase 01/02 实现提交并通过验收；Phase 02 已关闭，Phase 03 未授权。
 
 升级规则：工具链升级必须是单独变更，重新通过 Static、Unit、Integration、Desktop E2E、Package 与 Packaged Smoke。
 
@@ -658,7 +658,7 @@ Capability Acquisition Minimal 与 Deploy Website Mandate Prototype 作为 Defer
 - precise Browser tab/webContents model；
 - Capability Acquisition / Mandate 是否进入后续产品版本。
 
-Remote Repo 在 bootstrap 时确认为空仓库，Canonical Local Worktree 确认为 `F:\项目\Fielora`。Repo Bootstrap / Toolchain Preparation 后，用户已显式授权并完成 Phase 01；冻结架构语义未发生变更。当前 Phase 01 已关闭，Phase 02 Scope 已 Freeze，仍等待单独的 `Implementation Authorization`。
+Remote Repo 在 bootstrap 时确认为空仓库，Canonical Local Worktree 确认为 `F:\项目\Fielora`。Repo Bootstrap / Toolchain Preparation 后，用户已显式授权并完成 Phase 01 与 Phase 02；冻结架构语义未发生变更。Phase 02 已关闭，Phase 03 仍等待单独定义与 Implementation Authorization。
 
 ## 21. Repo Gate
 
@@ -688,6 +688,12 @@ PHASE_01_HUMAN_EXPERIENCE_GATE_PASS
 PHASE_01_COMPLETE
 PHASE_02_APPROVED_FOR_FREEZE
 PHASE_02_SPEC_FROZEN
-PHASE_02_NOT_AUTHORIZED
-PHASE_02_NOT_STARTED
+PHASE_02_IMPLEMENTATION_COMPLETE
+PHASE_02_ENGINEERING_GATE_PASS
+PHASE_02_DESKTOP_REALITY_GATE_PASS
+PHASE_02_HUMAN_EXPERIENCE_GATE_PASS
+PHASE_02_POST_CORRECTION_FULL_GATE_PASS
+PHASE_02_FINAL_ACCEPTANCE_GRANTED
+PHASE_02_COMPLETE
+PHASE_03_NOT_AUTHORIZED
 ```

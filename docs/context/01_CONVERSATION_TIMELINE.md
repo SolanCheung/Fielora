@@ -151,3 +151,13 @@ Human Experience Gate 随后由用户确认 PASS。用户于 2026-08-14 正式�
 Final amendment 固定 State content 4000、Activity summary 240、Resume 每组 5，修正 REFERENCE ACTIVE↔ARCHIVED lifecycle、typed relation self-edge 与空 TaskPane invariant，并明确 72/28 只属于 renderer default。真实 Migration 0001 与 Candidate 0002 在系统临时 SQLite 中完成 normal 1→2 和 incompatible-data rollback probe，均 PASS；没有创建产品 Migration 0002 或推进产品 schema version。
 
 用户于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`，将三份 Final Candidate 收敛为正式 Frozen Phase 02 规格。同时明确 `PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`：Freeze 不构成产品实现授权，Rust/TypeScript Phase 02 实现与产品 Migration 0002 仍未开始。
+
+## 第二十六阶段 — Phase 02 Implementation、Human Gate Correction 与 Complete
+
+用户随后基于精确 `main@1419b8541a188e59af7ed2966f869bdde2dc7ada` 明确授权 Phase 02 Implementation，同时要求不得自行改变 Frozen semantics。`phase/02-field-reality` 完成 Field Reality aggregate、State lifecycle、HTTPS-only REFERENCE、bounded lineage、typed mode/focus、固定 SurfaceLayoutV1、deterministic richer Resume、Migration 0002、20 个 additive FIPC capabilities 与严格 Electron bridge；三份 Frozen Phase 02 specs 保持 diff 0。
+
+初次完整 Engineering/Desktop Reality Gate 通过后，长期 `pnpm dev` Human Experience 发现 legacy Resume presentation 与内部诊断术语泄露。`f03ed1f` 以 renderer-only correction 将 legacy focus 表达为“上次关注”，隐藏 snapshot/layout/revision/pane/wire diagnostics，没有修改 Contract、Schema、Migration、Rust Core 或 FIPC/1。
+
+Post-correction `pnpm verify:phase02` 完整退出 0；TypeScript 12/12、Rust 19/19、FIPC Integration 4/4、Desktop E2E、Package、Packaged Smoke 与 fresh-directory Portable Smoke 全部 PASS。packaged/portable 各完成 17 项 checks，最终 ZIP 为 145,998,148 bytes，SHA-256 `24bf2bae54cf029ae748da0f8f7f6f6fb8c73a0e7049ebe76744017055d02a93`。
+
+用户基于最终 Evidence 与已经完成的实际 Human Experience 正式裁决 `PHASE_02_HUMAN_EXPERIENCE_GATE: PASS`、`PHASE_02_FINAL_ACCEPTANCE: GRANTED`、`PHASE_02: COMPLETE`，并授权 closeout 与 merge main。该裁决不授权 Phase 03；main closeout 后先停住，下一步单独落实 Development Workflow Hardening，再单独定义 Phase 03 推进方式。

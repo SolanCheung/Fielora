@@ -299,7 +299,7 @@ Final amendment 已确认：REFERENCE 保持 HTTPS-only；State content 4000、A
 
 Freeze closeout 未创建 `crates/fielora-storage/migrations/0002_phase02_reality.sql`，未修改 Rust/TypeScript Phase 02 产品实现，也未增加依赖。Phase 02 继续保持 `NOT_AUTHORIZED / NOT_STARTED`；只有后续单独的明确 Implementation Authorization 才能进入实现。
 
-## 35. Phase 02 Final Acceptance Candidate
+## 35. Phase 02 Complete
 
 用户于 2026-08-14 基于精确 `main@1419b8541a188e59af7ed2966f869bdde2dc7ada` 正式裁决 `PHASE_02_IMPLEMENTATION_AUTHORIZED: YES`。该裁决只改变 Phase 02 的实现授权状态，不改变第 34 节记录的 Frozen semantics；Frozen Implementation Specification、Contract Delta 与 Migration 0002 Specification 保持原文不变。
 
@@ -315,9 +315,12 @@ Freeze closeout 未创建 `crates/fielora-storage/migrations/0002_phase02_realit
 - Portable Build / fresh-directory Portable Smoke：PASS；
 - Engineering Gate：PASS；
 - Desktop Reality Gate：PASS；
-- Human Experience Gate：`PENDING_USER`；
-- Phase 02 Final Acceptance：`NOT_GRANTED`；
-- Phase 02：`NOT_COMPLETE`。
+- Human Experience Gate：PASS；
+- Post-correction Full Gate：PASS；
+- Phase 02 Final Acceptance：`GRANTED`；
+- Phase 02：`COMPLETE`；
+- Merge to main：`AUTHORIZED`；
+- Phase 03：`NOT_AUTHORIZED`。
 
 Post-correction portable artifact 为 `artifacts/phase02/Fielora-V0.1-Phase02-win-x64.zip`，bytes `145998148`，SHA-256 `24bf2bae54cf029ae748da0f8f7f6f6fb8c73a0e7049ebe76744017055d02a93`。实现、测试、已知限制、构建信息与待人工验收清单位于 `artifacts/phase02/`。
 
@@ -327,9 +330,9 @@ Human Gate 前的长期 `pnpm dev` 体验发现：Core Reality persistence 未�
 
 Post-correction Full Gate 已基于包含该 UI correction 的 source `ccd849c3b4c52662cd89fab023a00db857e88e21` 重新生成 packaged/portable build。完整 `pnpm verify:phase02` 于 2026-08-14 17:22:55–17:25:48 +08:00 退出 0：Static、12 项 TypeScript unit、19 项 Rust unit、Clippy/Release、4 项 FIPC Integration、Desktop E2E、Package、Packaged Smoke、Portable 与 fresh-directory Portable Smoke 全部 PASS。Packaged 与 Portable 各完成 17 项 acceptance checks；四张 standard/legacy 成品截图经人工检查未见 correction 回归。
 
-Final Acceptance Candidate 已固化于 `artifacts/phase02/PHASE_02_FINAL_ACCEPTANCE_CANDIDATE.md`。机器 Evidence 已满足提交 Final Acceptance 的前提，但用户尚未作 Human Experience / Final Acceptance 裁决；因此 `PHASE_02_FINAL_ACCEPTANCE: NOT_GRANTED`、`MERGE_TO_MAIN: NOT_DONE`、`PHASE_03: NOT_AUTHORIZED`。
+Final Acceptance Candidate 已固化于 `artifacts/phase02/PHASE_02_FINAL_ACCEPTANCE_CANDIDATE.md`。用户基于 Post-correction Full Gate、实际 Human Experience、重新生成并通过 smoke 的 packaged/portable 与最终 Evidence，正式裁决 `PHASE_02_HUMAN_EXPERIENCE_GATE: PASS`、`PHASE_02_FINAL_ACCEPTANCE: GRANTED`、`PHASE_02: COMPLETE`。正式 closeout 见 `artifacts/phase02/PHASE_02_CLOSEOUT_REPORT.md`。
 
-“实现完成”仍不等于“Phase 02 完成”。只有用户完成 Human Experience Gate，并在真实 Evidence 基础上给出 Phase 02 Final Acceptance 裁决后，Phase 02 才能进入 Complete closeout。
+Phase 02 不再继续开发或继续 Human Gate 打磨。该裁决只授权 Phase 02 closeout 与 merge main；`PHASE_03: NOT_AUTHORIZED`。main closeout 后先停住，后续先单独落实 Development Workflow Hardening，再单独定义和授权 Phase 03 推进方式。
 
 ## 36. 最高产品原则
 

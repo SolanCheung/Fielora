@@ -84,6 +84,14 @@
 - 用户于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`；
 - Freeze closeout 只冻结规格，Phase 02 继续 `IMPLEMENTATION NOT AUTHORIZED / NOT STARTED`。
 
+### Stage M — Phase 02 Implementation、Human Correction 与 Complete
+- 用户基于 `main@1419b8541a188e59af7ed2966f869bdde2dc7ada` 明确授权 Phase 02 Implementation；
+- 严格实现 Frozen Field Reality、State/REFERENCE、bounded lineage、SurfaceLayoutV1、Resume 与 Migration 0002，Frozen specs diff 0；
+- Engineering、Desktop Reality、Human Experience 与 Post-correction Full Gate 全部 PASS；
+- correction 后 packaged/portable 各完成 17 项 smoke checks，最终 Portable SHA-256 为 `24bf2bae54cf029ae748da0f8f7f6f6fb8c73a0e7049ebe76744017055d02a93`；
+- 用户于 2026-08-14 裁决 `PHASE_02_FINAL_ACCEPTANCE: GRANTED`、`PHASE_02: COMPLETE`；
+- closeout/merge main 获授权，但 Phase 03 未授权；下一步先单独落实 Development Workflow Hardening。
+
 ## 当前事实源
 
 历史脉络：`01_CONVERSATION_TIMELINE.md`

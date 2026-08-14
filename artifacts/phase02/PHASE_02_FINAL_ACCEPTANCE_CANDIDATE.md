@@ -1,10 +1,12 @@
 # Phase 02 Final Acceptance Candidate
 
-状态：`SUBMITTED_FOR_USER_DECISION`
+状态：`ACCEPTED / SUPERSEDED_BY_PHASE_02_CLOSEOUT_REPORT`
 
 ```text
-PHASE_02_FINAL_ACCEPTANCE: NOT_GRANTED
-MERGE_TO_MAIN: NOT_DONE
+PHASE_02_HUMAN_EXPERIENCE_GATE: PASS
+PHASE_02_FINAL_ACCEPTANCE: GRANTED
+PHASE_02: COMPLETE
+MERGE_TO_MAIN: AUTHORIZED
 PHASE_03: NOT_AUTHORIZED
 ```
 
@@ -53,9 +55,9 @@ PHASE_03: NOT_AUTHORIZED
 - `artifacts/phase02/PHASE_02_PORTABLE_ACCEPTANCE.json`
 - packaged / portable standard 与 exact-legacy screenshots
 
-## Remaining User Decision
+## User Decision
 
-机器 Evidence、成品 Smoke 与视觉检查均未发现 blocker，但不能代替用户 Human Experience Gate。若人工体验也通过，可明确裁决：
+机器 Evidence、成品 Smoke 与视觉检查没有代替用户 Human Experience Gate。用户已基于真实 Human Experience 与完整 Evidence 明确裁决：
 
 ```text
 PHASE_02_HUMAN_EXPERIENCE_GATE: PASS
@@ -63,4 +65,4 @@ PHASE_02_FINAL_ACCEPTANCE: GRANTED
 PHASE_02: COMPLETE
 ```
 
-在该裁决返回前，本 Candidate 不授权 merge to main 或 Phase 03。
+该裁决授权 Phase 02 closeout 与 merge main，但不授权 Phase 03。正式状态见 `artifacts/phase02/PHASE_02_CLOSEOUT_REPORT.md`。

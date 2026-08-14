@@ -7,7 +7,7 @@
 日期：2026-08-14
 原则：语义完整，物理实现克制
 
-Phase 02 精确 Frozen 增量见 `PHASE_02_CONTRACT_DELTA_V0.1.md`；其 Freeze 不构成 Rust/TypeScript 产品实现授权。
+Phase 02 精确 Frozen 增量见 `PHASE_02_CONTRACT_DELTA_V0.1.md`。Freeze 本身不构成实现授权；用户随后单独授权、验收并裁决 `PHASE_02: COMPLETE`。Frozen Contract semantics 未改变，Phase 03 未授权。
 
 ## 1. Contract 总图
 
@@ -558,7 +558,7 @@ schema_migrations
 
 跨进程 API 分类为 `command.*`、`query.*`、`event.*`、`system.*`。UI 不获得 SQL 或 arbitrary method pass-through。
 
-Phase 01 产品实现只 export Field/Surface/System DTO。Phase 02 Frozen Delta 已定义 State/REFERENCE/bounded Relation/Activity/SurfaceLayoutV1/Resume 的 additive FIPC DTO 与 methods，但在明确 Implementation Authorization 前不得进入产品代码。后续每个 Phase 才增加 Capture、Requirement、Development、Capability、Verification 等 DTO。
+Phase 01 产品实现只 export Field/Surface/System DTO。Phase 02 已按 Frozen Delta 实现并验收 State/REFERENCE/bounded Relation/Activity/SurfaceLayoutV1/Resume 的 additive FIPC DTO 与 methods。后续每个 Phase 才增加 Capture、Requirement、Development、Capability、Verification 等 DTO；Phase 03 未授权，不得提前增加。
 
 FIPC DTO、Domain Command、Aggregate、Repository Row 必须是不同类型，避免 IPC version 与 DB schema 深耦合。
 

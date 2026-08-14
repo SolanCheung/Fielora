@@ -16,7 +16,7 @@
 - Capability Invocation/Policy/Result 在 Domain 语义中分离，在 V0.1 Persistence 收敛为 `capability_executions`；
 - Migration 一经发布不可修改，checksum mismatch 必须阻止启动；
 - 本文件精确冻结 Phase 01 Migration 0001；后续表只冻结职责、名称和 Phase，实际 columns/constraints 在对应 Phase 开工前冻结。
-- Phase 02 不新增最终业务表；其 Frozen Migration 0002 只重建并收紧 `field_state_entries`、`field_objects`、`field_relations` 与相关 indexes，精确 SQL 见 `PHASE_02_MIGRATION_0002_V0.1.md`。该规格当前 `NOT APPLIED / IMPLEMENTATION NOT AUTHORIZED`，0001 保持不变。
+- Phase 02 不新增最终业务表；其 Frozen Migration 0002 只重建并收紧 `field_state_entries`、`field_objects`、`field_relations` 与相关 indexes，精确 SQL 见 `PHASE_02_MIGRATION_0002_V0.1.md`。Migration 0002 已按 Frozen spec 实现、应用并通过正常升级、incompatible-data rollback、Engineering/Desktop/Packaged/Portable 验证；0001 保持不变。
 
 ## 2. Storage primitives
 
@@ -225,7 +225,7 @@ Bootstrap 必须幂等。
 | Phase | 表 | 冻结深度 |
 |---|---|---|
 | 01 | bootstrap: schema_migrations；0001: principals, fields, field_state_entries, field_objects, field_relations, activities, devices, device_bindings, surface_snapshots | 本文件精确冻结 |
-| 02 | 无新增最终业务表；0002 重建/收紧 field_state_entries, field_objects, field_relations 与 indexes | `PHASE_02_MIGRATION_0002_V0.1.md` 精确冻结；当前未应用 |
+| 02 | 无新增最终业务表；0002 重建/收紧 field_state_entries, field_objects, field_relations 与 indexes | `PHASE_02_MIGRATION_0002_V0.1.md` 精确冻结；已实现并验收 |
 | 04 | captures | 表职责/名称冻结；Phase 04 冻结 columns |
 | 05 | requirements, acceptance_criteria, project_realities, evidence | 表职责/名称冻结；Phase 05 冻结 columns |
 | 06 | development_tasks, coding_sessions, change_sets | 表职责/名称冻结；Phase 06 冻结 columns |
