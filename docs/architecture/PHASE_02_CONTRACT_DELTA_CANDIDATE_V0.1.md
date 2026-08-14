@@ -1,6 +1,6 @@
 # Fielora Phase 02 Contract Delta Candidate
 
-状态：CANDIDATE / NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED
+状态：FINAL CANDIDATE / VALIDATION PASS / NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED
 
 版本：V0.1
 
@@ -188,6 +188,12 @@ struct ArchiveReferenceRequest {
     expected_object_revision: u64,
 }
 
+struct RestoreReferenceRequest {
+    field_id: FieldId,
+    object_id: ObjectId,
+    expected_object_revision: u64,
+}
+
 struct ReferenceRequest {
     field_id: FieldId,
     object_id: ObjectId,
@@ -211,6 +217,8 @@ struct ListReferencesRequest {
 REFERENCE Domain aggregate 仍满足 Frozen FieldObject semantic contract：AccessEnvelope 在 Phase 02 固定投影为 local-private/owner-only，metadata 固定为空 canonical object，provenance 由 created_by + source_activity_id 构成。它们不是客户端可写字段。
 
 Archive result 是 `RealityMutationResult<ReferenceView>`；它代表同一 transaction 已清除指向该 REFERENCE 的 typed focus，并 retract 全部 active SOURCED_FROM relations。不会返回或接受任意 cascade plan。
+
+Restore result 是 `RealityMutationResult<ReferenceView>`。Restore 只执行 ARCHIVED → ACTIVE；若 canonical URL 与另一 ACTIVE REFERENCE 冲突则失败。它不恢复旧 focus 或旧 SOURCED_FROM Relation。
 
 ## 5. Bounded Relation DTOs
 
@@ -285,6 +293,7 @@ enum ActivityAction {
     ReferenceCreated,
     ReferenceRevised,
     ReferenceArchived,
+    ReferenceRestored,
     ReferenceSourceAttached,
     ReferenceSourceRetracted,
 }
@@ -364,7 +373,9 @@ struct SurfaceSnapshotV1View {
 }
 ```
 
-Primitive/binding matrix：TASK_PANE 只能绑定 FIELD_TASKS；REFERENCE_PANE 只能绑定 REFERENCE。Primary 必须 `collapsed=false`。Template 与 supporting count：0/1/2 精确对应。
+Primitive/binding matrix：TASK_PANE 只能绑定 FIELD_TASKS；REFERENCE_PANE 只能绑定 REFERENCE。Primary 必须 `collapsed=false`。Template 与 supporting count：0/1/2 精确对应。一个 layout 最多一个 TASK_PANE/FIELD_TASKS；零 TASK State 的空 TaskPane 是合法默认状态，layout validation 不要求存在 TASK State，也不产生占位 Reality。
+
+SurfaceLayoutV1 不包含 ratio/width/height/coordinates。Phase 02 renderer 可把 right-support template 默认显示为约 72/28、two-supports 默认上下等分，但该数值不得序列化进 layout_json、open_objects_json 或任何 durable Contract。
 
 `FieldFocusV1`、`PaneBindingV1`、`ResourceRef`、`LineageEndpointRef`、`ContinuationTarget` 使用 internal tagged JSON：`kind` 是 SCREAMING_SNAKE_CASE discriminator，其余字段不得出现 unknown key。
 
@@ -464,6 +475,7 @@ reference.get
 reference.list
 reference.revise
 reference.archive
+reference.restore
 relation.attach_reference_source
 relation.retract_reference_source
 relation.list
@@ -488,6 +500,7 @@ query.reference.get
 query.reference.list
 command.reference.revise
 command.reference.archive
+command.reference.restore
 command.relation.attach_reference_source
 command.relation.retract_reference_source
 query.relation.list
@@ -505,7 +518,7 @@ Result mapping 固定为：
 | field update mode/focus | `RealityMutationResult<FieldView>` |
 | state create/revise/transition | `RealityMutationResult<StateView>` |
 | state supersede | `SupersedeStateResult` |
-| reference create/revise/archive | `RealityMutationResult<ReferenceView>` |
+| reference create/revise/archive/restore | `RealityMutationResult<ReferenceView>` |
 | relation attach/retract | `RealityMutationResult<RelationView>` |
 | state/reference/relation/activity list | typed `Page<View, Cursor>` |
 | state/reference get | corresponding View |
@@ -530,6 +543,7 @@ enum FieldChangeKind {
     ReferenceCreated,
     ReferenceRevised,
     ReferenceArchived,
+    ReferenceRestored,
     ReferenceSourceAttached,
     ReferenceSourceRetracted,
 }

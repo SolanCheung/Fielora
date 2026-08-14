@@ -1,6 +1,6 @@
 # Fielora Codex Context Pack
 
-版本：2026-08-14 / V0.1 Phase 02 Freeze Candidate
+版本：2026-08-14 / V0.1 Phase 02 Final Freeze Candidate
 
 本包用于让 Codex 在首次接手 Fielora 仓库时，不依赖单次 Prompt 猜测产品，而是先完整读取项目历史、当前事实、明确决策、交互规格和技术基线。
 
@@ -36,4 +36,4 @@
 
 Phase 01 Core Vertical Slice 已完成 Engineering、Desktop Reality 与 Human Experience Gate。用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE`。
 
-完成证据位于 `artifacts/phase01/`。用户随后批准 Phase 02 Scope Review 方向，并授权形成 Freeze Candidate；Candidate 尚未冻结，不构成 Phase 02 Implementation Authorization。Phase 02 继续保持 `NOT_AUTHORIZED / NOT_STARTED`，不得提前实现任何 Later Phase 能力。
+完成证据位于 `artifacts/phase01/`。Phase 02 Final Freeze Candidate 已完成最后 amendment 与 bounded SQLite validation，状态为 `VALIDATION PASS / NOT FROZEN`，不构成 Phase 02 Implementation Authorization。Phase 02 继续保持 `NOT_AUTHORIZED / NOT_STARTED`，不得提前实现任何 Later Phase 能力。

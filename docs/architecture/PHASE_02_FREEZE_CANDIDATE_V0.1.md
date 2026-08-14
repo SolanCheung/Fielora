@@ -1,6 +1,6 @@
 # Fielora Phase 02 Freeze Candidate
 
-状态：CANDIDATE / NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED
+状态：FINAL CANDIDATE / VALIDATION PASS / NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED
 
 版本：V0.1
 
@@ -46,7 +46,7 @@ Phase 02 不创建通用资源平台、知识图谱、自由布局引擎、个�
 - FACT / DECISION / ASSUMPTION / QUESTION / TASK / BLOCKER / RESULT State；
 - State create、revise、resolve/reopen、retract、atomic supersede；
 - ObjectKind 只开放 `REFERENCE`；
-- REFERENCE create、revise、archive；
+- REFERENCE create、revise、archive、restore；
 - 只保留 `SOURCED_FROM` 与 `SUPERSEDED_BY` 两种 lineage；
 - Reality mutation 与一条 Activity 同 transaction；
 - Activity keyset pagination 与按需 Inspector；
@@ -80,7 +80,7 @@ Phase 02 不创建通用资源平台、知识图谱、自由布局引擎、个�
 - Field mode 更新；
 - Field focus 更新或清除；
 - State create/revise/status transition/supersede；
-- REFERENCE create/revise/archive；
+- REFERENCE create/revise/archive/restore；
 - source relation attach/retract。
 
 以下不递增：
@@ -161,11 +161,13 @@ REFERENCE 只是当前 Field 的稳定 membership/reference，不是网页快照
 - create 为 ACTIVE/revision 1；
 - source_activity_id 指向同 transaction 的 `REFERENCE_CREATED` Activity，创建后不可变；
 - revise 可完整替换 title 与 URL，仅 ACTIVE 可 revise；
-- archive 为 ACTIVE → ARCHIVED，terminal；
+- archive 为 ACTIVE → ARCHIVED；restore 为 ARCHIVED → ACTIVE；
 - 同一 Field 中不允许两个 ACTIVE REFERENCE 指向同一 canonical URL；
 - archived reference 可以被历史 Activity/Relation 引用，但不能新建 source relation，也不能成为可恢复 open object。
 
 Archive REFERENCE 必须在同一 transaction 中清除指向它的 typed focus，并将所有指向它的 ACTIVE SOURCED_FROM Relation 转为 RETRACTED（各 Relation revision +1）。整个 archive command 仍只写一条 `REFERENCE_ARCHIVED` Activity、只递增一次 Field aggregate revision；Activity summary 可记录受影响 relation count，不记录 URL。
+
+Restore REFERENCE 必须验证同一 Field 不存在相同 canonical URL 的其他 ACTIVE REFERENCE。成功后 lifecycle 变为 ACTIVE、Object revision +1、写一条 `REFERENCE_RESTORED` Activity、Field aggregate revision +1。Restore 不自动恢复先前 focus 或已 RETRACTED 的 SOURCED_FROM Relation；用户必须通过现有 typed commands 显式重新建立，避免把历史 presentation/lineage 当作当前 Reality。
 
 REFERENCE 永不物理删除。本地 path、`file:`、`javascript:`、credential-bearing URL 和 opaque provider session ref 全部拒绝。
 
@@ -208,6 +210,7 @@ STATE_SUPERSEDED
 REFERENCE_CREATED
 REFERENCE_REVISED
 REFERENCE_ARCHIVED
+REFERENCE_RESTORED
 REFERENCE_SOURCE_ATTACHED
 REFERENCE_SOURCE_RETRACTED
 ```
@@ -234,6 +237,8 @@ REFERENCE_PANE
 ```
 
 - TASK_PANE 绑定当前 Field 的 TASK State collection；
+- 一个 layout 最多包含一个 TASK_PANE/FIELD_TASKS binding；
+- TASK_PANE 在当前 Field 没有任何 TASK State 时仍是合法空状态，不得为了渲染默认 Surface 创建占位 TASK、Activity 或 Field revision；
 - REFERENCE_PANE 必须绑定同一 Field 的一个 ACTIVE REFERENCE Object；
 - State/Activity 的其他信息通过按需 Context Inspector 显示，不是常驻 pane；
 - V0.1 列出的 Web/Document/Code/Terminal/Preview/Requirement/Table/Media/Evidence/Conversation/ExternalApp Pane 在 Phase 02 不可实例化。
@@ -248,7 +253,8 @@ PRIMARY_TWO_SUPPORTS_RIGHT
 
 - exactly one primary；
 - supporting 数量必须与 template 匹配，最多两个；
-- right support column 使用固定 72/28 宽度；two-supports 在右栏固定上下等分；
+- durable layout 只保存 template 与 slot/pane semantics，不保存宽度、高度、坐标或 ratio；
+- Phase 02 renderer 对 right-support template 默认渲染约 72/28，two-supports 在右栏默认上下等分；这些只是 renderer presentation defaults，不是 Contract、Snapshot 或 Migration invariant；
 - primary 不可 collapsed；supporting 可 collapsed；
 - pane id 必须唯一；focused pane 必须存在且未 collapsed；
 - 同一 REFERENCE Object 在一个 layout 中最多出现一次；
@@ -369,17 +375,14 @@ Core 只返回 structured `reason + target`，不生成自然语言推荐，不�
 8. 再启动并核验 Field revision、State、Relation、Activity、layout、open reference、continuation target；
 9. 在 snapshot 后改变 Reality，证明 Resume 标记 STALE 且旧 snapshot 不覆盖新 Reality；
 10. archive open reference，证明 Resume 安全降级并报告 unavailable；
-11. kill Core 后自动恢复，数据仍一致。
+11. restore reference，证明对象重新 ACTIVE，但旧 focus/source relations 不被暗中恢复；
+12. 在零 TASK State 的新 Field 恢复默认空 TaskPane，证明没有创建占位 Reality/Activity/revision；
+13. kill Core 后自动恢复，数据仍一致。
 
 不得以 mock、in-memory repository、fixture DB 或仅 development mode 代替。
 
 ## 14. Candidate close conditions
 
-本 candidate 已给出可冻结的语义，不存在需要扩大 Phase 的设计缺口。进入正式 Freeze 前只剩以下审核动作：
+用户已确认 HTTPS-only REFERENCE、State content 4000、Activity summary 240、Resume 每组 5 条，并确认固定 Surface template。72/28 只作为 Phase 02 renderer default，不进入 durable layout semantics。
 
-1. 用户确认 HTTPS-only REFERENCE 是否满足 Phase 02；
-2. 用户确认 State content 4000、Activity summary 240、Resume 每组 5 条的上限；
-3. 用户确认固定 72/28 右栏模板，不开放其他 density；
-4. 执行 schema migration SQL 的 SQLite parser/probe 属于 Implementation Authorization 后的工作，本轮不运行产品 migration。
-
-`set_focus_v1`、`save_snapshot_v1`、`resume_v1` 方法名在本 Candidate 中已经关闭，不再作为实现期选择。若上述 1–3 被否决，返回设计修订；不允许在实现中自行选择。除此之外未发现 Frozen Spec conflict。
+`set_focus_v1`、`save_snapshot_v1`、`resume_v1` 方法名也已关闭，不再作为实现期选择。Bounded migration probe 已 PASS，证据位于 `artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md` 与 `MIGRATION_0002_BOUNDED_PROBE.json`。正式 Freeze 前只剩用户明确 Freeze 裁决；Freeze 后仍须另行给出 Implementation Authorization。除此之外未发现 Frozen Spec conflict。

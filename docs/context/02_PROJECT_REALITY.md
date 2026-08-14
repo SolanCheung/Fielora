@@ -274,7 +274,11 @@ Engineering、Desktop Reality、Human Experience 与 Closeout 证据见 `artifac
 - FIPC/1 transport 保持不变，additive methods 不触发 transport version 重设计；
 - Personal Memory、Agent、Browser、LLM 与其他 Later Phase 能力不进入 Phase 02。
 
-精确 State lifecycle、REFERENCE、Relation matrix、SurfaceLayoutV1、deterministic richer Resume、Contract delta 与 Migration 0002 位于 `docs/architecture/PHASE_02_*_CANDIDATE_V0.1.md`。这些文件状态为 `CANDIDATE / NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED`；必须经用户后续明确 Freeze 裁决，并另行获得 Phase 02 Implementation Authorization 后，才能进入产品实现。
+精确 State lifecycle、REFERENCE、Relation matrix、SurfaceLayoutV1、deterministic richer Resume、Contract delta 与 Migration 0002 位于 `docs/architecture/PHASE_02_*_CANDIDATE_V0.1.md`。这些文件状态为 `FINAL CANDIDATE / VALIDATION PASS / NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED`；必须经用户后续明确 Freeze 裁决，并另行获得 Phase 02 Implementation Authorization 后，才能进入产品实现。
+
+Final amendment 已确认：REFERENCE 保持 HTTPS-only；State content 4000、Activity summary 240、Resume 每组 5；REFERENCE lifecycle 为 ACTIVE↔ARCHIVED；Relation self-edge 以完整 typed endpoint 判断；一个 layout 最多一个 FIELD_TASKS TaskPane，且零 TASK 的空 TaskPane 合法。Surface template 仍固定，但 72/28 只属于 Phase 02 renderer default，不进入 durable layout semantics。
+
+真实 0001 + Candidate 0002 已在系统临时 SQLite 中完成正常 1→2 与 incompatible-data rollback probe，两条路径均 PASS，临时文件已清理。证据位于 `artifacts/phase02/`。Final Candidate 当前为 `VALIDATION PASS / NOT FROZEN`；Phase 02 仍为 `NOT_AUTHORIZED / NOT_STARTED`。
 
 ## 35. 最高产品原则
 

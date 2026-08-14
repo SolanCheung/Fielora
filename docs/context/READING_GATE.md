@@ -23,6 +23,7 @@
 - [ ] docs/architecture/PHASE_02_FREEZE_CANDIDATE_V0.1.md
 - [ ] docs/architecture/PHASE_02_CONTRACT_DELTA_CANDIDATE_V0.1.md
 - [ ] docs/architecture/PHASE_02_MIGRATION_0002_CANDIDATE_V0.1.md
+- [ ] artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md
 - [ ] docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md
 - [ ] context_manifest.json
 
@@ -56,3 +57,4 @@ Codex 必须能准确解释：
 - 为什么长期方向是 Personal Steward，但 V0.1 不是“AI 管家”。
 - 为什么 Phase 02 Candidate 只包含 Field Reality/State/REFERENCE/bounded lineage/constrained Surface/Resume；
 - 为什么 Candidate 尚未冻结，也不构成 Phase 02 Implementation Authorization。
+- bounded migration probe 证明了什么，以及它为什么仍不等于产品 Migration 实现。

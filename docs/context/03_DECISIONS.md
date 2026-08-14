@@ -76,3 +76,9 @@
 | D-070 | Phase 02 DXE 使用固定 SurfaceLayoutV1 template，只开放 TaskPane/ReferencePane，不实现坐标、自由 resize、任意 pane 或 Generative UI | FREEZE CANDIDATE |
 | D-071 | FIPC/1 transport、framing、hello 与 `ProtocolVersion 1.0` 保持不变；Phase 02 methods 通过 capabilities additive 扩展 | CONFIRMED FOR FREEZE CANDIDATE |
 | D-072 | Personal Memory、Agent、Browser、LLM、Capture/Inbox、Requirement/Coding/Verify/Evidence/Capability 等 Later Phase 能力继续排除在 Phase 02 外 | CONFIRMED |
+| D-073 | Phase 02 REFERENCE 保持 HTTPS-only；State content 4000、Activity summary 240、Resume BLOCKER/QUESTION/TASK 每组 5 条 | CONFIRMED FOR FINAL FREEZE CANDIDATE |
+| D-074 | REFERENCE lifecycle 修正为 ACTIVE↔ARCHIVED；restore 不自动恢复旧 focus 或已 retracted SOURCED_FROM | CONFIRMED FOR FINAL FREEZE CANDIDATE |
+| D-075 | Relation self-edge 必须比较完整 typed endpoint；SQL 使用 `from_type != to_type OR from_id != to_id` | CONFIRMED FOR FINAL FREEZE CANDIDATE |
+| D-076 | 一个 SurfaceLayoutV1 最多一个 TASK_PANE/FIELD_TASKS；零 TASK 的空 TaskPane 是合法默认状态且不创建占位 Reality | CONFIRMED FOR FINAL FREEZE CANDIDATE |
+| D-077 | 固定 Surface template 保留；72/28 只作为 Phase 02 renderer default，不进入 durable Contract/Snapshot/Migration semantics | CONFIRMED FOR FINAL FREEZE CANDIDATE |
+| D-078 | 真实 0001 + Candidate 0002 临时 SQLite normal upgrade 与 incompatible-data rollback probe 均 PASS；该证据不等于 Freeze 或 Implementation Authorization | VERIFIED |

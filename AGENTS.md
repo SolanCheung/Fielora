@@ -38,9 +38,10 @@ Fielora 是一个长期产品项目。
 16. `docs/architecture/PHASE_02_FREEZE_CANDIDATE_V0.1.md`
 17. `docs/architecture/PHASE_02_CONTRACT_DELTA_CANDIDATE_V0.1.md`
 18. `docs/architecture/PHASE_02_MIGRATION_0002_CANDIDATE_V0.1.md`
-19. `docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md`
-20. `docs/context/READING_GATE.md`
-21. `context_manifest.json`
+19. `artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md`
+20. `docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md`
+21. `docs/context/READING_GATE.md`
+22. `context_manifest.json`
 
 不得只做关键词搜索替代阅读。
 
@@ -135,7 +136,7 @@ Phase 01 精确工具链与实现边界以已冻结的 `TECHNICAL_ARCHITECTURE_V
 
 Phase 01 完成不构成 Phase 02 或任何 Later Phase 的实现授权。没有新的明确 Implementation Authorization，不得开始 Phase 02、扩大产品范围或提前实现 Later Phase 能力。
 
-用户已批准 Phase 02 Scope Review 方向并授权形成 Freeze Candidate，但 Candidate 仍为 `NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED`。Candidate 文档只用于设计评审；在用户明确裁决 Freeze 且另行授权实现前，不得创建产品 Migration 0002、修改 Phase 02 Contract/Schema 实现或推进 schema version。
+用户已批准 Phase 02 Scope Review 方向；Final Freeze Candidate 已完成 amendment 与 bounded SQLite validation，但仍为 `NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED`。Candidate 文档和 probe 只用于设计评审；在用户明确裁决 Freeze 且另行授权实现前，不得创建产品 Migration 0002、修改 Phase 02 Contract/Schema 实现或推进 schema version。
 
 ## 6. 验证规则
 

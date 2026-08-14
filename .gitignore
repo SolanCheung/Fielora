@@ -25,6 +25,10 @@ playwright-report/
 logs/
 *.log
 !artifacts/phase01/FULL_GATE.log
+!artifacts/phase02/
+artifacts/phase02/*
+!artifacts/phase02/*.md
+!artifacts/phase02/*.json
 
 # Local configuration and secrets
 .env

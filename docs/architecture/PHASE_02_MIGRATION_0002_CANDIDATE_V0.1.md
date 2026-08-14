@@ -1,6 +1,6 @@
 # Fielora Phase 02 Migration 0002 Candidate
 
-状态：CANDIDATE / NOT FROZEN / NOT APPLIED
+状态：FINAL CANDIDATE / BOUNDED PROBE PASS / NOT FROZEN / NOT APPLIED
 
 版本：V0.1
 
@@ -134,7 +134,7 @@ CREATE TABLE field_relations_v2 (
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     CHECK (created_at <= updated_at),
-    CHECK (from_id != to_id),
+    CHECK (from_type != to_type OR from_id != to_id),
     CHECK (
       (relation_type = 'SOURCED_FROM' AND from_type = 'STATE' AND to_type = 'OBJECT') OR
       (relation_type = 'SUPERSEDED_BY' AND from_type = 'STATE' AND to_type = 'STATE')
@@ -186,6 +186,7 @@ SQLite CHECK 不替代 Domain validation：
 - source_activity_id 必须是本次创建 Activity 且属于同一 Field transaction；
 - REFERENCE title、canonical HTTPS URL、no credentials、metadata exactly `{}`；
 - archive REFERENCE 原子清除 typed focus 并 retract 指向它的 active SOURCED_FROM；
+- restore REFERENCE 只执行 ARCHIVED → ACTIVE，并通过 partial unique index 阻止 active canonical URL 冲突；不恢复旧 focus/relation；
 - Relation endpoint 存在、同一 Field、target lifecycle、same-kind supersede、no cycle；
 - SUPERSEDED_BY 不可 retract；
 - 所有 mutation 同 transaction 递增 Field aggregate revision；
@@ -211,6 +212,7 @@ Storage startup 不得继续只检查 table names。Schema version 2 至少核�
 - `fields` 不新增 aggregate revision column；继续使用现有 `revision`，只冻结其语义；
 - `activities` 不增加 payload/before/after/evidence JSON；
 - `surface_snapshots` 不改 columns；V1 typed JSON 写入现有 layout/open_objects columns；
+- Surface template 只持久化 slot/pane semantics；72/28 等 renderer defaults 不进入 durable JSON schema；
 - `devices`、`device_bindings` 不变；Phase 02 REFERENCE 不建立 device binding；
 - 不新增 State history、object metadata、relation graph、memory、agent、browser、provider 或 resume cache tables；
 - 不建立万能 resources/EAV 表。
@@ -220,3 +222,15 @@ Storage startup 不得继续只检查 table names。Schema version 2 至少核�
 0001 的 `field_state_entries.source_activity_id` 允许 NULL 和 `ON DELETE SET NULL`；0002 candidate 将其变为 NOT NULL 且默认 restrictive FK，以满足 State creation provenance。现有 Activity 是 append-only，不存在合法删除路径，因此语义一致。
 
 若后续确认需要删除 Activity，该需求与此 candidate 冲突，必须在实现前重新设计；Phase 02 不接受通过恢复 nullable 或把 provenance 塞入 JSON 解决。
+
+## 7. Bounded probe evidence
+
+真实 `0001_core.sql` + 本文件唯一 Candidate SQL block 已在系统临时 SQLite files 中完成：
+
+- normal Phase 01 data 1→2：PASS；
+- incompatible legacy object：expected failure + full transaction rollback PASS；
+- typed cross-type same-id relation：PASS；
+- same typed endpoint self-edge rejection：PASS；
+- temporary files cleanup：PASS。
+
+证据：`artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md` 与 `MIGRATION_0002_BOUNDED_PROBE.json`。Probe 没有创建产品 migration、没有调用产品 runner、没有推进产品 schema version。
