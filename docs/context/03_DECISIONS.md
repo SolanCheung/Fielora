@@ -1,6 +1,6 @@
 # Fielora Decision Log
 
-状态：已明确决定 / V0.1 Technical Architecture Freeze（2026-08-13）
+状态：已明确决定 / V0.1 Technical Architecture Freeze / Phase 01 COMPLETE（2026-08-14）
 
 | ID | 决定 | 状态 |
 |---|---|---|
@@ -59,8 +59,13 @@
 | D-053 | Production trusted local application origin 为精确 `fielora://app`；dev 仅接受当次 Forge entry 的精确 loopback origin；Browse/remote content 永不获得 app bridge | FROZEN |
 | D-054 | Rust Sidecar 将 parent-pipe EOF 作为权威 shutdown signal，安全清理并在 2 秒内退出；不得 orphan，且不自行重启 | FROZEN |
 | D-055 | Installer cadence 固定为 Phase 03、Phase 08、Final Alpha；每 Phase Portable，Final Alpha 同时交付 Portable + Installer | CONFIRMED |
-| D-056 | Remote Repo `git@github.com:SolanCheung/Fielora.git` 已确认存在且为空；Local Worktree 未确认；确认前实现不开始 | CONFIRMED |
+| D-056 | 当时 Remote Repo `git@github.com:SolanCheung/Fielora.git` 已确认存在且为空；Local Worktree 未确认；确认前实现不开始 | HISTORICAL / SUPERSEDED BY D-058 |
 | D-057 | 本机 Node 由 `D:\AppInstall\nvm\nvm` 管理；现有 14.18.2/22.16.0 只作环境事实，不能替代冻结的 Node 24.18.1；当前不安装或切换 | CONFIRMED |
 | D-058 | `F:\项目\Fielora` 是 Fielora canonical Local Worktree；初始化 Git、默认分支 `main`，remote 为 `git@github.com:SolanCheung/Fielora.git` | CONFIRMED |
 | D-059 | Repo Bootstrap / Toolchain Preparation 获授权；Baseline Commit 只包含冻结 Context Pack、docs、`.gitignore` 与精确工具链 metadata，不包含产品 workspace/code/dependencies/schema | CONFIRMED |
 | D-060 | Node 24.18.1、pnpm 11.21.0、Rust 1.97.1 已准备并通过精确版本 Gate；这不构成 Phase 01 Implementation Authorization | CONFIRMED |
+| D-061 | 用户以 baseline `bfdcbe0147b142cdf73ba06986fe7f35aaf2a604`、required-reading manifest 与冻结 Architecture/Contracts/Schema/Phase 01 Spec 为唯一实现基线，正式授权 `phase/01-core-vertical-slice` 实现 | CONFIRMED |
+| D-062 | Phase 01 真实纵向闭环及 Static、Unit、Clippy/Release、Integration、Desktop E2E、Package、Packaged Smoke 全部通过；Engineering Gate 为 PASS | VERIFIED |
+| D-063 | Phase 01 Portable 在实际 Windows desktop runtime 中证明 packaged Electron、`fielora://app`、Rust Core、SQLite、security boundaries、bounded shutdown/no orphan 与 executable restart/resume；Desktop Reality Gate 为 PASS | VERIFIED |
+| D-064 | Human Experience Gate 已由用户确认 PASS；用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE` | CONFIRMED / COMPLETE |
+| D-065 | Phase 01 closeout 不构成 Phase 02 或 Later Phase Implementation Authorization；Phase 02 保持 `NOT_AUTHORIZED` / `NOT_STARTED` | CONFIRMED |

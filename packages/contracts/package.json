@@ -1,0 +1,9 @@
+{
+  "name": "@fielora/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "types": "generated/index.ts",
+  "exports": {
+    ".": "./generated/index.ts"
+  }
+}

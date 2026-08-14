@@ -1,0 +1,21 @@
+{
+  "status": "PASS",
+  "application": "F:\\项目\\Fielora\\apps\\desktop\\out\\Fielora-win32-x64\\Fielora.exe",
+  "trusted_origin": "fielora://app",
+  "core_path": "F:\\项目\\Fielora\\apps\\desktop\\out\\Fielora-win32-x64\\resources\\fielora-core.exe",
+  "database_path": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-packaged-e2e-0TTT8i\\Fielora\\data\\fielora.db",
+  "field": "Fielora / Build V0.1",
+  "focus": "Architecture",
+  "schema_version": 1,
+  "checks": [
+    "secure_renderer",
+    "subframe_bridge_denied",
+    "external_navigation_denied",
+    "create",
+    "focus_update",
+    "graceful_close",
+    "packaged_restart_resume",
+    "core_crash_restart_requery"
+  ],
+  "captured_at": "2026-08-13T11:29:52.860Z"
+}

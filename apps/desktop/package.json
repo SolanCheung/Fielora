@@ -1,0 +1,37 @@
+{
+  "name": "@fielora/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": ".webpack/main",
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package --arch=x64 --platform=win32",
+    "make": "electron-forge make --arch=x64 --platform=win32",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src webpack.*.ts forge.config.ts",
+    "test": "node --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@fielora/contracts": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/maker-zip": "7.11.2",
+    "@electron-forge/plugin-webpack": "7.11.2",
+    "@electron-forge/shared-types": "7.11.2",
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.2.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "css-loader": "7.1.4",
+    "electron": "43.4.0",
+    "eslint": "10.8.1",
+    "style-loader": "4.0.0",
+    "ts-loader": "9.6.2",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.67.0",
+    "webpack": "5.109.2"
+  }
+}

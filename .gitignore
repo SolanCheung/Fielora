@@ -7,7 +7,12 @@ dist/
 out/
 target/
 coverage/
-artifacts/
+artifacts/*
+!artifacts/phase01/
+artifacts/phase01/*
+!artifacts/phase01/*.md
+!artifacts/phase01/*.json
+!artifacts/phase01/*.png
 test-results/
 playwright-report/
 
@@ -19,6 +24,7 @@ playwright-report/
 *.sqlite3
 logs/
 *.log
+!artifacts/phase01/FULL_GATE.log
 
 # Local configuration and secrets
 .env
@@ -33,6 +39,10 @@ logs/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Electron Forge local output
+apps/desktop/.webpack/
+apps/desktop/out/
 
 # Temporary files
 *.tmp

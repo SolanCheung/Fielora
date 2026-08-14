@@ -1,0 +1,21 @@
+{
+  "status": "PASS",
+  "application": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-portable-smoke-4e3000d04ce4431dae896e7132080d91\\Fielora.exe",
+  "trusted_origin": "fielora://app",
+  "core_path": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-portable-smoke-4e3000d04ce4431dae896e7132080d91\\resources\\fielora-core.exe",
+  "database_path": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-portable-e2e-TjmyQ7\\Fielora\\data\\fielora.db",
+  "field": "Fielora / Build V0.1",
+  "focus": "Architecture",
+  "schema_version": 1,
+  "checks": [
+    "secure_renderer",
+    "subframe_bridge_denied",
+    "external_navigation_denied",
+    "create",
+    "focus_update",
+    "graceful_close",
+    "packaged_restart_resume",
+    "core_crash_restart_requery"
+  ],
+  "captured_at": "2026-08-13T11:30:33.440Z"
+}

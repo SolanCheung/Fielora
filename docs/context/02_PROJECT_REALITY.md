@@ -226,7 +226,7 @@ V0.1 不实现完整通信、IM、共享 Field 或 Steward-to-Steward 自动协�
 
 ## 31. Technical Architecture Freeze
 
-2026-08-13 用户已批准冻结 Technical Architecture、Core Contracts 与 Phase 01 Schema；Phase 01 Implementation Spec 状态为 READY，但不等于已授权实现。
+2026-08-13 用户批准冻结 Technical Architecture、Core Contracts 与 Phase 01 Schema；随后又以这些冻结文档和 baseline commit 为唯一基线，显式授权 Phase 01 实现。Phase 01 已在不改变冻结 Contract / Schema 语义的前提下完成。
 
 Phase 01 精确工具链冻结为：Electron 43.4.0、Node 24.18.1 LTS、pnpm 11.21.0、Rust 1.97.1 / Edition 2024、rusqlite 0.40.2 `bundled`、Electron Forge + Webpack + TypeScript + React。
 
@@ -238,13 +238,30 @@ Installer cadence 冻结为 Phase 03、Phase 08、Final Alpha；每个 Phase 的
 
 ## 32. Canonical Repository 与 Toolchain Gate
 
-Canonical Local Worktree 已由用户明确确认为 `F:\项目\Fielora`。该目录已初始化为 Git repository，默认分支 `main`，remote `origin` 绑定 `git@github.com:SolanCheung/Fielora.git`。Remote 由 GitHub API 与用户裁决共同确认为当前账户 `SolanCheung` 所有的 private empty repository。
+Canonical Local Worktree 已由用户明确确认为 `F:\项目\Fielora`。该目录是 Git repository，默认分支 `main`，remote `origin` 绑定 `git@github.com:SolanCheung/Fielora.git`。Remote 在 bootstrap 时由 GitHub API 与用户裁决共同确认为当前账户 `SolanCheung` 所有的 private empty repository。
 
-Toolchain Preparation 已完成并实测：Node 24.18.1（NVM active）、pnpm 11.21.0、Rust/Cargo 1.97.1、rustfmt 与 clippy 1.97.1 toolchain components。Repo 提交 `.node-version` 与 `rust-toolchain.toml`；没有创建 package/Cargo workspace，也没有安装产品依赖。
+Toolchain Preparation 已完成并实测：Node 24.18.1（NVM active）、pnpm 11.21.0、Rust/Cargo 1.97.1、rustfmt 与 clippy 1.97.1 toolchain components。Repo 提交 `.node-version`、`rust-toolchain.toml`、`pnpm-lock.yaml` 与 `Cargo.lock`；Phase 01 workspace 与冻结范围内的产品依赖已经真实建立。
 
-Repo Bootstrap / Toolchain Gate 通过不等于 Phase 01 实现授权。当前实现状态仍是 `IMPLEMENTATION_NOT_AUTHORIZED` / `IMPLEMENTATION_NOT_STARTED`；必须等待用户新的明确 Implementation Authorization。
+Phase 01 从 baseline commit `bfdcbe0147b142cdf73ba06986fe7f35aaf2a604` 在 `phase/01-core-vertical-slice` 分支实施；Engineering evidence head 为 `5051ab31a25285b16ef5bc3aad1ffaaeebbd1a16`。Closeout 后以项目既定 feature-branch → `main` 流程保存完整 Git 历史。
 
-## 33. 最高产品原则
+## 33. Phase 01 Complete
+
+Phase 01 Core Vertical Slice 已证明真实链路：`Electron Renderer → typed preload → Electron Main → FIPC/1 → Rust Core → SQLite transaction → Activity/Event → React query → packaged restart/resume`。
+
+截至 2026-08-14：
+
+- Engineering Gate：PASS；
+- Desktop Reality Gate：`DESKTOP_REALITY_GATE_PASS`；
+- Human Experience Gate：PASS；
+- 用户正式裁决：`PHASE_01: COMPLETE`；
+- Portable artifact：`artifacts/phase01/Fielora-V0.1-Phase01-win-x64.zip`；
+- Portable SHA-256：`04a0d539d11324e941f2f4c7bee39628ad919dcb7e0326afb8525ebc1b7220f9`；
+- 冻结规格冲突：无；
+- Phase 02：`NOT_AUTHORIZED` / `NOT_STARTED`。
+
+Engineering、Desktop Reality、Human Experience 与 Closeout 证据见 `artifacts/phase01/`。Phase 01 Complete 只确认首个 Core Vertical Slice，不代表 V0.1 全部阶段完成。
+
+## 34. 最高产品原则
 
 > **不是把所有软件装进 Fielora，而是让用户的工作与生活在软件之间不再断掉。**
 

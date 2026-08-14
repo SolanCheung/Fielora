@@ -128,7 +128,9 @@ Fielora 自己做跨场景、高频、核心、轻量能力；Blender、CAD、�
 
 当前 V0.1 平台：Windows 11 x64；Electron/Chromium 作为验证宿主；不直接 Fork Chromium；Rust Core 优先 Sidecar Process；本地优先持久化；多 LLM API Provider。
 
-Phase 01 精确工具链与实现边界以已冻结的 `TECHNICAL_ARCHITECTURE_V0.1.md`、`CORE_CONTRACTS_V0.1.md`、`SCHEMA_FREEZE_V0.1.md`、`PHASE_01_IMPLEMENTATION_SPEC_V0.1.md` 为准。Canonical Local Worktree 已确认为 `F:\项目\Fielora`，Repo Bootstrap / Toolchain Preparation 已获授权并完成；Phase 01 产品实现仍为 `IMPLEMENTATION_NOT_AUTHORIZED`。没有新的明确 Implementation Authorization，不得创建产品 workspace、安装产品依赖、创建 schema 或编写 Phase 01 产品代码。
+Phase 01 精确工具链与实现边界以已冻结的 `TECHNICAL_ARCHITECTURE_V0.1.md`、`CORE_CONTRACTS_V0.1.md`、`SCHEMA_FREEZE_V0.1.md`、`PHASE_01_IMPLEMENTATION_SPEC_V0.1.md` 为准。Canonical Local Worktree 已确认为 `F:\项目\Fielora`。Phase 01 Core Vertical Slice 已完成 Engineering、Desktop Reality 与 Human Experience Gate，用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE`。
+
+Phase 01 完成不构成 Phase 02 或任何 Later Phase 的实现授权。没有新的明确 Implementation Authorization，不得开始 Phase 02、扩大产品范围或提前实现 Later Phase 能力。
 
 ## 6. 验证规则
 

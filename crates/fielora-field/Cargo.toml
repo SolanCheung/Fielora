@@ -1,0 +1,11 @@
+[package]
+name = "fielora-field"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fielora-contracts = { path = "../fielora-contracts" }
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

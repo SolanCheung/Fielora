@@ -1,10 +1,10 @@
 # Fielora V0.1 Phase 01 Implementation Specification
 
-状态：IMPLEMENTATION READY / WAITING EXPLICIT IMPLEMENTATION AUTHORIZATION  
+状态：IMPLEMENTATION COMPLETE / CLOSED BY USER VERDICT（2026-08-14）
 版本：V0.1  
 阶段：Phase 01  
 正式验收平台：Windows 11 x64  
-注意：Technical Architecture、Core Contracts 与 Phase 01 Schema 已批准冻结；Repo Bootstrap / Toolchain Gate 已完成，但当前仍未授权 Phase 01 产品实现
+注意：Technical Architecture、Core Contracts 与 Phase 01 Schema 保持冻结；用户已授权并验收 Phase 01，未发现冻结规格冲突。该状态不授权 Phase 02
 
 ## 1. 唯一目标
 
@@ -31,7 +31,7 @@ secure React Renderer
 
 UI 只用于证明架构，不承担最终视觉设计。
 
-## 3. Repo Gate
+## 3. Repo Gate（开工时历史 Gate）
 
 修改代码、初始化 workspace 或安装依赖前，必须在真正 Repo 根报告：
 
@@ -55,14 +55,14 @@ git status --short
 
 Remote Repo 已确认为 `git@github.com:SolanCheung/Fielora.git` 且为空；Canonical Local Worktree 已确认为 `F:\项目\Fielora`。Baseline Commit 后必须重新核验 remote、branch、HEAD、dirty files，以及最新 AGENTS、Context、Baseline Freeze、Technical Architecture、Core Contracts 与本 Phase spec。
 
-当前 Gate：
+开工前 Gate 随后由用户显式 Implementation Authorization 解锁；实现所用 baseline 为 `bfdcbe0147b142cdf73ba06986fe7f35aaf2a604`。历史前置状态为：
 
 ```text
 REMOTE_REPO_CONFIRMED_EMPTY
 CANONICAL_LOCAL_WORKTREE_CONFIRMED
 REPO_BOOTSTRAP_COMPLETE
 TOOLCHAIN_GATE_PASS
-IMPLEMENTATION_NOT_AUTHORIZED
+AWAITING_EXPLICIT_IMPLEMENTATION_AUTHORIZATION
 ```
 
 有用户 dirty files 时不得 reset、checkout、clean 或覆盖。
@@ -410,6 +410,8 @@ WAITING HUMAN ACCEPTANCE
 
 不得报告 Phase Complete。
 
+本阶段实际结果（2026-08-14）：Engineering Gate PASS、Desktop Reality Gate PASS、Human Experience Gate PASS；用户正式裁决 `PHASE_01: COMPLETE`。
+
 ## 19. 实现顺序
 
 1. Repo Bootstrap / toolchain；
@@ -459,10 +461,16 @@ React local state 与简单 CSS Modules 足够。真实不可避免的新增依�
 TECHNICAL_ARCHITECTURE_FROZEN
 CORE_CONTRACTS_FROZEN
 PHASE_01_SCHEMA_FROZEN
-REMOTE_REPO_CONFIRMED_EMPTY
+BASELINE_COMMIT_bfdcbe0147b142cdf73ba06986fe7f35aaf2a604
 CANONICAL_LOCAL_WORKTREE_CONFIRMED
 REPO_BOOTSTRAP_COMPLETE
 TOOLCHAIN_GATE_PASS
-IMPLEMENTATION_NOT_AUTHORIZED
-IMPLEMENTATION_NOT_STARTED
+IMPLEMENTATION_AUTHORIZED
+IMPLEMENTATION_COMPLETE
+ENGINEERING_GATE_PASS
+DESKTOP_REALITY_GATE_PASS
+HUMAN_EXPERIENCE_GATE_PASS
+PHASE_01_COMPLETE
+PHASE_02_NOT_AUTHORIZED
+PHASE_02_NOT_STARTED
 ```

@@ -1,7 +1,7 @@
 {
   "project": "Fielora",
-  "version": "v0.1-repo-bootstrap-toolchain-gate-2026-08-13",
-  "purpose": "Codex first-read context package",
+  "version": "v0.1-phase-01-closeout-2026-08-14",
+  "purpose": "Codex first-read context package and current Phase 01 closeout state",
   "required_reading": [
     "README.md",
     "AGENTS.md",
@@ -33,28 +33,28 @@
   "rule": "No product-code changes until CODEX_READING_REPORT.md is reviewed by the user.",
   "files": {
     "README.md": {
-      "sha256": "d5bf7ecef46dc9c5e785f7fd6b4c1647e65cc344b1172f14fbe15850ce150aa3",
-      "bytes": 1555
+      "sha256": "c5d209ab706ec006fc896550273ab85e3d32e9e82526c3d9339b70cb9955c400",
+      "bytes": 1892
     },
     "AGENTS.md": {
-      "sha256": "1aa927887a13fa9cd3b78ff0700550152daebc517b8ce36901313af50ad5a95f",
-      "bytes": 5855
+      "sha256": "d74d2ace9b2c1bc02d23849c298c2d00637d457e97166a391de6aec5c6c852e8",
+      "bytes": 5939
     },
     "docs/context/00_CONVERSATION_INDEX.md": {
-      "sha256": "2050e297b89da6d87160892bc72141a59eaeaa287e10b56e9d2e6cc3ae409d9c",
-      "bytes": 3017
+      "sha256": "da3439a675b64563bda3174c02a967a8400b95461c71f7c97611933b68a7db11",
+      "bytes": 3566
     },
     "docs/context/01_CONVERSATION_TIMELINE.md": {
-      "sha256": "2485e6dc01c908573248200161479fb88aa9d529357087f12a974ff1d9b15ea8",
-      "bytes": 7576
+      "sha256": "a8fe774d9caf69ac3ce372ac69b283c099548bd6ba3e6cb134b944e58b81b613",
+      "bytes": 8928
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "247ac2ce1384495d9cfeb3d8c73facf8e5cdeeb3a0befa5e3e81d937c4a681b7",
-      "bytes": 13527
+      "sha256": "d48be680cceb2682bf26eca7a9894b8f290b7f6ff7ac7b88acb64412fbb308a8",
+      "bytes": 14600
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "96849ee385d6f79711d676a8306428d3eded59a9c67582654c4178e4e3c854c9",
-      "bytes": 7152
+      "sha256": "5624c6aab1736830bfc1a28371b6436623fdbaeacc3ce4de24e68dcd8e7f370b",
+      "bytes": 8176
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
       "sha256": "6336e081956b1d9c1390c971527ea8d6beea60c8b2840110c919184be6b5c650",
@@ -77,12 +77,12 @@
       "bytes": 12618
     },
     "docs/architecture/TECHNICAL_BASELINE_V0.1.md": {
-      "sha256": "243d229ea997a6cab72ecf6a76ddcb39cb364bbba520b2ee60eeaa81d8c1cba1",
-      "bytes": 9468
+      "sha256": "eaf3cc01f68168a96a614bd043b64f89de0b9e5209ed271ff9b17590b31aab00",
+      "bytes": 9665
     },
     "docs/architecture/TECHNICAL_ARCHITECTURE_V0.1.md": {
-      "sha256": "bee3b2bd732ca9b900c9814e4532288b3727096c9ad3c900a503074fb0edf68d",
-      "bytes": 25855
+      "sha256": "b7999d1124a4e0e6af9d01f0986e977eb714c75cb47332173f325b66a33ed0fc",
+      "bytes": 26126
     },
     "docs/architecture/CORE_CONTRACTS_V0.1.md": {
       "sha256": "4d5de24df4a37bcfb8767a2211d3f6ba522874d4ec7dc5e6df1280eb803e8b2a",
@@ -93,8 +93,8 @@
       "bytes": 10893
     },
     "docs/architecture/PHASE_01_IMPLEMENTATION_SPEC_V0.1.md": {
-      "sha256": "8efb8ba284866768c821ac2f04c4e308de8a853d59f52bfb0d75a5f387cf79b8",
-      "bytes": 13136
+      "sha256": "165e39d33e77b591c416d8eb8623873bf9b2c39e3e413cbf85f7e5d3d0ad4614",
+      "bytes": 13657
     },
     "docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md": {
       "sha256": "f8099f0b9c05880667c02e649c6f595767d9050ec75b247115b8860ef1a213b8",
