@@ -297,7 +297,31 @@ Final amendment 已确认：REFERENCE 保持 HTTPS-only；State content 4000、A
 
 Freeze closeout 未创建 `crates/fielora-storage/migrations/0002_phase02_reality.sql`，未修改 Rust/TypeScript Phase 02 产品实现，也未增加依赖。Phase 02 继续保持 `NOT_AUTHORIZED / NOT_STARTED`；只有后续单独的明确 Implementation Authorization 才能进入实现。
 
-## 35. 最高产品原则
+## 35. Phase 02 Implementation Engineering Candidate
+
+用户于 2026-08-14 基于精确 `main@1419b8541a188e59af7ed2966f869bdde2dc7ada` 正式裁决 `PHASE_02_IMPLEMENTATION_AUTHORIZED: YES`。该裁决只改变 Phase 02 的实现授权状态，不改变第 34 节记录的 Frozen semantics；Frozen Implementation Specification、Contract Delta 与 Migration 0002 Specification 保持原文不变。
+
+实现位于 `phase/02-field-reality`，实现提交为 `baeb73298bd8ffca007dc365394b45ff1c4ae819`。产品 schema 已按 Frozen Migration 0002 推进到 version 2；Field Reality aggregate、State lifecycle、唯一 REFERENCE Object、bounded lineage、typed mode/focus、固定 SurfaceLayoutV1、deterministic richer Resume、20 个 additive Phase 02 capabilities 与严格 Electron bridge 已进入实现。FIPC/1 transport 和 `ProtocolVersion 1.0` 未改变，没有扩入 Later Phase 能力，也没有新增产品依赖。
+
+截至 2026-08-14：
+
+- Static / generated contracts：PASS；
+- TypeScript unit、Rust unit、Clippy、Release：PASS；
+- real FIPC Integration：PASS；
+- Desktop E2E dev：PASS；
+- Windows x64 Package / Packaged Smoke：PASS；
+- Portable Build / fresh-directory Portable Smoke：PASS；
+- Engineering Gate：PASS；
+- Desktop Reality Gate：PASS；
+- Human Experience Gate：`PENDING_USER`；
+- Phase 02 Final Acceptance：`NOT_YET_GRANTED`；
+- Phase 02：`NOT_COMPLETE`。
+
+Portable artifact 为 `artifacts/phase02/Fielora-V0.1-Phase02-win-x64.zip`，bytes `145997587`，SHA-256 `f765df94c011139a43d6587225cbcd5fcf048b5f1fd97605f8b9858b34a81397`。实现、测试、已知限制、构建信息与待人工验收清单位于 `artifacts/phase02/`。
+
+“实现完成”仍不等于“Phase 02 完成”。只有用户完成 Human Experience Gate，并在真实 Evidence 基础上给出 Phase 02 Final Acceptance 裁决后，Phase 02 才能进入 Complete closeout。
+
+## 36. 最高产品原则
 
 > **不是把所有软件装进 Fielora，而是让用户的工作与生活在软件之间不再断掉。**
 

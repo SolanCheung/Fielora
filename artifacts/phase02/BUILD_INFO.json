@@ -1,0 +1,115 @@
+{
+  "project": "Fielora",
+  "version": "0.1.0",
+  "phase": "02-field-reality",
+  "status": "ENGINEERING_CANDIDATE_HUMAN_PENDING",
+  "generated_at": "2026-08-14T16:01:19.3838707+08:00",
+  "platform": {
+    "caption": "Microsoft Windows 11",
+    "version": "10.0.26200",
+    "architecture": "x64"
+  },
+  "git": {
+    "baseline_commit": "1419b8541a188e59af7ed2966f869bdde2dc7ada",
+    "branch": "phase/02-field-reality",
+    "implementation_commit": "baeb73298bd8ffca007dc365394b45ff1c4ae819"
+  },
+  "toolchain": {
+    "node": "24.18.1",
+    "pnpm": "11.21.0",
+    "rustc": "1.97.1",
+    "cargo": "1.97.1",
+    "rust_edition": "2024",
+    "electron": "43.4.0",
+    "electron_forge": "7.11.2",
+    "sqlite_driver": "rusqlite 0.40.2 bundled"
+  },
+  "lockfiles": [
+    {
+      "path": "pnpm-lock.yaml",
+      "bytes": 228171,
+      "sha256": "2823ef01ea91056e4ae30d4d57bb62eebf044efb231579a513ef84af7cd39444"
+    },
+    {
+      "path": "Cargo.lock",
+      "bytes": 17874,
+      "sha256": "0dfee71695f43af26ebe3c59c7742f83350a41297d6a0a4c1e5b9b4e2938e257"
+    }
+  ],
+  "frozen_outputs": [
+    {
+      "path": "crates/fielora-storage/migrations/0001_core.sql",
+      "bytes": 5196,
+      "sha256": "a1396e4b2db60344ca4526973d91bb0218a1726f224c1d712a1e43d220822117"
+    },
+    {
+      "path": "crates/fielora-storage/migrations/0002_phase02_reality.sql",
+      "bytes": 5913,
+      "sha256": "96bc5abb15335bea23c8aaf006ba7ca9736c791e3c47bc21397465f13e310622",
+      "normalized_lf_no_trailing_newline_sha256": "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9"
+    },
+    {
+      "path": "packages/contracts/generated/index.ts",
+      "bytes": 10496,
+      "sha256": "84e9dc42046f8ec91ced3dc0ce1a7c0474a7a16b55c2428f2a26e79098a099d5"
+    }
+  ],
+  "packaged_build": [
+    {
+      "path": "apps/desktop/out/Fielora-win32-x64/Fielora.exe",
+      "bytes": 225533440,
+      "sha256": "cc7161b62d0e6835008b80a4b8dbbd6dafd6565ea04f593d538131cc86da34a4"
+    },
+    {
+      "path": "apps/desktop/out/Fielora-win32-x64/resources/app.asar",
+      "bytes": 259081,
+      "sha256": "3a3f81bcb1ebf41f5e9fd26969c3f173959016fc64a99c5dd2a5a1da4ccfab07"
+    },
+    {
+      "path": "apps/desktop/out/Fielora-win32-x64/resources/fielora-core.exe",
+      "bytes": 3673088,
+      "sha256": "d38314e049745aeec130f3b3cb42d62c2d8474a358ee208c73298b09510b718b"
+    }
+  ],
+  "portable_artifact": {
+    "path": "artifacts/phase02/Fielora-V0.1-Phase02-win-x64.zip",
+    "bytes": 145997587,
+    "sha256": "f765df94c011139a43d6587225cbcd5fcf048b5f1fd97605f8b9858b34a81397"
+  },
+  "evidence": [
+    {
+      "path": "artifacts/phase02/FULL_GATE.log",
+      "bytes": 1350,
+      "sha256": "c7ece5ed1f915485c43a76adff961fb804128b189c3d466fad1b2b2b4f678045"
+    },
+    {
+      "path": "artifacts/phase02/PHASE_02_PACKAGED_ACCEPTANCE.json",
+      "bytes": 743,
+      "sha256": "780c58e759e06b49b8107e153fc1e5fcd61757fbc158f871f3899e938d4c4e02"
+    },
+    {
+      "path": "artifacts/phase02/PHASE_02_PORTABLE_ACCEPTANCE.json",
+      "bytes": 781,
+      "sha256": "ae2e84f659bc047e4e3d334a96fd1d70d5f932f1c14e7f0a994a036a53fda67b"
+    },
+    {
+      "path": "artifacts/phase02/dev-phase02-resume.png",
+      "bytes": 83335,
+      "sha256": "880789e3eaceaf348275fd20554274f661caf9a8872e500e9d0dc21157cf79c7"
+    },
+    {
+      "path": "artifacts/phase02/packaged-phase02-resume.png",
+      "bytes": 84439,
+      "sha256": "20d85f7052eae28ead27d1ef66f70c81540041bd24e61f0d31dc1184396db8d5"
+    },
+    {
+      "path": "artifacts/phase02/portable-phase02-resume.png",
+      "bytes": 84392,
+      "sha256": "020bdbc993d64bc612e86cb699408c1640605748b505ab869dab4c8ff8e6c3d5"
+    }
+  ],
+  "engineering_gate": "PASS",
+  "desktop_reality_gate": "PASS",
+  "human_experience_acceptance": "PENDING_USER",
+  "user_verdict": "NOT_YET_GRANTED"
+}

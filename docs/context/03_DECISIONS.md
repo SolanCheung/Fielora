@@ -1,6 +1,6 @@
 # Fielora Decision Log
 
-状态：已明确决定 / V0.1 Technical Architecture + Phase 02 Scope Freeze / Phase 01 COMPLETE（2026-08-14）
+状态：已明确决定 / V0.1 Technical Architecture + Phase 02 Engineering Candidate / Phase 01 COMPLETE（2026-08-14）
 
 | ID | 决定 | 状态 |
 |---|---|---|
@@ -84,3 +84,7 @@
 | D-078 | 真实 0001 + Candidate 0002 临时 SQLite normal upgrade 与 incompatible-data rollback probe 均 PASS；该证据不等于 Freeze 或 Implementation Authorization | VERIFIED |
 | D-079 | 用户于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`；Phase 02 Implementation Spec、Contract Delta 与 Migration 0002 Spec 收敛为正式 Frozen 规格 | FROZEN / APPROVED |
 | D-080 | Phase 02 Freeze 不构成产品实现授权；`PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`、`PHASE_02_IMPLEMENTATION_STARTED: NO`，不得创建产品 Migration 0002 或修改 Rust/TypeScript Phase 02 实现 | CONFIRMED |
+| D-081 | 用户基于精确 `main@1419b8541a188e59af7ed2966f869bdde2dc7ada` 正式裁决 `PHASE_02_IMPLEMENTATION_AUTHORIZED: YES`；该裁决仅取代 D-080 的授权状态，不改变 D-067–D-079 的 Frozen semantics | CONFIRMED / AUTHORIZED |
+| D-082 | Phase 02 产品实现提交 `baeb73298bd8ffca007dc365394b45ff1c4ae819` 已严格实现 Frozen Implementation Spec、Contract Delta 与 Migration 0002；三份 Frozen 规格原文、FIPC/1 transport 与 `ProtocolVersion 1.0` 均未修改 | IMPLEMENTED |
+| D-083 | Phase 02 一次完整 Static、Unit、Rust、Integration、Desktop E2E、Package、Packaged Smoke、Portable 与 Portable Smoke 链路全部通过；Engineering Gate 与 Desktop Reality Gate 为 PASS | VERIFIED |
+| D-084 | Phase 02 Human Experience Gate 仍为 `PENDING_USER`，Final Acceptance 为 `NOT_YET_GRANTED`；Engineering/Implementation 完成不等于 `PHASE_02: COMPLETE` | PENDING USER |

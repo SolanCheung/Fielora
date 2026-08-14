@@ -1,7 +1,7 @@
 {
   "project": "Fielora",
-  "version": "v0.1-phase-02-frozen-2026-08-14",
-  "purpose": "Codex first-read context package, Phase 01 completed reality, and frozen Phase 02 specification with implementation not authorized",
+  "version": "v0.1-phase-02-engineering-candidate-2026-08-14",
+  "purpose": "Codex first-read context package, Phase 01 completed reality, frozen Phase 02 semantics, and verified Phase 02 engineering candidate with Human Experience pending",
   "required_reading": [
     "README.md",
     "AGENTS.md",
@@ -23,6 +23,11 @@
     "docs/architecture/PHASE_02_CONTRACT_DELTA_V0.1.md",
     "docs/architecture/PHASE_02_MIGRATION_0002_V0.1.md",
     "artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md",
+    "artifacts/phase02/PHASE_02_IMPLEMENTATION_REPORT.md",
+    "artifacts/phase02/TEST_REPORT.md",
+    "artifacts/phase02/HUMAN_ACCEPTANCE_CHECKLIST.md",
+    "artifacts/phase02/KNOWN_ISSUES.md",
+    "artifacts/phase02/BUILD_INFO.json",
     "docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md",
     "docs/context/READING_GATE.md"
   ],
@@ -53,12 +58,12 @@
       "bytes": 10149
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "47e7f87ed35869eba6abe07e2cab20385a50214fdf90173e089e8ebad53ec8aa",
-      "bytes": 17108
+      "sha256": "0811995d2bf9ede12b1995deb858e22ba358992882941194698910ac8d2bfd58",
+      "bytes": 19015
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "d8bff496a3fb66ae7fe6319eb03b6a59a4ca22ab0d0af4cb0c56666580165750",
-      "bytes": 10748
+      "sha256": "08596a1a47887172699456f0e5094a20dcd2fc888320b14bfa98ed8936dabf17",
+      "bytes": 11679
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
       "sha256": "6336e081956b1d9c1390c971527ea8d6beea60c8b2840110c919184be6b5c650",
@@ -116,6 +121,26 @@
       "sha256": "cc0e667a63d4c48f7d07b90dbde4afbe92c0a6b373e6a295e50cb9933e03d558",
       "bytes": 4660
     },
+    "artifacts/phase02/PHASE_02_IMPLEMENTATION_REPORT.md": {
+      "sha256": "a0fb707641333996bfa57958a1c2891f02073785bafa0ad928742cecf9cbed81",
+      "bytes": 4091
+    },
+    "artifacts/phase02/TEST_REPORT.md": {
+      "sha256": "0eead834df988252c2de43f39b0a9e9bceb64d671527b7856e93915a34757dee",
+      "bytes": 2872
+    },
+    "artifacts/phase02/HUMAN_ACCEPTANCE_CHECKLIST.md": {
+      "sha256": "4e33e613681f698cdc60a19d98825d9b7c1efe84114d832be6731fb74d226f72",
+      "bytes": 1906
+    },
+    "artifacts/phase02/KNOWN_ISSUES.md": {
+      "sha256": "e0fb6690f3c73938c54a84048b270d30236c420005f40254a03870d314eb5791",
+      "bytes": 1300
+    },
+    "artifacts/phase02/BUILD_INFO.json": {
+      "sha256": "4b5b4fcd4734281aa08333379fca31a0203bb7b5ea5bfdd9ca908cba77d3ceee",
+      "bytes": 3799
+    },
     "artifacts/phase02/MIGRATION_0002_BOUNDED_PROBE.json": {
       "sha256": "41777faa1ecc52aa7e7c59f5dacd33bff8f4964a2bf87ec4dc3cec3839e3eaf5",
       "bytes": 2475
@@ -125,8 +150,8 @@
       "bytes": 5063
     },
     "docs/context/READING_GATE.md": {
-      "sha256": "71b74fe38975a640bd0796e8df32c5259bdfd4000ff29f525f357e50643491ee",
-      "bytes": 2294
+      "sha256": "3e6fb579db247e00986e7187a274671bdc5702f3320dd980765335aa7d9b9ab1",
+      "bytes": 2895
     },
     "CODEX_FIRST_PROMPT.md": {
       "sha256": "78bc7f4c1c4cf2e878858bbb415ea8a0a61a75be019dc044c776413838103520",

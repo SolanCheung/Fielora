@@ -24,6 +24,11 @@
 - [ ] docs/architecture/PHASE_02_CONTRACT_DELTA_V0.1.md
 - [ ] docs/architecture/PHASE_02_MIGRATION_0002_V0.1.md
 - [ ] artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md
+- [ ] artifacts/phase02/PHASE_02_IMPLEMENTATION_REPORT.md
+- [ ] artifacts/phase02/TEST_REPORT.md
+- [ ] artifacts/phase02/HUMAN_ACCEPTANCE_CHECKLIST.md
+- [ ] artifacts/phase02/KNOWN_ISSUES.md
+- [ ] artifacts/phase02/BUILD_INFO.json
 - [ ] docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md
 - [ ] context_manifest.json
 
@@ -58,3 +63,6 @@ Codex 必须能准确解释：
 - 为什么 Frozen Phase 02 只包含 Field Reality/State/REFERENCE/bounded lineage/constrained Surface/Resume；
 - 为什么 `PHASE_02: APPROVED_FOR_FREEZE` 仍不构成 Phase 02 Implementation Authorization；
 - bounded migration probe 证明了什么，以及它为什么仍不等于产品 Migration 实现或 schema version 推进。
+- Phase 02 Implementation Authorization 如何取代旧的未授权状态，但不改变任何 Frozen semantics；
+- 为什么 Engineering Gate 与 Desktop Reality Gate PASS 仍不等于 Human Experience Gate 或 Phase 02 Final Acceptance；
+- 当前 Phase 02 artifact、实现 commit、Migration 0002 canonical hash、已验证范围与 Known Issues 分别是什么。
