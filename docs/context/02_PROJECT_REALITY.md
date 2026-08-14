@@ -261,7 +261,22 @@ Phase 01 Core Vertical Slice 已证明真实链路：`Electron Renderer → type
 
 Engineering、Desktop Reality、Human Experience 与 Closeout 证据见 `artifacts/phase01/`。Phase 01 Complete 只确认首个 Core Vertical Slice，不代表 V0.1 全部阶段完成。
 
-## 34. 最高产品原则
+## 34. Phase 02 Freeze Candidate
+
+用户已批准 Phase 02 Scope Review 方向，但明确未授权实现。2026-08-14 基于已经隔离 Logo 与 Phase 01 状态勘误后的 clean `main@65a8751873deb8ef395286e06d62a9489462629f` 创建 `phase/02-freeze-candidate`，只形成设计候选。
+
+最新裁决：
+
+- `fields.revision` 是 Field Reality aggregate revision；
+- Phase 02 ObjectKind 只开放 `REFERENCE`；
+- Relation 只保留真正需要的 bounded lineage；
+- DXE 不做自由布局；
+- FIPC/1 transport 保持不变，additive methods 不触发 transport version 重设计；
+- Personal Memory、Agent、Browser、LLM 与其他 Later Phase 能力不进入 Phase 02。
+
+精确 State lifecycle、REFERENCE、Relation matrix、SurfaceLayoutV1、deterministic richer Resume、Contract delta 与 Migration 0002 位于 `docs/architecture/PHASE_02_*_CANDIDATE_V0.1.md`。这些文件状态为 `CANDIDATE / NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED`；必须经用户后续明确 Freeze 裁决，并另行获得 Phase 02 Implementation Authorization 后，才能进入产品实现。
+
+## 35. 最高产品原则
 
 > **不是把所有软件装进 Fielora，而是让用户的工作与生活在软件之间不再断掉。**
 

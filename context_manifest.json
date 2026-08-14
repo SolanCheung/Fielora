@@ -1,7 +1,7 @@
 {
   "project": "Fielora",
-  "version": "v0.1-phase-01-closeout-2026-08-14",
-  "purpose": "Codex first-read context package and current Phase 01 closeout state",
+  "version": "v0.1-phase-02-freeze-candidate-2026-08-14",
+  "purpose": "Codex first-read context package, Phase 01 completed reality, and current Phase 02 freeze candidate",
   "required_reading": [
     "README.md",
     "AGENTS.md",
@@ -19,6 +19,9 @@
     "docs/architecture/CORE_CONTRACTS_V0.1.md",
     "docs/architecture/SCHEMA_FREEZE_V0.1.md",
     "docs/architecture/PHASE_01_IMPLEMENTATION_SPEC_V0.1.md",
+    "docs/architecture/PHASE_02_FREEZE_CANDIDATE_V0.1.md",
+    "docs/architecture/PHASE_02_CONTRACT_DELTA_CANDIDATE_V0.1.md",
+    "docs/architecture/PHASE_02_MIGRATION_0002_CANDIDATE_V0.1.md",
     "docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md",
     "docs/context/READING_GATE.md"
   ],
@@ -33,12 +36,12 @@
   "rule": "No product-code changes until CODEX_READING_REPORT.md is reviewed by the user.",
   "files": {
     "README.md": {
-      "sha256": "c5d209ab706ec006fc896550273ab85e3d32e9e82526c3d9339b70cb9955c400",
-      "bytes": 1892
+      "sha256": "0b76d37eed525e77303e8da7c619349ae4dbfe1802ce9d13f4c279de4484fb00",
+      "bytes": 2035
     },
     "AGENTS.md": {
-      "sha256": "d74d2ace9b2c1bc02d23849c298c2d00637d457e97166a391de6aec5c6c852e8",
-      "bytes": 5939
+      "sha256": "c53f33c38de16419fcd492792348a15116240a88f842f2642dd2db127a94322b",
+      "bytes": 6475
     },
     "docs/context/00_CONVERSATION_INDEX.md": {
       "sha256": "da3439a675b64563bda3174c02a967a8400b95461c71f7c97611933b68a7db11",
@@ -49,12 +52,12 @@
       "bytes": 8928
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "d48be680cceb2682bf26eca7a9894b8f290b7f6ff7ac7b88acb64412fbb308a8",
-      "bytes": 14600
+      "sha256": "e5534660b87a34900ae18c1483beda72db1e3053f3b85100f55649db436385f4",
+      "bytes": 15693
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "5624c6aab1736830bfc1a28371b6436623fdbaeacc3ce4de24e68dcd8e7f370b",
-      "bytes": 8176
+      "sha256": "07c9ccfc25d9b350cfa8b12d157a7affe19634dd0df665a37564331ff0d45b76",
+      "bytes": 9488
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
       "sha256": "6336e081956b1d9c1390c971527ea8d6beea60c8b2840110c919184be6b5c650",
@@ -96,13 +99,25 @@
       "sha256": "165e39d33e77b591c416d8eb8623873bf9b2c39e3e413cbf85f7e5d3d0ad4614",
       "bytes": 13657
     },
+    "docs/architecture/PHASE_02_FREEZE_CANDIDATE_V0.1.md": {
+      "sha256": "383ab00ab3628ded126ec69f9eff2f01cf600178cd4750caf07c0eb95bde9e65",
+      "bytes": 18818
+    },
+    "docs/architecture/PHASE_02_CONTRACT_DELTA_CANDIDATE_V0.1.md": {
+      "sha256": "23573e9a30d9719969d6b24eab3948a684f2cf1fa0effc0db10219a52cbec45e",
+      "bytes": 14528
+    },
+    "docs/architecture/PHASE_02_MIGRATION_0002_CANDIDATE_V0.1.md": {
+      "sha256": "d1df550c6005efe9c437891b563e0af377197c6c49450d2dd75cbcebc50bead4",
+      "bytes": 9353
+    },
     "docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md": {
       "sha256": "f8099f0b9c05880667c02e649c6f595767d9050ec75b247115b8860ef1a213b8",
       "bytes": 5063
     },
     "docs/context/READING_GATE.md": {
-      "sha256": "6b1bc0fd47c8a3268809a4061bce6f130cc1d882902361327bcd11aa6e341016",
-      "bytes": 1712
+      "sha256": "b5aba24423c364881485ce5036940c14ed6d013eab51688f8fda2f4f7c0571d5",
+      "bytes": 2110
     },
     "CODEX_FIRST_PROMPT.md": {
       "sha256": "78bc7f4c1c4cf2e878858bbb415ea8a0a61a75be019dc044c776413838103520",
