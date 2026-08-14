@@ -3,7 +3,7 @@
 状态：FROZEN / APPROVED（含 Required Freeze Amendments）  
 版本：V0.1  
 日期：2026-08-13  
-实现 Gate：Repo Bootstrap / Toolchain Gate 已执行；`IMPLEMENTATION_NOT_AUTHORIZED`，不得进入 Phase 01 实现
+实现 Gate：Phase 01 Engineering / Desktop Reality / Human Experience 全部 PASS；用户于 2026-08-14 裁决 `PHASE_01: COMPLETE`。Phase 02 未授权、未开始
 
 ## 1. 架构目标
 
@@ -654,7 +654,7 @@ Capability Acquisition Minimal 与 Deploy Website Mandate Prototype 作为 Defer
 - precise Browser tab/webContents model；
 - Capability Acquisition / Mandate 是否进入后续产品版本。
 
-Remote Repo 已确认为空仓库，Canonical Local Worktree 已确认为 `F:\项目\Fielora`。Repo Bootstrap / Toolchain Preparation 已完成；当前唯一阻塞 Phase 01 开工的外部前置项是用户尚未授予新的 `Implementation Authorization`。
+Remote Repo 在 bootstrap 时确认为空仓库，Canonical Local Worktree 确认为 `F:\项目\Fielora`。Repo Bootstrap / Toolchain Preparation 后，用户已显式授权并完成 Phase 01；冻结架构语义未发生变更。当前 Phase 01 已关闭，Phase 02 仍等待单独的 `Implementation Authorization`。
 
 ## 21. Repo Gate
 
@@ -668,15 +668,20 @@ git rev-parse HEAD
 git status --short
 ```
 
-Remote 已确认为 `git@github.com:SolanCheung/Fielora.git` 且为空。Canonical Local Worktree 是 `F:\项目\Fielora`；Git root、remote、branch、HEAD、dirty state 与 toolchain 必须在 Baseline Commit 后重新核验，Repo 根必须包含最新 `AGENTS.md`、context、product、architecture、Core Contracts 与 Phase 01 spec。
+Remote 在 bootstrap 时确认为 `git@github.com:SolanCheung/Fielora.git` 且为空。Canonical Local Worktree 是 `F:\项目\Fielora`；Git root、remote、branch、HEAD、dirty state 与 toolchain 已在 Baseline Commit 后核验，Repo 根包含 `AGENTS.md`、context、product、architecture、Core Contracts 与 Phase 01 spec。
 
 当前状态为：
 
 ```text
-REMOTE_REPO_CONFIRMED_EMPTY
+BASELINE_COMMIT_bfdcbe0147b142cdf73ba06986fe7f35aaf2a604
 CANONICAL_LOCAL_WORKTREE_CONFIRMED
 REPO_BOOTSTRAP_COMPLETE
 TOOLCHAIN_GATE_PASS
-IMPLEMENTATION_NOT_AUTHORIZED
-IMPLEMENTATION_NOT_STARTED
+PHASE_01_IMPLEMENTATION_AUTHORIZED
+PHASE_01_ENGINEERING_GATE_PASS
+PHASE_01_DESKTOP_REALITY_GATE_PASS
+PHASE_01_HUMAN_EXPERIENCE_GATE_PASS
+PHASE_01_COMPLETE
+PHASE_02_NOT_AUTHORIZED
+PHASE_02_NOT_STARTED
 ```

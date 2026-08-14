@@ -17,14 +17,16 @@ secure React Renderer
 → Field + Focus + Surface Resume
 ```
 
-状态严格按冻结交付基线报告为：
+最终状态：
 
 ```text
 ENGINEERING PASS
-WAITING HUMAN ACCEPTANCE
+DESKTOP REALITY GATE PASS
+HUMAN EXPERIENCE GATE PASS
+PHASE_01 COMPLETE
 ```
 
-未发现 `SPEC_CONFLICT`；未修改 Frozen Contract / Schema 语义；未实现任何 Later Phase capability。人工 Gate 确认前不报告 `Phase Complete`。
+未发现 `SPEC_CONFLICT`；未修改 Frozen Contract / Schema 语义；未实现任何 Later Phase capability。用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE`。
 
 ## 1. 实际文件结构
 
@@ -67,6 +69,8 @@ Fielora/
 │  ├─ FULL_GATE.log
 │  ├─ PACKAGED_ACCEPTANCE.json
 │  ├─ PORTABLE_ACCEPTANCE.json
+│  ├─ DESKTOP_REALITY_VERIFICATION_REPORT.md
+│  ├─ PHASE_01_CLOSEOUT_REPORT.md
 │  └─ *-resume.png
 ├─ Cargo.toml / Cargo.lock
 ├─ package.json / pnpm-workspace.yaml / pnpm-lock.yaml
@@ -192,6 +196,7 @@ Packaged 与从 ZIP 新目录解压运行的 Portable build 都实际创建 `Fie
 
 - `PACKAGED_ACCEPTANCE.json`；
 - `PORTABLE_ACCEPTANCE.json`；
+- `DESKTOP_REALITY_VERIFICATION_REPORT.md`；
 - `packaged-resume.png`；
 - `portable-resume.png`；
 - `FULL_GATE.log`。
@@ -210,7 +215,6 @@ Frozen semantic deviation：`0`。`SPEC_CONFLICT`：`0`。Later Phase implementa
 
 - Windows executable 未代码签名，可能触发 SmartScreen；签名/updater/final installer 属于后续冻结 cadence；
 - Phase 01 UI 是证明架构的最小界面，不是最终视觉设计；
-- Human Experience Acceptance 尚未由用户执行，因此阶段不能标记 Complete；
 - Node test runner 有 module-type warning，但 Gate 无 failure；
 - Portable ZIP 是本地可再生 binary artifact，因 145.7 MB 未纳入普通 Git history；其哈希、build info、验收 JSON、日志和截图已版本化；
 - Phase 01 明确不实现 Browser/Capture，因此不存在 Browse WebContents；实际安全测试覆盖 App remote navigation、wrong-origin policy 和 subframe bridge denial。没有用 mock Browser 冒充 Later Phase PASS。
@@ -223,12 +227,14 @@ Frozen semantic deviation：`0`。`SPEC_CONFLICT`：`0`。Later Phase implementa
 bfdcbe0147b142cdf73ba06986fe7f35aaf2a604  baseline
 8641770                                      feat: implement phase 01 core vertical slice
 3df25ebc23870d55700b85efae22f7e3428b969d  fix: harden phase 01 delivery path
+c4441ba                                      docs: record phase 01 implementation evidence
+5051ab31a25285b16ef5bc3aad1ffaaeebbd1a16  docs: normalize phase 01 evidence logs
 ```
 
-分支：`phase/01-core-vertical-slice`。本报告、Gate 日志、acceptance JSON 和截图由独立 evidence commit 收口；报告不自引用自身 commit hash，精确 delivery HEAD 以 `git log -1` 和最终交付消息为准。
+实现分支：`phase/01-core-vertical-slice`。本报告、Gate 日志、acceptance JSON 和截图由独立 evidence commits 收口；closeout 由独立 documentation commit 和显式 merge commit 保存。报告不自引用自身 commit hash，精确最终 commits 以 `git log` 和最终交付消息为准。
 
-最终交付要求：tracked working tree clean；Portable ZIP 作为 `.gitignore` 中的本地 build artifact 保留，不计入 dirty state。没有 push、merge 或 PR，因为用户只授权了本地分支实现。
+Closeout 交付要求：feature branch 与 `main` 推送到 `origin`，`main` 与 `origin/main` 一致，tracked working tree clean。Portable ZIP 作为 `.gitignore` 中的本地 build artifact 保留，不计入 dirty state。
 
-## 人工验收入口
+## Gate closeout
 
-使用 `HUMAN_ACCEPTANCE_CHECKLIST.md` 与 Portable ZIP。用户确认之前，唯一正确结论仍是 `ENGINEERING PASS / WAITING HUMAN ACCEPTANCE`。
+Desktop Reality 复核详情见 `DESKTOP_REALITY_VERIFICATION_REPORT.md`；人工验收记录见 `HUMAN_ACCEPTANCE_CHECKLIST.md`；总体 closeout 见 `PHASE_01_CLOSEOUT_REPORT.md`。三项 Gate 均已 PASS，Phase 01 已关闭；Phase 02 未授权、未开始。

@@ -1,6 +1,6 @@
 # Fielora V0.1 Technical Baseline
 
-状态：V0.1 Technical Architecture Freeze（2026-08-13）；不得擅自扩大。
+状态：V0.1 Technical Architecture Freeze（2026-08-13）；Phase 01 COMPLETE（2026-08-14）；不得擅自扩大。
 
 ## 1. 目标平台
 
@@ -160,11 +160,11 @@ Core Contracts 与 Phase 01 Schema 已冻结 principal、owner、actor、visibil
 
 Phase 01 精确值：Electron 43.4.0、Node 24.18.1 LTS、pnpm 11.21.0、Rust 1.97.1 / Edition 2024、rusqlite 0.40.2 `bundled`、Electron Forge + Webpack + TypeScript + React。
 
-本机 Node 由 `D:\AppInstall\nvm\nvm` 下的 NVM 管理；Node 24.18.1 已安装并设为 active，pnpm 11.21.0 已准备。Rust 1.97.1 已设为 default toolchain，并安装 rustfmt/clippy。Repo 使用 `.node-version` 与 `rust-toolchain.toml` 固定版本；产品 package/Cargo workspace 仍未创建。
+本机 Node 由 `D:\AppInstall\nvm\nvm` 下的 NVM 管理；Node 24.18.1 已安装并设为 active，pnpm 11.21.0 已准备。Rust 1.97.1 已设为 default toolchain，并安装 rustfmt/clippy。Repo 使用 `.node-version` 与 `rust-toolchain.toml` 固定版本；Phase 01 package/Cargo workspace 已创建，依赖分别由 `pnpm-lock.yaml` 与 `Cargo.lock` 锁定。
 
 ## 16. 工程仓库前置条件
 
-Canonical Local Worktree 已确认为 `F:\项目\Fielora`，已初始化 Git `main` 并绑定 `origin` 到 `git@github.com:SolanCheung/Fielora.git`。Baseline Commit 只允许包含冻结 Context Pack/docs、`.gitignore` 与精确工具链 metadata。Repo Bootstrap 完成不授权 Phase 01 实现；实现仍等待明确用户授权。
+Canonical Local Worktree 已确认为 `F:\项目\Fielora`，Git 默认分支为 `main`，`origin` 为 `git@github.com:SolanCheung/Fielora.git`。Baseline Commit `bfdcbe0147b142cdf73ba06986fe7f35aaf2a604` 只包含冻结 Context Pack/docs、`.gitignore` 与精确工具链 metadata。用户随后明确授权 Phase 01；实现与三项 Gate 已完成，用户于 2026-08-14 裁决 `PHASE_01: COMPLETE`。Phase 02 仍未授权、未开始。
 
 ## 17. 仍开放的技术决定
 

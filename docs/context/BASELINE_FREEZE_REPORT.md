@@ -1,5 +1,7 @@
 # Fielora V0.1 Baseline Freeze Report
 
+> 历史 Freeze 记录：以下状态描述 baseline freeze 当时的事实。当前状态以 `02_PROJECT_REALITY.md` 与 `artifacts/phase01/PHASE_01_CLOSEOUT_REPORT.md` 为准；Phase 01 已于 2026-08-14 裁决 COMPLETE。
+
 状态：Baseline Freeze 完成；等待 Technical Architecture 评审  
 冻结日期：2026-08-13  
 依据：用户在首次阅读 Gate PASS 后给出的最新明确裁决

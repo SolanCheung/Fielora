@@ -68,7 +68,14 @@
 - frozen Core Contracts 与 Phase 01 Schema；
 - trusted `fielora://app` production origin；
 - parent-pipe EOF 有界退出；
-- Phase 01 READY，但 Local Worktree 未确认，Implementation 未开始。
+- 当时 Phase 01 READY，尚待 Canonical Local Worktree、Toolchain 与显式 Implementation Authorization。
+
+### Stage K — Phase 01 Core Vertical Slice 与 Closeout
+- 以 baseline `bfdcbe0147b142cdf73ba06986fe7f35aaf2a604` 创建 `phase/01-core-vertical-slice`；
+- 完成 Electron → typed preload → FIPC/1 → Rust Core → SQLite → Activity/Event → React → packaged restart/resume 的真实纵向闭环；
+- Engineering Gate、Desktop Reality Gate 与 Human Experience Gate 全部 PASS；
+- 用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE`；
+- Closeout 只同步已确认事实，不开始 Phase 02。
 
 ## 当前事实源
 

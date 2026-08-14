@@ -1,5 +1,7 @@
 # Fielora Codex 首次阅读报告
 
+> 历史 Gate 记录：以下状态描述首次阅读当时的事实。当前状态以 `02_PROJECT_REALITY.md` 与 `artifacts/phase01/PHASE_01_CLOSEOUT_REPORT.md` 为准；Phase 01 已于 2026-08-14 裁决 COMPLETE。
+
 状态：等待用户确认；确认前禁止进入实现  
 阅读日期：2026-08-13  
 上下文基线：`v0.1-context-baseline-2026-08-12`

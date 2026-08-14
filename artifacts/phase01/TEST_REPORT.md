@@ -6,7 +6,7 @@
 
 源码：`3df25ebc23870d55700b85efae22f7e3428b969d`
 
-结论：`ENGINEERING PASS / WAITING HUMAN ACCEPTANCE`
+结论：`ENGINEERING PASS / DESKTOP REALITY PASS / HUMAN EXPERIENCE PASS / PHASE_01 COMPLETE`
 
 ## Gate 汇总
 
@@ -26,7 +26,9 @@
 | Packaged smoke/restart/resume | PASS | real packaged `Fielora.exe` + packaged Core |
 | Portable build | PASS | 145,700,464-byte ZIP |
 | Portable extract/run/restart/resume | PASS | ZIP 解压至临时目录后直接运行 |
-| Human Experience Acceptance | WAITING | 必须由用户人工裁决 |
+| Desktop Reality Verification | PASS | 实际 packaged desktop/process/origin/core/SQLite/shutdown/restart-resume 复核 |
+| Human Experience Acceptance | PASS | 用户于 2026-08-14 正式确认 |
+| Phase 01 Verdict | COMPLETE | 用户正式裁决 `PHASE_01: COMPLETE` |
 
 全量原始输出见 `FULL_GATE.log`；末行是：
 
@@ -73,6 +75,19 @@ Phase 01 不创建 Browse WebContents；因此没有把“一个不存在的 Bro
 
 Node test runner 对未声明 package module type 的 `.ts` 测试打印 `MODULE_TYPELESS_PACKAGE_JSON` warning；测试、typecheck、packaging 均为 PASS。没有为消除非功能性 warning 改变 Forge package module semantics。
 
+## Desktop Reality Gate
+
+在普通 packaged 启动、dev 启动、Portable ZIP 解压启动和隔离 `LOCALAPPDATA` 场景中完成附加复核：
+
+- packaged runtime 为真实 Electron Main/renderer/GPU/utility 进程与 Rust `fielora-core.exe`，普通启动无 dev server listener；
+- packaged renderer URL/origin 为 `fielora://app/index.html` / `fielora://app`，无 Node、`require` 或 browser-only fallback；
+- subframe bridge、`window.open`、remote navigation 均被拒绝；
+- 普通 application quit exit code 为 0，Core 同步退出且无残留；parent kill 后 Core 因 stdin EOF 在 156 ms 内退出，无 orphan；
+- 在完整 executable restart 前后恢复唯一测试 Field、revision 2、Focus 与 Snapshot，且第二次 Core PID 已改变；
+- 只读 SQLite 查询确认 Field、`FIELD_CREATED` / `FOCUS_UPDATED` Activity 与 Snapshot；localStorage 为空。
+
+完整证据见 `DESKTOP_REALITY_VERIFICATION_REPORT.md`，裁决为 `DESKTOP_REALITY_GATE_PASS`。
+
 ## 人工 Gate
 
-自动化证据不能替代人工体验裁决。请按 `HUMAN_ACCEPTANCE_CHECKLIST.md` 使用 Portable ZIP 验收；确认前阶段状态必须保持 `WAITING HUMAN ACCEPTANCE`，不得报告 `Phase Complete`。
+自动化证据没有替代人工体验裁决。用户已按 Phase 01 冻结范围确认 Human Experience Gate PASS，并于 2026-08-14 正式裁决 `PHASE_01: COMPLETE`。验收入口与最终状态见 `HUMAN_ACCEPTANCE_CHECKLIST.md`。

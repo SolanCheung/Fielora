@@ -134,3 +134,13 @@ C++：仅未来 Chromium 深度集成必要时的薄 Adapter。
 V0.1 目标 Windows 11 x64 本地桌面应用。暂定 Electron/Chromium + React/TS + Rust Sidecar，不直接 Fork Chromium。
 
 Codex 交付不能只让 `pnpm dev` 能跑，必须提供 Packaged Build，并经过 Unit → Integration → E2E → Package → Packaged Smoke → Human Experience Acceptance。
+
+## 第二十三阶段 — Phase 01 Implementation Authorization 与真实纵向闭环
+用户以 baseline `bfdcbe0147b142cdf73ba06986fe7f35aaf2a604` 和 required-reading manifest 为唯一基线，正式授权 Phase 01 Core Vertical Slice Implementation，并明确禁止提前实现 Later Phase 能力。
+
+实现建立 `phase/01-core-vertical-slice` 分支，完成 Electron trusted renderer、typed preload allowlist、Electron Main supervised Rust Sidecar、FIPC/1、SQLite Migration 0001、Field create/list/get/update focus、Activity/Event、Surface Snapshot、packaged restart/resume 与 Portable ZIP。Engineering Gate 的 Static、Unit、Clippy/Release、Integration、Desktop E2E、Package 与 Packaged Smoke 全部通过。
+
+## 第二十四阶段 — Desktop Reality、Human Experience 与 Closeout
+Desktop Reality Verification 在实际 Windows 桌面进程、packaged `Fielora.exe`、`fielora://app` renderer、真实 Rust Core 与 SQLite 上复核通过；验证了无 dev server/Node 依赖、bridge/security 边界、正常退出、parent-pipe EOF 无 orphan，以及完整 executable restart/resume。
+
+Human Experience Gate 随后由用户确认 PASS。用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE`，并授权同步 Reality、Decisions、Reports 与 Git 历史。该裁决只关闭 Phase 01，不授权或开始 Phase 02。

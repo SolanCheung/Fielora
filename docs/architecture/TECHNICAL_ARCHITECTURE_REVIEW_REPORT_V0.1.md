@@ -1,5 +1,7 @@
 # Fielora V0.1 Technical Architecture Review Report
 
+> 历史 Review 记录：以下 Gate 状态描述 2026-08-13 architecture review 当时的事实。当前状态以 `docs/context/02_PROJECT_REALITY.md` 与 `artifacts/phase01/PHASE_01_CLOSEOUT_REPORT.md` 为准；Phase 01 已于 2026-08-14 裁决 COMPLETE。
+
 状态：CLOSED / APPROVED WITH REQUIRED FREEZE AMENDMENTS  
 日期：2026-08-13  
 结论：Architecture / Contracts / Schema 已冻结，Phase 01 Spec READY；实现仍受 `LOCAL_WORKTREE_NOT_CONFIRMED` 阻塞
