@@ -96,7 +96,7 @@ Phase 01 Repo Bootstrap 使用：
 
 版本事实已经通过官方发布渠道核验：Electron 43.4.0 于 2026-08-11 发布；Node 24 是 LTS 且 24.18.1 存在；Rust 1.97.1 于 2026-07-16 发布；pnpm 11.21.0 是 2026-08-09 的已签名正式发布；rusqlite 0.40.2 已在 crates.io 正式发布、未撤回且支持 `bundled` feature。
 
-本机 Toolchain Gate 已执行：Node 由 `D:\AppInstall\nvm\nvm` 下的 NVM 管理，24.18.1 已安装并 active；pnpm 11.21.0 已准备；Rust 1.97.1 已设为 default，rustfmt/clippy components 已安装。精确版本 metadata 已提交候选，但产品 workspace 与依赖仍不存在。
+本机 Toolchain Gate 已执行：Node 由 `D:\AppInstall\nvm\nvm` 下的 NVM 管理，24.18.1 已安装并 active；pnpm 11.21.0 已准备；Rust 1.97.1 已设为 default，rustfmt/clippy components 已安装。精确版本 metadata、产品 workspace 与依赖已随 Phase 01 实现提交并通过验收；Phase 02 仍未授权、未开始。
 
 升级规则：工具链升级必须是单独变更，重新通过 Static、Unit、Integration、Desktop E2E、Package 与 Packaged Smoke。
 

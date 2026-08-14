@@ -71,7 +71,8 @@ async function registerApplicationProtocol(): Promise<void> {
       const bytes = await readFile(path.join(rendererRoot, relative));
       const type = relative.endsWith('.html') ? 'text/html; charset=utf-8'
         : relative.endsWith('.js') ? 'text/javascript; charset=utf-8'
-          : relative.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream';
+          : relative.endsWith('.css') ? 'text/css; charset=utf-8'
+            : relative.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream';
       return new Response(bytes, {
         headers: {
           'Content-Type': type,
