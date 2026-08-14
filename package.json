@@ -19,10 +19,11 @@
     "test": "pnpm test:ts && cargo test --workspace",
     "test:ts": "pnpm --filter @fielora/desktop test",
     "test:integration": "pnpm build:core:debug && node --test tests/integration/core.integration.test.mjs",
-    "test:e2e": "pnpm build:core:debug && node tests/e2e/desktop-e2e.mjs dev",
+    "test:e2e": "pnpm build:core:debug && node tests/e2e/phase02-desktop-e2e.mjs dev",
     "make:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-portable.ps1",
-    "test:packaged": "node tests/e2e/desktop-e2e.mjs packaged",
+    "test:packaged": "node tests/e2e/phase02-desktop-e2e.mjs packaged",
     "test:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-portable.ps1",
-    "verify:phase01": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-phase01.ps1"
+    "verify:phase01": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-phase01.ps1",
+    "verify:phase02": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-phase02.ps1"
   }
 }

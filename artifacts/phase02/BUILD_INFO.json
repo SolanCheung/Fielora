@@ -1,0 +1,145 @@
+{
+  "project": "Fielora",
+  "version": "0.1.0",
+  "phase": "02-field-reality",
+  "status": "PHASE_02_COMPLETE",
+  "generated_at": "2026-08-14T17:45:04.9387331+08:00",
+  "platform": {
+    "caption": "Microsoft Windows 11",
+    "version": "10.0.26200",
+    "architecture": "x64"
+  },
+  "git": {
+    "baseline_commit": "1419b8541a188e59af7ed2966f869bdde2dc7ada",
+    "branch": "phase/02-field-reality",
+    "implementation_commit": "baeb73298bd8ffca007dc365394b45ff1c4ae819",
+    "ui_correction_commit": "f03ed1fe120e60f925896e12a35caca7cc19ec54",
+    "post_correction_gate_source_commit": "ccd849c3b4c52662cd89fab023a00db857e88e21",
+    "full_gate_evidence_commit": "67c59d3b187a4c034c8bb56c1c6cf51ef043ea79",
+    "acceptance_metadata_commit": "264b57ce50d2890ca95b7cb00445dcd460d5a62e",
+    "packaged_build_source_commit": "ccd849c3b4c52662cd89fab023a00db857e88e21"
+  },
+  "toolchain": {
+    "node": "24.18.1",
+    "pnpm": "11.21.0",
+    "rustc": "1.97.1",
+    "cargo": "1.97.1",
+    "rust_edition": "2024",
+    "electron": "43.4.0",
+    "electron_forge": "7.11.2",
+    "sqlite_driver": "rusqlite 0.40.2 bundled"
+  },
+  "lockfiles": [
+    {
+      "path": "pnpm-lock.yaml",
+      "bytes": 228171,
+      "sha256": "2823ef01ea91056e4ae30d4d57bb62eebf044efb231579a513ef84af7cd39444"
+    },
+    {
+      "path": "Cargo.lock",
+      "bytes": 17874,
+      "sha256": "0dfee71695f43af26ebe3c59c7742f83350a41297d6a0a4c1e5b9b4e2938e257"
+    }
+  ],
+  "frozen_outputs": [
+    {
+      "path": "crates/fielora-storage/migrations/0001_core.sql",
+      "bytes": 5196,
+      "sha256": "a1396e4b2db60344ca4526973d91bb0218a1726f224c1d712a1e43d220822117"
+    },
+    {
+      "path": "crates/fielora-storage/migrations/0002_phase02_reality.sql",
+      "bytes": 5913,
+      "sha256": "96bc5abb15335bea23c8aaf006ba7ca9736c791e3c47bc21397465f13e310622",
+      "normalized_lf_no_trailing_newline_sha256": "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9"
+    },
+    {
+      "path": "packages/contracts/generated/index.ts",
+      "bytes": 10496,
+      "sha256": "84e9dc42046f8ec91ced3dc0ce1a7c0474a7a16b55c2428f2a26e79098a099d5"
+    }
+  ],
+  "packaged_build": [
+    {
+      "path": "apps/desktop/out/Fielora-win32-x64/Fielora.exe",
+      "bytes": 225533440,
+      "sha256": "9c69d90710f04afb260168497b163ad242eb8009a394a0f6a61af82af61888b4"
+    },
+    {
+      "path": "apps/desktop/out/Fielora-win32-x64/resources/app.asar",
+      "bytes": 260244,
+      "sha256": "9f22d831ca6a71c0cd621a3a8e6ac3677e4519f482d518a6e932d8812786d9ed"
+    },
+    {
+      "path": "apps/desktop/out/Fielora-win32-x64/resources/fielora-core.exe",
+      "bytes": 3673088,
+      "sha256": "d38314e049745aeec130f3b3cb42d62c2d8474a358ee208c73298b09510b718b"
+    }
+  ],
+  "portable_artifact": {
+    "path": "artifacts/phase02/Fielora-V0.1-Phase02-win-x64.zip",
+    "bytes": 145998148,
+    "sha256": "24bf2bae54cf029ae748da0f8f7f6f6fb8c73a0e7049ebe76744017055d02a93",
+    "source_commit": "ccd849c3b4c52662cd89fab023a00db857e88e21",
+    "formal_gate_status": "PASS"
+  },
+  "evidence": [
+    {
+      "path": "artifacts/phase02/FULL_GATE.log",
+      "bytes": 1361,
+      "sha256": "19adad603d68616bc5ee2ef38103ab9266378463889818bebcd806008faab5c2"
+    },
+    {
+      "path": "artifacts/phase02/PHASE_02_PACKAGED_ACCEPTANCE.json",
+      "bytes": 810,
+      "sha256": "a506b02bd9bda2ef93c0c3b0e5233988d5ea74684f0277ad014c3ed112769742"
+    },
+    {
+      "path": "artifacts/phase02/PHASE_02_PORTABLE_ACCEPTANCE.json",
+      "bytes": 848,
+      "sha256": "f656e3c024e3ba336fa9ff6b55257ee39858e6b969207cc6596ffb4457973405"
+    },
+    {
+      "path": "artifacts/phase02/dev-phase02-resume.png",
+      "bytes": 85070,
+      "sha256": "f98fbea2d2bb917009485fd0b8ab74c19f54cb9e8cc0488c9dda3f79fad62ba0"
+    },
+    {
+      "path": "artifacts/phase02/dev-phase02-legacy-resume.png",
+      "bytes": 68419,
+      "sha256": "c71c7ce116984b89add41eeb1bc3320be0c60aa80913fd80e08830140c655e46"
+    },
+    {
+      "path": "artifacts/phase02/packaged-phase02-resume.png",
+      "bytes": 86110,
+      "sha256": "8b45a3d624d4b4e4df31069e614a1c5d570277a65406d6db76d52dde328931c7"
+    },
+    {
+      "path": "artifacts/phase02/packaged-phase02-legacy-resume.png",
+      "bytes": 71942,
+      "sha256": "8bbb127e9af0042ae2d08fd15b1af7424756a5e57fd970ef6e8a41119a1b64c7"
+    },
+    {
+      "path": "artifacts/phase02/portable-phase02-resume.png",
+      "bytes": 86153,
+      "sha256": "5cae3a005aeafd6102a033353d39808dfa16de2a684416227e3a0b28a59b2f74"
+    },
+    {
+      "path": "artifacts/phase02/portable-phase02-legacy-resume.png",
+      "bytes": 70936,
+      "sha256": "bb35e6f962f4ae252f3e48f6b027147315aaf708ccbfa95dac4423fd14018fb6"
+    }
+  ],
+  "engineering_gate": "PASS",
+  "desktop_reality_gate": "PASS",
+  "ui_correction_dev_slice_gate": "PASS",
+  "post_correction_full_gate": "PASS",
+  "formal_packaged_revalidation": "PASS",
+  "human_experience_acceptance": "PASS",
+  "final_acceptance": "GRANTED",
+  "phase_status": "COMPLETE",
+  "merge_to_main": "AUTHORIZED_FOR_CLOSEOUT",
+  "phase_03": "NOT_AUTHORIZED",
+  "user_verdict": "PHASE_02_COMPLETE",
+  "closeout_date": "2026-08-14"
+}

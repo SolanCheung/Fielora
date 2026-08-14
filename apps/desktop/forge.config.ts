@@ -12,6 +12,7 @@ const config: ForgeConfig = {
     name: 'Fielora',
     icon: path.resolve(__dirname, 'assets', 'fielora.ico'),
     extraResource: ['../../target/release/fielora-core.exe'],
+    electronZipDir: process.env.FIELORA_ELECTRON_ZIP_DIR || undefined,
   },
   rebuildConfig: {},
   makers: [new MakerZIP({})],

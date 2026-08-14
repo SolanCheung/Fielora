@@ -6,7 +6,9 @@
 
 阅读基线：`phase/02-freeze-candidate@a31cb5db7969b7da16b9fa48e73e2c41204c4f21`
 
-最新用户裁决：`PHASE_02: APPROVED_FOR_FREEZE`；`PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`
+阅读时最新用户裁决（历史）：`PHASE_02: APPROVED_FOR_FREEZE`；`PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`
+
+Closeout 状态注记（2026-08-14）：用户随后单独授权并完成 Phase 02 Implementation；Engineering、Desktop Reality、Human Experience、Post-correction Full Gate 全部 PASS，最终裁决 `PHASE_02_FINAL_ACCEPTANCE: GRANTED`、`PHASE_02: COMPLETE`。本报告正文保留首次阅读时点，当前事实以 `02_PROJECT_REALITY.md`、`03_DECISIONS.md` 与 `artifacts/phase02/PHASE_02_CLOSEOUT_REPORT.md` 为准。`PHASE_03: NOT_AUTHORIZED`。
 
 ## 1. Gate 结论
 
@@ -201,4 +203,4 @@ Phase 02 产品实现本身不是“待自行决定”的事项：当前明确�
 
 ## 21. Gate 状态
 
-用户已于 2026-08-14 明确确认本报告，首次只读 Gate 已解除。该确认只允许执行用户授权的 Freeze closeout，不改变 `PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`，不得据此开始任何产品实现。
+用户已于 2026-08-14 明确确认本报告，首次只读 Gate 已解除。该段记录首次 Freeze closeout 时点；后续 Phase 02 Authorization、Implementation 与 Final Acceptance 由更新后的 Project Reality、Decision Log 和 Phase 02 Closeout Report 记录。Phase 03 仍未授权。

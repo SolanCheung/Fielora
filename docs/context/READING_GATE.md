@@ -24,6 +24,14 @@
 - [ ] docs/architecture/PHASE_02_CONTRACT_DELTA_V0.1.md
 - [ ] docs/architecture/PHASE_02_MIGRATION_0002_V0.1.md
 - [ ] artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md
+- [ ] artifacts/phase02/PHASE_02_IMPLEMENTATION_REPORT.md
+- [ ] artifacts/phase02/TEST_REPORT.md
+- [ ] artifacts/phase02/HUMAN_ACCEPTANCE_CHECKLIST.md
+- [ ] artifacts/phase02/HUMAN_GATE_CORRECTION_REPORT.md
+- [ ] artifacts/phase02/PHASE_02_FINAL_ACCEPTANCE_CANDIDATE.md
+- [ ] artifacts/phase02/PHASE_02_CLOSEOUT_REPORT.md
+- [ ] artifacts/phase02/KNOWN_ISSUES.md
+- [ ] artifacts/phase02/BUILD_INFO.json
 - [ ] docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md
 - [ ] context_manifest.json
 
@@ -58,3 +66,11 @@ Codex 必须能准确解释：
 - 为什么 Frozen Phase 02 只包含 Field Reality/State/REFERENCE/bounded lineage/constrained Surface/Resume；
 - 为什么 `PHASE_02: APPROVED_FOR_FREEZE` 仍不构成 Phase 02 Implementation Authorization；
 - bounded migration probe 证明了什么，以及它为什么仍不等于产品 Migration 实现或 schema version 推进。
+- Phase 02 Implementation Authorization 如何取代旧的未授权状态，但不改变任何 Frozen semantics；
+- 为什么 Engineering Gate 与 Desktop Reality Gate PASS 仍不等于 Human Experience Gate 或 Phase 02 Final Acceptance；
+- 当前 Phase 02 artifact、实现 commit、Migration 0002 canonical hash、已验证范围与 Known Issues 分别是什么。
+- 为什么日常开发与人工体验长期运行 `pnpm dev`，而 packaged/portable 只在正式阶段 Gate 生成验证；哪些 packaging-sensitive 基础设施变更可以触发 targeted packaged smoke，以及它为什么不替代完整 Gate。
+- 为什么 Phase 02 legacy focus、snapshot freshness 与 layout source 是独立信息；Human Gate UI correction 如何只修正 presentation 而不改变 Frozen Resume semantics；post-correction packaged/portable 正式 Gate 提供了什么 Evidence。
+- 为什么 Final Acceptance Candidate 提交时仍不等于 Final Acceptance 已授予；用户裁决如何把 Human Gate、Final Acceptance 与 Phase 02 转为完成，并只授权 closeout/merge main、不授权 Phase 03。
+- Phase 02 的 Engineering、Desktop Reality、Human Experience、Post-correction Full Gate 与 Final Acceptance 如何形成完整闭环；为什么 `PHASE_02: COMPLETE` 仍不授权 Phase 03。
+- 为什么 Phase 02 closeout 后先执行单独授权的 Development Workflow Hardening，再定义 Phase 03 推进方式。

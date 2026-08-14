@@ -1,6 +1,6 @@
 # Fielora Decision Log
 
-状态：已明确决定 / V0.1 Technical Architecture + Phase 02 Scope Freeze / Phase 01 COMPLETE（2026-08-14）
+状态：已明确决定 / V0.1 Technical Architecture / Phase 01 COMPLETE / Phase 02 COMPLETE（2026-08-14）
 
 | ID | 决定 | 状态 |
 |---|---|---|
@@ -84,3 +84,13 @@
 | D-078 | 真实 0001 + Candidate 0002 临时 SQLite normal upgrade 与 incompatible-data rollback probe 均 PASS；该证据不等于 Freeze 或 Implementation Authorization | VERIFIED |
 | D-079 | 用户于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`；Phase 02 Implementation Spec、Contract Delta 与 Migration 0002 Spec 收敛为正式 Frozen 规格 | FROZEN / APPROVED |
 | D-080 | Phase 02 Freeze 不构成产品实现授权；`PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`、`PHASE_02_IMPLEMENTATION_STARTED: NO`，不得创建产品 Migration 0002 或修改 Rust/TypeScript Phase 02 实现 | CONFIRMED |
+| D-081 | 用户基于精确 `main@1419b8541a188e59af7ed2966f869bdde2dc7ada` 正式裁决 `PHASE_02_IMPLEMENTATION_AUTHORIZED: YES`；该裁决仅取代 D-080 的授权状态，不改变 D-067–D-079 的 Frozen semantics | CONFIRMED / AUTHORIZED |
+| D-082 | Phase 02 产品实现提交 `baeb73298bd8ffca007dc365394b45ff1c4ae819` 已严格实现 Frozen Implementation Spec、Contract Delta 与 Migration 0002；三份 Frozen 规格原文、FIPC/1 transport 与 `ProtocolVersion 1.0` 均未修改 | IMPLEMENTED |
+| D-083 | Phase 02 一次完整 Static、Unit、Rust、Integration、Desktop E2E、Package、Packaged Smoke、Portable 与 Portable Smoke 链路全部通过；Engineering Gate 与 Desktop Reality Gate 为 PASS | VERIFIED |
+| D-084 | Final Acceptance Candidate 形成时，Phase 02 Human Experience / Final Acceptance 尚待用户裁决；Engineering/Implementation 完成不等于 `PHASE_02: COMPLETE` | HISTORICAL / SUPERSEDED BY D-088 |
+| D-085 | Fielora 采用双模式验证：日常开发与人工体验长期运行 `pnpm dev`；只有正式阶段 Gate 才生成并验证 packaged/portable build。Packaging-sensitive 基础设施变更可提前触发风险定向的 targeted packaged smoke，但不能替代正式 Gate | CONFIRMED |
+| D-086 | Phase 02 Human Gate 反馈确认 Resume 与 Field 默认 UI 不应暴露 snapshot/layout/revision/pane/wire diagnostics；`f03ed1f` 以 renderer-only correction 改用产品语言并保持 Frozen continuation priority | IMPLEMENTED |
+| D-087 | Post-correction `pnpm verify:phase02` 完整退出 0；Static、Unit、Rust、Integration、Desktop E2E、Package、Packaged Smoke、Portable 与 fresh-directory Portable Smoke 全部 PASS。新 artifact SHA-256 为 `24bf2bae54cf029ae748da0f8f7f6f6fb8c73a0e7049ebe76744017055d02a93`，包含 UI correction | VERIFIED |
+| D-088 | 用户基于 Post-correction Full Gate、实际 Human Experience、重新生成并通过 smoke 的 packaged/portable 与最终 Evidence，正式裁决 `PHASE_02_HUMAN_EXPERIENCE_GATE: PASS`、`PHASE_02_FINAL_ACCEPTANCE: GRANTED`、`PHASE_02: COMPLETE` | CONFIRMED / COMPLETE |
+| D-089 | Phase 02 Final Acceptance 授权 closeout 与 `phase/02-field-reality` merge main；该授权不构成 Phase 03 Implementation Authorization，`PHASE_03: NOT_AUTHORIZED` | CONFIRMED |
+| D-090 | Phase 02 main closeout 后停止阶段开发；先单独落实 Development Workflow Hardening，再单独定义 Phase 03 的推进方式与授权边界 | CONFIRMED / NEXT WORKFLOW STEP |

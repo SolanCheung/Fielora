@@ -1,6 +1,6 @@
 # Fielora V0.1 Technical Baseline
 
-状态：V0.1 Technical Architecture Freeze（2026-08-13）；Phase 01 COMPLETE；Phase 02 Scope FROZEN / IMPLEMENTATION NOT AUTHORIZED（2026-08-14）；不得擅自扩大。
+状态：V0.1 Technical Architecture Freeze（2026-08-13）；Phase 01 COMPLETE；Phase 02 COMPLETE（2026-08-14）；Phase 03 NOT AUTHORIZED；不得擅自扩大。
 
 ## 1. 目标平台
 
@@ -166,7 +166,7 @@ Phase 01 精确值：Electron 43.4.0、Node 24.18.1 LTS、pnpm 11.21.0、Rust 1.
 
 Canonical Local Worktree 已确认为 `F:\项目\Fielora`，Git 默认分支为 `main`，`origin` 为 `git@github.com:SolanCheung/Fielora.git`。Baseline Commit `bfdcbe0147b142cdf73ba06986fe7f35aaf2a604` 只包含冻结 Context Pack/docs、`.gitignore` 与精确工具链 metadata。用户随后明确授权 Phase 01；实现与三项 Gate 已完成，用户于 2026-08-14 裁决 `PHASE_01: COMPLETE`。
 
-用户于 2026-08-14 另行裁决 `PHASE_02: APPROVED_FOR_FREEZE`，Phase 02 精确边界见 `PHASE_02_IMPLEMENTATION_SPEC_V0.1.md`、`PHASE_02_CONTRACT_DELTA_V0.1.md` 与 `PHASE_02_MIGRATION_0002_V0.1.md`。该 Freeze 不是 Implementation Authorization；Phase 02 仍未授权、未开始。
+用户于 2026-08-14 先裁决 `PHASE_02: APPROVED_FOR_FREEZE`，随后基于精确 main baseline 单独授权并完成实现。Phase 02 精确边界仍以原文未改的 `PHASE_02_IMPLEMENTATION_SPEC_V0.1.md`、`PHASE_02_CONTRACT_DELTA_V0.1.md` 与 `PHASE_02_MIGRATION_0002_V0.1.md` 为准；Engineering、Desktop Reality、Human Experience、Post-correction Full Gate 与 Final Acceptance 均已通过，用户裁决 `PHASE_02: COMPLETE`。该完成不授权 Phase 03。
 
 ## 17. 仍开放的技术决定
 
