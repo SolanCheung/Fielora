@@ -1,9 +1,7 @@
-use fielora_contracts::{
-    CoreHealthState, CreateFieldRequest, DomainEventDTO, FieldReferenceRequest, FieldSummary,
-    FieldView, HealthDTO, HelloResponse, ProtocolVersion, SaveSurfaceSnapshotRequest,
-    SurfaceResumeView, SurfaceSnapshotView, TraceId, UpdateFocusRequest,
+use fielora_contracts::*;
+use fielora_field::{
+    DomainError, Field, FieldService, RealityService, SurfaceService, SurfaceSnapshot,
 };
-use fielora_field::{DomainError, Field, FieldService, SurfaceService, SurfaceSnapshot};
 use fielora_platform::{DeviceIdentity, PlatformPaths};
 use fielora_storage::{StorageWorker, schema_version};
 use serde::Deserialize;
@@ -20,13 +18,33 @@ use uuid::Uuid;
 
 const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 const PROTOCOL: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
-const CAPABILITIES: [&str; 6] = [
+const CAPABILITIES: [&str; 26] = [
     "field.create",
     "field.list",
     "field.get",
     "field.update_focus",
     "surface.save_snapshot",
     "surface.latest_snapshot",
+    "field.update_mode",
+    "field.set_focus_v1",
+    "state.create",
+    "state.get",
+    "state.list",
+    "state.revise",
+    "state.transition",
+    "state.supersede",
+    "reference.create",
+    "reference.get",
+    "reference.list",
+    "reference.revise",
+    "reference.archive",
+    "reference.restore",
+    "relation.attach_reference_source",
+    "relation.retract_reference_source",
+    "relation.list",
+    "activity.list",
+    "surface.save_snapshot_v1",
+    "field.resume_v1",
 ];
 
 #[derive(Debug, Error)]
@@ -67,6 +85,7 @@ impl<'a> MakeWriter<'a> for BoundedLogWriter {
 
 struct Runtime {
     field: FieldService<fielora_storage::StorageHandle>,
+    reality: RealityService<fielora_storage::StorageHandle>,
     surface: SurfaceService<fielora_storage::StorageHandle>,
     health: HealthDTO,
     hello_completed: bool,
@@ -116,6 +135,11 @@ fn run() -> Result<(), CoreError> {
     let handle = storage.handle();
     let mut runtime = Runtime {
         field: FieldService::new(handle.clone(), handle.local_user.clone()),
+        reality: RealityService::new(
+            handle.clone(),
+            handle.local_user.clone(),
+            handle.device_id.clone(),
+        ),
         surface: SurfaceService::new(handle.clone(), handle.device_id.clone()),
         health: HealthDTO {
             state: CoreHealthState::Ready,
@@ -355,6 +379,118 @@ fn dispatch_request(
                 Some(event),
             ))
         }
+        "command.field.update_mode" => {
+            let params: UpdateFieldModeRequest = parse_params(&request.params)?;
+            let (field, event) = runtime.field.update_mode(params, trace_id, now_ms())?;
+            Ok((
+                serde_json::to_value(RealityMutationResult {
+                    field_revision: field.revision,
+                    resource: field_view(field),
+                })
+                .unwrap(),
+                Some(event),
+            ))
+        }
+        "command.field.set_focus_v1" => {
+            let params: SetFieldFocusV1Request = parse_params(&request.params)?;
+            let (field, event) = runtime.field.set_focus_v1(params, trace_id, now_ms())?;
+            Ok((
+                serde_json::to_value(RealityMutationResult {
+                    field_revision: field.revision,
+                    resource: field_view(field),
+                })
+                .unwrap(),
+                Some(event),
+            ))
+        }
+        "command.state.create" => mutation(runtime.reality.create_state(
+            parse_params(&request.params)?,
+            trace_id,
+            now_ms(),
+        )?),
+        "query.state.get" => serialize(runtime.reality.get_state(parse_params(&request.params)?)?),
+        "query.state.list" => serialize(
+            runtime
+                .reality
+                .list_states(parse_params(&request.params)?)?,
+        ),
+        "command.state.revise" => mutation(runtime.reality.revise_state(
+            parse_params(&request.params)?,
+            trace_id,
+            now_ms(),
+        )?),
+        "command.state.transition" => mutation(runtime.reality.transition_state(
+            parse_params(&request.params)?,
+            trace_id,
+            now_ms(),
+        )?),
+        "command.state.supersede" => mutation(runtime.reality.supersede_state(
+            parse_params(&request.params)?,
+            trace_id,
+            now_ms(),
+        )?),
+        "command.reference.create" => mutation(runtime.reality.create_reference(
+            parse_params(&request.params)?,
+            trace_id,
+            now_ms(),
+        )?),
+        "query.reference.get" => serialize(
+            runtime
+                .reality
+                .get_reference(parse_params(&request.params)?)?,
+        ),
+        "query.reference.list" => serialize(
+            runtime
+                .reality
+                .list_references(parse_params(&request.params)?)?,
+        ),
+        "command.reference.revise" => mutation(runtime.reality.revise_reference(
+            parse_params(&request.params)?,
+            trace_id,
+            now_ms(),
+        )?),
+        "command.reference.archive" => mutation(runtime.reality.archive_reference(
+            parse_params(&request.params)?,
+            trace_id,
+            now_ms(),
+        )?),
+        "command.reference.restore" => mutation(runtime.reality.restore_reference(
+            parse_params(&request.params)?,
+            trace_id,
+            now_ms(),
+        )?),
+        "command.relation.attach_reference_source" => {
+            mutation(runtime.reality.attach_reference_source(
+                parse_params(&request.params)?,
+                trace_id,
+                now_ms(),
+            )?)
+        }
+        "command.relation.retract_reference_source" => {
+            mutation(runtime.reality.retract_reference_source(
+                parse_params(&request.params)?,
+                trace_id,
+                now_ms(),
+            )?)
+        }
+        "query.relation.list" => serialize(
+            runtime
+                .reality
+                .list_relations(parse_params(&request.params)?)?,
+        ),
+        "query.activity.list" => serialize(
+            runtime
+                .reality
+                .list_activities(parse_params(&request.params)?)?,
+        ),
+        "command.surface.save_snapshot_v1" => {
+            let params: SaveSurfaceSnapshotV1Request = parse_params(&request.params)?;
+            serialize(runtime.surface.save_v1(params, now_ms())?)
+        }
+        "query.field.resume_v1" => {
+            let params: FieldReferenceRequest = parse_params(&request.params)?;
+            serialize(runtime.reality.resume_v1(params.field_id)?)
+        }
         "command.surface.save_snapshot" => {
             let params: SaveSurfaceSnapshotRequest = parse_params(&request.params)?;
             serialize(snapshot_view(runtime.surface.save(
@@ -375,6 +511,14 @@ fn dispatch_request(
             Err(DomainError::Validation(format!("unknown_method:{method}")))
         }
     }
+}
+
+fn mutation<T: serde::Serialize>(
+    (resource, event): (T, DomainEventDTO),
+) -> Result<(Value, Option<DomainEventDTO>), DomainError> {
+    serde_json::to_value(resource)
+        .map(|value| (value, Some(event)))
+        .map_err(|error| DomainError::Validation(error.to_string()))
 }
 
 fn parse_params<T: for<'de> Deserialize<'de>>(value: &Value) -> Result<T, DomainError> {
@@ -462,11 +606,101 @@ fn domain_error_response(id: Value, error: DomainError, trace_id: String) -> Val
             false,
             json!({}),
         ),
-        DomainError::Conflict => error_response(
+        DomainError::RevisionConflict => error_response(
             id,
             -32002,
             "Revision conflict",
-            "conflict",
+            "REVISION_CONFLICT",
+            trace_id,
+            false,
+            json!({}),
+        ),
+        DomainError::InvalidStateTransition => error_response(
+            id,
+            -32002,
+            "Invalid state transition",
+            "INVALID_STATE_TRANSITION",
+            trace_id,
+            false,
+            json!({}),
+        ),
+        DomainError::TerminalResource => error_response(
+            id,
+            -32002,
+            "Resource is terminal",
+            "TERMINAL_RESOURCE",
+            trace_id,
+            false,
+            json!({}),
+        ),
+        DomainError::DuplicateActiveReference => error_response(
+            id,
+            -32002,
+            "Duplicate active reference",
+            "DUPLICATE_ACTIVE_REFERENCE",
+            trace_id,
+            false,
+            json!({}),
+        ),
+        DomainError::InvalidReferenceUrl => error_response(
+            id,
+            -32602,
+            "Invalid reference URL",
+            "INVALID_REFERENCE_URL",
+            trace_id,
+            false,
+            json!({}),
+        ),
+        DomainError::InvalidRelationEndpoint => error_response(
+            id,
+            -32602,
+            "Invalid relation endpoint",
+            "INVALID_RELATION_ENDPOINT",
+            trace_id,
+            false,
+            json!({}),
+        ),
+        DomainError::InvalidRelationMatrix => error_response(
+            id,
+            -32602,
+            "Invalid relation matrix",
+            "INVALID_RELATION_MATRIX",
+            trace_id,
+            false,
+            json!({}),
+        ),
+        DomainError::DuplicateActiveRelation => error_response(
+            id,
+            -32002,
+            "Duplicate active relation",
+            "DUPLICATE_ACTIVE_RELATION",
+            trace_id,
+            false,
+            json!({}),
+        ),
+        DomainError::InvalidSurfaceLayout(message) => error_response(
+            id,
+            -32602,
+            "Invalid surface layout",
+            "INVALID_SURFACE_LAYOUT",
+            trace_id,
+            false,
+            json!({"reason":message}),
+        ),
+        DomainError::SnapshotReferenceUnavailable => error_response(
+            id,
+            -32002,
+            "Snapshot reference unavailable",
+            "SNAPSHOT_REFERENCE_UNAVAILABLE",
+            trace_id,
+            false,
+            json!({}),
+        ),
+        DomainError::MigrationIncompatibleData => error_response(
+            id,
+            -32005,
+            "Migration contains incompatible data",
+            "MIGRATION_INCOMPATIBLE_DATA",
             trace_id,
             false,
             json!({}),

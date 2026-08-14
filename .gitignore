@@ -29,6 +29,8 @@ logs/
 artifacts/phase02/*
 !artifacts/phase02/*.md
 !artifacts/phase02/*.json
+!artifacts/phase02/*.png
+!artifacts/phase02/FULL_GATE.log
 
 # Local configuration and secrets
 .env

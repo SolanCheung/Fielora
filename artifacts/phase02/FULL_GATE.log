@@ -1,0 +1,65 @@
+**********************
+Windows PowerShell transcript start
+Start time: 20260814155156
+Username: DESKTOP-JP2DJBR\giants
+RunAs User: DESKTOP-JP2DJBR\giants
+Configuration Name:
+Machine: DESKTOP-JP2DJBR (Microsoft Windows NT 10.0.26200.0)
+Host Application: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-phase02.ps1
+Process ID: 31108
+PSVersion: 5.1.26100.9168
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1
+BuildVersion: 10.0.26100.9168
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+GATE_START contracts
+
+GATE_PASS contracts
+GATE_START typecheck
+
+GATE_PASS typecheck
+GATE_START lint
+
+GATE_PASS lint
+GATE_START rust-fmt
+
+GATE_PASS rust-fmt
+GATE_START ts-unit
+
+GATE_PASS ts-unit
+GATE_START rust-unit
+
+GATE_PASS rust-unit
+GATE_START rust-clippy
+
+GATE_PASS rust-clippy
+GATE_START rust-release
+
+GATE_PASS rust-release
+GATE_START integration
+
+GATE_PASS integration
+GATE_START desktop-e2e
+
+GATE_PASS desktop-e2e
+GATE_START package
+
+GATE_PASS package
+GATE_START packaged-smoke
+
+GATE_PASS packaged-smoke
+GATE_START portable
+
+GATE_PASS portable
+GATE_START portable-smoke
+
+GATE_PASS portable-smoke
+PHASE02_ENGINEERING_GATE=PASS
+**********************
+Windows PowerShell transcript end
+End time: 20260814155537
+**********************

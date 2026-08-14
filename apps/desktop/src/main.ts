@@ -5,7 +5,14 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { channels } from './channels';
 import { assertTrustedSender, isAllowedNavigation, trustedOriginFor } from './security';
 import { CoreProcessSupervisor } from './supervisor';
-import { validateCreate, validateFocus, validateReference, validateSnapshot } from './validation';
+import {
+  validateArchiveReference, validateAttachReferenceSource, validateCreate, validateCreateReference,
+  validateCreateState, validateFocus, validateListActivities, validateListReferences,
+  validateListRelations, validateListStates, validateObjectReference, validateReference,
+  validateRestoreReference, validateRetractReferenceSource, validateReviseReference,
+  validateReviseState, validateSetFocusV1, validateSnapshot, validateSnapshotV1,
+  validateStateReference, validateSupersedeState, validateTransitionState, validateUpdateMode,
+} from './validation';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
@@ -44,7 +51,27 @@ function registerBridgeHandlers(): void {
   });
   handle(channels.fieldGet, validateReference, 'query.field.get');
   handle(channels.fieldUpdateFocus, validateFocus, 'command.field.update_focus');
+  handle(channels.fieldUpdateMode, validateUpdateMode, 'command.field.update_mode');
+  handle(channels.fieldSetFocusV1, validateSetFocusV1, 'command.field.set_focus_v1');
+  handle(channels.fieldResumeV1, validateReference, 'query.field.resume_v1');
+  handle(channels.stateCreate, validateCreateState, 'command.state.create');
+  handle(channels.stateGet, validateStateReference, 'query.state.get');
+  handle(channels.stateList, validateListStates, 'query.state.list');
+  handle(channels.stateRevise, validateReviseState, 'command.state.revise');
+  handle(channels.stateTransition, validateTransitionState, 'command.state.transition');
+  handle(channels.stateSupersede, validateSupersedeState, 'command.state.supersede');
+  handle(channels.referenceCreate, validateCreateReference, 'command.reference.create');
+  handle(channels.referenceGet, validateObjectReference, 'query.reference.get');
+  handle(channels.referenceList, validateListReferences, 'query.reference.list');
+  handle(channels.referenceRevise, validateReviseReference, 'command.reference.revise');
+  handle(channels.referenceArchive, validateArchiveReference, 'command.reference.archive');
+  handle(channels.referenceRestore, validateRestoreReference, 'command.reference.restore');
+  handle(channels.relationAttachReferenceSource, validateAttachReferenceSource, 'command.relation.attach_reference_source');
+  handle(channels.relationRetractReferenceSource, validateRetractReferenceSource, 'command.relation.retract_reference_source');
+  handle(channels.relationList, validateListRelations, 'query.relation.list');
+  handle(channels.activityList, validateListActivities, 'query.activity.list');
   handle(channels.surfaceSaveSnapshot, validateSnapshot, 'command.surface.save_snapshot');
+  handle(channels.surfaceSaveSnapshotV1, validateSnapshotV1, 'command.surface.save_snapshot_v1');
   handle(channels.surfaceLatestSnapshot, validateReference, 'query.surface.latest_snapshot');
   ipcMain.handle(channels.coreHealth, (event) => { assertBridgeEvent(event); return supervisor.getHealth(); });
   ipcMain.handle(channels.coreRetry, async (event) => { assertBridgeEvent(event); await supervisor.retry(); });

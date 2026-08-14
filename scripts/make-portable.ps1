@@ -2,8 +2,8 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $packageRoot = Join-Path $repoRoot 'apps\desktop\out\Fielora-win32-x64'
-$artifactRoot = Join-Path $repoRoot 'artifacts\phase01'
-$zipPath = Join-Path $artifactRoot 'Fielora-V0.1-Phase01-win-x64.zip'
+$artifactRoot = Join-Path $repoRoot 'artifacts\phase02'
+$zipPath = Join-Path $artifactRoot 'Fielora-V0.1-Phase02-win-x64.zip'
 
 if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'Fielora.exe'))) {
     throw 'Packaged Fielora.exe is missing. Run the package gate first.'
