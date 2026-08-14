@@ -1,15 +1,15 @@
 **********************
 Windows PowerShell transcript start
-Start time: 20260814155156
+Start time: 20260814172255
 Username: DESKTOP-JP2DJBR\giants
 RunAs User: DESKTOP-JP2DJBR\giants
 Configuration Name:
 Machine: DESKTOP-JP2DJBR (Microsoft Windows NT 10.0.26200.0)
 Host Application: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-phase02.ps1
-Process ID: 31108
+Process ID: 31172
 PSVersion: 5.1.26100.9168
 PSEdition: Desktop
-PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9168
 BuildVersion: 10.0.26100.9168
 CLRVersion: 4.0.30319.42000
 WSManStackVersion: 3.0
@@ -61,5 +61,5 @@ GATE_PASS portable-smoke
 PHASE02_ENGINEERING_GATE=PASS
 **********************
 Windows PowerShell transcript end
-End time: 20260814155537
+End time: 20260814172548
 **********************
