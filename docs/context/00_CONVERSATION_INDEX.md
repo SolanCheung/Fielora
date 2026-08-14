@@ -92,6 +92,13 @@
 - 用户于 2026-08-14 裁决 `PHASE_02_FINAL_ACCEPTANCE: GRANTED`、`PHASE_02: COMPLETE`；
 - closeout/merge main 获授权，但 Phase 03 未授权；下一步先单独落实 Development Workflow Hardening。
 
+### Stage N — Lightweight Development Workflow Hardening
+- 从稳定 `main@e757d050b97a3f0dd3b6812bccefc1e433571c8f` 单独实施，不重新打开 Phase 02；
+- 保留长期 `pnpm dev`，新增 Docs/UI/Core/Cross/PreMerge 五条显式验证 Lane；
+- 所有 main 准入运行 PreMerge，packaging-sensitive 变更追加 targeted packaged smoke；
+- Development Gate 不替代正式 Phase Gate，不增加依赖或产品能力；
+- Hardening 完成后继续 `PHASE_03: NOT_AUTHORIZED`，等待单独裁决。
+
 ## 当前事实源
 
 历史脉络：`01_CONVERSATION_TIMELINE.md`

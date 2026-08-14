@@ -33,6 +33,8 @@
 - [ ] artifacts/phase02/KNOWN_ISSUES.md
 - [ ] artifacts/phase02/BUILD_INFO.json
 - [ ] docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md
+- [ ] docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md
+- [ ] artifacts/workflow/DEVELOPMENT_WORKFLOW_HARDENING_REPORT.md
 - [ ] context_manifest.json
 
 ## Output
@@ -74,3 +76,4 @@ Codex 必须能准确解释：
 - 为什么 Final Acceptance Candidate 提交时仍不等于 Final Acceptance 已授予；用户裁决如何把 Human Gate、Final Acceptance 与 Phase 02 转为完成，并只授权 closeout/merge main、不授权 Phase 03。
 - Phase 02 的 Engineering、Desktop Reality、Human Experience、Post-correction Full Gate 与 Final Acceptance 如何形成完整闭环；为什么 `PHASE_02: COMPLETE` 仍不授权 Phase 03。
 - 为什么 Phase 02 closeout 后先执行单独授权的 Development Workflow Hardening，再定义 Phase 03 推进方式。
+- Docs/UI/Core/Cross/PreMerge 五条 Development Lane 分别证明什么；为什么风险必须向上升级且 PreMerge 仍不能替代正式 Phase Gate。

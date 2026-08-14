@@ -25,6 +25,22 @@ Fielora 采用双模式验证：
 
 Targeted packaged smoke 应按风险验证受影响链路，不要求在每次普通 UI/Core 迭代时生成完整 portable artifact，也不能替代正式阶段 Gate 的完整证据链。
 
+### 2.2 Development Gate Lanes
+
+日常变更使用显式分层 Gate，精确定义见 `docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md`：
+
+```powershell
+pnpm verify:dev:docs
+pnpm verify:dev:ui
+pnpm verify:dev:core
+pnpm verify:dev:cross
+pnpm verify:premerge
+```
+
+Docs/UI/Core/Cross 用于受影响 Slice 的快速反馈；所有准备进入 main 的变更运行 PreMerge。PreMerge 覆盖 Context audit、generated Contract、TypeScript、Rust、real FIPC Integration 与 Desktop E2E，但不生成正式 packaged/portable artifact。
+
+Packaging-sensitive 变更必须在 PreMerge 之外追加 targeted packaged smoke。正式 Phase Gate 仍以该 Phase 的冻结 verify 命令为准；不得用 Development Lane 替代 Release、Package、Portable、正式 Evidence 或 Human Experience。
+
 ## 3. Static Gate
 
 至少覆盖 TypeScript typecheck/lint、Rust fmt check（规则在 Technical Architecture 冻结）以及配置/契约的静态校验。Static 只证明静态约束通过，不替代 Unit 或运行时验证。

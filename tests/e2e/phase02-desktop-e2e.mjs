@@ -9,7 +9,9 @@ const mode=process.argv[2]??'dev';
 const packaged=mode==='packaged'||mode==='portable';
 const appPath=process.env.FIELORA_PACKAGED_APP??path.join(root,'apps','desktop','out','Fielora-win32-x64','Fielora.exe');
 const localAppData=await mkdtemp(path.join(tmpdir(),`fielora-phase02-${mode}-e2e-`));
-const evidenceDir=path.join(root,'artifacts','phase02');
+const evidenceDir=process.env.FIELORA_E2E_EVIDENCE_DIR?path.resolve(process.env.FIELORA_E2E_EVIDENCE_DIR):path.join(root,'artifacts','phase02');
+const targetTimeoutMs=Number(process.env.FIELORA_E2E_TARGET_TIMEOUT_MS??60000);
+if(!Number.isFinite(targetTimeoutMs)||targetTimeoutMs<=0)throw new Error('FIELORA_E2E_TARGET_TIMEOUT_MS must be a positive number');
 const title=`Phase 02 ${mode} Reality`;
 let port=9800+Math.floor(Math.random()*300);let launched;const output=[];const ownedCorePids=new Set();
 
@@ -21,7 +23,7 @@ class Cdp{
   close(){this.socket.close();}
 }
 function launch(){port+=1;const env={...process.env,LOCALAPPDATA:localAppData,FIELORA_E2E:'1',ELECTRON_MIRROR:'https://npmmirror.com/mirrors/electron/'};const child=packaged?spawn(appPath,[`--remote-debugging-port=${port}`],{env,windowsHide:true,stdio:['ignore','pipe','pipe']}):spawn(process.env.ComSpec??'cmd.exe',['/d','/s','/c',`pnpm --filter @fielora/desktop start -- --remote-debugging-port=${port}`],{cwd:root,env,windowsHide:true,stdio:['ignore','pipe','pipe']});child.stdout.on('data',(chunk)=>output.push(String(chunk)));child.stderr.on('data',(chunk)=>output.push(String(chunk)));return child;}
-async function waitForTarget(timeoutMs=60000){const started=Date.now();while(Date.now()-started<timeoutMs){try{const targets=await(await fetch(`http://127.0.0.1:${port}/json/list`)).json();const target=targets.find((item)=>item.type==='page'&&(item.url.startsWith('fielora://app')||item.url.includes('main_window')));if(target)return target;}catch{}await new Promise((resolve)=>setTimeout(resolve,100));}throw new Error(`Electron target did not appear.\n${output.join('')}`);}
+async function waitForTarget(timeoutMs=targetTimeoutMs){const started=Date.now();while(Date.now()-started<timeoutMs){try{const targets=await(await fetch(`http://127.0.0.1:${port}/json/list`)).json();const target=targets.find((item)=>item.type==='page'&&(item.url.startsWith('fielora://app')||item.url.includes('main_window')));if(target)return target;}catch{}await new Promise((resolve)=>setTimeout(resolve,100));}throw new Error(`Electron target did not appear.\n${output.join('')}`);}
 async function connect(){const target=await waitForTarget();const cdp=new Cdp(target.webSocketDebuggerUrl);await cdp.open();await cdp.send('Runtime.enable');await cdp.send('Page.enable');return cdp;}
 async function waitExpression(cdp,expression,timeoutMs=15000){const started=Date.now();while(Date.now()-started<timeoutMs){try{if(await cdp.evaluate(`Boolean(${expression})`))return;}catch{}await new Promise((resolve)=>setTimeout(resolve,75));}throw new Error(`Timed out waiting for ${expression}\n${output.join('')}`);}
 function click(selector){return`(()=>{const element=document.querySelector(${JSON.stringify(selector)});if(!element)return false;element.click();return true;})()`;}

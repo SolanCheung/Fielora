@@ -36,4 +36,8 @@
 
 Phase 01 Core Vertical Slice 已完成 Engineering、Desktop Reality 与 Human Experience Gate。用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE`。
 
-Phase 01 完成证据位于 `artifacts/phase01/`。Phase 02 已严格依据三份 Frozen specs 完成实现；Engineering、Desktop Reality、Human Experience 与 Post-correction Full Gate 全部 PASS。用户于 2026-08-14 正式裁决 `PHASE_02_FINAL_ACCEPTANCE: GRANTED`、`PHASE_02: COMPLETE`。最终 portable 与 closeout Evidence 位于 `artifacts/phase02/`。Phase 03 未授权；Phase 02 closeout 后先停住，Development Workflow Hardening 与 Phase 03 推进方式需要后续单独裁决。
+Phase 01 完成证据位于 `artifacts/phase01/`。Phase 02 已严格依据三份 Frozen specs 完成实现；Engineering、Desktop Reality、Human Experience 与 Post-correction Full Gate 全部 PASS。用户于 2026-08-14 正式裁决 `PHASE_02_FINAL_ACCEPTANCE: GRANTED`、`PHASE_02: COMPLETE`。最终 portable 与 closeout Evidence 位于 `artifacts/phase02/`。用户随后单独授权轻量 Development Workflow Hardening；Phase 03 仍未授权，推进方式需要后续单独裁决。
+
+## 开发工作流
+
+日常开发与人工体验长期运行 `pnpm dev`。根据变更范围使用 `pnpm verify:dev:docs`、`verify:dev:ui`、`verify:dev:core` 或 `verify:dev:cross`；任何准备进入 main 的变更运行 `pnpm verify:premerge`。Packaging-sensitive 变更额外执行 targeted packaged smoke，正式阶段仍运行冻结的完整 Phase Gate。精确定义见 `docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md`。
