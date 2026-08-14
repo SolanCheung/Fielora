@@ -299,7 +299,7 @@ Final amendment 已确认：REFERENCE 保持 HTTPS-only；State content 4000、A
 
 Freeze closeout 未创建 `crates/fielora-storage/migrations/0002_phase02_reality.sql`，未修改 Rust/TypeScript Phase 02 产品实现，也未增加依赖。Phase 02 继续保持 `NOT_AUTHORIZED / NOT_STARTED`；只有后续单独的明确 Implementation Authorization 才能进入实现。
 
-## 35. Phase 02 Implementation Engineering Candidate
+## 35. Phase 02 Final Acceptance Candidate
 
 用户于 2026-08-14 基于精确 `main@1419b8541a188e59af7ed2966f869bdde2dc7ada` 正式裁决 `PHASE_02_IMPLEMENTATION_AUTHORIZED: YES`。该裁决只改变 Phase 02 的实现授权状态，不改变第 34 节记录的 Frozen semantics；Frozen Implementation Specification、Contract Delta 与 Migration 0002 Specification 保持原文不变。
 
@@ -316,16 +316,18 @@ Freeze closeout 未创建 `crates/fielora-storage/migrations/0002_phase02_realit
 - Engineering Gate：PASS；
 - Desktop Reality Gate：PASS；
 - Human Experience Gate：`PENDING_USER`；
-- Phase 02 Final Acceptance：`NOT_YET_GRANTED`；
+- Phase 02 Final Acceptance：`NOT_GRANTED`；
 - Phase 02：`NOT_COMPLETE`。
 
-Portable artifact 为 `artifacts/phase02/Fielora-V0.1-Phase02-win-x64.zip`，bytes `145997587`，SHA-256 `f765df94c011139a43d6587225cbcd5fcf048b5f1fd97605f8b9858b34a81397`。实现、测试、已知限制、构建信息与待人工验收清单位于 `artifacts/phase02/`。
+Post-correction portable artifact 为 `artifacts/phase02/Fielora-V0.1-Phase02-win-x64.zip`，bytes `145998148`，SHA-256 `24bf2bae54cf029ae748da0f8f7f6f6fb8c73a0e7049ebe76744017055d02a93`。实现、测试、已知限制、构建信息与待人工验收清单位于 `artifacts/phase02/`。
 
 Human Gate 前的长期 `pnpm dev` 体验发现：Core Reality persistence 未失败，但 renderer 将 continuation、snapshot freshness、layout source、revision、pane primitive 与 raw wire enum 暴露给用户，使正确的 legacy compatibility semantics 呈现为误导性的“继续 + STALE”。该问题是 presentation defect，不是旧 snapshot 覆盖 authoritative Reality，也不需要改变 Frozen continuation priority。
 
 `f03ed1fe120e60f925896e12a35caca7cc19ec54` 已完成 bounded renderer-only correction：legacy focus 显示为“上次关注”，默认 UI 隐藏 migration/snapshot/revision/pane diagnostic，mode/kind/status/reference/activity 使用产品语言。TypeScript typecheck、lint、12/12 unit 与真实 Electron dev E2E 均 PASS；exact legacy focus + stale Phase 01 snapshot + current Phase 02 TASK 已被独立复现并验证。Contract、Schema、Migration、Rust Core、Electron bridge、FIPC/1 与三份 Frozen specs 零修改。
 
-现有 packaged/portable artifact 生成于该 UI correction 之前，仍证明既有 Core/Desktop Reality 链路，但不代表 correction 后 renderer。按双模式验证规则，用户先通过长期运行的 `pnpm dev` 体验当前界面；正式 Phase Gate 必须重新生成并验证 packaged/portable build，之后才能申请 Final Acceptance。
+Post-correction Full Gate 已基于包含该 UI correction 的 source `ccd849c3b4c52662cd89fab023a00db857e88e21` 重新生成 packaged/portable build。完整 `pnpm verify:phase02` 于 2026-08-14 17:22:55–17:25:48 +08:00 退出 0：Static、12 项 TypeScript unit、19 项 Rust unit、Clippy/Release、4 项 FIPC Integration、Desktop E2E、Package、Packaged Smoke、Portable 与 fresh-directory Portable Smoke 全部 PASS。Packaged 与 Portable 各完成 17 项 acceptance checks；四张 standard/legacy 成品截图经人工检查未见 correction 回归。
+
+Final Acceptance Candidate 已固化于 `artifacts/phase02/PHASE_02_FINAL_ACCEPTANCE_CANDIDATE.md`。机器 Evidence 已满足提交 Final Acceptance 的前提，但用户尚未作 Human Experience / Final Acceptance 裁决；因此 `PHASE_02_FINAL_ACCEPTANCE: NOT_GRANTED`、`MERGE_TO_MAIN: NOT_DONE`、`PHASE_03: NOT_AUTHORIZED`。
 
 “实现完成”仍不等于“Phase 02 完成”。只有用户完成 Human Experience Gate，并在真实 Evidence 基础上给出 Phase 02 Final Acceptance 裁决后，Phase 02 才能进入 Complete closeout。
 

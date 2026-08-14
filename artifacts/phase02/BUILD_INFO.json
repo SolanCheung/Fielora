@@ -2,8 +2,8 @@
   "project": "Fielora",
   "version": "0.1.0",
   "phase": "02-field-reality",
-  "status": "ENGINEERING_CANDIDATE_UI_CORRECTION_DEV_VERIFIED_FORMAL_PACKAGE_PENDING",
-  "generated_at": "2026-08-14T17:12:30.5857875+08:00",
+  "status": "FINAL_ACCEPTANCE_CANDIDATE_USER_VERDICT_PENDING",
+  "generated_at": "2026-08-14T17:30:04.8652570+08:00",
   "platform": {
     "caption": "Microsoft Windows 11",
     "version": "10.0.26200",
@@ -14,7 +14,10 @@
     "branch": "phase/02-field-reality",
     "implementation_commit": "baeb73298bd8ffca007dc365394b45ff1c4ae819",
     "ui_correction_commit": "f03ed1fe120e60f925896e12a35caca7cc19ec54",
-    "packaged_build_source_commit": "baeb73298bd8ffca007dc365394b45ff1c4ae819"
+    "post_correction_gate_source_commit": "ccd849c3b4c52662cd89fab023a00db857e88e21",
+    "full_gate_evidence_commit": "67c59d3b187a4c034c8bb56c1c6cf51ef043ea79",
+    "acceptance_metadata_commit": "264b57ce50d2890ca95b7cb00445dcd460d5a62e",
+    "packaged_build_source_commit": "ccd849c3b4c52662cd89fab023a00db857e88e21"
   },
   "toolchain": {
     "node": "24.18.1",
@@ -60,12 +63,12 @@
     {
       "path": "apps/desktop/out/Fielora-win32-x64/Fielora.exe",
       "bytes": 225533440,
-      "sha256": "cc7161b62d0e6835008b80a4b8dbbd6dafd6565ea04f593d538131cc86da34a4"
+      "sha256": "9c69d90710f04afb260168497b163ad242eb8009a394a0f6a61af82af61888b4"
     },
     {
       "path": "apps/desktop/out/Fielora-win32-x64/resources/app.asar",
-      "bytes": 259081,
-      "sha256": "3a3f81bcb1ebf41f5e9fd26969c3f173959016fc64a99c5dd2a5a1da4ccfab07"
+      "bytes": 260244,
+      "sha256": "9f22d831ca6a71c0cd621a3a8e6ac3677e4519f482d518a6e932d8812786d9ed"
     },
     {
       "path": "apps/desktop/out/Fielora-win32-x64/resources/fielora-core.exe",
@@ -75,26 +78,26 @@
   ],
   "portable_artifact": {
     "path": "artifacts/phase02/Fielora-V0.1-Phase02-win-x64.zip",
-    "bytes": 145997587,
-    "sha256": "f765df94c011139a43d6587225cbcd5fcf048b5f1fd97605f8b9858b34a81397",
-    "source_commit": "baeb73298bd8ffca007dc365394b45ff1c4ae819",
-    "formal_gate_status": "REVALIDATION_REQUIRED_AFTER_UI_CORRECTION"
+    "bytes": 145998148,
+    "sha256": "24bf2bae54cf029ae748da0f8f7f6f6fb8c73a0e7049ebe76744017055d02a93",
+    "source_commit": "ccd849c3b4c52662cd89fab023a00db857e88e21",
+    "formal_gate_status": "PASS"
   },
   "evidence": [
     {
       "path": "artifacts/phase02/FULL_GATE.log",
-      "bytes": 1350,
-      "sha256": "c7ece5ed1f915485c43a76adff961fb804128b189c3d466fad1b2b2b4f678045"
+      "bytes": 1361,
+      "sha256": "19adad603d68616bc5ee2ef38103ab9266378463889818bebcd806008faab5c2"
     },
     {
       "path": "artifacts/phase02/PHASE_02_PACKAGED_ACCEPTANCE.json",
-      "bytes": 743,
-      "sha256": "780c58e759e06b49b8107e153fc1e5fcd61757fbc158f871f3899e938d4c4e02"
+      "bytes": 810,
+      "sha256": "a506b02bd9bda2ef93c0c3b0e5233988d5ea74684f0277ad014c3ed112769742"
     },
     {
       "path": "artifacts/phase02/PHASE_02_PORTABLE_ACCEPTANCE.json",
-      "bytes": 781,
-      "sha256": "ae2e84f659bc047e4e3d334a96fd1d70d5f932f1c14e7f0a994a036a53fda67b"
+      "bytes": 848,
+      "sha256": "f656e3c024e3ba336fa9ff6b55257ee39858e6b969207cc6596ffb4457973405"
     },
     {
       "path": "artifacts/phase02/dev-phase02-resume.png",
@@ -108,19 +111,33 @@
     },
     {
       "path": "artifacts/phase02/packaged-phase02-resume.png",
-      "bytes": 84439,
-      "sha256": "20d85f7052eae28ead27d1ef66f70c81540041bd24e61f0d31dc1184396db8d5"
+      "bytes": 86110,
+      "sha256": "8b45a3d624d4b4e4df31069e614a1c5d570277a65406d6db76d52dde328931c7"
+    },
+    {
+      "path": "artifacts/phase02/packaged-phase02-legacy-resume.png",
+      "bytes": 71942,
+      "sha256": "8bbb127e9af0042ae2d08fd15b1af7424756a5e57fd970ef6e8a41119a1b64c7"
     },
     {
       "path": "artifacts/phase02/portable-phase02-resume.png",
-      "bytes": 84392,
-      "sha256": "020bdbc993d64bc612e86cb699408c1640605748b505ab869dab4c8ff8e6c3d5"
+      "bytes": 86153,
+      "sha256": "5cae3a005aeafd6102a033353d39808dfa16de2a684416227e3a0b28a59b2f74"
+    },
+    {
+      "path": "artifacts/phase02/portable-phase02-legacy-resume.png",
+      "bytes": 70936,
+      "sha256": "bb35e6f962f4ae252f3e48f6b027147315aaf708ccbfa95dac4423fd14018fb6"
     }
   ],
   "engineering_gate": "PASS",
   "desktop_reality_gate": "PASS",
   "ui_correction_dev_slice_gate": "PASS",
-  "formal_packaged_revalidation": "PENDING",
+  "post_correction_full_gate": "PASS",
+  "formal_packaged_revalidation": "PASS",
   "human_experience_acceptance": "PENDING_USER",
+  "final_acceptance": "SUBMITTED_NOT_GRANTED",
+  "merge_to_main": "NOT_DONE",
+  "phase_03": "NOT_AUTHORIZED",
   "user_verdict": "NOT_YET_GRANTED"
 }

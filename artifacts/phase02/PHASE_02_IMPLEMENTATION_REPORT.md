@@ -1,6 +1,6 @@
 # Phase 02 Implementation Report
 
-状态：`ENGINEERING_CANDIDATE_READY / HUMAN_EXPERIENCE_PENDING / PHASE_02_NOT_COMPLETE`
+状态：`FINAL_ACCEPTANCE_CANDIDATE_SUBMITTED / USER_VERDICT_PENDING / PHASE_02_NOT_COMPLETE`
 
 日期：2026-08-14
 
@@ -12,9 +12,11 @@
 
 Human Gate UI correction：`f03ed1fe120e60f925896e12a35caca7cc19ec54`
 
+Post-correction packaged source：`ccd849c3b4c52662cd89fab023a00db857e88e21`
+
 ## 1. 授权与规格边界
 
-用户已明确授权 `PHASE_02_IMPLEMENTATION_AUTHORIZED: YES`。本次实现严格以以下 Frozen 文件为唯一语义基线：
+用户已明确授权 `PHASE_02_IMPLEMENTATION_AUTHORIZED: YES`。实现严格以以下 Frozen 文件为唯一语义基线：
 
 - `docs/architecture/PHASE_02_IMPLEMENTATION_SPEC_V0.1.md`
 - `docs/architecture/PHASE_02_CONTRACT_DELTA_V0.1.md`
@@ -26,78 +28,77 @@ Human Gate UI correction：`f03ed1fe120e60f925896e12a35caca7cc19ec54`
 
 - Field Reality aggregate revision 与 optimistic concurrency；
 - State create/get/list/revise/transition/supersede 全生命周期；
-- Phase 02 唯一 ObjectKind `REFERENCE`，HTTPS-only canonicalization 与 ACTIVE↔ARCHIVED lifecycle；
-- State `SOURCED_FROM` REFERENCE、State `SUPERSEDED_BY` State 两种 bounded lineage；
-- typed mode 与 typed focus；
-- fixed `SurfaceLayoutV1`，仅 TaskPane / ReferencePane；
+- 唯一 ObjectKind `REFERENCE`、HTTPS-only canonicalization、ACTIVE↔ARCHIVED lifecycle；
+- State `SOURCED_FROM` REFERENCE、State `SUPERSEDED_BY` State 两类 bounded lineage；
+- typed mode、typed focus、固定 `SurfaceLayoutV1`；
 - deterministic richer Resume、current/stale/invalid snapshot 与 legacy fallback；
-- Migration 0002 产品 runner、registry checksum、schema gate、incompatible-data fail-closed rollback；
-- Rust Core 的 20 个 Phase 02 additive capabilities；
-- Electron Main / preload 的逐方法 typed allowlist 与严格输入校验；
-- React 工作面：TaskPane 为主、ReferencePane 为辅助、Context Inspector 按需出现；
-- dev、packaged、portable 三种真实桌面链路与 restart/resume 证据。
+- 产品 Migration 0002、registry checksum、schema gate 与 incompatible-data fail-closed rollback；
+- Rust Core 的 20 个 additive Phase 02 capabilities；
+- Electron Main/preload 逐方法 typed allowlist 与严格输入校验；
+- TaskPane 主工作面、ReferencePane 辅助面、按需 Context Inspector；
+- dev、packaged、portable 三种真实桌面链路的 restart/resume 证据。
 
 ## 3. 关键语义保持
 
-- 每个成功 Reality mutation 在单一 transaction 中只递增一次 `fields.revision`，并只写一条对应 Activity；
+- 每个成功 Reality mutation 在一个 transaction 中只递增一次 `fields.revision`，并只写一条对应 Activity；
 - 失败 mutation 不产生部分数据、revision 或 Activity；
-- State revise 不改变 kind，supersede 仅允许同 kind replacement；
-- archive REFERENCE 会 retract 活跃 `SOURCED_FROM` 并清除相关 focus，但 restore 不隐式恢复旧 relation 或 focus；
-- snapshot/resume 为读取/工作面行为，不制造 Reality 或 Activity；
+- State revise 不改变 kind，supersede 只允许同 kind replacement；
+- archive REFERENCE 会 retract 活跃 `SOURCED_FROM` 并清除相关 focus，restore 不隐式恢复旧 relation 或 focus；
+- snapshot/resume 为只读工作面行为，不制造 Reality 或 Activity；
 - 零 TASK 的空 TaskPane 合法，不创建占位 State；
-- REFERENCE 在 Phase 02 始终 inert，不触发页面导航或网络加载；
+- REFERENCE 在 Phase 02 始终 inert，不触发导航或网络加载；
 - renderer 的约 72/28 仅为当前表现，不写入 durable layout semantics。
 
 ## 4. Migration 0002
 
 产品 migration 位于 `crates/fielora-storage/migrations/0002_phase02_reality.sql`。
 
-- Frozen spec 规定的 normalized LF、无尾换行 SHA-256：`9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9`
-- 当前 Windows worktree 原始字节 SHA-256：`96bc5abb15335bea23c8aaf006ba7ca9736c791e3c47bc21397465f13e310622`
+- Frozen canonical normalized LF SHA-256：`9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9`
 - schema version：`2`
-- 迁移行为：`BEGIN IMMEDIATE`、registry name/checksum 验证、legacy incompatible data rollback、详细 schema/index/foreign-key gate
+- 行为：`BEGIN IMMEDIATE`、registry name/checksum 验证、legacy incompatible data rollback、完整 schema/index/foreign-key gate
 
-原始字节哈希因 Windows CRLF/尾换行表示不同；runner 与 Frozen 规格审计使用前述 canonical normalized hash。
+## 5. Post-correction Full Gate
 
-## 5. 验证结论
-
-一次完整 `pnpm verify:phase02` 于 2026-08-14 15:51:56 +08:00 开始，于 15:55:37 +08:00 结束，退出码为 0：
+完整 `pnpm verify:phase02` 于 2026-08-14 17:22:55 +08:00 开始，17:25:48 +08:00 结束，退出码为 0：
 
 - Static / generated contracts：PASS
-- TypeScript typecheck / lint / unit：PASS
-- Rust fmt / unit / clippy / release：PASS
-- FIPC integration：PASS
+- TypeScript typecheck / lint / 12 unit tests：PASS
+- Rust fmt / 19 tests / clippy / release：PASS
+- FIPC integration 4/4：PASS
 - Desktop E2E dev：PASS
 - Electron package：PASS
 - Packaged Smoke：PASS
-- Portable build / smoke：PASS
+- Portable build / fresh-directory Portable Smoke：PASS
+
+Packaged 与 Portable smoke 各完成 17 项 acceptance checks，最终 `schema_version = 2`、`field_revision = 15`，并显式验证 correction 后 legacy Resume presentation 与内部术语不可见。
 
 详细矩阵见 `artifacts/phase02/TEST_REPORT.md`；机器日志见 `artifacts/phase02/FULL_GATE.log`。
 
-## 6. 当前裁决边界
+## 6. Human Gate UI Correction
 
-当前可申请 Human Experience Gate，但不能申请 Phase 02 Final Acceptance：
+`f03ed1fe120e60f925896e12a35caca7cc19ec54` 完成严格 renderer-only correction：
+
+- legacy text focus 遵守 Frozen continuation priority，但显示为“上次关注”；
+- `snapshot_freshness` 与 `layout_source` 不再进入默认可见 UI；
+- aggregate/resource revision、pane primitive、raw status/mode/kind/action wire value 不再直接显示；
+- State、Reference、Context 与 activity 使用用户语言；
+- 默认记录入口仍可达全部 Frozen kinds；
+- Contract、Schema、Rust Core、FIPC/1 与三份 Frozen 规格零修改。
+
+Post-correction package 与 portable 已重新生成并完成真实 smoke；本轮成品包含该 correction。
+
+## 7. 当前裁决边界
+
+Final Acceptance Candidate 已形成，但用户尚未作最终裁决：
 
 ```text
 PHASE_02_ENGINEERING_GATE: PASS
 PHASE_02_DESKTOP_REALITY_GATE: PASS
 PHASE_02_HUMAN_EXPERIENCE_GATE: PENDING_USER
+PHASE_02_FINAL_ACCEPTANCE: NOT_GRANTED
+MERGE_TO_MAIN: NOT_DONE
+PHASE_03: NOT_AUTHORIZED
 PHASE_02: NOT_COMPLETE
 ```
 
-Human Experience Gate 必须由用户进行人工体验并裁决，自动化不能替代。
-
-## 7. Human Gate UI Correction
-
-用户在长期运行的 `pnpm dev` 人工体验中确认 Core Reality persistence 正常，同时指出 Resume presentation、内部术语泄露与 Domain-console 感不适合 Human Gate。`f03ed1fe120e60f925896e12a35caca7cc19ec54` 完成了严格 renderer-only correction：
-
-- legacy text focus 仍遵守 Frozen continuation priority，但显示为“上次关注”；
-- `snapshot_freshness` 与 `layout_source` 不再进入默认可见 UI；
-- Field aggregate/resource revision、pane primitive、raw status/mode/kind/action wire value 不再直接显示；
-- State、Reference、Context 与 activity 使用用户语言；
-- 默认记录入口保持全部 Frozen kinds 可达，但不再要求用户理解 wire enum；
-- Contract、Schema、Rust Core、FIPC/1 与 Frozen 三份规格零修改。
-
-Targeted Slice Gate 已通过 TypeScript typecheck、lint、12/12 unit tests 与真实 Electron dev E2E。E2E 额外构造 exact legacy focus + stale Phase 01 snapshot + current Phase 02 TASK，证明当前工作正常显示，同时可见 UI 不出现 `STALE` 或 `LEGACY_PHASE01_FALLBACK`。
-
-本次 correction 按双模式验证规则未提前重新打包。现有 packaged/portable artifact 仍证明 correction 前的完整 Core/Desktop Reality 链路，但不包含新的 renderer；正式 Phase Gate 必须重新生成并验证 packaged/portable build 后，才能申请 Final Acceptance。
+自动化、成品 smoke 与机器 Evidence 不能代替用户的 Human Experience / Final Acceptance 裁决。

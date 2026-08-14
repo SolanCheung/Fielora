@@ -1,6 +1,6 @@
 # Fielora Decision Log
 
-状态：已明确决定 / V0.1 Technical Architecture + Phase 02 Engineering Candidate / Phase 01 COMPLETE（2026-08-14）
+状态：已明确决定 / V0.1 Technical Architecture + Phase 02 Final Acceptance Candidate / Phase 01 COMPLETE（2026-08-14）
 
 | ID | 决定 | 状态 |
 |---|---|---|
@@ -87,6 +87,8 @@
 | D-081 | 用户基于精确 `main@1419b8541a188e59af7ed2966f869bdde2dc7ada` 正式裁决 `PHASE_02_IMPLEMENTATION_AUTHORIZED: YES`；该裁决仅取代 D-080 的授权状态，不改变 D-067–D-079 的 Frozen semantics | CONFIRMED / AUTHORIZED |
 | D-082 | Phase 02 产品实现提交 `baeb73298bd8ffca007dc365394b45ff1c4ae819` 已严格实现 Frozen Implementation Spec、Contract Delta 与 Migration 0002；三份 Frozen 规格原文、FIPC/1 transport 与 `ProtocolVersion 1.0` 均未修改 | IMPLEMENTED |
 | D-083 | Phase 02 一次完整 Static、Unit、Rust、Integration、Desktop E2E、Package、Packaged Smoke、Portable 与 Portable Smoke 链路全部通过；Engineering Gate 与 Desktop Reality Gate 为 PASS | VERIFIED |
-| D-084 | Phase 02 Human Experience Gate 仍为 `PENDING_USER`，Final Acceptance 为 `NOT_YET_GRANTED`；Engineering/Implementation 完成不等于 `PHASE_02: COMPLETE` | PENDING USER |
+| D-084 | Phase 02 Human Experience Gate 仍为 `PENDING_USER`，Final Acceptance 为 `NOT_GRANTED`；Engineering/Implementation 完成不等于 `PHASE_02: COMPLETE` | PENDING USER |
 | D-085 | Fielora 采用双模式验证：日常开发与人工体验长期运行 `pnpm dev`；只有正式阶段 Gate 才生成并验证 packaged/portable build。Packaging-sensitive 基础设施变更可提前触发风险定向的 targeted packaged smoke，但不能替代正式 Gate | CONFIRMED |
-| D-086 | Phase 02 Human Gate 反馈确认 Resume 与 Field 默认 UI 不应暴露 snapshot/layout/revision/pane/wire diagnostics；`f03ed1f` 以 renderer-only correction 改用产品语言并保持 Frozen continuation priority。Targeted dev Slice Gate PASS；现有 packaged/portable 不包含该 correction，正式 Gate 必须重新生成验证 | IMPLEMENTED / FORMAL GATE PENDING |
+| D-086 | Phase 02 Human Gate 反馈确认 Resume 与 Field 默认 UI 不应暴露 snapshot/layout/revision/pane/wire diagnostics；`f03ed1f` 以 renderer-only correction 改用产品语言并保持 Frozen continuation priority | IMPLEMENTED |
+| D-087 | Post-correction `pnpm verify:phase02` 完整退出 0；Static、Unit、Rust、Integration、Desktop E2E、Package、Packaged Smoke、Portable 与 fresh-directory Portable Smoke 全部 PASS。新 artifact SHA-256 为 `24bf2bae54cf029ae748da0f8f7f6f6fb8c73a0e7049ebe76744017055d02a93`，包含 UI correction | VERIFIED |
+| D-088 | Phase 02 Final Acceptance Candidate 已提交用户裁决；在用户明确通过 Human Experience / Final Acceptance 前，继续保持 `PHASE_02_FINAL_ACCEPTANCE: NOT_GRANTED`、`MERGE_TO_MAIN: NOT_DONE`、`PHASE_03: NOT_AUTHORIZED` | PENDING USER |

@@ -28,6 +28,7 @@
 - [ ] artifacts/phase02/TEST_REPORT.md
 - [ ] artifacts/phase02/HUMAN_ACCEPTANCE_CHECKLIST.md
 - [ ] artifacts/phase02/HUMAN_GATE_CORRECTION_REPORT.md
+- [ ] artifacts/phase02/PHASE_02_FINAL_ACCEPTANCE_CANDIDATE.md
 - [ ] artifacts/phase02/KNOWN_ISSUES.md
 - [ ] artifacts/phase02/BUILD_INFO.json
 - [ ] docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md
@@ -68,4 +69,5 @@ Codex 必须能准确解释：
 - 为什么 Engineering Gate 与 Desktop Reality Gate PASS 仍不等于 Human Experience Gate 或 Phase 02 Final Acceptance；
 - 当前 Phase 02 artifact、实现 commit、Migration 0002 canonical hash、已验证范围与 Known Issues 分别是什么。
 - 为什么日常开发与人工体验长期运行 `pnpm dev`，而 packaged/portable 只在正式阶段 Gate 生成验证；哪些 packaging-sensitive 基础设施变更可以触发 targeted packaged smoke，以及它为什么不替代完整 Gate。
-- 为什么 Phase 02 legacy focus、snapshot freshness 与 layout source 是独立信息；Human Gate UI correction 如何只修正 presentation 而不改变 Frozen Resume semantics；为什么现有 portable 需要在正式 Gate 重新生成。
+- 为什么 Phase 02 legacy focus、snapshot freshness 与 layout source 是独立信息；Human Gate UI correction 如何只修正 presentation 而不改变 Frozen Resume semantics；post-correction packaged/portable 正式 Gate 提供了什么 Evidence。
+- 为什么 Final Acceptance Candidate 已提交仍不等于 Final Acceptance 已授予；为什么当前不得 merge main 或开始 Phase 03。
