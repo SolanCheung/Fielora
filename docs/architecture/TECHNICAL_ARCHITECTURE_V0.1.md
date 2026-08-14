@@ -1,9 +1,12 @@
 # Fielora V0.1 Technical Architecture
 
-状态：FROZEN / APPROVED（含 Required Freeze Amendments）  
-版本：V0.1  
-日期：2026-08-13  
-实现 Gate：Phase 01 Engineering / Desktop Reality / Human Experience 全部 PASS；用户于 2026-08-14 裁决 `PHASE_01: COMPLETE`。Phase 02 未授权、未开始
+状态：FROZEN / APPROVED（含 Required Freeze Amendments 与 Phase 02 Frozen Delta）
+
+版本：V0.1
+
+日期：2026-08-14
+
+实现 Gate：Phase 01 Engineering / Desktop Reality / Human Experience 全部 PASS；用户于 2026-08-14 裁决 `PHASE_01: COMPLETE`。Phase 02 已批准 Freeze，但实现未授权、未开始
 
 ## 1. 架构目标
 
@@ -641,8 +644,9 @@ Capability Acquisition Minimal 与 Deploy Website Mandate Prototype 作为 Defer
 - Field Reality / Surface Snapshot truth separation；
 - Rust-to-TS DTO generation；
 - Phase 01 packaging/test gate。
+- Phase 02 的 Field Reality aggregate revision、State/REFERENCE/bounded lineage、SurfaceLayoutV1、richer Resume、additive FIPC surface 与 Migration 0002 设计；精确增量见 `PHASE_02_IMPLEMENTATION_SPEC_V0.1.md`、`PHASE_02_CONTRACT_DELTA_V0.1.md`、`PHASE_02_MIGRATION_0002_V0.1.md`。
 
-不阻塞 Phase 01、按后续 Phase 冻结：
+不阻塞 Phase 02 Freeze、按后续 Phase 冻结：
 
 - code editor implementation；
 - LSP host boundary；
@@ -654,7 +658,7 @@ Capability Acquisition Minimal 与 Deploy Website Mandate Prototype 作为 Defer
 - precise Browser tab/webContents model；
 - Capability Acquisition / Mandate 是否进入后续产品版本。
 
-Remote Repo 在 bootstrap 时确认为空仓库，Canonical Local Worktree 确认为 `F:\项目\Fielora`。Repo Bootstrap / Toolchain Preparation 后，用户已显式授权并完成 Phase 01；冻结架构语义未发生变更。当前 Phase 01 已关闭，Phase 02 仍等待单独的 `Implementation Authorization`。
+Remote Repo 在 bootstrap 时确认为空仓库，Canonical Local Worktree 确认为 `F:\项目\Fielora`。Repo Bootstrap / Toolchain Preparation 后，用户已显式授权并完成 Phase 01；冻结架构语义未发生变更。当前 Phase 01 已关闭，Phase 02 Scope 已 Freeze，仍等待单独的 `Implementation Authorization`。
 
 ## 21. Repo Gate
 
@@ -682,6 +686,8 @@ PHASE_01_ENGINEERING_GATE_PASS
 PHASE_01_DESKTOP_REALITY_GATE_PASS
 PHASE_01_HUMAN_EXPERIENCE_GATE_PASS
 PHASE_01_COMPLETE
+PHASE_02_APPROVED_FOR_FREEZE
+PHASE_02_SPEC_FROZEN
 PHASE_02_NOT_AUTHORIZED
 PHASE_02_NOT_STARTED
 ```

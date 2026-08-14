@@ -1,7 +1,8 @@
 # Fielora Project Reality V0.1
 
-状态：当前事实源 / V0.1 Technical Architecture Freeze  
-日期：2026-08-13
+状态：当前事实源 / V0.1 Technical Architecture + Phase 02 Scope Freeze
+
+日期：2026-08-14
 
 ## 1. 产品身份
 
@@ -261,7 +262,42 @@ Phase 01 Core Vertical Slice 已证明真实链路：`Electron Renderer → type
 
 Engineering、Desktop Reality、Human Experience 与 Closeout 证据见 `artifacts/phase01/`。Phase 01 Complete 只确认首个 Core Vertical Slice，不代表 V0.1 全部阶段完成。
 
-## 34. 最高产品原则
+## 34. Phase 02 Frozen Specification
+
+用户已批准 Phase 02 Scope Review 方向，但明确未授权实现。2026-08-14 基于已经隔离 Logo 与 Phase 01 状态勘误后的 clean `main@65a8751873deb8ef395286e06d62a9489462629f` 创建 `phase/02-freeze-candidate`，完成设计候选、final amendment 与 bounded SQLite validation。
+
+用户于 2026-08-14 正式裁决：
+
+```text
+PHASE_02: APPROVED_FOR_FREEZE
+PHASE_02_IMPLEMENTATION_AUTHORIZED: NO
+PHASE_02_IMPLEMENTATION_STARTED: NO
+```
+
+Frozen Phase 02 边界：
+
+- `fields.revision` 是 Field Reality aggregate revision；
+- Phase 02 ObjectKind 只开放 `REFERENCE`；
+- Relation 只保留真正需要的 bounded lineage；
+- DXE 不做自由布局；
+- FIPC/1 transport 保持不变，additive methods 不触发 transport version 重设计；
+- Personal Memory、Agent、Browser、LLM 与其他 Later Phase 能力不进入 Phase 02。
+
+精确 State lifecycle、REFERENCE、Relation matrix、SurfaceLayoutV1、deterministic richer Resume、Contract delta 与 Migration 0002 位于：
+
+- `docs/architecture/PHASE_02_IMPLEMENTATION_SPEC_V0.1.md`；
+- `docs/architecture/PHASE_02_CONTRACT_DELTA_V0.1.md`；
+- `docs/architecture/PHASE_02_MIGRATION_0002_V0.1.md`。
+
+三份文件状态为 `FROZEN / APPROVED / IMPLEMENTATION NOT AUTHORIZED / IMPLEMENTATION NOT STARTED`。它们冻结设计与未来实现边界，不是产品实现文件。
+
+Final amendment 已确认：REFERENCE 保持 HTTPS-only；State content 4000、Activity summary 240、Resume 每组 5；REFERENCE lifecycle 为 ACTIVE↔ARCHIVED；Relation self-edge 以完整 typed endpoint 判断；一个 layout 最多一个 FIELD_TASKS TaskPane，且零 TASK 的空 TaskPane 合法。Surface template 仍固定，但 72/28 只属于 Phase 02 renderer default，不进入 durable layout semantics。
+
+真实 0001 + Candidate 0002 已在系统临时 SQLite 中完成正常 1→2 与 incompatible-data rollback probe，两条路径均 PASS，临时文件已清理。证据位于 `artifacts/phase02/`。该 probe 证明 frozen SQL 在 bounded paths 上可迁移与 fail-closed，但不等于产品 Migration 0002 已创建、产品 runner 已验证或 schema version 已推进。
+
+Freeze closeout 未创建 `crates/fielora-storage/migrations/0002_phase02_reality.sql`，未修改 Rust/TypeScript Phase 02 产品实现，也未增加依赖。Phase 02 继续保持 `NOT_AUTHORIZED / NOT_STARTED`；只有后续单独的明确 Implementation Authorization 才能进入实现。
+
+## 35. 最高产品原则
 
 > **不是把所有软件装进 Fielora，而是让用户的工作与生活在软件之间不再断掉。**
 

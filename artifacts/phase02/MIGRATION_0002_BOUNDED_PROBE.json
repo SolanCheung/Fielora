@@ -1,0 +1,58 @@
+{
+  "probe": "Fielora Phase 02 Candidate Migration 0002 bounded SQLite probe",
+  "probe_version": 1,
+  "executed_at_utc": "2026-08-14T05:31:57.757Z",
+  "candidate_branch": "phase/02-freeze-candidate",
+  "candidate_base_head": "7c683eaca40a41aedf2610ac56c5114f75347d60",
+  "sqlite_version": "3.39.4",
+  "real_0001": {
+    "path": "crates/fielora-storage/migrations/0001_core.sql",
+    "bytes": 5196,
+    "sha256": "a1396e4b2db60344ca4526973d91bb0218a1726f224c1d712a1e43d220822117"
+  },
+  "candidate_0002": {
+    "source": "docs/architecture/PHASE_02_MIGRATION_0002_CANDIDATE_V0.1.md#Exact SQL candidate",
+    "extracted_sql_sha256": "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9",
+    "product_migration_created": false,
+    "product_schema_version_advanced": false
+  },
+  "normal_upgrade": {
+    "result": "PASS",
+    "schema_version": 2,
+    "schema_fingerprint": "81df430d551d93b56e88763375d12446c9db16c3ca19b16c503b596b8cbf1ae1",
+    "db_sha256_before_cleanup": "1a07d9d39207f4dafe07ddad99dc6c4fbc7baefc771c83000f1f8974f31efd67",
+    "checks": {
+      "phase01_field_preserved": true,
+      "phase01_activities_preserved": true,
+      "legacy_snapshot_preserved": true,
+      "state_status_not_null": true,
+      "state_source_activity_not_null": true,
+      "object_phase02_columns_present": true,
+      "relation_phase02_columns_present": true,
+      "required_indexes_present": true,
+      "foreign_key_check_empty": true,
+      "typed_cross_type_same_id_allowed": true,
+      "same_typed_endpoint_self_edge_rejected": true
+    }
+  },
+  "incompatible_data_rollback": {
+    "result": "PASS",
+    "expected_error": "NOT NULL constraint failed: field_objects_v2.source_activity_id",
+    "schema_version_after_failure": 1,
+    "schema_fingerprint_before": "00bccc34f12816dff911ab8cd91f0b6e7bda87a70e6504162d1fdcdcb94f1d3a",
+    "schema_fingerprint_after": "00bccc34f12816dff911ab8cd91f0b6e7bda87a70e6504162d1fdcdcb94f1d3a",
+    "db_sha256_before_cleanup": "a5d7731a2b4d2bbad715bfdafb64e7e42d2e24f54550cbc09cb886adf7fd8ebe",
+    "checks": {
+      "migration_failed_closed": true,
+      "schema_version_remains_1": true,
+      "schema_fingerprint_unchanged": true,
+      "legacy_object_preserved": true,
+      "original_nullable_state_status_restored": true,
+      "phase02_object_columns_absent": true,
+      "no_transient_v2_tables": true,
+      "foreign_key_check_empty": true
+    }
+  },
+  "temporary_files_cleaned": true,
+  "overall_result": "PASS"
+}

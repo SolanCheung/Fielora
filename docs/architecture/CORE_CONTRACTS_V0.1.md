@@ -1,9 +1,13 @@
 # Fielora V0.1 Core Contracts
 
-状态：FROZEN / APPROVED  
-版本：V0.1  
-日期：2026-08-13  
+状态：FROZEN / APPROVED（含 Phase 02 Frozen Contract Delta）
+
+版本：V0.1
+
+日期：2026-08-14
 原则：语义完整，物理实现克制
+
+Phase 02 精确 Frozen 增量见 `PHASE_02_CONTRACT_DELTA_V0.1.md`；其 Freeze 不构成 Rust/TypeScript 产品实现授权。
 
 ## 1. Contract 总图
 
@@ -543,6 +547,7 @@ schema_migrations
 | Phase | 新增物理表 |
 |---|---|
 | 01 | principals, fields, field_state_entries, field_objects, field_relations, activities, devices, device_bindings, surface_snapshots, schema_migrations |
+| 02 | 无新增最终业务表；通过 Frozen Migration 0002 收紧 Phase 01 的 State/Object/Relation 结构与 indexes |
 | 04 | captures |
 | 05 | requirements, acceptance_criteria, project_realities, evidence |
 | 06 | development_tasks, coding_sessions, change_sets |
@@ -553,7 +558,7 @@ schema_migrations
 
 跨进程 API 分类为 `command.*`、`query.*`、`event.*`、`system.*`。UI 不获得 SQL 或 arbitrary method pass-through。
 
-Phase 01 只 export Field/Surface/System DTO。后续每个 Phase 才增加 Capture、Requirement、Development、Capability、Verification 等 DTO。
+Phase 01 产品实现只 export Field/Surface/System DTO。Phase 02 Frozen Delta 已定义 State/REFERENCE/bounded Relation/Activity/SurfaceLayoutV1/Resume 的 additive FIPC DTO 与 methods，但在明确 Implementation Authorization 前不得进入产品代码。后续每个 Phase 才增加 Capture、Requirement、Development、Capability、Verification 等 DTO。
 
 FIPC DTO、Domain Command、Aggregate、Repository Row 必须是不同类型，避免 IPC version 与 DB schema 深耦合。
 
@@ -571,5 +576,6 @@ FIPC DTO、Domain Command、Aggregate、Repository Row 必须是不同类型，�
 - Exchange 只做 access/provenance 语义预留；
 - 不做万能 Resource、Full Event Sourcing 或 Workflow Engine；
 - Acquisition/Mandate 保留 Deferred semantic contract，不进入当前 V0.1 P0 physical implementation。
+- Phase 02 只冻结 Field Reality/State/REFERENCE/bounded lineage/constrained Surface/richer Resume 增量，不引入新的一级 Contract 概念；精确 wire surface 以 `PHASE_02_CONTRACT_DELTA_V0.1.md` 为准。
 
 确认本文件后，Core Contract 不再继续增加一级概念；新抽象必须由真实 Phase 实现证明现有模型无法表达必要能力。

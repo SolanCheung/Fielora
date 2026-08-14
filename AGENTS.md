@@ -35,9 +35,13 @@ Fielora 是一个长期产品项目。
 13. `docs/architecture/CORE_CONTRACTS_V0.1.md`
 14. `docs/architecture/SCHEMA_FREEZE_V0.1.md`
 15. `docs/architecture/PHASE_01_IMPLEMENTATION_SPEC_V0.1.md`
-16. `docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md`
-17. `docs/context/READING_GATE.md`
-18. `context_manifest.json`
+16. `docs/architecture/PHASE_02_IMPLEMENTATION_SPEC_V0.1.md`
+17. `docs/architecture/PHASE_02_CONTRACT_DELTA_V0.1.md`
+18. `docs/architecture/PHASE_02_MIGRATION_0002_V0.1.md`
+19. `artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md`
+20. `docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md`
+21. `docs/context/READING_GATE.md`
+22. `context_manifest.json`
 
 不得只做关键词搜索替代阅读。
 
@@ -131,6 +135,8 @@ Fielora 自己做跨场景、高频、核心、轻量能力；Blender、CAD、�
 Phase 01 精确工具链与实现边界以已冻结的 `TECHNICAL_ARCHITECTURE_V0.1.md`、`CORE_CONTRACTS_V0.1.md`、`SCHEMA_FREEZE_V0.1.md`、`PHASE_01_IMPLEMENTATION_SPEC_V0.1.md` 为准。Canonical Local Worktree 已确认为 `F:\项目\Fielora`。Phase 01 Core Vertical Slice 已完成 Engineering、Desktop Reality 与 Human Experience Gate，用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE`。
 
 Phase 01 完成不构成 Phase 02 或任何 Later Phase 的实现授权。没有新的明确 Implementation Authorization，不得开始 Phase 02、扩大产品范围或提前实现 Later Phase 能力。
+
+用户已批准 Phase 02 Scope Review 方向；Final Freeze Candidate 已完成 amendment 与 bounded SQLite validation。用户于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`，三份 Phase 02 规格已收敛为 `FROZEN / APPROVED`。该 Freeze 裁决不构成实现授权；`PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`、`PHASE_02_IMPLEMENTATION_STARTED: NO`。在另行获得明确 Implementation Authorization 前，不得创建产品 Migration 0002、修改 Rust/TypeScript Phase 02 Contract/Schema 实现或推进 schema version。
 
 ## 6. 验证规则
 
