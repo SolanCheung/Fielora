@@ -1,13 +1,15 @@
 {
   "status": "PASS",
-  "application": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-portable-smoke-6603487f28214290bca04fbbc9614f0f\\Fielora.exe",
-  "database_path": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-phase02-portable-e2e-vUxxGs\\Fielora\\data\\fielora.db",
+  "application": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-portable-smoke-f84ffbbdc14a485ebeb9dcaec86ae096\\Fielora.exe",
+  "database_path": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-phase02-portable-e2e-qx2wVd\\Fielora\\data\\fielora.db",
   "schema_version": 2,
   "field_revision": 15,
   "checks": [
     "secure_renderer",
     "typed_preload_allowlist",
     "state_lifecycle",
+    "legacy_resume_presentation",
+    "no_visible_internal_terms",
     "same_kind_supersede",
     "reference_canonicalization",
     "source_relation",
@@ -21,5 +23,5 @@
     "core_crash_restart",
     "no_reference_network"
   ],
-  "captured_at": "2026-08-14T09:25:40.238Z"
+  "captured_at": "2026-08-14T09:28:59.891Z"
 }

@@ -1,13 +1,15 @@
 {
   "status": "PASS",
   "application": "F:\\项目\\Fielora\\apps\\desktop\\out\\Fielora-win32-x64\\Fielora.exe",
-  "database_path": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-phase02-packaged-e2e-iFIAiv\\Fielora\\data\\fielora.db",
+  "database_path": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-phase02-packaged-e2e-GuF93u\\Fielora\\data\\fielora.db",
   "schema_version": 2,
   "field_revision": 15,
   "checks": [
     "secure_renderer",
     "typed_preload_allowlist",
     "state_lifecycle",
+    "legacy_resume_presentation",
+    "no_visible_internal_terms",
     "same_kind_supersede",
     "reference_canonicalization",
     "source_relation",
@@ -21,5 +23,5 @@
     "core_crash_restart",
     "no_reference_network"
   ],
-  "captured_at": "2026-08-14T09:24:53.947Z"
+  "captured_at": "2026-08-14T09:28:39.804Z"
 }
