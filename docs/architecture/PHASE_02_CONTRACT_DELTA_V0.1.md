@@ -1,14 +1,16 @@
-# Fielora Phase 02 Contract Delta Candidate
+# Fielora V0.1 Phase 02 Contract Delta
 
-状态：FINAL CANDIDATE / VALIDATION PASS / NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED
+状态：FROZEN / APPROVED / IMPLEMENTATION NOT AUTHORIZED / IMPLEMENTATION NOT STARTED
 
 版本：V0.1
 
 日期：2026-08-14
 
-基线：`main@65a8751873deb8ef395286e06d62a9489462629f`
+设计基线：`main@65a8751873deb8ef395286e06d62a9489462629f`
 
-本文件是 `CORE_CONTRACTS_V0.1.md` 的候选增量。现有 FIPC/1 transport、JSON-RPC/NDJSON framing、hello、deadline、trace、error envelope 与 Electron security boundary 不变。以下代码块定义 wire semantics，不是本轮产品代码。
+Freeze 裁决：用户于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`，并同时明确 `PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`。
+
+本文件是 `CORE_CONTRACTS_V0.1.md` 的正式 Frozen Phase 02 增量。现有 FIPC/1 transport、JSON-RPC/NDJSON framing、hello、deadline、trace、error envelope 与 Electron security boundary 不变。以下代码块冻结 wire semantics，不是产品代码，也不授权修改 Rust/TypeScript 实现。
 
 ## 1. Typed IDs and enums
 

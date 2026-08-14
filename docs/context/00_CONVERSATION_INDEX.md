@@ -77,6 +77,13 @@
 - 用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE`；
 - Closeout 只同步已确认事实，不开始 Phase 02。
 
+### Stage L — Phase 02 Scope Freeze
+- 从 clean `main@65a8751873deb8ef395286e06d62a9489462629f` 建立 `phase/02-freeze-candidate`，只做设计评审与 bounded validation；
+- Phase 02 收紧为 Field Reality aggregate revision、State lifecycle、HTTPS REFERENCE、bounded lineage、constrained SurfaceLayoutV1 与 deterministic richer Resume；
+- 真实 0001 + Candidate 0002 的 normal upgrade 与 incompatible-data rollback probe 均 PASS；
+- 用户于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`；
+- Freeze closeout 只冻结规格，Phase 02 继续 `IMPLEMENTATION NOT AUTHORIZED / NOT STARTED`。
+
 ## 当前事实源
 
 历史脉络：`01_CONVERSATION_TIMELINE.md`
@@ -98,3 +105,9 @@
 Phase 01 Schema：`../architecture/SCHEMA_FREEZE_V0.1.md`
 
 Phase 01 实现规格：`../architecture/PHASE_01_IMPLEMENTATION_SPEC_V0.1.md`
+
+Phase 02 实现规格：`../architecture/PHASE_02_IMPLEMENTATION_SPEC_V0.1.md`
+
+Phase 02 Contract 增量：`../architecture/PHASE_02_CONTRACT_DELTA_V0.1.md`
+
+Phase 02 Migration 0002 规格：`../architecture/PHASE_02_MIGRATION_0002_V0.1.md`

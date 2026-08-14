@@ -1,18 +1,20 @@
-# Fielora Phase 02 Freeze Candidate
+# Fielora V0.1 Phase 02 Implementation Specification
 
-状态：FINAL CANDIDATE / VALIDATION PASS / NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED
+状态：FROZEN / APPROVED / IMPLEMENTATION NOT AUTHORIZED / IMPLEMENTATION NOT STARTED
 
 版本：V0.1
 
 日期：2026-08-14
 
-基线：`main@65a8751873deb8ef395286e06d62a9489462629f`
+设计基线：`main@65a8751873deb8ef395286e06d62a9489462629f`
 
-本文件只关闭 Phase 02 的设计候选，不修改既有 Frozen Architecture、Core Contracts 或 Migration 0001，不授权创建 Migration 0002 产品文件、修改 Rust/TypeScript 产品实现、增加依赖或开始 Phase 02。
+Freeze 裁决：用户于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`，并同时明确 `PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`。
 
-精确 Contract DTO/FIPC surface 见 `PHASE_02_CONTRACT_DELTA_CANDIDATE_V0.1.md`；精确物理增量见 `PHASE_02_MIGRATION_0002_CANDIDATE_V0.1.md`。
+本文件冻结 Phase 02 的实现边界，不修改既有 Frozen Architecture、Phase 01 Contract/Schema 语义或 Migration 0001。Freeze 不授权创建 Migration 0002 产品文件、修改 Rust/TypeScript 产品实现、增加依赖或开始 Phase 02。
 
-## 1. Candidate verdict
+精确 Contract DTO/FIPC surface 见 `PHASE_02_CONTRACT_DELTA_V0.1.md`；精确物理增量见 `PHASE_02_MIGRATION_0002_V0.1.md`。
+
+## 1. Frozen verdict
 
 Phase 02 只建立以下真实闭环：
 
@@ -327,13 +329,13 @@ Core 只返回 structured `reason + target`，不生成自然语言推荐，不�
 - metadata/layout 不成为万能 JSON/EAV 扩展点；
 - 不增加 secret store、provider adapter、agent runtime 或 memory table。
 
-## 13. Acceptance Gate candidate
+## 13. Implementation acceptance gate
 
-### 13.1 Freeze Gate
+### 13.1 Implementation start Gate
 
-- 本文件、Contract Delta、Migration 0002 三份 candidate 经用户裁决 FROZEN/APPROVED；
-- Frozen Core Contracts/Schema/Architecture 同步后 manifest 逐项通过；
-- 另有明确 Phase 02 Implementation Authorization。
+- 本文件、Contract Delta、Migration 0002 三份规格已经用户裁决 `FROZEN / APPROVED`；
+- Frozen Core Contracts/Schema/Architecture 与 context manifest 已完成 Freeze closeout 同步；
+- 开始实现前仍必须另有明确 `PHASE_02_IMPLEMENTATION_AUTHORIZED: YES`；当前值为 `NO`。
 
 ### 13.2 Static / Domain
 
@@ -381,8 +383,10 @@ Core 只返回 structured `reason + target`，不生成自然语言推荐，不�
 
 不得以 mock、in-memory repository、fixture DB 或仅 development mode 代替。
 
-## 14. Candidate close conditions
+## 14. Freeze closeout
 
 用户已确认 HTTPS-only REFERENCE、State content 4000、Activity summary 240、Resume 每组 5 条，并确认固定 Surface template。72/28 只作为 Phase 02 renderer default，不进入 durable layout semantics。
 
-`set_focus_v1`、`save_snapshot_v1`、`resume_v1` 方法名也已关闭，不再作为实现期选择。Bounded migration probe 已 PASS，证据位于 `artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md` 与 `MIGRATION_0002_BOUNDED_PROBE.json`。正式 Freeze 前只剩用户明确 Freeze 裁决；Freeze 后仍须另行给出 Implementation Authorization。除此之外未发现 Frozen Spec conflict。
+`set_focus_v1`、`save_snapshot_v1`、`resume_v1` 方法名也已关闭，不再作为实现期选择。Bounded migration probe 已 PASS，证据位于 `artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md` 与 `MIGRATION_0002_BOUNDED_PROBE.json`。
+
+用户已于 2026-08-14 给出明确 Freeze 裁决。Freeze closeout 只把 Final Candidate 收敛为正式 Frozen Phase 02 规格，不构成产品实现、Migration apply 或 schema version 推进。Phase 02 继续保持 `IMPLEMENTATION NOT AUTHORIZED / NOT STARTED`。未发现 Frozen Spec conflict。

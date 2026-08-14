@@ -1,5 +1,7 @@
 # Fielora Phase 02 Freeze Candidate Validation Report
 
+> 历史验证证据：本报告的 verdict 记录用户 Freeze 裁决前的 Final Candidate 状态。用户随后于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`；当前正式规格见 `docs/architecture/PHASE_02_IMPLEMENTATION_SPEC_V0.1.md`、`PHASE_02_CONTRACT_DELTA_V0.1.md` 与 `PHASE_02_MIGRATION_0002_V0.1.md`。本报告中的 `NOT FROZEN` 不构成当前状态源，且 Freeze 仍未授权产品实现。
+
 状态：FINAL CANDIDATE VALIDATION PASS / NOT FROZEN / IMPLEMENTATION NOT AUTHORIZED
 
 日期：2026-08-14

@@ -1,6 +1,6 @@
 # Fielora Decision Log
 
-状态：已明确决定 / V0.1 Technical Architecture Freeze / Phase 01 COMPLETE（2026-08-14）
+状态：已明确决定 / V0.1 Technical Architecture + Phase 02 Scope Freeze / Phase 01 COMPLETE（2026-08-14）
 
 | ID | 决定 | 状态 |
 |---|---|---|
@@ -70,15 +70,17 @@
 | D-064 | Human Experience Gate 已由用户确认 PASS；用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE` | CONFIRMED / COMPLETE |
 | D-065 | Phase 01 closeout 不构成 Phase 02 或 Later Phase Implementation Authorization；Phase 02 保持 `NOT_AUTHORIZED` / `NOT_STARTED` | CONFIRMED |
 | D-066 | 用户批准 Phase 02 Scope Review 方向并授权形成 Freeze Candidate，但未授权实现；Candidate 必须与既有 Logo/Phase 01 状态维护变更隔离，并从 clean main 建立 | CONFIRMED |
-| D-067 | Phase 02 将 `fields.revision` 收紧为 Field Reality aggregate revision；每个成功 Reality mutation 在同一 transaction 中只递增一次 | CONFIRMED FOR FREEZE CANDIDATE |
-| D-068 | Phase 02 ObjectKind 只开放 REFERENCE；不得借 object/metadata 扩展为万能资源、Memory、Capture、Browser 或 Later Phase Aggregate | CONFIRMED FOR FREEZE CANDIDATE |
-| D-069 | Phase 02 Relation 只保留 State `SOURCED_FROM` REFERENCE 与 State `SUPERSEDED_BY` State 两类 bounded lineage，不建立 generic knowledge graph | FREEZE CANDIDATE |
-| D-070 | Phase 02 DXE 使用固定 SurfaceLayoutV1 template，只开放 TaskPane/ReferencePane，不实现坐标、自由 resize、任意 pane 或 Generative UI | FREEZE CANDIDATE |
-| D-071 | FIPC/1 transport、framing、hello 与 `ProtocolVersion 1.0` 保持不变；Phase 02 methods 通过 capabilities additive 扩展 | CONFIRMED FOR FREEZE CANDIDATE |
+| D-067 | Phase 02 将 `fields.revision` 收紧为 Field Reality aggregate revision；每个成功 Reality mutation 在同一 transaction 中只递增一次 | FROZEN |
+| D-068 | Phase 02 ObjectKind 只开放 REFERENCE；不得借 object/metadata 扩展为万能资源、Memory、Capture、Browser 或 Later Phase Aggregate | FROZEN |
+| D-069 | Phase 02 Relation 只保留 State `SOURCED_FROM` REFERENCE 与 State `SUPERSEDED_BY` State 两类 bounded lineage，不建立 generic knowledge graph | FROZEN |
+| D-070 | Phase 02 DXE 使用固定 SurfaceLayoutV1 template，只开放 TaskPane/ReferencePane，不实现坐标、自由 resize、任意 pane 或 Generative UI | FROZEN |
+| D-071 | FIPC/1 transport、framing、hello 与 `ProtocolVersion 1.0` 保持不变；Phase 02 methods 通过 capabilities additive 扩展 | FROZEN |
 | D-072 | Personal Memory、Agent、Browser、LLM、Capture/Inbox、Requirement/Coding/Verify/Evidence/Capability 等 Later Phase 能力继续排除在 Phase 02 外 | CONFIRMED |
-| D-073 | Phase 02 REFERENCE 保持 HTTPS-only；State content 4000、Activity summary 240、Resume BLOCKER/QUESTION/TASK 每组 5 条 | CONFIRMED FOR FINAL FREEZE CANDIDATE |
-| D-074 | REFERENCE lifecycle 修正为 ACTIVE↔ARCHIVED；restore 不自动恢复旧 focus 或已 retracted SOURCED_FROM | CONFIRMED FOR FINAL FREEZE CANDIDATE |
-| D-075 | Relation self-edge 必须比较完整 typed endpoint；SQL 使用 `from_type != to_type OR from_id != to_id` | CONFIRMED FOR FINAL FREEZE CANDIDATE |
-| D-076 | 一个 SurfaceLayoutV1 最多一个 TASK_PANE/FIELD_TASKS；零 TASK 的空 TaskPane 是合法默认状态且不创建占位 Reality | CONFIRMED FOR FINAL FREEZE CANDIDATE |
-| D-077 | 固定 Surface template 保留；72/28 只作为 Phase 02 renderer default，不进入 durable Contract/Snapshot/Migration semantics | CONFIRMED FOR FINAL FREEZE CANDIDATE |
+| D-073 | Phase 02 REFERENCE 保持 HTTPS-only；State content 4000、Activity summary 240、Resume BLOCKER/QUESTION/TASK 每组 5 条 | FROZEN |
+| D-074 | REFERENCE lifecycle 修正为 ACTIVE↔ARCHIVED；restore 不自动恢复旧 focus 或已 retracted SOURCED_FROM | FROZEN |
+| D-075 | Relation self-edge 必须比较完整 typed endpoint；SQL 使用 `from_type != to_type OR from_id != to_id` | FROZEN |
+| D-076 | 一个 SurfaceLayoutV1 最多一个 TASK_PANE/FIELD_TASKS；零 TASK 的空 TaskPane 是合法默认状态且不创建占位 Reality | FROZEN |
+| D-077 | 固定 Surface template 保留；72/28 只作为 Phase 02 renderer default，不进入 durable Contract/Snapshot/Migration semantics | FROZEN |
 | D-078 | 真实 0001 + Candidate 0002 临时 SQLite normal upgrade 与 incompatible-data rollback probe 均 PASS；该证据不等于 Freeze 或 Implementation Authorization | VERIFIED |
+| D-079 | 用户于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`；Phase 02 Implementation Spec、Contract Delta 与 Migration 0002 Spec 收敛为正式 Frozen 规格 | FROZEN / APPROVED |
+| D-080 | Phase 02 Freeze 不构成产品实现授权；`PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`、`PHASE_02_IMPLEMENTATION_STARTED: NO`，不得创建产品 Migration 0002 或修改 Rust/TypeScript Phase 02 实现 | CONFIRMED |

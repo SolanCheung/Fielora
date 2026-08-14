@@ -20,9 +20,9 @@
 - [ ] docs/architecture/CORE_CONTRACTS_V0.1.md
 - [ ] docs/architecture/SCHEMA_FREEZE_V0.1.md
 - [ ] docs/architecture/PHASE_01_IMPLEMENTATION_SPEC_V0.1.md
-- [ ] docs/architecture/PHASE_02_FREEZE_CANDIDATE_V0.1.md
-- [ ] docs/architecture/PHASE_02_CONTRACT_DELTA_CANDIDATE_V0.1.md
-- [ ] docs/architecture/PHASE_02_MIGRATION_0002_CANDIDATE_V0.1.md
+- [ ] docs/architecture/PHASE_02_IMPLEMENTATION_SPEC_V0.1.md
+- [ ] docs/architecture/PHASE_02_CONTRACT_DELTA_V0.1.md
+- [ ] docs/architecture/PHASE_02_MIGRATION_0002_V0.1.md
 - [ ] artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md
 - [ ] docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md
 - [ ] context_manifest.json
@@ -55,6 +55,6 @@ Codex 必须能准确解释：
 - 为什么 Electron 暂时只是验证宿主；
 - 为什么 Local LLM 延后；
 - 为什么长期方向是 Personal Steward，但 V0.1 不是“AI 管家”。
-- 为什么 Phase 02 Candidate 只包含 Field Reality/State/REFERENCE/bounded lineage/constrained Surface/Resume；
-- 为什么 Candidate 尚未冻结，也不构成 Phase 02 Implementation Authorization。
-- bounded migration probe 证明了什么，以及它为什么仍不等于产品 Migration 实现。
+- 为什么 Frozen Phase 02 只包含 Field Reality/State/REFERENCE/bounded lineage/constrained Surface/Resume；
+- 为什么 `PHASE_02: APPROVED_FOR_FREEZE` 仍不构成 Phase 02 Implementation Authorization；
+- bounded migration probe 证明了什么，以及它为什么仍不等于产品 Migration 实现或 schema version 推进。

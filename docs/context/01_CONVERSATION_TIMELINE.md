@@ -144,3 +144,10 @@ Codex 交付不能只让 `pnpm dev` 能跑，必须提供 Packaged Build，并�
 Desktop Reality Verification 在实际 Windows 桌面进程、packaged `Fielora.exe`、`fielora://app` renderer、真实 Rust Core 与 SQLite 上复核通过；验证了无 dev server/Node 依赖、bridge/security 边界、正常退出、parent-pipe EOF 无 orphan，以及完整 executable restart/resume。
 
 Human Experience Gate 随后由用户确认 PASS。用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE`，并授权同步 Reality、Decisions、Reports 与 Git 历史。该裁决只关闭 Phase 01，不授权或开始 Phase 02。
+
+## 第二十五阶段 — Phase 02 Final Freeze Candidate 与 Freeze Closeout
+用户批准 Phase 02 Scope Review 方向，但明确不授权产品实现。设计候选从 clean `main@65a8751873deb8ef395286e06d62a9489462629f` 独立建立，只覆盖 Field Reality aggregate revision、State lifecycle、HTTPS-only REFERENCE、bounded `SOURCED_FROM`/`SUPERSEDED_BY` lineage、append-only Activity、constrained SurfaceLayoutV1、per-device Snapshot 与 deterministic richer Resume。
+
+Final amendment 固定 State content 4000、Activity summary 240、Resume 每组 5，修正 REFERENCE ACTIVE↔ARCHIVED lifecycle、typed relation self-edge 与空 TaskPane invariant，并明确 72/28 只属于 renderer default。真实 Migration 0001 与 Candidate 0002 在系统临时 SQLite 中完成 normal 1→2 和 incompatible-data rollback probe，均 PASS；没有创建产品 Migration 0002 或推进产品 schema version。
+
+用户于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`，将三份 Final Candidate 收敛为正式 Frozen Phase 02 规格。同时明确 `PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`：Freeze 不构成产品实现授权，Rust/TypeScript Phase 02 实现与产品 Migration 0002 仍未开始。

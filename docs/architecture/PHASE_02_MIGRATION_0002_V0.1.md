@@ -1,6 +1,6 @@
-# Fielora Phase 02 Migration 0002 Candidate
+# Fielora V0.1 Phase 02 Migration 0002 Specification
 
-状态：FINAL CANDIDATE / BOUNDED PROBE PASS / NOT FROZEN / NOT APPLIED
+状态：FROZEN / APPROVED / BOUNDED PROBE PASS / NOT APPLIED / IMPLEMENTATION NOT AUTHORIZED / IMPLEMENTATION NOT STARTED
 
 版本：V0.1
 
@@ -8,20 +8,22 @@
 
 基线：Migration 0001 checksum 保持不变
 
-本文件精确描述候选 `0002_phase02_reality.sql`。它不是产品 migration 文件，本轮不得复制到 `crates/fielora-storage/migrations/`、不得执行或推进 schema version。
+Freeze 裁决：用户于 2026-08-14 正式裁决 `PHASE_02: APPROVED_FOR_FREEZE`，并同时明确 `PHASE_02_IMPLEMENTATION_AUTHORIZED: NO`。
+
+本文件精确冻结未来产品 `0002_phase02_reality.sql` 的 SQL 与约束。它不是产品 migration 文件；在另行获得 Phase 02 Implementation Authorization 前，不得复制到 `crates/fielora-storage/migrations/`、不得由产品 runner 执行，也不得推进 schema version。
 
 ## 1. Migration policy
 
 - 0001 永不编辑；
-- 最终 schema version 从 1 变为 2；
+- 未来产品 0002 成功应用后 schema version 才从 1 变为 2；当前仍为 1；
 - runner 按 version 顺序执行 compile-time embedded migrations 并核验 checksum；
-- 0002 在一个 `BEGIN IMMEDIATE` transaction 中完成；
+- 未来产品 0002 必须在一个 `BEGIN IMMEDIATE` transaction 中完成；
 - runner 已开启 `PRAGMA foreign_keys = ON`；
 - supported Phase 01 产品不会写 State/Object/Relation，因此正常升级为空表；
 - 若 DB 含不满足新约束的非空 legacy rows，INSERT/constraint 必须使整个 migration 回滚并返回 `MIGRATION_INCOMPATIBLE_DATA`，不得删除、猜测转换或静默降级；
 - transient `_v2` tables 不改变“Phase 02 不新增最终业务表”的裁决。
 
-## 2. Exact SQL candidate
+## 2. Exact frozen SQL
 
 ```sql
 CREATE TABLE field_state_entries_v2 (
@@ -217,15 +219,15 @@ Storage startup 不得继续只检查 table names。Schema version 2 至少核�
 - 不新增 State history、object metadata、relation graph、memory、agent、browser、provider 或 resume cache tables；
 - 不建立万能 resources/EAV 表。
 
-## 6. Candidate issue discovered
+## 6. Frozen compatibility constraint
 
-0001 的 `field_state_entries.source_activity_id` 允许 NULL 和 `ON DELETE SET NULL`；0002 candidate 将其变为 NOT NULL 且默认 restrictive FK，以满足 State creation provenance。现有 Activity 是 append-only，不存在合法删除路径，因此语义一致。
+0001 的 `field_state_entries.source_activity_id` 允许 NULL 和 `ON DELETE SET NULL`；Frozen 0002 将其变为 NOT NULL 且默认 restrictive FK，以满足 State creation provenance。现有 Activity 是 append-only，不存在合法删除路径，因此语义一致。
 
-若后续确认需要删除 Activity，该需求与此 candidate 冲突，必须在实现前重新设计；Phase 02 不接受通过恢复 nullable 或把 provenance 塞入 JSON 解决。
+若后续确认需要删除 Activity，该需求与此 Frozen Spec 冲突，必须在实现前重新设计；Phase 02 不接受通过恢复 nullable 或把 provenance 塞入 JSON 解决。
 
 ## 7. Bounded probe evidence
 
-真实 `0001_core.sql` + 本文件唯一 Candidate SQL block 已在系统临时 SQLite files 中完成：
+真实 `0001_core.sql` + 本文件同内容的唯一 SQL block 已在系统临时 SQLite files 中完成：
 
 - normal Phase 01 data 1→2：PASS；
 - incompatible legacy object：expected failure + full transaction rollback PASS；
@@ -233,4 +235,4 @@ Storage startup 不得继续只检查 table names。Schema version 2 至少核�
 - same typed endpoint self-edge rejection：PASS；
 - temporary files cleanup：PASS。
 
-证据：`artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md` 与 `MIGRATION_0002_BOUNDED_PROBE.json`。Probe 没有创建产品 migration、没有调用产品 runner、没有推进产品 schema version。
+证据：`artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md` 与 `MIGRATION_0002_BOUNDED_PROBE.json`。Probe 使用的 Candidate SQL SHA-256 为 `9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9`；Freeze closeout 未改变该 SQL block。Probe 没有创建产品 migration、没有调用产品 runner、没有推进产品 schema version。
