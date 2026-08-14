@@ -161,3 +161,11 @@ Final amendment 固定 State content 4000、Activity summary 240、Resume 每组
 Post-correction `pnpm verify:phase02` 完整退出 0；TypeScript 12/12、Rust 19/19、FIPC Integration 4/4、Desktop E2E、Package、Packaged Smoke 与 fresh-directory Portable Smoke 全部 PASS。packaged/portable 各完成 17 项 checks，最终 ZIP 为 145,998,148 bytes，SHA-256 `24bf2bae54cf029ae748da0f8f7f6f6fb8c73a0e7049ebe76744017055d02a93`。
 
 用户基于最终 Evidence 与已经完成的实际 Human Experience 正式裁决 `PHASE_02_HUMAN_EXPERIENCE_GATE: PASS`、`PHASE_02_FINAL_ACCEPTANCE: GRANTED`、`PHASE_02: COMPLETE`，并授权 closeout 与 merge main。该裁决不授权 Phase 03；main closeout 后先停住，下一步单独落实 Development Workflow Hardening，再单独定义 Phase 03 推进方式。
+
+## 第二十七阶段 — Lightweight Development Workflow Hardening
+
+Phase 02 以 merge commit `e757d050b97a3f0dd3b6812bccefc1e433571c8f` 稳定进入 main 后，用户单独授权一次轻量 Development Workflow Hardening，并继续保留 `PHASE_03: NOT_AUTHORIZED`。
+
+Hardening 保留长期 `pnpm dev` 的日常开发模式，增加 Docs/UI/Core/Cross/PreMerge 五条显式 Gate Lane。Slice Lane 用于快速反馈；所有 main 准入运行 PreMerge，覆盖 Context audit、generated Contract、TypeScript、Rust、real FIPC Integration 与 Desktop E2E。Packaging-sensitive 变更额外升级到 targeted packaged smoke，正式阶段的 Release/Package/Portable/Evidence/Human Gate 不被替代。
+
+该任务不增加产品依赖、Git hook manager、远程 CI 服务或产品能力，也不通过自动路径判断跳过 Gate。完成并 merge main 后停止，Phase 03 的范围、Gate 与授权由后续单独裁决。

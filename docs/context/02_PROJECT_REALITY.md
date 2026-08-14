@@ -334,7 +334,22 @@ Final Acceptance Candidate 已固化于 `artifacts/phase02/PHASE_02_FINAL_ACCEPT
 
 Phase 02 不再继续开发或继续 Human Gate 打磨。该裁决只授权 Phase 02 closeout 与 merge main；`PHASE_03: NOT_AUTHORIZED`。main closeout 后先停住，后续先单独落实 Development Workflow Hardening，再单独定义和授权 Phase 03 推进方式。
 
-## 36. 最高产品原则
+## 36. Development Workflow Hardening
+
+用户在稳定 `main@e757d050b97a3f0dd3b6812bccefc1e433571c8f` 上单独授权的轻量 Development Workflow Hardening 已完成并验证；该任务位于开发基础设施层，不重新打开 Phase 02，也不构成 Phase 03 Authorization。
+
+当前开发循环：
+
+- 日常开发与人工体验长期运行 `pnpm dev`；
+- Docs/UI/Core/Cross 四条 Slice Lane 提供与变更范围匹配的快速反馈；
+- 所有准备进入 main 的变更运行 `pnpm verify:premerge`，覆盖 Context audit、Contracts、TypeScript、Rust、real FIPC Integration 与 Desktop E2E；
+- packaging-sensitive 变更必须额外运行 targeted packaged smoke；
+- 正式 Phase Gate 继续包含 Release、Package、Packaged Smoke、Portable、Portable Smoke、Evidence 与 Human Experience，不被 PreMerge 替代；
+- 不增加依赖、hook manager、远程 CI 服务或 Phase 03 产品能力。
+
+精确定义位于 `docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md`，验证证据位于 `artifacts/workflow/DEVELOPMENT_WORKFLOW_HARDENING_REPORT.md`。Docs Lane 与最终 PreMerge 均 PASS；PreMerge 约 73 秒完成 TS 12/12、Rust 19/19、Integration 4/4 与 real Desktop E2E，正式 Phase 02 Evidence diff 0。当前 `PHASE_03: NOT_AUTHORIZED`；Hardening merge main 后必须停住，等待单独授权。
+
+## 37. 最高产品原则
 
 > **不是把所有软件装进 Fielora，而是让用户的工作与生活在软件之间不再断掉。**
 

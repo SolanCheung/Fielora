@@ -94,3 +94,5 @@
 | D-088 | 用户基于 Post-correction Full Gate、实际 Human Experience、重新生成并通过 smoke 的 packaged/portable 与最终 Evidence，正式裁决 `PHASE_02_HUMAN_EXPERIENCE_GATE: PASS`、`PHASE_02_FINAL_ACCEPTANCE: GRANTED`、`PHASE_02: COMPLETE` | CONFIRMED / COMPLETE |
 | D-089 | Phase 02 Final Acceptance 授权 closeout 与 `phase/02-field-reality` merge main；该授权不构成 Phase 03 Implementation Authorization，`PHASE_03: NOT_AUTHORIZED` | CONFIRMED |
 | D-090 | Phase 02 main closeout 后停止阶段开发；先单独落实 Development Workflow Hardening，再单独定义 Phase 03 的推进方式与授权边界 | CONFIRMED / NEXT WORKFLOW STEP |
+| D-091 | Development Workflow Hardening 使用 Docs/UI/Core/Cross/PreMerge 五条显式 Lane；所有 main 准入运行 PreMerge，packaging-sensitive 变更追加 targeted packaged smoke，正式 Phase Gate 不被替代 | CONFIRMED / IMPLEMENTED |
+| D-092 | 本次 Hardening 只修改开发基础设施与项目事实，不增加依赖、自动跳过 Gate、远程 CI 或产品能力；完成后 `PHASE_03: NOT_AUTHORIZED`，必须等待用户单独授权 | CONFIRMED |

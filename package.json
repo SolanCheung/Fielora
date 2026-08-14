@@ -23,6 +23,12 @@
     "make:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-portable.ps1",
     "test:packaged": "node tests/e2e/phase02-desktop-e2e.mjs packaged",
     "test:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-portable.ps1",
+    "audit:context": "node scripts/audit-context.mjs",
+    "verify:dev:docs": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-development.ps1 -Lane Docs",
+    "verify:dev:ui": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-development.ps1 -Lane Ui",
+    "verify:dev:core": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-development.ps1 -Lane Core",
+    "verify:dev:cross": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-development.ps1 -Lane Cross",
+    "verify:premerge": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-development.ps1 -Lane PreMerge",
     "verify:phase01": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-phase01.ps1",
     "verify:phase02": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-phase02.ps1"
   }

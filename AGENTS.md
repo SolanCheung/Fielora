@@ -48,8 +48,10 @@ Fielora 是一个长期产品项目。
 26. `artifacts/phase02/KNOWN_ISSUES.md`
 27. `artifacts/phase02/BUILD_INFO.json`
 28. `docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md`
-29. `docs/context/READING_GATE.md`
-30. `context_manifest.json`
+29. `docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md`
+30. `artifacts/workflow/DEVELOPMENT_WORKFLOW_HARDENING_REPORT.md`
+31. `docs/context/READING_GATE.md`
+32. `context_manifest.json`
 
 不得只做关键词搜索替代阅读。
 
@@ -144,7 +146,9 @@ Phase 01 精确工具链与实现边界以已冻结的 `TECHNICAL_ARCHITECTURE_V
 
 用户于 2026-08-14 基于 `main@1419b8541a188e59af7ed2966f869bdde2dc7ada` 授权 Phase 02 Implementation。实现严格遵守三份 Frozen Phase 02 specs，并完成 Engineering、Desktop Reality、Human Experience、Post-correction Full Gate、Packaged Smoke 与 Portable Smoke。用户最终裁决 `PHASE_02_FINAL_ACCEPTANCE: GRANTED`、`PHASE_02: COMPLETE`；证据位于 `artifacts/phase02/`。
 
-Phase 02 完成只授权 closeout 与 merge main，不构成 Phase 03 Implementation Authorization。`PHASE_03: NOT_AUTHORIZED`。不得继续扩展 Phase 02、提前实现 Phase 03 或自行改变 Frozen semantics。Phase 02 main closeout 后，先等待 Development Workflow Hardening 的单独任务与授权，再单独定义 Phase 03 推进方式。
+Phase 02 完成只授权 closeout 与 merge main，不构成 Phase 03 Implementation Authorization。`PHASE_03: NOT_AUTHORIZED`。不得继续扩展 Phase 02、提前实现 Phase 03 或自行改变 Frozen semantics。用户已另行授权轻量 Development Workflow Hardening；该基础设施任务完成后仍须等待用户单独定义和授权 Phase 03。
+
+Development Workflow Hardening 已从稳定 `main@e757d050b97a3f0dd3b6812bccefc1e433571c8f` 建立。日常按 Docs/UI/Core/Cross Lane 验证，所有 main 准入运行 `pnpm verify:premerge`；packaging-sensitive 变更额外运行 targeted packaged smoke；正式 Phase Gate 不被替代。精确规则见 `docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md`。
 
 ## 6. 验证规则
 
