@@ -321,6 +321,12 @@ Freeze closeout 未创建 `crates/fielora-storage/migrations/0002_phase02_realit
 
 Portable artifact 为 `artifacts/phase02/Fielora-V0.1-Phase02-win-x64.zip`，bytes `145997587`，SHA-256 `f765df94c011139a43d6587225cbcd5fcf048b5f1fd97605f8b9858b34a81397`。实现、测试、已知限制、构建信息与待人工验收清单位于 `artifacts/phase02/`。
 
+Human Gate 前的长期 `pnpm dev` 体验发现：Core Reality persistence 未失败，但 renderer 将 continuation、snapshot freshness、layout source、revision、pane primitive 与 raw wire enum 暴露给用户，使正确的 legacy compatibility semantics 呈现为误导性的“继续 + STALE”。该问题是 presentation defect，不是旧 snapshot 覆盖 authoritative Reality，也不需要改变 Frozen continuation priority。
+
+`f03ed1fe120e60f925896e12a35caca7cc19ec54` 已完成 bounded renderer-only correction：legacy focus 显示为“上次关注”，默认 UI 隐藏 migration/snapshot/revision/pane diagnostic，mode/kind/status/reference/activity 使用产品语言。TypeScript typecheck、lint、12/12 unit 与真实 Electron dev E2E 均 PASS；exact legacy focus + stale Phase 01 snapshot + current Phase 02 TASK 已被独立复现并验证。Contract、Schema、Migration、Rust Core、Electron bridge、FIPC/1 与三份 Frozen specs 零修改。
+
+现有 packaged/portable artifact 生成于该 UI correction 之前，仍证明既有 Core/Desktop Reality 链路，但不代表 correction 后 renderer。按双模式验证规则，用户先通过长期运行的 `pnpm dev` 体验当前界面；正式 Phase Gate 必须重新生成并验证 packaged/portable build，之后才能申请 Final Acceptance。
+
 “实现完成”仍不等于“Phase 02 完成”。只有用户完成 Human Experience Gate，并在真实 Evidence 基础上给出 Phase 02 Final Acceptance 裁决后，Phase 02 才能进入 Complete closeout。
 
 ## 36. 最高产品原则

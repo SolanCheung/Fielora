@@ -10,6 +10,8 @@
 
 实现提交：`baeb73298bd8ffca007dc365394b45ff1c4ae819`
 
+Human Gate UI correction：`f03ed1fe120e60f925896e12a35caca7cc19ec54`
+
 ## 1. 授权与规格边界
 
 用户已明确授权 `PHASE_02_IMPLEMENTATION_AUTHORIZED: YES`。本次实现严格以以下 Frozen 文件为唯一语义基线：
@@ -83,4 +85,19 @@ PHASE_02_HUMAN_EXPERIENCE_GATE: PENDING_USER
 PHASE_02: NOT_COMPLETE
 ```
 
-Human Experience Gate 必须由用户对指定 portable artifact 进行人工体验并裁决，自动化不能替代。
+Human Experience Gate 必须由用户进行人工体验并裁决，自动化不能替代。
+
+## 7. Human Gate UI Correction
+
+用户在长期运行的 `pnpm dev` 人工体验中确认 Core Reality persistence 正常，同时指出 Resume presentation、内部术语泄露与 Domain-console 感不适合 Human Gate。`f03ed1fe120e60f925896e12a35caca7cc19ec54` 完成了严格 renderer-only correction：
+
+- legacy text focus 仍遵守 Frozen continuation priority，但显示为“上次关注”；
+- `snapshot_freshness` 与 `layout_source` 不再进入默认可见 UI；
+- Field aggregate/resource revision、pane primitive、raw status/mode/kind/action wire value 不再直接显示；
+- State、Reference、Context 与 activity 使用用户语言；
+- 默认记录入口保持全部 Frozen kinds 可达，但不再要求用户理解 wire enum；
+- Contract、Schema、Rust Core、FIPC/1 与 Frozen 三份规格零修改。
+
+Targeted Slice Gate 已通过 TypeScript typecheck、lint、12/12 unit tests 与真实 Electron dev E2E。E2E 额外构造 exact legacy focus + stale Phase 01 snapshot + current Phase 02 TASK，证明当前工作正常显示，同时可见 UI 不出现 `STALE` 或 `LEGACY_PHASE01_FALLBACK`。
+
+本次 correction 按双模式验证规则未提前重新打包。现有 packaged/portable artifact 仍证明 correction 前的完整 Core/Desktop Reality 链路，但不包含新的 renderer；正式 Phase Gate 必须重新生成并验证 packaged/portable build 后，才能申请 Final Acceptance。

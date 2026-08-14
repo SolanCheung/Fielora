@@ -89,3 +89,4 @@
 | D-083 | Phase 02 一次完整 Static、Unit、Rust、Integration、Desktop E2E、Package、Packaged Smoke、Portable 与 Portable Smoke 链路全部通过；Engineering Gate 与 Desktop Reality Gate 为 PASS | VERIFIED |
 | D-084 | Phase 02 Human Experience Gate 仍为 `PENDING_USER`，Final Acceptance 为 `NOT_YET_GRANTED`；Engineering/Implementation 完成不等于 `PHASE_02: COMPLETE` | PENDING USER |
 | D-085 | Fielora 采用双模式验证：日常开发与人工体验长期运行 `pnpm dev`；只有正式阶段 Gate 才生成并验证 packaged/portable build。Packaging-sensitive 基础设施变更可提前触发风险定向的 targeted packaged smoke，但不能替代正式 Gate | CONFIRMED |
+| D-086 | Phase 02 Human Gate 反馈确认 Resume 与 Field 默认 UI 不应暴露 snapshot/layout/revision/pane/wire diagnostics；`f03ed1f` 以 renderer-only correction 改用产品语言并保持 Frozen continuation priority。Targeted dev Slice Gate PASS；现有 packaged/portable 不包含该 correction，正式 Gate 必须重新生成验证 | IMPLEMENTED / FORMAL GATE PENDING |

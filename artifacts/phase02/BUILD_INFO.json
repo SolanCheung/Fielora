@@ -2,8 +2,8 @@
   "project": "Fielora",
   "version": "0.1.0",
   "phase": "02-field-reality",
-  "status": "ENGINEERING_CANDIDATE_HUMAN_PENDING",
-  "generated_at": "2026-08-14T16:01:19.3838707+08:00",
+  "status": "ENGINEERING_CANDIDATE_UI_CORRECTION_DEV_VERIFIED_FORMAL_PACKAGE_PENDING",
+  "generated_at": "2026-08-14T17:12:30.5857875+08:00",
   "platform": {
     "caption": "Microsoft Windows 11",
     "version": "10.0.26200",
@@ -12,7 +12,9 @@
   "git": {
     "baseline_commit": "1419b8541a188e59af7ed2966f869bdde2dc7ada",
     "branch": "phase/02-field-reality",
-    "implementation_commit": "baeb73298bd8ffca007dc365394b45ff1c4ae819"
+    "implementation_commit": "baeb73298bd8ffca007dc365394b45ff1c4ae819",
+    "ui_correction_commit": "f03ed1fe120e60f925896e12a35caca7cc19ec54",
+    "packaged_build_source_commit": "baeb73298bd8ffca007dc365394b45ff1c4ae819"
   },
   "toolchain": {
     "node": "24.18.1",
@@ -74,7 +76,9 @@
   "portable_artifact": {
     "path": "artifacts/phase02/Fielora-V0.1-Phase02-win-x64.zip",
     "bytes": 145997587,
-    "sha256": "f765df94c011139a43d6587225cbcd5fcf048b5f1fd97605f8b9858b34a81397"
+    "sha256": "f765df94c011139a43d6587225cbcd5fcf048b5f1fd97605f8b9858b34a81397",
+    "source_commit": "baeb73298bd8ffca007dc365394b45ff1c4ae819",
+    "formal_gate_status": "REVALIDATION_REQUIRED_AFTER_UI_CORRECTION"
   },
   "evidence": [
     {
@@ -94,8 +98,13 @@
     },
     {
       "path": "artifacts/phase02/dev-phase02-resume.png",
-      "bytes": 83335,
-      "sha256": "880789e3eaceaf348275fd20554274f661caf9a8872e500e9d0dc21157cf79c7"
+      "bytes": 85070,
+      "sha256": "f98fbea2d2bb917009485fd0b8ab74c19f54cb9e8cc0488c9dda3f79fad62ba0"
+    },
+    {
+      "path": "artifacts/phase02/dev-phase02-legacy-resume.png",
+      "bytes": 68419,
+      "sha256": "c71c7ce116984b89add41eeb1bc3320be0c60aa80913fd80e08830140c655e46"
     },
     {
       "path": "artifacts/phase02/packaged-phase02-resume.png",
@@ -110,6 +119,8 @@
   ],
   "engineering_gate": "PASS",
   "desktop_reality_gate": "PASS",
+  "ui_correction_dev_slice_gate": "PASS",
+  "formal_packaged_revalidation": "PENDING",
   "human_experience_acceptance": "PENDING_USER",
   "user_verdict": "NOT_YET_GRANTED"
 }

@@ -54,12 +54,40 @@
 
 截图显示恢复后的 Field、VERIFY mode、stale snapshot 回退、TaskPane 主工作面、ReferencePane 辅助面与默认关闭的 Context Inspector。
 
+## Human Gate UI Correction Slice
+
+实现提交：`f03ed1fe120e60f925896e12a35caca7cc19ec54`
+
+按双模式验证规则，本 Slice 只运行受影响的快速 Gate：
+
+| Gate | 结果 |
+|---|---|
+| TypeScript typecheck | PASS |
+| ESLint | PASS |
+| TypeScript unit | 12/12 PASS |
+| Real Electron dev E2E | PASS |
+| Visual screenshot inspection | PASS |
+| Packaged/portable revalidation | PENDING FORMAL GATE |
+
+新增验证：
+
+- raw mode/state/status/activity/reference wire values 映射为用户语言；
+- typed focus 不再以 JSON 显示；
+- exact legacy text focus 显示为“上次关注”；
+- stale legacy snapshot 不在可见 UI 暴露 `STALE` / `LEGACY_PHASE01_FALLBACK`；
+- 当前 Phase 02 TASK 与 legacy focus 同时存在时，authoritative Reality 仍正常显示；
+- 默认界面不显示 `FIELD · REV`、`TASK PANE`、resource revision 或其他 diagnostic token；
+- dev Evidence：`artifacts/phase02/dev-phase02-resume.png`；
+- exact legacy Evidence：`artifacts/phase02/dev-phase02-legacy-resume.png`。
+
 ## Artifact
 
 `artifacts/phase02/Fielora-V0.1-Phase02-win-x64.zip`
 
 - bytes：`145997587`
 - SHA-256：`f765df94c011139a43d6587225cbcd5fcf048b5f1fd97605f8b9858b34a81397`
+
+该 artifact 生成于 UI correction 之前，只保留为既有完整 Engineering/Desktop Reality Evidence。正式 Final Gate 前必须重新生成，不得用它验收 correction 后的界面。
 
 ## 尚未通过的 Gate
 
