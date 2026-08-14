@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
@@ -9,6 +10,7 @@ const config: ForgeConfig = {
     asar: true,
     executableName: 'Fielora',
     name: 'Fielora',
+    icon: path.resolve(__dirname, 'assets', 'fielora.ico'),
     extraResource: ['../../target/release/fielora-core.exe'],
   },
   rebuildConfig: {},
