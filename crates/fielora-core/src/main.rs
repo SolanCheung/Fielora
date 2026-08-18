@@ -1,3 +1,6 @@
+mod agent_runtime;
+
+use agent_runtime::AgentCoordinator;
 use fielora_contracts::*;
 use fielora_field::{
     DomainError, Field, FieldService, RealityService, SurfaceService, SurfaceSnapshot,
@@ -26,7 +29,7 @@ use uuid::Uuid;
 
 const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 const PROTOCOL: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
-const CAPABILITIES: [&str; 54] = [
+const CAPABILITIES: [&str; 63] = [
     "field.create",
     "field.list",
     "field.get",
@@ -81,6 +84,15 @@ const CAPABILITIES: [&str; 54] = [
     "conversation.archive",
     "conversation.message.create",
     "conversation.message.list",
+    "agent.start",
+    "agent.get",
+    "agent.list",
+    "agent.events",
+    "agent.tool_calls",
+    "agent.cancel",
+    "agent.resume",
+    "agent.resolve_approval",
+    "agent.stream",
 ];
 
 #[derive(Debug, Error)]
@@ -131,6 +143,7 @@ struct Runtime {
     cancellations: Arc<Mutex<HashMap<String, CancellationToken>>>,
     completed_invocations: Arc<Mutex<HashSet<String>>>,
     event_sender: SyncSender<Value>,
+    agent: AgentCoordinator,
 }
 
 #[derive(Debug, Deserialize)]
@@ -188,6 +201,24 @@ fn run() -> Result<(), CoreError> {
             }
         })
         .map_err(|error| CoreError::Output(io::Error::other(error)))?;
+    let credentials = Arc::new(WindowsCredentialStore);
+    let async_runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(4)
+        .thread_name("fielora-runtime")
+        .build()
+        .map_err(|error| CoreError::Platform(error.to_string()))?;
+    let agent = AgentCoordinator::new(
+        handle.clone(),
+        credentials.clone(),
+        event_sender.clone(),
+        paths.data_dir.join("agent-artifacts"),
+        async_runtime.handle().clone(),
+    );
+    let reconciled = handle
+        .reconcile_agent_runs(now_ms())
+        .map_err(|error| CoreError::Storage(error.to_string()))?;
+    agent.emit_reconciled(reconciled);
     let mut runtime = Runtime {
         field: FieldService::new(handle.clone(), handle.local_user.clone()),
         reality: RealityService::new(
@@ -206,18 +237,12 @@ fn run() -> Result<(), CoreError> {
         },
         hello_completed: false,
         storage: handle,
-        credentials: Arc::new(WindowsCredentialStore),
-        async_runtime: Some(
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .worker_threads(2)
-                .thread_name("fielora-model")
-                .build()
-                .map_err(|error| CoreError::Platform(error.to_string()))?,
-        ),
+        credentials,
+        async_runtime: Some(async_runtime),
         cancellations: Arc::new(Mutex::new(HashMap::new())),
         completed_invocations: Arc::new(Mutex::new(HashSet::new())),
         event_sender: event_sender.clone(),
+        agent,
     };
 
     let stdin = io::stdin();
@@ -278,6 +303,7 @@ fn run() -> Result<(), CoreError> {
     for cancellation in runtime.cancellations.lock().unwrap().values() {
         cancellation.cancel();
     }
+    runtime.agent.cancel_all();
     if let Some(async_runtime) = runtime.async_runtime.take() {
         async_runtime.shutdown_timeout(std::time::Duration::from_millis(750));
     }
@@ -479,6 +505,38 @@ fn dispatch_request(
                     .storage
                     .list_conversation_messages(params.conversation_id)?,
             )
+        }
+        "command.agent.start" => {
+            let params: StartAgentRunRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.start(params)?)
+        }
+        "query.agent.get" => {
+            let params: AgentRunRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.get_agent_run(params.run_id)?)
+        }
+        "query.agent.list" => {
+            let params: ListAgentRunsRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.list_agent_runs(params.conversation_id)?)
+        }
+        "query.agent.events" => {
+            let params: ListAgentEventsRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.list_agent_events(params)?)
+        }
+        "query.agent.tool_calls" => {
+            let params: AgentRunRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.list_agent_tool_calls(params.run_id)?)
+        }
+        "command.agent.cancel" => {
+            let params: AgentRunRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.cancel(params.run_id)?)
+        }
+        "command.agent.resume" => {
+            let params: AgentRunRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.resume(params.run_id)?)
+        }
+        "command.agent.resolve_approval" => {
+            let params: ResolveAgentApprovalRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.resolve_approval(params)?)
         }
         "command.field.create" => {
             let params: CreateFieldRequest = parse_params(&request.params)?;

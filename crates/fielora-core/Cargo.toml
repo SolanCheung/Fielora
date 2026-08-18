@@ -10,6 +10,7 @@ fielora-field = { path = "../fielora-field" }
 fielora-platform = { path = "../fielora-platform" }
 fielora-storage = { path = "../fielora-storage" }
 fielora-model = { path = "../fielora-model" }
+fielora-agent = { path = "../fielora-agent" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

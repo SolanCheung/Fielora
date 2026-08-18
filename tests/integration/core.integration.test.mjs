@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -207,4 +207,37 @@ test('Phase 04 fixture proves provider-neutral stream, capture lifecycle, and no
   h.send('remove','command.provider.remove_config',{provider_config_id:provider.id});await response('remove');
   const serialized=JSON.stringify(notifications);assert.equal(serialized.includes(secret),false);assert.equal(serialized.includes('Fixture prompt must not persist'),false);assert.equal(serialized.includes('forged renderer field text'),false);
   h.send('shutdown','system.shutdown');await response('shutdown');await h.exit();
+});
+
+test('Complete Agent executes an approved coding loop with durable tools, verification, and conversation result', async (t) => {
+  const dataDir=await mkdtemp(path.join(tmpdir(),'fielora-agent-integration-'));
+  const projectRoot=path.join(dataDir,'agent-project');await mkdir(projectRoot,{recursive:true});
+  assert.equal(spawnSync('git',['init'],{cwd:projectRoot,windowsHide:true,stdio:'ignore'}).status,0);
+  const h=harness(dataDir);t.after(async()=>{if(h.child.exitCode===null){spawnSync('taskkill.exe',['/PID',String(h.child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});}await rm(dataDir,{recursive:true,force:true});});const greeting=await hello(h);for(const capability of ['agent.start','agent.events','agent.resolve_approval'])assert.ok(greeting.result.capabilities.includes(capability));
+  const notifications=[];async function response(id){for(;;){const value=await h.next();if(value.id===id)return value;notifications.push(value);}}
+  h.send('agent-provider','command.provider.create_config',{provider_kind:'OPENAI_COMPATIBLE',display_name:'Agent fixture',base_url:'https://example.com/v1',default_model:'__fielora_agent_fixture__',custom_endpoint_acknowledged:true});const provider=(await response('agent-provider')).result;
+  h.send('agent-credential','command.provider.store_credential',{provider_config_id:provider.id,secret:`agent-fixture-${randomUUID()}`});assert.equal((await response('agent-credential')).result.lifecycle_status,'ACTIVE');t.after(()=>spawnSync('cmdkey.exe',[`/delete:Fielora/provider/${provider.id}`],{windowsHide:true,stdio:'ignore'}));
+  h.send('agent-project','command.project.create',{title:'Agent Project',goal:'Prove a real tool loop',root_path:projectRoot});const project=(await response('agent-project')).result;
+  h.send('agent-conversation','command.conversation.create',{field_id:project.field_id,title:'Agent execution',provider_config_id:provider.id,model_id:'__fielora_agent_fixture__'});const conversation=(await response('agent-conversation')).result;
+  h.send('agent-user-message','command.conversation.message.create',{conversation_id:conversation.id,role:'USER',content:'FIELORA_AGENT_FIXTURE_CREATE',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null});await response('agent-user-message');
+  h.send('agent-start','command.agent.start',{field_id:project.field_id,conversation_id:conversation.id,provider_config_id:provider.id,model_id:'__fielora_agent_fixture__',task:'FIELORA_AGENT_FIXTURE_CREATE',permission:'REVIEW_CHANGES',max_steps:8});const run=(await response('agent-start')).result;
+
+  let sequence=0;let approvalCount=0;let finalRun=null;
+  for(let attempt=0;attempt<120;attempt+=1){
+    h.send(`agent-get-${attempt}`,'query.agent.get',{run_id:run.id});finalRun=(await response(`agent-get-${attempt}`)).result;
+    h.send(`agent-events-${attempt}`,'query.agent.events',{run_id:run.id,after_sequence:sequence,limit:100});const events=(await response(`agent-events-${attempt}`)).result;if(events.length)sequence=events.at(-1).sequence;
+    const requested=events.find((event)=>event.kind==='APPROVAL_REQUESTED');
+    if(requested){
+      const approval=requested.payload.approval;approvalCount+=1;
+      h.send(`agent-approve-${approvalCount}`,'command.agent.resolve_approval',{run_id:run.id,approval_id:approval.id,nonce:approval.nonce,decision:'ALLOW_ONCE'});assert.equal((await response(`agent-approve-${approvalCount}`)).result.decision,'ALLOW_ONCE');
+    }
+    if(['COMPLETED','FAILED','CANCELLED'].includes(finalRun.status))break;
+    await new Promise((resolve)=>setTimeout(resolve,25));
+  }
+  assert.equal(finalRun.status,'COMPLETED',JSON.stringify(finalRun));assert.equal(approvalCount,2);
+  assert.equal(await readFile(path.join(projectRoot,'fielora-agent-fixture.txt'),'utf8'),'created by the Fielora Agent fixture\n');
+  h.send('agent-tools','query.agent.tool_calls',{run_id:run.id});const tools=(await response('agent-tools')).result;assert.deepEqual(tools.map((tool)=>[tool.name,tool.status]),[['create_file','COMPLETED'],['run_command','COMPLETED']]);assert.equal(tools[1].receipt.success,true);assert.equal(tools[1].receipt.execution_boundary,'CONTROLLED_WORKSPACE_EXECUTION');
+  h.send('agent-all-events','query.agent.events',{run_id:run.id,after_sequence:null,limit:500});const kinds=(await response('agent-all-events')).result.map((event)=>event.kind);for(const kind of ['RUN_CREATED','CONTEXT_COMPILED','APPROVAL_REQUESTED','TOOL_COMPLETED','VERIFICATION_RECORDED','RUN_COMPLETED'])assert.ok(kinds.includes(kind),kind);
+  h.send('agent-messages','query.conversation.message.list',{conversation_id:conversation.id});const messages=(await response('agent-messages')).result;assert.deepEqual(messages.map((message)=>message.role),['USER','ASSISTANT']);assert.match(messages[1].content,/completed the task/i);
+  h.send('agent-shutdown','system.shutdown');await response('agent-shutdown');await h.exit();
 });

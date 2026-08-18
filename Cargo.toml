@@ -6,6 +6,7 @@ members = [
   "crates/fielora-storage",
   "crates/fielora-platform",
   "crates/fielora-model",
+  "crates/fielora-agent",
 ]
 resolver = "2"
 
@@ -28,7 +29,7 @@ tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "sync", 
 tokio-util = { version = "=0.7.19", features = ["rt"] }
 reqwest = { version = "=0.13.4", default-features = false, features = ["rustls", "json", "stream"] }
 futures-util = "=0.3.34"
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [profile.release]
 strip = "symbols"
