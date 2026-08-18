@@ -19,4 +19,13 @@ export default tseslint.config(
       },
     },
   },
+  {
+    files: ['src/renderer/BrowseScreen.tsx'],
+    rules: {
+      'no-restricted-syntax': ['error', {
+        selector: "MemberExpression[object.name='window'][property.name='fielora']",
+        message: 'BrowseScreen must use only its narrowed browser capability prop.',
+      }],
+    },
+  },
 );

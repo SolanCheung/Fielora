@@ -1,0 +1,18 @@
+{
+  "result": "PASS",
+  "candidate_sha256": "4d142745b3e9a5ccd8c27f422ecdc888163a575a91b0515f90a1ee6aa0f869ab",
+  "frozen_normalized_bytes": 5740,
+  "migration_sequence": [1, 2, 4],
+  "intentional_gap_accepted": true,
+  "fresh_install": "PASS",
+  "version_2_upgrade": "PASS",
+  "idempotent_reopen": "PASS",
+  "checksum_tamper_rejected": true,
+  "failed_migration_rollback": true,
+  "query_plan_index": "idx_captures_owner_inbox",
+  "capture_columns": 25,
+  "provider_columns": 13,
+  "foreign_key_errors": 0,
+  "product_runner_changed": false,
+  "schema_version_changed": false
+}

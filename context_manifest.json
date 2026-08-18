@@ -1,39 +1,15 @@
 {
   "project": "Fielora",
-  "version": "v0.1-development-workflow-hardened-2026-08-14",
-  "purpose": "Codex first-read context package with Phase 01 and Phase 02 complete, lightweight development Gate lanes active, and Phase 03 explicitly not authorized",
+  "version": "v0.1-rapid-multi-provider-desktop-rebase-2026-08-17",
+  "purpose": "Minimal current context for rapid delivery of a Codex-like multi-provider desktop, followed by stable long tasks, Aegis, DXE, and Personal Steward",
   "required_reading": [
     "README.md",
     "AGENTS.md",
-    "docs/context/00_CONVERSATION_INDEX.md",
-    "docs/context/01_CONVERSATION_TIMELINE.md",
+    "docs/product/RAPID_DESKTOP_EXECUTION_V0.1.md",
     "docs/context/02_PROJECT_REALITY.md",
     "docs/context/03_DECISIONS.md",
-    "docs/context/04_REJECTED_DEFERRED.md",
-    "docs/context/05_SOURCE_ARCHIVE.md",
-    "docs/context/sources/Fielora_功能讨论_原始片段.txt",
-    "docs/product/COMPETITIVE_BOUNDARIES.md",
-    "docs/product/FIELORA_V0.1_INTERACTION_SPEC_CN.md",
     "docs/architecture/TECHNICAL_BASELINE_V0.1.md",
-    "docs/architecture/TECHNICAL_ARCHITECTURE_V0.1.md",
-    "docs/architecture/CORE_CONTRACTS_V0.1.md",
-    "docs/architecture/SCHEMA_FREEZE_V0.1.md",
-    "docs/architecture/PHASE_01_IMPLEMENTATION_SPEC_V0.1.md",
-    "docs/architecture/PHASE_02_IMPLEMENTATION_SPEC_V0.1.md",
-    "docs/architecture/PHASE_02_CONTRACT_DELTA_V0.1.md",
-    "docs/architecture/PHASE_02_MIGRATION_0002_V0.1.md",
-    "artifacts/phase02/PHASE_02_FREEZE_CANDIDATE_VALIDATION_REPORT.md",
-    "artifacts/phase02/PHASE_02_IMPLEMENTATION_REPORT.md",
-    "artifacts/phase02/TEST_REPORT.md",
-    "artifacts/phase02/HUMAN_ACCEPTANCE_CHECKLIST.md",
-    "artifacts/phase02/HUMAN_GATE_CORRECTION_REPORT.md",
-    "artifacts/phase02/PHASE_02_FINAL_ACCEPTANCE_CANDIDATE.md",
-    "artifacts/phase02/PHASE_02_CLOSEOUT_REPORT.md",
-    "artifacts/phase02/KNOWN_ISSUES.md",
-    "artifacts/phase02/BUILD_INFO.json",
-    "docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md",
-    "docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md",
-    "artifacts/workflow/DEVELOPMENT_WORKFLOW_HARDENING_REPORT.md",
+    "artifacts/phase04/KNOWN_ISSUES.md",
     "docs/context/READING_GATE.md"
   ],
   "historical_visual_assets": [
@@ -44,35 +20,43 @@
     "docs/context/assets/费洛拉生产力工作台界面.png"
   ],
   "first_prompt": "CODEX_FIRST_PROMPT.md",
-  "rule": "No product-code changes until CODEX_READING_REPORT.md is reviewed by the user.",
+  "rule": "Read the minimal current context, inspect task-relevant code/tests, then implement the requested vertical slice; use short Change Impact only for high-risk changes.",
   "files": {
+    "artifacts/strategy/2026-08-17_RAPID_DESKTOP_REBASE_CHANGE_IMPACT.md": {
+      "sha256": "df76169f68493196a897ed0f3c2627d821c9fc4186ac68e49bdc75f7319ca37a",
+      "bytes": 1383
+    },
+    "artifacts/strategy/2026-08-17_COMPETITIVE_REBASE_CHANGE_IMPACT.md": {
+      "sha256": "b884ec0f5d34a4fedf7b297640acae6fb00f90aa70d2daa71fa083c99648d7fa",
+      "bytes": 2973
+    },
     "README.md": {
-      "sha256": "23662c04fc05d7e22b7f85a5232b93c071038b286e090fcf39c665551316fb4d",
-      "bytes": 2763
+      "sha256": "a5ac00804c49783886b3fc2383994fe68f82a531ed51723730a0c2f45f50874c",
+      "bytes": 11614
     },
     "AGENTS.md": {
-      "sha256": "431c82d4fa3d847d4626f5f2725566a2d65396cea81be5166280295154062ca3",
-      "bytes": 7621
+      "sha256": "3801f08e1e2246692262d2750ac0da631f8d1defa21ba9d7814a67e1896a5890",
+      "bytes": 23124
     },
     "docs/context/00_CONVERSATION_INDEX.md": {
-      "sha256": "f9e25df1195b079d0ef1e2430eb830c0751f186d6580a6ee065b1bfcd4b9a6b9",
-      "bytes": 5735
+      "sha256": "6e0836ba596c315d50cf1af8e2fe6b914f6642215e04a6e21b3d26b910433850",
+      "bytes": 16500
     },
     "docs/context/01_CONVERSATION_TIMELINE.md": {
       "sha256": "8b41d0f9a7d2611b05bfcdc2a587a3916d9342651883338fc2d14fb39c558773",
       "bytes": 12753
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "48d98e03f2c2567dea00aa1592bfcdb16a90fc47a65a844514f73d8128ed96e2",
-      "bytes": 23005
+      "sha256": "80f4414350d54e1a14265832846fe622978e19e25c0d9838a5f2c6afbccd8136",
+      "bytes": 97656
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "823c711e88eaf6d668e2d392b20457810de6ebba379ddd1c2b6083f7385a0822",
-      "bytes": 13718
+      "sha256": "d53b37b5a51f413bc1f34bbefcf247f320ff74fe026d242593404a8d22027599",
+      "bytes": 58277
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
-      "sha256": "6336e081956b1d9c1390c971527ea8d6beea60c8b2840110c919184be6b5c650",
-      "bytes": 4233
+      "sha256": "0b4f9bd00ad5b9a198e4f3a6523503aaacbf8b5630aaa5d029577ee08abbc160",
+      "bytes": 5292
     },
     "docs/context/05_SOURCE_ARCHIVE.md": {
       "sha256": "3932c1e4aee3dbf298eab2205684b422330b5d59d9b94d2150a5441df242e7c0",
@@ -83,24 +67,64 @@
       "bytes": 6975
     },
     "docs/product/COMPETITIVE_BOUNDARIES.md": {
-      "sha256": "1809162315ad662dcb1d1a164a03865a7acfaa87269a8ffc0889b3ebcc1ff18d",
-      "bytes": 1839
+      "sha256": "2cd27301477e1d7ebbb3e1f378af8e083e9fa0cefc77250224fe257b89426594",
+      "bytes": 9345
     },
     "docs/product/FIELORA_V0.1_INTERACTION_SPEC_CN.md": {
       "sha256": "e2a4e79ccc403d3fa7edcbab36326cbacfd57d67448e31922242e96ca325e15b",
       "bytes": 12618
     },
     "docs/architecture/TECHNICAL_BASELINE_V0.1.md": {
-      "sha256": "ef07756af2cb57d604061030ac60a246d69c3be98c06c0f09a169dbc67825b67",
-      "bytes": 10162
+      "sha256": "39cb8df25db88ac70c99b8a866ad2a30c33b8dae08c0d51d089314ae2bc3ca9a",
+      "bytes": 14471
     },
     "docs/architecture/TECHNICAL_ARCHITECTURE_V0.1.md": {
-      "sha256": "0391bf731eb5dbf094e3d8d30e86fabe9f5f1e85cd5e6417695f2ab58c742e71",
-      "bytes": 26813
+      "sha256": "33dcbbf68fc75278f2625e0b8d93c709286085c58a288a35ff7a7460b55639f4",
+      "bytes": 29375
+    },
+    "docs/architecture/PHASE_04_ALPHA_REMAP_CANDIDATE_V0.1.md": {
+      "sha256": "96b792e2e07ac66fce8ce78faf9fa6ebc2e7eed11ddd640cdf833ac2ac408352",
+      "bytes": 59020
+    },
+    "docs/architecture/PHASE_04_CAPABILITY_DEFINITION_CANDIDATE_V0.1.md": {
+      "sha256": "dc0553ae89d47666459c21d1de4c2f32a7afee87b98bd9da687f9de1a71f67f8",
+      "bytes": 22700
+    },
+    "docs/architecture/PHASE_04_FREEZE_PACKAGE_CANDIDATE_V0.1.md": {
+      "sha256": "0617e6ae4234008057cbaf794865abe4e65e772eaeede650cbbcfb7e4c119d7f",
+      "bytes": 5980
+    },
+    "docs/product/PHASE_04_PRODUCT_FREEZE_CANDIDATE_V0.1.md": {
+      "sha256": "77c6205f1dcf30487359ed93d4e8935e9b5baa59b9c6ccbd83da0aed86b72c9d",
+      "bytes": 7768
+    },
+    "docs/architecture/PHASE_04_CONTRACT_DELTA_CANDIDATE_V0.1.md": {
+      "sha256": "d594e37a81c0e4b983f1470ade695f41af00ac76c680366fd154720f06e0674e",
+      "bytes": 8691
+    },
+    "docs/architecture/PHASE_04_MIGRATION_0004_CANDIDATE_V0.1.md": {
+      "sha256": "6eac8ee34e3359ca247eb98c2b5c6439c6167372186df018a6bc12169eedd045",
+      "bytes": 8901
+    },
+    "docs/architecture/PHASE_04_IMPLEMENTATION_SPEC_CANDIDATE_V0.1.md": {
+      "sha256": "ad52c8a55e33edea570f41736ea1467bd21d33f13803484d3d7263be481d13e4",
+      "bytes": 7638
+    },
+    "docs/architecture/PHASE_04_TEST_PLAN_CANDIDATE_V0.1.md": {
+      "sha256": "174e7a0fdf6359986055ffff9983bde4f5c5fbe4f442f7abd7de7f1276f164b0",
+      "bytes": 7282
+    },
+    "artifacts/phase04/PHASE_04_FREEZE_PACKAGE_REVIEW_REPORT.md": {
+      "sha256": "fa9c706b4a140b8dcb419ee9fed859c928f7868a99b4511ea653c5e0f4ac9435",
+      "bytes": 7922
+    },
+    "scripts/freeze/phase04/probe-migration-0004.mjs": {
+      "sha256": "4c0e9908546113561e86e0762198db7a01c38b0c18b25d7371c04d4c51fcf28c",
+      "bytes": 7519
     },
     "docs/architecture/CORE_CONTRACTS_V0.1.md": {
-      "sha256": "8ce1a052460efe02ea7f7a8fa313b7a22daad1635158bc129d718421ff725bee",
-      "bytes": 19560
+      "sha256": "fa3dd3bfa743937ad8002a19adb28b840dff1a1204e3de460391a8260bcc1d11",
+      "bytes": 20038
     },
     "docs/architecture/SCHEMA_FREEZE_V0.1.md": {
       "sha256": "f3fccfedfe05b3b3f77aff43f49f004dbf114e914c810198a52082637a2b9eab",
@@ -167,20 +191,36 @@
       "bytes": 7279
     },
     "docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md": {
-      "sha256": "69ceb77eb9380e4b11677c88bb023cbdc5aedcb296b738e03648ca4ce150dcd4",
-      "bytes": 3654
+      "sha256": "e21f20a8557afd59ee2d411ca57328374bac69c80f9fe24917f3a5a89d56a585",
+      "bytes": 8414
     },
     "artifacts/workflow/DEVELOPMENT_WORKFLOW_HARDENING_REPORT.md": {
       "sha256": "b5c7f0406034afff6ba65cc499544054948483f6842fcbdca565aaad5ef23e11",
       "bytes": 2520
     },
+    "artifacts/phase03/SLICE_05_HUMAN_EXPERIENCE_CHECKLIST.md": {
+      "sha256": "35c843df709ba3d3339531504814993d12dc3fb5530389873227c0e0ffbb19cb",
+      "bytes": 7652
+    },
+    "artifacts/phase03/TEST_REPORT.md": {
+      "sha256": "3709086b2c945ea25e47f1ee2cf1f755cbe6083ac1c3fda8451561082cfe6dd5",
+      "bytes": 2447
+    },
+    "artifacts/phase03/BUILD_INFO.json": {
+      "sha256": "e3b77ee4f454a051cb636fff646054d73b1c2e49679ea5169e42ba67c17981eb",
+      "bytes": 3550
+    },
+    "artifacts/phase03/PHASE_03_CLOSEOUT_REPORT.md": {
+      "sha256": "1ec90f4667dc6afa29167978bc6723af5aa8037144020885b5c65e28679bb78c",
+      "bytes": 2596
+    },
     "docs/context/READING_GATE.md": {
-      "sha256": "1117904fb8ad0883124d7732ac79b2a5639f76c3a145c7e541566ba14bc10cd4",
-      "bytes": 4399
+      "sha256": "167cdd42ab4d8e775f0f657605e5b3d22978e2209b59cbd842d087ad1cbb653b",
+      "bytes": 1562
     },
     "CODEX_FIRST_PROMPT.md": {
-      "sha256": "78bc7f4c1c4cf2e878858bbb415ea8a0a61a75be019dc044c776413838103520",
-      "bytes": 1933
+      "sha256": "99e47c67ca51a68c844dca8acc87a60fb5e2fb650d97a8fb545f703aaf1ad87a",
+      "bytes": 748
     },
     "docs/context/assets/03ce617b-d945-4291-945e-90b68dcf2594.png": {
       "sha256": "a624f52f6786c7f371f647007a8ca448b8f5d8cf923f51fe813a36cc5ac4f6b1",
@@ -201,6 +241,102 @@
     "docs/context/assets/费洛拉生产力工作台界面.png": {
       "sha256": "be8573063d78b86bb8e55823595ca180120fa0510ae20de49384bbd8ba31de17",
       "bytes": 1166283
+    },
+    "artifacts/phase04/freeze/PHASE_04_FREEZE_PROBE_REPORT.md": {
+      "sha256": "c9ab3430058741bb3a07752dcceeb61bf74cc9e764e33d3341fee143cf0d9b0d",
+      "bytes": 4497
+    },
+    "scripts/freeze/phase04/probe-wincred.ps1": {
+      "sha256": "0a4e6ad7cba28f7669f3eab93f9f512384affd3e915a8a0ae269b81413497b2b",
+      "bytes": 6040
+    },
+    "scripts/freeze/phase04/probe-provider-contract.mjs": {
+      "sha256": "c62d1daef88a9bd74247c10d3335cc08630201ed905c41dd9ae1a565903034ea",
+      "bytes": 6980
+    },
+    "scripts/freeze/phase04/probe-endpoint-policy.mjs": {
+      "sha256": "bdb143149b56fbcef038a8eb7ea0179ea377b43e0dd7f7d290541cc491a83e64",
+      "bytes": 4203
+    },
+    "scripts/freeze/phase04/probe-context-capture-contract.mjs": {
+      "sha256": "5e132d1415cd47f0906f8dab0f08346bd7bb2161872cc8d1f77be73d8fcf6db4",
+      "bytes": 6504
+    },
+    "scripts/freeze/phase04/probe-real-providers.mjs": {
+      "sha256": "d5f681cee1cd7cf9bf9631d65ed5253a2507f77b0f92a1c744d382d824b9998e",
+      "bytes": 13883
+    },
+    "artifacts/phase04/freeze/MIGRATION_0004_PROBE_RESULT.json": {
+      "sha256": "5ddf6fe5944ba3d9811429e5e4d54fdf19187cf3c8cb88372fb340e5f9563a23",
+      "bytes": 579
+    },
+    "artifacts/phase04/freeze/WINCRED_PROBE_RESULT.json": {
+      "sha256": "ad6ef4dc4f6fc6bc1b41c389e2c0e560b80bcd9758217da9acd226eefccca770",
+      "bytes": 402
+    },
+    "artifacts/phase04/freeze/PROVIDER_CONTRACT_FIXTURE_RESULT.json": {
+      "sha256": "21daa00bd884bbf41b13ad76566cb2a85977b97afb93f356e98f42fc82e0059f",
+      "bytes": 545
+    },
+    "artifacts/phase04/freeze/ENDPOINT_POLICY_PROBE_RESULT.json": {
+      "sha256": "dffab5303f34153413b007b6ed74c80b9a898579d02b4f9d551dc972b811031f",
+      "bytes": 360
+    },
+    "artifacts/phase04/freeze/CONTEXT_CAPTURE_CONTRACT_PROBE_RESULT.json": {
+      "sha256": "154e401d467edb59cca5c6a500a9302df0f75593583746d23f702cee5a79c521",
+      "bytes": 461
+    },
+    "artifacts/phase04/freeze/REAL_PROVIDER_PROBE_RESULT.json": {
+      "sha256": "96a022a9d7351d0cce434ed290494e80be5cafa0b4354900ea06d0a17d10cd41",
+      "bytes": 1033
+    },
+    "docs/architecture/PHASE_04_PROVIDER_GATE_AMENDMENT_V0.1.md": {
+      "sha256": "0c94dd82dcad39846ef5a7068b118f1d6470b224f868c075981abf040797374f",
+      "bytes": 2977
+    },
+    "artifacts/phase04/CHANGE_IMPACT.md": {
+      "sha256": "9ba3f22b0a1b369b5a82b4ce7f7b7075830cb230d47cb60f39e03239330f95e1",
+      "bytes": 2473
+    },
+    "artifacts/phase04/PHASE_04_IMPLEMENTATION_REPORT.md": {
+      "sha256": "47b87adb82e1e6c452339c30ce6b335828b1c4d0a1f04b68082aba65504ee516",
+      "bytes": 3501
+    },
+    "artifacts/phase04/PHASE_04_IMPLEMENTATION_CROSS_REVIEW.md": {
+      "sha256": "f962a4d90b51fd8d8cc822654f31576fcab4e4090d7c528b1391e26f969d3d39",
+      "bytes": 3672
+    },
+    "artifacts/phase04/TEST_REPORT.md": {
+      "sha256": "040f63273450168f695abadb1e4a34737aebc49c9050be34292444d4f505461c",
+      "bytes": 3301
+    },
+    "artifacts/phase04/BUILD_INFO.json": {
+      "sha256": "1a7e38d45bf92f19e2190f07d77c027fdb2dccd620479c9cba292b3b1d8408ca",
+      "bytes": 851
+    },
+    "artifacts/phase04/PORTABLE_SMOKE_REPORT.md": {
+      "sha256": "98efb995826dfb3ff9c9ffd2aa9a934591d829e9aa9abbb4bdff017038ff061e",
+      "bytes": 1040
+    },
+    "artifacts/phase04/HUMAN_ACCEPTANCE_CHECKLIST.md": {
+      "sha256": "5e46f9c4d12c61e57aa75586285f73d3f96e05d91b96bac4032a5bca6caee7f3",
+      "bytes": 4976
+    },
+    "artifacts/phase04/PHASE_04_FINAL_ACCEPTANCE_CANDIDATE.md": {
+      "sha256": "d140408f800df7ddeed251fbd9c8b51e07c42c52f16ef92ec5cd7404717bb59a",
+      "bytes": 860
+    },
+    "artifacts/phase04/KNOWN_ISSUES.md": {
+      "sha256": "3a34283524d062a44a3976ee8cb2aba73455f7cc9fc53abc65fefabe22994813",
+      "bytes": 2130
+    },
+    "artifacts/phase04/HUMAN_EXPERIENCE_REMEDIATION_REPORT.md": {
+      "sha256": "1cfaacfdc0264804e69976b622b1e7fa4e3f55a79377d4574481f1f4c53fae91",
+      "bytes": 3980
+    },
+    "docs/product/RAPID_DESKTOP_EXECUTION_V0.1.md": {
+      "sha256": "54f14733a05587fb2019671c2e562bb1cd930091584bb70bbe2e490aeb536ee0",
+      "bytes": 5318
     }
   }
 }

@@ -1,0 +1,17 @@
+{
+  "status": "PASS",
+  "historical_main_pid": 23244,
+  "historical_path": "F:\\项目\\Fielora\\artifacts\\phase04\\Fielora.exe",
+  "current_test_main_pid": 30232,
+  "current_path": "F:\\项目\\Fielora\\apps\\desktop\\out\\desktop-foundation\\Fielora-win32-x64\\Fielora.exe",
+  "current_runtime_profile": "@fielora\\desktop-foundation",
+  "checks": [
+    "historical_process_remained_running",
+    "current_process_started_without_historical_interception",
+    "current_process_survived_startup",
+    "fresh_zip_was_extracted_to_a_new_directory",
+    "freshly_extracted_executable_survived_startup_while_historical_process_remained_running",
+    "current_test_process_only_was_terminated_after_verification"
+  ],
+  "captured_at": "2026-08-17T15:51:00+08:00"
+}

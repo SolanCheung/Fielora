@@ -1,0 +1,10 @@
+{
+  "status": "PASS",
+  "checks": [
+    "current_starts_while_historical_profile_is_locked",
+    "second_current_instance_exits",
+    "first_current_instance_survives",
+    "no_destroyed_window_exception"
+  ],
+  "captured_at": "2026-08-17T15:39:52.285Z"
+}

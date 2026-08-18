@@ -7,7 +7,7 @@
 日期：2026-08-14
 原则：语义完整，物理实现克制
 
-Phase 02 精确 Frozen 增量见 `PHASE_02_CONTRACT_DELTA_V0.1.md`。Freeze 本身不构成实现授权；用户随后单独授权、验收并裁决 `PHASE_02: COMPLETE`。Frozen Contract semantics 未改变，Phase 03 未授权。
+Phase 02 精确 Frozen 增量见 `PHASE_02_CONTRACT_DELTA_V0.1.md`。Freeze 本身不构成实现授权；用户随后单独授权、验收并裁决 `PHASE_02: COMPLETE`。Frozen Contract semantics 未改变。Phase 03 Browse Foundation 已单独授权，但不得改变本文件、Phase 02 semantics、FIPC trust model、Schema 或 Object identity。
 
 ## 1. Contract 总图
 
@@ -558,7 +558,7 @@ schema_migrations
 
 跨进程 API 分类为 `command.*`、`query.*`、`event.*`、`system.*`。UI 不获得 SQL 或 arbitrary method pass-through。
 
-Phase 01 产品实现只 export Field/Surface/System DTO。Phase 02 已按 Frozen Delta 实现并验收 State/REFERENCE/bounded Relation/Activity/SurfaceLayoutV1/Resume 的 additive FIPC DTO 与 methods。后续每个 Phase 才增加 Capture、Requirement、Development、Capability、Verification 等 DTO；Phase 03 未授权，不得提前增加。
+Phase 01 产品实现只 export Field/Surface/System DTO。Phase 02 已按 Frozen Delta 实现并验收 State/REFERENCE/bounded Relation/Activity/SurfaceLayoutV1/Resume 的 additive FIPC DTO 与 methods。Phase 03 Browse Foundation 的 Desktop Browser control 只存在于 trusted App Renderer → Electron Main typed bridge，不进入 Rust FIPC/Field Reality，也不新增 Core DTO、Schema 或 Migration。Slice 02 的 Page ID 是 Electron Main 内 ephemeral runtime identity，typed bridge 只允许新建 Page 与对精确 Page ID 的切换/关闭，不把 Page 映射成 Field/Object identity。后续 Phase 才按授权增加 Capture、Requirement、Development、Capability、Verification 等 DTO。
 
 FIPC DTO、Domain Command、Aggregate、Repository Row 必须是不同类型，避免 IPC version 与 DB schema 深耦合。
 

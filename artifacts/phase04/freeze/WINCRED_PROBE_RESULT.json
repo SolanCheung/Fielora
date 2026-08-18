@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "type": "CRED_TYPE_GENERIC",
+  "persist": "CRED_PERSIST_LOCAL_MACHINE",
+  "create_read": "PASS",
+  "replace_read_2048": "PASS",
+  "delete_unreadable": "PASS",
+  "fielora_product_limit_bytes": 2048,
+  "wincred_system_limit_bytes": 2560,
+  "target_prefix": "Fielora/freeze-probe/",
+  "credential_enumeration": false,
+  "test_credential_deleted": true,
+  "secret_output": "NONE"
+}

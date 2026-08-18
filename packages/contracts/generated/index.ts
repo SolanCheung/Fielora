@@ -20,6 +20,18 @@ export type SurfaceSnapshotId = string;
 
 export type TraceId = string;
 
+export type ProviderConfigId = string;
+
+export type CaptureId = string;
+
+export type ContextPackageId = string;
+
+export type ModelInvocationId = string;
+
+export type ConversationId = string;
+
+export type MessageId = string;
+
 export type ProtocolVersion = { major: number, minor: number, };
 
 export type FipcErrorData = { code: string, trace_id: string, retryable: boolean, details: unknown, };
@@ -100,7 +112,7 @@ export type ReferenceCursor = { updated_at: number, object_id: ObjectId, };
 
 export type ListReferencesRequest = { field_id: FieldId, lifecycle: ObjectLifecycle | null, cursor: ReferenceCursor | null, limit: number | null, };
 
-export type ResourceRef = { "kind": "FIELD", field_id: FieldId, } | { "kind": "STATE", state_id: StateId, } | { "kind": "REFERENCE", object_id: ObjectId, } | { "kind": "RELATION", relation_id: RelationId, };
+export type ResourceRef = { "kind": "FIELD", field_id: FieldId, } | { "kind": "STATE", state_id: StateId, } | { "kind": "REFERENCE", object_id: ObjectId, } | { "kind": "RELATION", relation_id: RelationId, } | { "kind": "CAPTURE", capture_id: CaptureId, } | { "kind": "PROVIDER_CONFIG", provider_config_id: ProviderConfigId, };
 
 export type LineageEndpointRef = { "kind": "STATE", state_id: StateId, } | { "kind": "REFERENCE", object_id: ObjectId, };
 
@@ -114,7 +126,7 @@ export type RelationCursor = { created_at: number, relation_id: RelationId, };
 
 export type ListRelationsRequest = { field_id: FieldId, relation_type: RelationType | null, lifecycle: RelationLifecycle | null, endpoint: LineageEndpointRef | null, cursor: RelationCursor | null, limit: number | null, };
 
-export type ActivityAction = "FIELD_CREATED" | "FIELD_FOCUS_UPDATED" | "FIELD_MODE_UPDATED" | "STATE_CREATED" | "STATE_REVISED" | "STATE_STATUS_CHANGED" | "STATE_SUPERSEDED" | "REFERENCE_CREATED" | "REFERENCE_REVISED" | "REFERENCE_ARCHIVED" | "REFERENCE_RESTORED" | "REFERENCE_SOURCE_ATTACHED" | "REFERENCE_SOURCE_RETRACTED";
+export type ActivityAction = "FIELD_CREATED" | "FIELD_FOCUS_UPDATED" | "FIELD_MODE_UPDATED" | "STATE_CREATED" | "STATE_REVISED" | "STATE_STATUS_CHANGED" | "STATE_SUPERSEDED" | "REFERENCE_CREATED" | "REFERENCE_REVISED" | "REFERENCE_ARCHIVED" | "REFERENCE_RESTORED" | "REFERENCE_SOURCE_ATTACHED" | "REFERENCE_SOURCE_RETRACTED" | "PROVIDER_CONFIG_CREATED" | "PROVIDER_CONFIG_UPDATED" | "PROVIDER_CONFIG_REMOVED" | "CAPTURE_CREATED" | "CAPTURE_ATTACHED" | "CAPTURE_PROMOTED" | "CAPTURE_ARCHIVED" | "CAPTURE_RESTORED" | "MODEL_INVOCATION_COMPLETED" | "MODEL_INVOCATION_FAILED";
 
 export type ActivityView = { id: ActivityId, field_id: FieldId | null, actor_principal_id: PrincipalId, action: ActivityAction, target: ResourceRef | null, summary: string | null, trace_id: TraceId, created_at: number, };
 
@@ -171,4 +183,104 @@ export type DomainEventDTO = { event: string, field_id: FieldId, change: FieldCh
 export type CoreHealthState = "STARTING" | "READY" | "UNAVAILABLE" | "DEGRADED" | "SHUTTING_DOWN";
 
 export type HealthDTO = { state: CoreHealthState, core_version: string, protocol: ProtocolVersion, schema_version: number, pid: number, db_path: string, };
+
+export type ProviderKind = "OPENAI" | "ANTHROPIC" | "OPENAI_COMPATIBLE";
+
+export type EndpointClass = "OFFICIAL" | "CUSTOM";
+
+export type ProviderLifecycle = "ACTIVE" | "DISABLED" | "REMOVED";
+
+export type ProviderConfigView = { id: ProviderConfigId, provider_kind: ProviderKind, display_name: string, endpoint_class: EndpointClass, base_url: string | null, default_model: string, lifecycle_status: ProviderLifecycle, credential_present: boolean, revision: number, created_at: number, updated_at: number, };
+
+export type CreateProviderConfigRequest = { provider_kind: ProviderKind, display_name: string, base_url: string | null, default_model: string, custom_endpoint_acknowledged: boolean, };
+
+export type UpdateProviderConfigRequest = { provider_config_id: ProviderConfigId, expected_revision: number, display_name: string, base_url: string | null, default_model: string, custom_endpoint_acknowledged: boolean, };
+
+export type ProviderConfigRequest = { provider_config_id: ProviderConfigId, };
+
+export type StoreCredentialRequest = { provider_config_id: ProviderConfigId, secret: string, };
+
+export type ModelIntent = "ASK" | "CONTINUE";
+
+export type ResponseMode = "TEXT";
+
+export type ContextChipKind = "CURRENT_FIELD" | "CURRENT_FOCUS" | "CURRENT_PAGE" | "CURRENT_SELECTION" | "CAPTURE" | "USER_NOTE";
+
+export type ContextSensitivity = "NORMAL" | "SENSITIVE" | "BLOCKED";
+
+export type ContextCompleteness = "COMPLETE" | "PARTIAL";
+
+export type ContextChip = { kind: ContextChipKind, source_identity: string, source_revision_or_navigation_generation: string, display_label: string, content: string, sensitivity: ContextSensitivity, completeness: ContextCompleteness, };
+
+export type ModelInvocationRequest = { invocation_id: ModelInvocationId, context_package_id: ContextPackageId, provider_config_id: ProviderConfigId, model_id: string, intent: ModelIntent, user_input: string, context_package: Array<ContextChip>, response_mode: ResponseMode, };
+
+export type StartModelInvocationRequest = { provider_config_id: ProviderConfigId, model_id: string | null, intent: ModelIntent, user_input: string, context_package: Array<ContextChip>, response_mode: ResponseMode, };
+
+export type StartModelInvocationResult = { invocation_id: ModelInvocationId, context_package_id: ContextPackageId, };
+
+export type CancelModelInvocationRequest = { invocation_id: ModelInvocationId, };
+
+export type ModelUsage = { input_tokens: bigint | null, output_tokens: bigint | null, };
+
+export type ToolProposal = { name: string, arguments: unknown, provider_opaque_id: string | null, };
+
+export type ModelInvocationEventKind = "STARTED" | "OUTPUT_TEXT_DELTA" | "TOOL_PROPOSAL" | "USAGE" | "COMPLETED" | "CANCELLED" | "FAILED";
+
+export type ModelInvocationEvent = { event: string, invocation_id: ModelInvocationId, kind: ModelInvocationEventKind, text_delta: string | null, tool_proposal: ToolProposal | null, usage: ModelUsage | null, error_code: string | null, };
+
+export type CaptureKind = "TEXT" | "PAGE" | "SELECTION" | "MODEL_OUTPUT" | "FIELD_EXCERPT";
+
+export type CapturePlacement = "INBOX" | "ATTACHED" | "PROMOTED";
+
+export type CaptureLifecycle = "ACTIVE" | "ARCHIVED";
+
+export type CaptureSourceKind = "USER_INPUT" | "REMOTE_PAGE" | "REMOTE_SELECTION" | "MODEL_RESPONSE" | "FIELD_RESOURCE";
+
+export type CaptureSource = { kind: CaptureSourceKind, title: string | null, uri: string | null, field_id: FieldId | null, resource_type: string | null, resource_id: string | null, resource_revision: number | null, provider_config_id: ProviderConfigId | null, provider_model_id: string | null, provider_invocation_id: ModelInvocationId | null, is_partial: boolean, };
+
+export type CaptureView = { id: CaptureId, kind: CaptureKind, title: string, content: string, placement_status: CapturePlacement, lifecycle_status: CaptureLifecycle, attached_field_id: FieldId | null, promoted_as: string | null, source: CaptureSource, revision: number, created_at: number, updated_at: number, };
+
+export type CreateCaptureRequest = { kind: CaptureKind, title: string, content: string, source: CaptureSource, };
+
+export type CaptureRequest = { capture_id: CaptureId, };
+
+export type MutateCaptureRequest = { capture_id: CaptureId, expected_revision: number, };
+
+export type AttachCaptureRequest = { capture_id: CaptureId, field_id: FieldId, expected_revision: number, };
+
+export type PromoteCaptureRequest = { capture_id: CaptureId, field_id: FieldId | null, expected_revision: number, };
+
+export type CaptureCursor = { updated_at: number, capture_id: CaptureId, };
+
+export type ListCapturesRequest = { placement: CapturePlacement | null, lifecycle: CaptureLifecycle | null, field_id: FieldId | null, cursor: CaptureCursor | null, limit: number | null, };
+
+export type CaptureChangedEvent = { event: string, capture_id: CaptureId, placement_status: CapturePlacement, lifecycle_status: CaptureLifecycle, attached_field_id: FieldId | null, revision: number, };
+
+export type ProjectView = { field_id: FieldId, title: string, goal: string | null, root_path: string, revision: number, created_at: number, updated_at: number, };
+
+export type CreateProjectRequest = { title: string, goal: string | null, root_path: string, };
+
+export type ProjectRequest = { field_id: FieldId, };
+
+export type ConversationLifecycle = "ACTIVE" | "ARCHIVED";
+
+export type ConversationView = { id: ConversationId, field_id: FieldId, title: string, provider_config_id: ProviderConfigId | null, model_id: string | null, lifecycle_status: ConversationLifecycle, revision: number, created_at: number, updated_at: number, };
+
+export type CreateConversationRequest = { field_id: FieldId, title: string, provider_config_id: ProviderConfigId | null, model_id: string | null, };
+
+export type ConversationRequest = { conversation_id: ConversationId, };
+
+export type UpdateConversationRequest = { conversation_id: ConversationId, expected_revision: number, title: string, provider_config_id: ProviderConfigId | null, model_id: string | null, };
+
+export type ArchiveConversationRequest = { conversation_id: ConversationId, expected_revision: number, };
+
+export type ConversationMessageRole = "USER" | "ASSISTANT";
+
+export type ConversationMessageStatus = "COMPLETED" | "CANCELLED" | "FAILED";
+
+export type ConversationMessageView = { id: MessageId, conversation_id: ConversationId, role: ConversationMessageRole, content: string, status: ConversationMessageStatus, provider_config_id: ProviderConfigId | null, model_id: string | null, invocation_id: ModelInvocationId | null, created_at: number, };
+
+export type CreateConversationMessageRequest = { conversation_id: ConversationId, role: ConversationMessageRole, content: string, status: ConversationMessageStatus, provider_config_id: ProviderConfigId | null, model_id: string | null, invocation_id: ModelInvocationId | null, };
+
+export type ListConversationMessagesRequest = { conversation_id: ConversationId, };
 

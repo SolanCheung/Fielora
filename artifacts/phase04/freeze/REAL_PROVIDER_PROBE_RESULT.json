@@ -1,0 +1,41 @@
+{
+  "result": "SKIP",
+  "reason": "TEST_CREDENTIAL_OR_MODEL_NOT_SUPPLIED",
+  "missing": [
+    "FIELORA_OPENAI_PROBE_KEY",
+    "FIELORA_OPENAI_PROBE_MODEL",
+    "FIELORA_ANTHROPIC_PROBE_KEY",
+    "FIELORA_ANTHROPIC_PROBE_MODEL"
+  ],
+  "synthetic_input_only": true,
+  "possible_billable_requests_per_provider": 2,
+  "invalid_auth_requests_per_provider": 1,
+  "retries": 0,
+  "max_output_tokens_per_request": 32,
+  "external_requests": 0,
+  "required_completed_normalized_events": [
+    "STARTED",
+    "OUTPUT_TEXT_DELTA",
+    "USAGE",
+    "COMPLETED"
+  ],
+  "required_cancelled_normalized_events": [
+    "STARTED",
+    "OUTPUT_TEXT_DELTA",
+    "CANCELLED"
+  ],
+  "required_failed_normalized_events": [
+    "STARTED",
+    "FAILED"
+  ],
+  "required_representative_error": "CREDENTIAL_REJECTED",
+  "required_artifact_leak_scan": {
+    "prompt_bodies": 0,
+    "response_bodies": 0,
+    "credential_bytes": 0,
+    "authorization_headers": 0,
+    "secret_log_bytes": 0
+  },
+  "secret_output": "NONE",
+  "prompt_or_response_output": "NONE"
+}

@@ -1,6 +1,6 @@
 # Fielora V0.1 Technical Baseline
 
-状态：V0.1 Technical Architecture Freeze（2026-08-13）；Phase 01 COMPLETE；Phase 02 COMPLETE（2026-08-14）；Phase 03 NOT AUTHORIZED；不得擅自扩大。
+状态：V0.1 Technical Architecture Freeze（2026-08-13）；Phase 01 COMPLETE；Phase 02 COMPLETE；Phase 03 Browse Foundation COMPLETE（2026-08-16）；下一阶段尚未定义或授权。
 
 ## 1. 目标平台
 
@@ -166,10 +166,18 @@ Phase 01 精确值：Electron 43.4.0、Node 24.18.1 LTS、pnpm 11.21.0、Rust 1.
 
 Canonical Local Worktree 已确认为 `F:\项目\Fielora`，Git 默认分支为 `main`，`origin` 为 `git@github.com:SolanCheung/Fielora.git`。Baseline Commit `bfdcbe0147b142cdf73ba06986fe7f35aaf2a604` 只包含冻结 Context Pack/docs、`.gitignore` 与精确工具链 metadata。用户随后明确授权 Phase 01；实现与三项 Gate 已完成，用户于 2026-08-14 裁决 `PHASE_01: COMPLETE`。
 
-用户于 2026-08-14 先裁决 `PHASE_02: APPROVED_FOR_FREEZE`，随后基于精确 main baseline 单独授权并完成实现。Phase 02 精确边界仍以原文未改的 `PHASE_02_IMPLEMENTATION_SPEC_V0.1.md`、`PHASE_02_CONTRACT_DELTA_V0.1.md` 与 `PHASE_02_MIGRATION_0002_V0.1.md` 为准；Engineering、Desktop Reality、Human Experience、Post-correction Full Gate 与 Final Acceptance 均已通过，用户裁决 `PHASE_02: COMPLETE`。该完成不授权 Phase 03。
+用户于 2026-08-14 先裁决 `PHASE_02: APPROVED_FOR_FREEZE`，随后基于精确 main baseline 单独授权并完成实现。Phase 02 精确边界仍以原文未改的 `PHASE_02_IMPLEMENTATION_SPEC_V0.1.md`、`PHASE_02_CONTRACT_DELTA_V0.1.md` 与 `PHASE_02_MIGRATION_0002_V0.1.md` 为准；Engineering、Desktop Reality、Human Experience、Post-correction Full Gate 与 Final Acceptance 均已通过，用户裁决 `PHASE_02: COMPLETE`。Phase 02 本身没有授权 Phase 03；用户随后以独立裁决和 `main@7dc1aac593a4d478b7e175e5e197cf99466c1f47` 授权 Phase 03 Browse Foundation。
 
 ## 17. 仍开放的技术决定
 
-不阻塞 Phase 02 Freeze、按所属后续 Phase 冻结：Electron tab/webcontents Browser model、code editor implementation、LSP host boundary、terminal PTY、project scan architecture、CodingAgentProvider/OpenCode/ACP viability、provider credential storage、updater/code signing/final installer technology、Evidence artifact retention/encryption、Generic MCP Connector 的协议范围与 transport，以及 future Exchange 的 ID/access 细节。
+Phase 03 Slice 01 已选择 Electron `WebContentsView` + 独立 untrusted persistent session 作为真实 Web Runtime，并完成 Human Experience Gate。Slice 02 使用 Electron Main 内 ephemeral Page ID 与内存 collection；每个已加载 Page 拥有独立 `WebContentsView`并共享现有 untrusted session，只有 active Page 可见。Page 不是 Field/Object identity，不新增 durable Browser schema 或 Migration。普通链接同页导航；合法 window-open 目标经既有 Policy 后创建受控新 Page。Omnibox Search Provider 通过 `BrowserSearchProvider` 契约保持可替换，当前默认 Google；它不是 durable setting，不新增设置 UI。Slice 03 在 trusted renderer 内把 `BrowseScreen` 限定为只接收 browser capability，并以 lint 防止直接访问全量 app bridge；该编译期维护边界保证 Loose Browse UI 不接入 Field mutation，但不替代 remote WebContents 的安全隔离。Slice 04 集中冻结 Remote/Local Page 的 untrusted WebPreferences 与 permission-deny session policy。Navigation Policy 同时使用 initiator + target：trusted Omnibox 可显式加载隔离 `file://` Local Page，HTTP(S) Remote Page 的 navigation/fetch/iframe/window-open→`file://` 仍拒绝，Loose Browse 的任何发起者均不能进入 `fielora://app`；trusted origin 与 FIPC model 未改变。Fresh Browse E2E 清空精确 `.webpack` 输出后重新构建并启动 Electron Main，防止增量 bundle 掩盖运行时模块解析错误。不阻塞当前 Slice 的其他开放决定包括 code editor implementation、LSP host boundary、terminal PTY、project scan architecture、CodingAgentProvider/OpenCode/ACP viability、provider credential storage、updater/code signing/final installer technology、Evidence artifact retention/encryption、Generic MCP Connector 的协议范围与 transport，以及 future Exchange 的 ID/access 细节。
+
+Slice 05 Desktop Experience 不新增 runtime contract；它以现有共享 untrusted persistent session 验证登录 POST/redirect、HttpOnly cookie、Reload 与跨 Page session，以既有 WebContentsView/Page lifecycle 验证复杂 JS、长页、多 Page、Resize 与 Now/Fields/Field 往返。首次 Human Gate 因窄窗 viewport、Clipboard、网页上下文菜单与 loading feedback 不足而失败。Repair 保持原 Contract：WebContents 从 100% CSS zoom 启动，窄窗 Browse shell 收敛；Main 使用 `ContextMenuParams` 与 WebContents/Clipboard 原生命令；UI 由真实 load events 驱动。E2E 核对 remote viewport/native bounds/visual scale/DPR/响应式渲染像素，并执行真实键盘复制粘贴与右键事件。稳定 fixture 只负责防回归，真实网站仍必须由 Human Experience Gate 裁决。Slice 05 Repair Candidate 通过后才可由用户决定是否进入正式 packaged/portable/Installer Gate。
+
+Slice 05 第二轮 Repair 继续不增加 durable contract：trusted Omnibox 的 edit menu 由 App WebContents Main handler提供；Page 标签菜单只接受现有 ephemeral `page_id` validator，仍属于 trusted Browser bridge。favicon 是 ephemeral Page presentation state，不能成为 Field/Object identity、Schema 或 Migration；remote favicon URL 只能由隔离 Browse session 获取，Main 限制协议/MIME/字节/尺寸并经 `nativeImage` 重编码为 PNG data URL，trusted origin 的 CSP 不放开 HTTP(S) image source。Loading 只迁移视觉表达，不改变 Electron load lifecycle。
+
+用户于 2026-08-16 最终裁决 Phase 03 完结。正式 Phase Gate 在 dev、packaged 与从全新临时目录解压的 portable 宿主中运行相同 Browse E2E，并同步回归 Phase 02 Field Reality；全部 PASS。该 closeout 没有改变 Phase 02 Frozen Schema、Field Reality、FIPC/trusted-origin、Object identity 或 remote isolation，也没有建立新的 durable Browser contract。下一阶段仍须单独设计和授权。
 
 Codex 不得在未评审情况下把这些设计成不可替换的深耦合实现。
+
+Rapid Desktop Foundation 已在 additive Migration 0005/schema 5 中实现首个 Project/Conversation 工作闭环。Project 仍以 Field stable identity + `PROJECT_ROOT` device binding 表达；Conversation/Message 由 Rust Core/SQLite 持久化。Electron Main 提供 bounded filesystem/process adapter，trusted renderer 只获得精确 Project-scoped bridge，Remote Browse WebContents 不获得本地 workspace capability。当前文件工作面是 bounded UTF-8 editor/diff，并非完整 code editor；Terminal 是显式 PowerShell process adapter，并非 PTY。LSP、PTY、Git change model、agent multi-file transaction、installer/updater/code signing 与真实 Provider acceptance 仍是开放项。

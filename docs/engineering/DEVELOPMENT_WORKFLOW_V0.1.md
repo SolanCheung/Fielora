@@ -1,5 +1,7 @@
 # Fielora Development Workflow V0.1
 
+> 2026-08-17 Rapid Desktop override：普通可逆 Project/Conversation/UI/Provider 工作不再先制作 Phase Freeze Package，直接按最小纵向切片实现并运行对应 Lane。只有 Schema/Migration、credential、安全、破坏性执行或不可回滚架构变化需要短 Change Impact。正式历史 Phase Gate 仅用于回归旧交付，不再阻断 Codex-like Desktop Foundation。
+
 状态：`ACTIVE / VERIFIED`
 
 生效基线：`main@e757d050b97a3f0dd3b6812bccefc1e433571c8f`
@@ -63,3 +65,94 @@ PreMerge Desktop E2E 将截图隔离到系统临时目录并在完成后清理�
 - 不定义、不授权、不开始 Phase 03。
 
 需要更深的 CI、并行测试、缓存、flaky-test quarantine 或 Evidence automation 时，必须作为后续独立基础设施任务评审，不能在产品 Phase 中隐式扩张。
+
+## 7. Change Safety / Compatibility Discipline
+
+Change Safety 是贯穿所有 Phase 的工程纪律，不是新的产品 Phase，也不是用户可见的重型治理系统。它解决：局部 Contract、Schema、Adapter 或 UX 变化不能在远处静默破坏 Reality、Resume、Permission、Verification、Migration 或 Hero Flow。
+
+重要变化开始前必须形成 bounded `CHANGE IMPACT`：
+
+```text
+Proposed change
+  → affected contracts
+  → affected modules/adapters
+  → affected persistent data/migrations
+  → affected invariants
+  → affected Hero Flows
+  → backward compatibility / rollback
+  → required verification and evidence
+```
+
+至少回答：
+
+```text
+What depends on this?
+What happens when this changes?
+```
+
+### 7.1 Change Impact 分类
+
+| 变化 | 最低要求 |
+|---|---|
+| UI-only、无语义变化 | 受影响 UI tests；涉及主流程时补 Human/visual check |
+| Domain/Contract | dependency search、contract tests、architecture invariants、受影响 Hero Flow |
+| FIPC/Adapter | 双端 contract、degraded/unknown behavior、integration/E2E |
+| Schema/Migration | old DB fixture → migration → semantic probe；失败行为、backup/rollback disposition |
+| Permission/Security | negative tests、deny precedence、scope non-expansion、secret/privileged boundary |
+| Verification/Reality | target revision mismatch、stale propagation、Resume/Completion regression |
+| Packaging/runtime | packaged/portable smoke，按风险追加 Installer checkpoint |
+
+### 7.2 Architecture Invariants / Fitness Functions
+
+以下不变量必须逐步转成自动测试；所属能力尚未实现时先保留为后续 Phase Gate：
+
+1. Provider/model switch 不改变 Field、Requirement、Task 或 Evidence identity；
+2. Requirement/source revision 改变后，旧 Verified Result 不得保持 `CURRENT`；
+3. Execution `SUCCEEDED` 不得自动推出 Requirement `VERIFIED`；
+4. 非幂等 `UNKNOWN_OUTCOME` 不得盲目 replay；
+5. Conversation/Memory 删除不得删除 authoritative Reality；
+6. Model、Provider、网页或 Connector metadata 不得扩大 permission；
+7. Auto-review/reviewer replacement 不得扩大 Capability Boundary；
+8. Context Package 不得被当作 Current Reality；
+9. 旧 Field 经 migration 后不得丢失 identity、lineage 或 Resume semantics；
+10. 外部 Adapter/Runtime 重构不得把其内部 identity 泄漏成 Fielora Domain identity。
+
+### 7.3 Contract 与 Migration Compatibility
+
+- 对外或跨进程 Contract 发生不兼容变化时必须显式版本化；优先采用 `reads old + new / writes new` 的 bounded compatibility window；
+- 不得通过同时修改 producer、consumer 与 fixture 来掩盖旧数据/旧 Adapter 已不兼容；
+- Migration 必须验证旧版本真实结构、checksum、重复运行/失败行为与 semantic outcome；“SQL 执行成功”不等于 migration 语义正确；
+- Plugin/Connector/Provider Adapter 只能依赖稳定 Fielora Contract，不依赖另一个 Adapter 的私有结构。
+
+### 7.4 Hero Flow Regression
+
+Alpha 前至少维护以下关键回归链：
+
+```text
+Capture → Inbox → Promote → Field → restart → Resume
+
+Existing Project → Requirement → Development
+→ FAIL → Fix → Replay → Verified Result
+
+Capability Request → Governed Execution
+→ Result / UnknownOutcome → Evidence → Reality
+
+Provider A → Provider B → human revision → Provider C
+→ restart → same authoritative Reality
+```
+
+不是每个 CSS 修改都运行全部 Hero Flow。开发 Lane 先跑受影响测试；Contract/Schema/Permission/Reality/Verification 的变化必须升级到对应关键回归，正式 Phase Gate 仍运行冻结的完整矩阵。
+
+### 7.5 Change Acceptance Gate
+
+重大变化只有在以下条件同时满足时才能被接受：
+
+1. impact scope 已记录；
+2. 受影响 Contract 与持久数据已有兼容/迁移方案；
+3. 相关 architecture invariants 与 negative tests 通过；
+4. 受影响 Hero Flow 已重跑；
+5. Evidence 能说明仍然成立什么、尚未证明什么；
+6. 失败或回滚路径明确；
+7. 重大产品/架构结论已同步 Project Reality、Decisions 与受影响 Spec。
+
+AI Coding 特别容易把当前局部修改做通而漏掉远端语义，因此 `CHANGE IMPACT` 是高风险变更的实现前输入，不得由“本地测试绿”替代。

@@ -6,7 +6,7 @@
 
 日期：2026-08-14
 
-实现 Gate：Phase 01 COMPLETE；Phase 02 Engineering / Desktop Reality / Human Experience / Post-correction Full Gate 全部 PASS，用户于 2026-08-14 裁决 `PHASE_02: COMPLETE`；Phase 03 未授权
+实现 Gate：Phase 01 COMPLETE；Phase 02 COMPLETE；Phase 03 Browse Foundation 于 2026-08-16 裁决 COMPLETE；Phase 04 → Alpha Remap work 已授权并形成独立 Candidate，Phase 04 尚未 Freeze、未获实现授权
 
 ## 1. 架构目标
 
@@ -99,7 +99,7 @@ Phase 01 Repo Bootstrap 使用：
 
 版本事实已经通过官方发布渠道核验：Electron 43.4.0 于 2026-08-11 发布；Node 24 是 LTS 且 24.18.1 存在；Rust 1.97.1 于 2026-07-16 发布；pnpm 11.21.0 是 2026-08-09 的已签名正式发布；rusqlite 0.40.2 已在 crates.io 正式发布、未撤回且支持 `bundled` feature。
 
-本机 Toolchain Gate 已执行：Node 由 `D:\AppInstall\nvm\nvm` 下的 NVM 管理，24.18.1 已安装并 active；pnpm 11.21.0 已准备；Rust 1.97.1 已设为 default，rustfmt/clippy components 已安装。精确版本 metadata、产品 workspace 与依赖已随 Phase 01/02 实现提交并通过验收；Phase 02 已关闭，Phase 03 未授权。
+本机 Toolchain Gate 已执行：Node 由 `D:\AppInstall\nvm\nvm` 下的 NVM 管理，24.18.1 已安装并 active；pnpm 11.21.0 已准备；Rust 1.97.1 已设为 default，rustfmt/clippy components 已安装。精确版本 metadata、产品 workspace 与依赖已随 Phase 01/02 实现提交并通过验收；Phase 02 已关闭，Phase 03 Browse Foundation 已独立授权。
 
 升级规则：工具链升级必须是单独变更，重新通过 Static、Unit、Integration、Desktop E2E、Package 与 Packaged Smoke。
 
@@ -260,6 +260,10 @@ allowRunningInsecureContent = false
 - channel 位于 typed allowlist，payload 通过 schema validation。
 
 Browse/remote content 必须使用隔离的 untrusted WebContents/session boundary，不装载 Fielora app preload，不获得 `window.fielora`，其 origin 永远不能升级为 trusted application origin。App Window 的 navigation、redirect、new-window 与 permission 默认 deny；明确外部 URL 只可交给隔离 Browser Runtime 或 system browser policy 处理。
+
+Phase 03 Slice 04 将 Remote/Local Browse WebContents 的关键 WebPreferences 集中为冻结基线：Node integration（含 subframe）、preload、webview 与 drag-drop navigation 不可用，context isolation、sandbox、web security 与 safe dialogs 开启；独立 Browse session 的 permission check/request、device 与 display media 默认拒绝。Policy 不是 target-only scheme whitelist，而是基于 USER / REMOTE_PAGE / LOCAL_PAGE / OPAQUE_PAGE initiator 与 target 联合裁决：trusted Omnibox 明确提交的本地 `file://` 可作为隔离 Local Page 加载，LOCAL_PAGE 可打开合法本地目标；REMOTE_PAGE 通过 navigation、fetch、iframe 或 window-open 访问 `file://` 必须失败；`fielora://app` 对所有 Loose Browse initiator 一律失败。Local Page 不属于 trusted application origin，仍无 Fielora preload/app bridge/Node。Browser Policy 拒绝由 Main/Browser Runtime 最终强制，内部稳定错误码跨 IPC 后只由 trusted Renderer 映射为产品提示；未知 Electron/IPC/loadURL 异常不得原样显示。该加固不改变 trusted application origin、typed app bridge 或 FIPC trust model。
+
+Browse Desktop E2E 将 `apps/desktop/.webpack` 作为唯一 fresh-build 清理目标，在验证该路径仍精确位于 workspace 内后删除，再由 Electron Forge 完整重建并等待 trusted App target ready。该 Gate 用来捕获 Main bundle 内 import 被重写为未交付 `./browser-errors.js` 一类只有 fresh launch 才出现的模块图回归；稳定 Browser 错误码与产品消息当前和 `browser-policy.ts` 同模块交付。
 
 ### 9.2 Renderer 与 bridge hardening
 
@@ -608,6 +612,8 @@ Phase 01 必须真实验证：
 
 ## 19. V0.1 implementation phases
 
+2026-08-16 用户已确认竞争审计并授权重排 Phase 04 → Alpha。独立候选为 `PHASE_04_ALPHA_REMAP_CANDIDATE_V0.1.md`。在该 Candidate 获用户明确接受并进入正式 Baseline Change 前，本节仍是冻结 Phase 编号与 schema responsibility 的权威基线；Candidate 不授权 Phase 04 实现。
+
 所有阶段仍属于 V0.1：
 
 1. Repo + Desktop Shell + Rust Core + SQLite/Migration + FIPC + thin Field/Resume vertical slice；
@@ -655,10 +661,10 @@ Capability Acquisition Minimal 与 Deploy Website Mandate Prototype 作为 Defer
 - CodingAgentProvider 的 OpenCode/ACP viability；
 - Provider credential vault；
 - updater、code signing、final installer technology；
-- precise Browser tab/webContents model；
+- Slice 02 已确认 ephemeral in-memory Page collection：每个已加载 Page 使用独立 `WebContentsView`，共享 isolated untrusted session，仅 active Page 可见；不形成 durable Browser model；
 - Capability Acquisition / Mandate 是否进入后续产品版本。
 
-Remote Repo 在 bootstrap 时确认为空仓库，Canonical Local Worktree 确认为 `F:\项目\Fielora`。Repo Bootstrap / Toolchain Preparation 后，用户已显式授权并完成 Phase 01 与 Phase 02；冻结架构语义未发生变更。Phase 02 已关闭，Phase 03 仍等待单独定义与 Implementation Authorization。
+Remote Repo 在 bootstrap 时确认为空仓库，Canonical Local Worktree 确认为 `F:\项目\Fielora`。Repo Bootstrap / Toolchain Preparation 后，用户已显式授权并完成 Phase 01 与 Phase 02；冻结架构语义未发生变更。Phase 02 已关闭；用户随后以 `main@7dc1aac593a4d478b7e175e5e197cf99466c1f47` 单独定义并授权 Phase 03 Browse Foundation。
 
 ## 21. Repo Gate
 
@@ -695,5 +701,16 @@ PHASE_02_HUMAN_EXPERIENCE_GATE_PASS
 PHASE_02_POST_CORRECTION_FULL_GATE_PASS
 PHASE_02_FINAL_ACCEPTANCE_GRANTED
 PHASE_02_COMPLETE
-PHASE_03_NOT_AUTHORIZED
+PHASE_03_BROWSE_FOUNDATION_AUTHORIZED
+PHASE_03_ENGINEERING_GATE_PASS
+PHASE_03_DESKTOP_REALITY_GATE_PASS
+PHASE_03_HUMAN_EXPERIENCE_GATE_PASS
+PHASE_03_PACKAGED_GATE_PASS
+PHASE_03_PORTABLE_GATE_PASS
+PHASE_03_FINAL_ACCEPTANCE_GRANTED
+PHASE_03_COMPLETE
+PHASE_04_ALPHA_REMAP_AUTHORIZED
+PHASE_04_ALPHA_REMAP_CANDIDATE_READY_FOR_REVIEW
+PHASE_04_FREEZE_NOT_YET
+PHASE_04_IMPLEMENTATION_NOT_AUTHORIZED
 ```

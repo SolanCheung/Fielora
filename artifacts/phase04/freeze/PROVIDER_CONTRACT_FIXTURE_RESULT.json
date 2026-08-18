@@ -1,0 +1,19 @@
+{
+  "result": "PASS",
+  "provider_families": ["OPENAI_RESPONSES", "ANTHROPIC_MESSAGES"],
+  "fragmented_sse": "PASS",
+  "text_normalization": "PASS",
+  "usage_normalization": "PASS",
+  "tool_request_as_proposal_only": "PASS",
+  "unknown_event_ignored": "PASS",
+  "malformed_protocol_rejected": true,
+  "oversized_event_rejected": true,
+  "deterministic_error_classes": [
+    "CREDENTIAL_REJECTED",
+    "MODEL_NOT_AVAILABLE",
+    "PROVIDER_RATE_LIMITED",
+    "PROVIDER_UNAVAILABLE"
+  ],
+  "external_requests": 0,
+  "product_code_changed": false
+}

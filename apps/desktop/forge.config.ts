@@ -6,6 +6,7 @@ import { mainConfig } from './webpack.main';
 import { rendererConfig } from './webpack.renderer';
 
 const config: ForgeConfig = {
+  outDir: process.env.FIELORA_OUT_DIR || 'out',
   packagerConfig: {
     asar: true,
     executableName: 'Fielora',

@@ -11,11 +11,19 @@ import type {
   StateView,
 } from '@fielora/contracts';
 
-export type Screen = 'startup' | 'now' | 'field';
+export type AppView = 'PROJECTS' | 'NOW' | 'BROWSE' | 'FIELDS' | 'SETTINGS';
+export type Screen = 'startup' | 'projects' | 'now' | 'browse' | 'fields' | 'field' | 'settings';
 
-export function screenFor(health: HealthDTO | undefined, selectedField: string | undefined): Screen {
+export function screenFor(health: HealthDTO | undefined, selectedField: string | undefined, appView: AppView = 'NOW'): Screen {
   if (!health || health.state !== 'READY') return 'startup';
-  return selectedField ? 'field' : 'now';
+  switch (appView) {
+    case 'PROJECTS': return 'projects';
+    case 'BROWSE': return 'browse';
+    case 'FIELDS': return selectedField ? 'field' : 'fields';
+    case 'SETTINGS': return 'settings';
+    case 'NOW': return selectedField ? 'field' : 'now';
+    default: throw new Error(`Unknown app view: ${String(appView)}`);
+  }
 }
 
 export function upsertFields(fields: FieldSummary[], changed: FieldSummary): FieldSummary[] {
@@ -77,6 +85,16 @@ const activityLabels: Record<ActivityAction, string> = {
   REFERENCE_RESTORED: '恢复了参考资料',
   REFERENCE_SOURCE_ATTACHED: '关联了来源',
   REFERENCE_SOURCE_RETRACTED: '移除了来源关联',
+  PROVIDER_CONFIG_CREATED: '创建了 Provider 配置',
+  PROVIDER_CONFIG_UPDATED: '更新了 Provider 配置',
+  PROVIDER_CONFIG_REMOVED: '移除了 Provider 配置',
+  CAPTURE_CREATED: '保存了 Capture',
+  CAPTURE_ATTACHED: '将 Capture 附加到 Field',
+  CAPTURE_PROMOTED: '将 Capture 提升为 Idea Candidate',
+  CAPTURE_ARCHIVED: '归档了 Capture',
+  CAPTURE_RESTORED: '恢复了 Capture',
+  MODEL_INVOCATION_COMPLETED: '完成了模型调用',
+  MODEL_INVOCATION_FAILED: '模型调用失败',
 };
 
 export function activityLabel(action: ActivityAction): string {

@@ -31,6 +31,12 @@ typed_id!(RelationId);
 typed_id!(PaneId);
 typed_id!(SurfaceSnapshotId);
 typed_id!(TraceId);
+typed_id!(ProviderConfigId);
+typed_id!(CaptureId);
+typed_id!(ContextPackageId);
+typed_id!(ModelInvocationId);
+typed_id!(ConversationId);
+typed_id!(MessageId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ProtocolVersion {
@@ -416,10 +422,24 @@ pub struct ListReferencesRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
 pub enum ResourceRef {
-    Field { field_id: FieldId },
-    State { state_id: StateId },
-    Reference { object_id: ObjectId },
-    Relation { relation_id: RelationId },
+    Field {
+        field_id: FieldId,
+    },
+    State {
+        state_id: StateId,
+    },
+    Reference {
+        object_id: ObjectId,
+    },
+    Relation {
+        relation_id: RelationId,
+    },
+    Capture {
+        capture_id: CaptureId,
+    },
+    ProviderConfig {
+        provider_config_id: ProviderConfigId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -499,6 +519,16 @@ pub enum ActivityAction {
     ReferenceRestored,
     ReferenceSourceAttached,
     ReferenceSourceRetracted,
+    ProviderConfigCreated,
+    ProviderConfigUpdated,
+    ProviderConfigRemoved,
+    CaptureCreated,
+    CaptureAttached,
+    CapturePromoted,
+    CaptureArchived,
+    CaptureRestored,
+    ModelInvocationCompleted,
+    ModelInvocationFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -797,6 +827,498 @@ pub struct HealthDTO {
     pub schema_version: u32,
     pub pid: u32,
     pub db_path: String,
+}
+
+// Phase 04 additive provider, invocation, context and capture contracts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProviderKind {
+    Openai,
+    Anthropic,
+    OpenaiCompatible,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EndpointClass {
+    Official,
+    Custom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProviderLifecycle {
+    Active,
+    Disabled,
+    Removed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ProviderConfigView {
+    pub id: ProviderConfigId,
+    pub provider_kind: ProviderKind,
+    pub display_name: String,
+    pub endpoint_class: EndpointClass,
+    pub base_url: Option<String>,
+    pub default_model: String,
+    pub lifecycle_status: ProviderLifecycle,
+    pub credential_present: bool,
+    #[ts(type = "number")]
+    pub revision: u64,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CreateProviderConfigRequest {
+    pub provider_kind: ProviderKind,
+    pub display_name: String,
+    pub base_url: Option<String>,
+    pub default_model: String,
+    pub custom_endpoint_acknowledged: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateProviderConfigRequest {
+    pub provider_config_id: ProviderConfigId,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+    pub display_name: String,
+    pub base_url: Option<String>,
+    pub default_model: String,
+    pub custom_endpoint_acknowledged: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderConfigRequest {
+    pub provider_config_id: ProviderConfigId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct StoreCredentialRequest {
+    pub provider_config_id: ProviderConfigId,
+    pub secret: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ModelIntent {
+    Ask,
+    Continue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ResponseMode {
+    Text,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ContextChipKind {
+    CurrentField,
+    CurrentFocus,
+    CurrentPage,
+    CurrentSelection,
+    Capture,
+    UserNote,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ContextSensitivity {
+    Normal,
+    Sensitive,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ContextCompleteness {
+    Complete,
+    Partial,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ContextChip {
+    pub kind: ContextChipKind,
+    pub source_identity: String,
+    pub source_revision_or_navigation_generation: String,
+    pub display_label: String,
+    pub content: String,
+    pub sensitivity: ContextSensitivity,
+    pub completeness: ContextCompleteness,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ModelInvocationRequest {
+    pub invocation_id: ModelInvocationId,
+    pub context_package_id: ContextPackageId,
+    pub provider_config_id: ProviderConfigId,
+    pub model_id: String,
+    pub intent: ModelIntent,
+    pub user_input: String,
+    pub context_package: Vec<ContextChip>,
+    pub response_mode: ResponseMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct StartModelInvocationRequest {
+    pub provider_config_id: ProviderConfigId,
+    pub model_id: Option<String>,
+    pub intent: ModelIntent,
+    pub user_input: String,
+    pub context_package: Vec<ContextChip>,
+    pub response_mode: ResponseMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct StartModelInvocationResult {
+    pub invocation_id: ModelInvocationId,
+    pub context_package_id: ContextPackageId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CancelModelInvocationRequest {
+    pub invocation_id: ModelInvocationId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ModelUsage {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ToolProposal {
+    pub name: String,
+    #[ts(type = "unknown")]
+    pub arguments: Value,
+    pub provider_opaque_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ModelInvocationEventKind {
+    Started,
+    OutputTextDelta,
+    ToolProposal,
+    Usage,
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ModelInvocationEvent {
+    pub event: String,
+    pub invocation_id: ModelInvocationId,
+    pub kind: ModelInvocationEventKind,
+    pub text_delta: Option<String>,
+    pub tool_proposal: Option<ToolProposal>,
+    pub usage: Option<ModelUsage>,
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CaptureKind {
+    Text,
+    Page,
+    Selection,
+    ModelOutput,
+    FieldExcerpt,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CapturePlacement {
+    Inbox,
+    Attached,
+    Promoted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CaptureLifecycle {
+    Active,
+    Archived,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CaptureSourceKind {
+    UserInput,
+    RemotePage,
+    RemoteSelection,
+    ModelResponse,
+    FieldResource,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureSource {
+    pub kind: CaptureSourceKind,
+    pub title: Option<String>,
+    pub uri: Option<String>,
+    pub field_id: Option<FieldId>,
+    pub resource_type: Option<String>,
+    pub resource_id: Option<String>,
+    #[ts(type = "number | null")]
+    pub resource_revision: Option<u64>,
+    pub provider_config_id: Option<ProviderConfigId>,
+    pub provider_model_id: Option<String>,
+    pub provider_invocation_id: Option<ModelInvocationId>,
+    pub is_partial: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct CaptureView {
+    pub id: CaptureId,
+    pub kind: CaptureKind,
+    pub title: String,
+    pub content: String,
+    pub placement_status: CapturePlacement,
+    pub lifecycle_status: CaptureLifecycle,
+    pub attached_field_id: Option<FieldId>,
+    pub promoted_as: Option<String>,
+    pub source: CaptureSource,
+    #[ts(type = "number")]
+    pub revision: u64,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CreateCaptureRequest {
+    pub kind: CaptureKind,
+    pub title: String,
+    pub content: String,
+    pub source: CaptureSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureRequest {
+    pub capture_id: CaptureId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct MutateCaptureRequest {
+    pub capture_id: CaptureId,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AttachCaptureRequest {
+    pub capture_id: CaptureId,
+    pub field_id: FieldId,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct PromoteCaptureRequest {
+    pub capture_id: CaptureId,
+    pub field_id: Option<FieldId>,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureCursor {
+    #[ts(type = "number")]
+    pub updated_at: i64,
+    pub capture_id: CaptureId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ListCapturesRequest {
+    pub placement: Option<CapturePlacement>,
+    pub lifecycle: Option<CaptureLifecycle>,
+    pub field_id: Option<FieldId>,
+    pub cursor: Option<CaptureCursor>,
+    pub limit: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct CaptureChangedEvent {
+    pub event: String,
+    pub capture_id: CaptureId,
+    pub placement_status: CapturePlacement,
+    pub lifecycle_status: CaptureLifecycle,
+    pub attached_field_id: Option<FieldId>,
+    #[ts(type = "number")]
+    pub revision: u64,
+}
+
+// Rapid Desktop Foundation additive Project / Conversation contracts.
+// A Project keeps the stable Field identity and exposes a device-scoped local root.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ProjectView {
+    pub field_id: FieldId,
+    pub title: String,
+    pub goal: Option<String>,
+    pub root_path: String,
+    #[ts(type = "number")]
+    pub revision: u64,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CreateProjectRequest {
+    pub title: String,
+    pub goal: Option<String>,
+    pub root_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectRequest {
+    pub field_id: FieldId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ConversationLifecycle {
+    Active,
+    Archived,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ConversationView {
+    pub id: ConversationId,
+    pub field_id: FieldId,
+    pub title: String,
+    pub provider_config_id: Option<ProviderConfigId>,
+    pub model_id: Option<String>,
+    pub lifecycle_status: ConversationLifecycle,
+    #[ts(type = "number")]
+    pub revision: u64,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CreateConversationRequest {
+    pub field_id: FieldId,
+    pub title: String,
+    pub provider_config_id: Option<ProviderConfigId>,
+    pub model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ConversationRequest {
+    pub conversation_id: ConversationId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateConversationRequest {
+    pub conversation_id: ConversationId,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+    pub title: String,
+    pub provider_config_id: Option<ProviderConfigId>,
+    pub model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveConversationRequest {
+    pub conversation_id: ConversationId,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ConversationMessageRole {
+    User,
+    Assistant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ConversationMessageStatus {
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ConversationMessageView {
+    pub id: MessageId,
+    pub conversation_id: ConversationId,
+    pub role: ConversationMessageRole,
+    pub content: String,
+    pub status: ConversationMessageStatus,
+    pub provider_config_id: Option<ProviderConfigId>,
+    pub model_id: Option<String>,
+    pub invocation_id: Option<ModelInvocationId>,
+    #[ts(type = "number")]
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CreateConversationMessageRequest {
+    pub conversation_id: ConversationId,
+    pub role: ConversationMessageRole,
+    pub content: String,
+    pub status: ConversationMessageStatus,
+    pub provider_config_id: Option<ProviderConfigId>,
+    pub model_id: Option<String>,
+    pub invocation_id: Option<ModelInvocationId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ListConversationMessagesRequest {
+    pub conversation_id: ConversationId,
 }
 
 #[cfg(test)]

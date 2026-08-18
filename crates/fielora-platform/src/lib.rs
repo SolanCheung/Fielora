@@ -4,6 +4,140 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::{Uuid, Version};
 
+pub const MAX_CREDENTIAL_BYTES: usize = 2048;
+
+#[derive(Debug)]
+pub struct SecretBytes(Vec<u8>);
+
+impl SecretBytes {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+    pub fn expose(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Drop for SecretBytes {
+    fn drop(&mut self) {
+        self.0.fill(0);
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum CredentialError {
+    #[error("credential not found")]
+    NotFound,
+    #[error("credential is empty or exceeds the 2048-byte bound")]
+    InvalidSize,
+    #[error("credential manager operation failed")]
+    Platform,
+}
+
+pub trait CredentialStore: Send + Sync {
+    fn store(&self, target: &str, secret: SecretBytes) -> Result<(), CredentialError>;
+    fn read(&self, target: &str) -> Result<SecretBytes, CredentialError>;
+    fn delete(&self, target: &str) -> Result<(), CredentialError>;
+    fn exists(&self, target: &str) -> bool {
+        self.read(target).is_ok()
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct WindowsCredentialStore;
+
+#[cfg(windows)]
+impl CredentialStore for WindowsCredentialStore {
+    fn store(&self, target: &str, secret: SecretBytes) -> Result<(), CredentialError> {
+        use std::ptr::null_mut;
+        use windows_sys::Win32::Security::Credentials::{
+            CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredWriteW,
+        };
+        if secret.expose().is_empty() || secret.expose().len() > MAX_CREDENTIAL_BYTES {
+            return Err(CredentialError::InvalidSize);
+        }
+        let mut target = wide(target);
+        let mut user = wide("Fielora");
+        let credential = CREDENTIALW {
+            Flags: 0,
+            Type: CRED_TYPE_GENERIC,
+            TargetName: target.as_mut_ptr(),
+            Comment: null_mut(),
+            LastWritten: unsafe { std::mem::zeroed() },
+            CredentialBlobSize: secret.expose().len() as u32,
+            CredentialBlob: secret.expose().as_ptr() as *mut u8,
+            Persist: CRED_PERSIST_LOCAL_MACHINE,
+            AttributeCount: 0,
+            Attributes: null_mut(),
+            TargetAlias: null_mut(),
+            UserName: user.as_mut_ptr(),
+        };
+        if unsafe { CredWriteW(&credential, 0) } == 0 {
+            Err(CredentialError::Platform)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn read(&self, target: &str) -> Result<SecretBytes, CredentialError> {
+        use std::ptr::null_mut;
+        use windows_sys::Win32::Foundation::{ERROR_NOT_FOUND, GetLastError};
+        use windows_sys::Win32::Security::Credentials::{
+            CRED_TYPE_GENERIC, CREDENTIALW, CredFree, CredReadW,
+        };
+        let target = wide(target);
+        let mut raw: *mut CREDENTIALW = null_mut();
+        if unsafe { CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut raw) } == 0 {
+            return if unsafe { GetLastError() } == ERROR_NOT_FOUND {
+                Err(CredentialError::NotFound)
+            } else {
+                Err(CredentialError::Platform)
+            };
+        }
+        let credential = unsafe { &*raw };
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                credential.CredentialBlob,
+                credential.CredentialBlobSize as usize,
+            )
+        }
+        .to_vec();
+        unsafe { CredFree(raw as *const _) };
+        Ok(SecretBytes::new(bytes))
+    }
+
+    fn delete(&self, target: &str) -> Result<(), CredentialError> {
+        use windows_sys::Win32::Foundation::{ERROR_NOT_FOUND, GetLastError};
+        use windows_sys::Win32::Security::Credentials::{CRED_TYPE_GENERIC, CredDeleteW};
+        let target = wide(target);
+        if unsafe { CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0) } == 0
+            && unsafe { GetLastError() } != ERROR_NOT_FOUND
+        {
+            Err(CredentialError::Platform)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(windows))]
+impl CredentialStore for WindowsCredentialStore {
+    fn store(&self, _: &str, _: SecretBytes) -> Result<(), CredentialError> {
+        Err(CredentialError::Platform)
+    }
+    fn read(&self, _: &str) -> Result<SecretBytes, CredentialError> {
+        Err(CredentialError::Platform)
+    }
+    fn delete(&self, _: &str) -> Result<(), CredentialError> {
+        Err(CredentialError::Platform)
+    }
+}
+
+#[cfg(windows)]
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
 #[derive(Debug, Error)]
 pub enum PlatformError {
     #[error("LOCALAPPDATA is unavailable")]

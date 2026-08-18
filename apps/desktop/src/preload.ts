@@ -4,6 +4,33 @@ import type { FieloraBridge } from './types';
 import type { DesktopCoreEvent } from './types';
 
 const bridge: FieloraBridge = {
+  project: {
+    pick: (request) => ipcRenderer.invoke(channels.projectPick, request),
+    list: () => ipcRenderer.invoke(channels.projectList),
+    get: (request) => ipcRenderer.invoke(channels.projectGet, request),
+  },
+  conversation: {
+    create: (request) => ipcRenderer.invoke(channels.conversationCreate, request),
+    list: (request) => ipcRenderer.invoke(channels.conversationList, request),
+    get: (request) => ipcRenderer.invoke(channels.conversationGet, request),
+    update: (request) => ipcRenderer.invoke(channels.conversationUpdate, request),
+    archive: (request) => ipcRenderer.invoke(channels.conversationArchive, request),
+    createMessage: (request) => ipcRenderer.invoke(channels.conversationMessageCreate, request),
+    listMessages: (request) => ipcRenderer.invoke(channels.conversationMessageList, request),
+  },
+  workspace: {
+    listFiles: (request) => ipcRenderer.invoke(channels.workspaceFileList, request),
+    readFile: (request) => ipcRenderer.invoke(channels.workspaceFileRead, request),
+    applyFile: (request) => ipcRenderer.invoke(channels.workspaceFileApply, request),
+    pickAttachments: () => ipcRenderer.invoke(channels.workspaceAttachmentPick),
+    runTerminal: (request) => ipcRenderer.invoke(channels.workspaceTerminalRun, request),
+    cancelTerminal: (request) => ipcRenderer.invoke(channels.workspaceTerminalCancel, request),
+    subscribe: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload);
+      ipcRenderer.on(channels.workspaceEvent, wrapped);
+      return () => ipcRenderer.removeListener(channels.workspaceEvent, wrapped);
+    },
+  },
   field: {
     create: (request) => ipcRenderer.invoke(channels.fieldCreate, request),
     list: () => ipcRenderer.invoke(channels.fieldList),
@@ -42,6 +69,48 @@ const bridge: FieloraBridge = {
     latestSnapshot: (request) => ipcRenderer.invoke(channels.surfaceLatestSnapshot, request),
     saveSnapshotV1: (request) => ipcRenderer.invoke(channels.surfaceSaveSnapshotV1, request),
   },
+  browser: {
+    show: (bounds) => ipcRenderer.invoke(channels.browserShow, bounds),
+    hide: () => ipcRenderer.invoke(channels.browserHide),
+    createPage: () => ipcRenderer.invoke(channels.browserCreatePage),
+    switchPage: (request) => ipcRenderer.invoke(channels.browserSwitchPage, request),
+    closePage: (request) => ipcRenderer.invoke(channels.browserClosePage, request),
+    showPageContextMenu: (request) => ipcRenderer.invoke(channels.browserShowPageContextMenu, request),
+    navigate: (request) => ipcRenderer.invoke(channels.browserNavigate, request),
+    back: () => ipcRenderer.invoke(channels.browserBack),
+    forward: () => ipcRenderer.invoke(channels.browserForward),
+    reload: () => ipcRenderer.invoke(channels.browserReload),
+    getState: () => ipcRenderer.invoke(channels.browserState),
+    getContextCandidate: () => ipcRenderer.invoke(channels.browserContext),
+    subscribe: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state);
+      ipcRenderer.on(channels.browserEvent, wrapped);
+      return () => ipcRenderer.removeListener(channels.browserEvent, wrapped);
+    },
+  },
+  provider: {
+    create: (request) => ipcRenderer.invoke(channels.providerCreate, request),
+    update: (request) => ipcRenderer.invoke(channels.providerUpdate, request),
+    storeCredential: (request) => ipcRenderer.invoke(channels.providerStoreCredential, request),
+    deleteCredential: (request) => ipcRenderer.invoke(channels.providerDeleteCredential, request),
+    remove: (request) => ipcRenderer.invoke(channels.providerRemove, request),
+    probe: (request) => ipcRenderer.invoke(channels.providerProbe, request),
+    list: () => ipcRenderer.invoke(channels.providerList),
+    get: (request) => ipcRenderer.invoke(channels.providerGet, request),
+  },
+  model: {
+    start: (request) => ipcRenderer.invoke(channels.modelStart, request),
+    cancel: (request) => ipcRenderer.invoke(channels.modelCancel, request),
+  },
+  capture: {
+    create: (request) => ipcRenderer.invoke(channels.captureCreate, request),
+    attach: (request) => ipcRenderer.invoke(channels.captureAttach, request),
+    promote: (request) => ipcRenderer.invoke(channels.capturePromote, request),
+    archive: (request) => ipcRenderer.invoke(channels.captureArchive, request),
+    restore: (request) => ipcRenderer.invoke(channels.captureRestore, request),
+    list: (request) => ipcRenderer.invoke(channels.captureList, request),
+    get: (request) => ipcRenderer.invoke(channels.captureGet, request),
+  },
   core: {
     getHealth: () => ipcRenderer.invoke(channels.coreHealth),
     subscribe: (listener) => {
@@ -60,5 +129,7 @@ contextBridge.exposeInMainWorld('fielora', bridge);
 if (process.env.FIELORA_E2E === '1') {
   contextBridge.exposeInMainWorld('fieloraTest', {
     killCore: () => ipcRenderer.invoke(channels.testKillCore),
+    resizeWindow: (size: { width: number; height: number }) => ipcRenderer.invoke(channels.testResizeWindow, size),
+    createProject: (request: Parameters<NonNullable<Window['fieloraTest']>['createProject']>[0]) => ipcRenderer.invoke(channels.testCreateProject, request),
   });
 }

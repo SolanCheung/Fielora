@@ -7,6 +7,7 @@
     "start": "electron-forge start",
     "package": "electron-forge package --arch=x64 --platform=win32",
     "make": "electron-forge make --arch=x64 --platform=win32",
+    "icon:generate": "node ../../scripts/generate-desktop-icon.cjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src webpack.*.ts forge.config.ts",
     "test": "node --test src/**/*.test.ts"

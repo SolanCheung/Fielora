@@ -21,16 +21,53 @@ import type {
   SurfaceSnapshotView,
   TransitionStateRequest, UpdateFieldModeRequest,
   UpdateFocusRequest,
+  CreateProviderConfigRequest, UpdateProviderConfigRequest, ProviderConfigRequest, StoreCredentialRequest,
+  ProviderConfigView, StartModelInvocationRequest, StartModelInvocationResult, CancelModelInvocationRequest,
+  ModelInvocationEvent, CaptureChangedEvent, CreateCaptureRequest, CaptureRequest, MutateCaptureRequest,
+  AttachCaptureRequest, PromoteCaptureRequest, ListCapturesRequest, CaptureView, CaptureCursor,
+  ProjectView, ProjectRequest, CreateProjectRequest,
+  ConversationView, CreateConversationRequest, ConversationRequest, UpdateConversationRequest,
+  ArchiveConversationRequest, ConversationMessageView, CreateConversationMessageRequest,
+  ListConversationMessagesRequest,
 } from '@fielora/contracts';
+import type { BrowserContextCandidate, BrowserNavigateRequest, BrowserPageRequest, BrowserPageState, BrowserViewBounds } from './browser-types';
+import type {
+  ApplyWorkspaceFileRequest, CancelTerminalRequest, PickProjectRequest, RunTerminalRequest,
+  TerminalEvent, TerminalRunResult, WorkspaceFileEntry, WorkspaceFileRequest, WorkspaceFileView,
+  WorkspaceAttachmentSelection, WorkspaceProjectRequest,
+} from './workspace-types';
 
 export type Unsubscribe = () => void;
-export type DesktopCoreEvent = DomainEventDTO | {
+export type DesktopCoreEvent = DomainEventDTO | ModelInvocationEvent | CaptureChangedEvent | {
   event: 'event.core.health';
   state: HealthDTO['state'];
   error?: string;
 };
 
 export interface FieloraBridge {
+  project: {
+    pick(request: PickProjectRequest): Promise<ProjectView | null>;
+    list(): Promise<ProjectView[]>;
+    get(request: ProjectRequest): Promise<ProjectView>;
+  };
+  conversation: {
+    create(request: CreateConversationRequest): Promise<ConversationView>;
+    list(request: ProjectRequest): Promise<ConversationView[]>;
+    get(request: ConversationRequest): Promise<ConversationView>;
+    update(request: UpdateConversationRequest): Promise<ConversationView>;
+    archive(request: ArchiveConversationRequest): Promise<ConversationView>;
+    createMessage(request: CreateConversationMessageRequest): Promise<ConversationMessageView>;
+    listMessages(request: ListConversationMessagesRequest): Promise<ConversationMessageView[]>;
+  };
+  workspace: {
+    listFiles(request: WorkspaceProjectRequest): Promise<WorkspaceFileEntry[]>;
+    readFile(request: WorkspaceFileRequest): Promise<WorkspaceFileView>;
+    applyFile(request: ApplyWorkspaceFileRequest): Promise<WorkspaceFileView>;
+    pickAttachments(): Promise<WorkspaceAttachmentSelection>;
+    runTerminal(request: RunTerminalRequest): Promise<TerminalRunResult>;
+    cancelTerminal(request: CancelTerminalRequest): Promise<null>;
+    subscribe(listener: (event: TerminalEvent) => void): Unsubscribe;
+  };
   field: {
     create(request: CreateFieldRequest): Promise<FieldView>;
     list(): Promise<FieldSummary[]>;
@@ -69,6 +106,44 @@ export interface FieloraBridge {
     latestSnapshot(request: FieldReferenceRequest): Promise<SurfaceResumeView>;
     saveSnapshotV1(request: SaveSurfaceSnapshotV1Request): Promise<SurfaceSnapshotV1View>;
   };
+  browser: {
+    show(bounds: BrowserViewBounds): Promise<BrowserPageState>;
+    hide(): Promise<BrowserPageState>;
+    createPage(): Promise<BrowserPageState>;
+    switchPage(request: BrowserPageRequest): Promise<BrowserPageState>;
+    closePage(request: BrowserPageRequest): Promise<BrowserPageState>;
+    showPageContextMenu(request: BrowserPageRequest): Promise<BrowserPageState>;
+    navigate(request: BrowserNavigateRequest): Promise<BrowserPageState>;
+    back(): Promise<BrowserPageState>;
+    forward(): Promise<BrowserPageState>;
+    reload(): Promise<BrowserPageState>;
+    getState(): Promise<BrowserPageState>;
+    getContextCandidate(): Promise<BrowserContextCandidate>;
+    subscribe(listener: (state: BrowserPageState) => void): Unsubscribe;
+  };
+  provider: {
+    create(request: CreateProviderConfigRequest): Promise<ProviderConfigView>;
+    update(request: UpdateProviderConfigRequest): Promise<ProviderConfigView>;
+    storeCredential(request: StoreCredentialRequest): Promise<ProviderConfigView>;
+    deleteCredential(request: ProviderConfigRequest): Promise<ProviderConfigView>;
+    remove(request: ProviderConfigRequest): Promise<ProviderConfigView>;
+    probe(request: ProviderConfigRequest): Promise<StartModelInvocationResult>;
+    list(): Promise<ProviderConfigView[]>;
+    get(request: ProviderConfigRequest): Promise<ProviderConfigView>;
+  };
+  model: {
+    start(request: StartModelInvocationRequest): Promise<StartModelInvocationResult>;
+    cancel(request: CancelModelInvocationRequest): Promise<null>;
+  };
+  capture: {
+    create(request: CreateCaptureRequest): Promise<CaptureView>;
+    attach(request: AttachCaptureRequest): Promise<CaptureView>;
+    promote(request: PromoteCaptureRequest): Promise<CaptureView>;
+    archive(request: MutateCaptureRequest): Promise<CaptureView>;
+    restore(request: MutateCaptureRequest): Promise<CaptureView>;
+    list(request: ListCapturesRequest): Promise<Page<CaptureView, CaptureCursor>>;
+    get(request: CaptureRequest): Promise<CaptureView>;
+  };
   core: {
     getHealth(): Promise<HealthDTO>;
     subscribe(listener: (event: DesktopCoreEvent) => void): Unsubscribe;
@@ -83,6 +158,8 @@ declare global {
     fielora: FieloraBridge;
     fieloraTest?: {
       killCore(): Promise<void>;
+      resizeWindow(size: { width: number; height: number }): Promise<{ width: number; height: number }>;
+      createProject(request: CreateProjectRequest): Promise<ProjectView>;
     };
   }
 }

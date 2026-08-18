@@ -50,14 +50,14 @@ switch ($Lane) {
     }
     'Cross' {
         Invoke-DocsGate
-        Invoke-Gate 'contracts' { pnpm contracts:check }
+        Invoke-Gate 'contracts' { pnpm contracts:verify-current }
         Invoke-UiGate
         Invoke-CoreGate
         Invoke-Gate 'integration' { pnpm test:integration }
     }
     'PreMerge' {
         Invoke-DocsGate
-        Invoke-Gate 'contracts' { pnpm contracts:check }
+        Invoke-Gate 'contracts' { pnpm contracts:verify-current }
         Invoke-UiGate
         Invoke-CoreGate
         Invoke-Gate 'integration' { pnpm test:integration }
@@ -68,6 +68,8 @@ switch ($Lane) {
             $env:FIELORA_E2E_EVIDENCE_DIR = $temporaryEvidence
             $env:FIELORA_E2E_TARGET_TIMEOUT_MS = '120000'
             Invoke-Gate 'desktop-e2e' { pnpm test:e2e }
+            Invoke-Gate 'desktop-e2e-browse' { pnpm test:e2e:browse }
+            Invoke-Gate 'desktop-e2e-foundation' { pnpm test:e2e:desktop-foundation }
         }
         finally {
             Remove-Item Env:FIELORA_E2E_EVIDENCE_DIR -ErrorAction SilentlyContinue

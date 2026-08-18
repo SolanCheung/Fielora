@@ -1,0 +1,16 @@
+{
+    "phase":  "04",
+    "generated_at":  "2026-08-17T03:14:03.2135542+00:00",
+    "git_commit":  "7dc1aac593a4d478b7e175e5e197cf99466c1f47",
+    "git_worktree_dirty":  true,
+    "platform":  "Windows 11 x64",
+    "schema_version":  4,
+    "migration_0004_normalized_sha256":  "4d142745b3e9a5ccd8c27f422ecdc888163a575a91b0515f90a1ee6aa0f869ab",
+    "packaged_exe_sha256":  "a9b38612438ec46143261d859902fb9f72e1a7941bd9c2cf93aafa94ba7098d1",
+    "packaged_core_sha256":  "28115aa4ce950243793cec5072f8cfeede61e5d777d7b89c5e48d7d9830b0366",
+    "portable":  "Fielora-V0.1-Phase04-win-x64.zip",
+    "portable_bytes":  148036660,
+    "portable_sha256":  "3a2bfdcca925dc0a70c81971c62253144294b387aa368969428308d0a3a9f662",
+    "provider_external_requests":  0,
+    "real_provider_acceptance":  "PENDING_NO_ELIGIBLE_AUTOMATION_CREDENTIALS"
+}

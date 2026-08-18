@@ -21,7 +21,13 @@ test('startup state does not fake Now before Core readiness', () => {
   assert.equal(screenFor(undefined, undefined), 'startup');
   assert.equal(screenFor({ ...health, state: 'UNAVAILABLE' }, undefined), 'startup');
   assert.equal(screenFor(health, undefined), 'now');
+  assert.equal(screenFor(health, undefined, 'BROWSE'), 'browse');
+  assert.equal(screenFor(health, 'field', 'BROWSE'), 'browse');
+  assert.equal(screenFor(health, undefined, 'FIELDS'), 'fields');
+  assert.equal(screenFor(health, undefined, 'SETTINGS'), 'settings');
+  assert.equal(screenFor(health, 'field', 'FIELDS'), 'field');
   assert.equal(screenFor(health, 'field'), 'field');
+  assert.throws(() => screenFor(health, undefined, 'UNKNOWN' as never), /Unknown app view/);
 });
 
 test('event invalidation result keeps newest field first', () => {

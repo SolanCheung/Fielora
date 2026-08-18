@@ -2,23 +2,31 @@ use fielora_contracts::*;
 use fielora_field::{
     DomainError, Field, FieldService, RealityService, SurfaceService, SurfaceSnapshot,
 };
-use fielora_platform::{DeviceIdentity, PlatformPaths};
-use fielora_storage::{StorageWorker, schema_version};
+use fielora_model::{ModelClient, ModelError, ProviderEndpoint};
+use fielora_platform::{
+    CredentialStore, DeviceIdentity, PlatformPaths, SecretBytes, WindowsCredentialStore,
+};
+use fielora_storage::{ProviderConfigRecord, StorageHandle, StorageWorker, schema_version};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    mpsc::{self, SyncSender},
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
 const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 const PROTOCOL: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
-const CAPABILITIES: [&str; 26] = [
+const CAPABILITIES: [&str; 54] = [
     "field.create",
     "field.list",
     "field.get",
@@ -45,6 +53,34 @@ const CAPABILITIES: [&str; 26] = [
     "activity.list",
     "surface.save_snapshot_v1",
     "field.resume_v1",
+    "provider.create_config",
+    "provider.update_config",
+    "provider.store_credential",
+    "provider.delete_credential",
+    "provider.remove_config",
+    "provider.list_configs",
+    "provider.get_config",
+    "model.start",
+    "model.cancel",
+    "capture.create",
+    "capture.attach",
+    "capture.promote",
+    "capture.archive",
+    "capture.restore",
+    "capture.list",
+    "capture.get",
+    "context.package",
+    "model.stream",
+    "project.create",
+    "project.list",
+    "project.get",
+    "conversation.create",
+    "conversation.list",
+    "conversation.get",
+    "conversation.update",
+    "conversation.archive",
+    "conversation.message.create",
+    "conversation.message.list",
 ];
 
 #[derive(Debug, Error)]
@@ -89,6 +125,12 @@ struct Runtime {
     surface: SurfaceService<fielora_storage::StorageHandle>,
     health: HealthDTO,
     hello_completed: bool,
+    storage: StorageHandle,
+    credentials: Arc<WindowsCredentialStore>,
+    async_runtime: Option<tokio::runtime::Runtime>,
+    cancellations: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    completed_invocations: Arc<Mutex<HashSet<String>>>,
+    event_sender: SyncSender<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -133,6 +175,19 @@ fn run() -> Result<(), CoreError> {
     let storage = StorageWorker::start(&paths.database, device, now_ms())
         .map_err(|error| CoreError::Storage(error.to_string()))?;
     let handle = storage.handle();
+    let (event_sender, event_receiver) = mpsc::sync_channel::<Value>(256);
+    let writer = std::thread::Builder::new()
+        .name("fielora-fipc-writer".into())
+        .spawn(move || {
+            let stdout = io::stdout();
+            let mut output = stdout.lock();
+            while let Ok(message) = event_receiver.recv() {
+                if write_messages(&mut output, vec![message]).is_err() {
+                    break;
+                }
+            }
+        })
+        .map_err(|error| CoreError::Output(io::Error::other(error)))?;
     let mut runtime = Runtime {
         field: FieldService::new(handle.clone(), handle.local_user.clone()),
         reality: RealityService::new(
@@ -150,12 +205,23 @@ fn run() -> Result<(), CoreError> {
             db_path: paths.database.to_string_lossy().into_owned(),
         },
         hello_completed: false,
+        storage: handle,
+        credentials: Arc::new(WindowsCredentialStore),
+        async_runtime: Some(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .worker_threads(2)
+                .thread_name("fielora-model")
+                .build()
+                .map_err(|error| CoreError::Platform(error.to_string()))?,
+        ),
+        cancellations: Arc::new(Mutex::new(HashMap::new())),
+        completed_invocations: Arc::new(Mutex::new(HashSet::new())),
+        event_sender: event_sender.clone(),
     };
 
     let stdin = io::stdin();
     let mut input = stdin.lock();
-    let stdout = io::stdout();
-    let mut output = stdout.lock();
     let mut parser = FrameParser::default();
     let mut buffer = [0_u8; 16 * 1024];
     'read: loop {
@@ -169,17 +235,27 @@ fn run() -> Result<(), CoreError> {
                 ParsedFrame::Frame(bytes) => {
                     let dispatch = handle_frame(&mut runtime, &bytes);
                     match dispatch {
-                        Dispatch::Continue(messages) => write_messages(&mut output, messages)?,
+                        Dispatch::Continue(messages) => {
+                            for message in messages {
+                                event_sender.send(message).map_err(|_| {
+                                    CoreError::Output(io::Error::new(
+                                        io::ErrorKind::BrokenPipe,
+                                        "FIPC writer stopped",
+                                    ))
+                                })?;
+                            }
+                        }
                         Dispatch::Shutdown(messages) => {
-                            write_messages(&mut output, messages)?;
+                            for message in messages {
+                                let _ = event_sender.send(message);
+                            }
                             break 'read;
                         }
                     }
                 }
                 ParsedFrame::Oversized => {
-                    write_messages(
-                        &mut output,
-                        vec![error_response(
+                    event_sender
+                        .send(error_response(
                             Value::Null,
                             -32600,
                             "Frame exceeds 4 MiB",
@@ -187,14 +263,28 @@ fn run() -> Result<(), CoreError> {
                             Uuid::now_v7().to_string(),
                             false,
                             json!({}),
-                        )],
-                    )?;
+                        ))
+                        .map_err(|_| {
+                            CoreError::Output(io::Error::new(
+                                io::ErrorKind::BrokenPipe,
+                                "FIPC writer stopped",
+                            ))
+                        })?;
                 }
             }
         }
     }
     runtime.health.state = CoreHealthState::ShuttingDown;
+    for cancellation in runtime.cancellations.lock().unwrap().values() {
+        cancellation.cancel();
+    }
+    if let Some(async_runtime) = runtime.async_runtime.take() {
+        async_runtime.shutdown_timeout(std::time::Duration::from_millis(750));
+    }
     storage.shutdown();
+    drop(runtime);
+    drop(event_sender);
+    let _ = writer.join();
     info!("core shutdown complete");
     Ok(())
 }
@@ -248,7 +338,7 @@ fn handle_frame(runtime: &mut Runtime, bytes: &[u8]) -> Dispatch {
         }
     };
     let id = value.get("id").cloned().unwrap_or(Value::Null);
-    let request = match serde_json::from_value::<RequestEnvelope>(value) {
+    let mut request = match serde_json::from_value::<RequestEnvelope>(value) {
         Ok(request) if request.jsonrpc == "2.0" && !request.id.is_null() => request,
         _ => {
             return Dispatch::Continue(vec![error_response(
@@ -303,7 +393,7 @@ fn handle_frame(runtime: &mut Runtime, bytes: &[u8]) -> Dispatch {
     }
 
     let id = request.id.clone();
-    let result = dispatch_request(runtime, &request, TraceId::new(trace_id.clone()));
+    let result = dispatch_request(runtime, &mut request, TraceId::new(trace_id.clone()));
     match result {
         Ok((result, event)) => {
             let mut messages = vec![success_response(id, result)];
@@ -326,7 +416,7 @@ fn handle_frame(runtime: &mut Runtime, bytes: &[u8]) -> Dispatch {
 
 fn dispatch_request(
     runtime: &mut Runtime,
-    request: &RequestEnvelope,
+    request: &mut RequestEnvelope,
     trace_id: TraceId,
 ) -> Result<(Value, Option<DomainEventDTO>), DomainError> {
     match request.method.as_str() {
@@ -341,6 +431,55 @@ fn dispatch_request(
         }
         "system.health" => serialize(runtime.health.clone()),
         "system.shutdown" | "system.cancel" => Ok((Value::Null, None)),
+        "command.project.create" => {
+            let params: CreateProjectRequest = parse_params(&request.params)?;
+            validate_create_project(&params)?;
+            serialize(runtime.storage.create_project(params, now_ms())?)
+        }
+        "query.project.list" => serialize(runtime.storage.list_projects()?),
+        "query.project.get" => {
+            let params: ProjectRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.get_project(params.field_id)?)
+        }
+        "command.conversation.create" => {
+            let params: CreateConversationRequest = parse_params(&request.params)?;
+            validate_create_conversation(&params)?;
+            serialize(runtime.storage.create_conversation(params, now_ms())?)
+        }
+        "query.conversation.list" => {
+            let params: ProjectRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.list_conversations(params.field_id)?)
+        }
+        "query.conversation.get" => {
+            let params: ConversationRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.get_conversation(params.conversation_id)?)
+        }
+        "command.conversation.update" => {
+            let params: UpdateConversationRequest = parse_params(&request.params)?;
+            validate_update_conversation(&params)?;
+            serialize(runtime.storage.update_conversation(params, now_ms())?)
+        }
+        "command.conversation.archive" => {
+            let params: ArchiveConversationRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.archive_conversation(params, now_ms())?)
+        }
+        "command.conversation.message.create" => {
+            let params: CreateConversationMessageRequest = parse_params(&request.params)?;
+            validate_create_conversation_message(&params)?;
+            serialize(
+                runtime
+                    .storage
+                    .create_conversation_message(params, now_ms())?,
+            )
+        }
+        "query.conversation.message.list" => {
+            let params: ListConversationMessagesRequest = parse_params(&request.params)?;
+            serialize(
+                runtime
+                    .storage
+                    .list_conversation_messages(params.conversation_id)?,
+            )
+        }
         "command.field.create" => {
             let params: CreateFieldRequest = parse_params(&request.params)?;
             let (field, event) =
@@ -506,11 +645,656 @@ fn dispatch_request(
             let snapshot = runtime.surface.latest(&params.field_id)?.map(snapshot_view);
             serialize(SurfaceResumeView { field, snapshot })
         }
+        "command.provider.create_config" => {
+            let params: CreateProviderConfigRequest = parse_params(&request.params)?;
+            validate_provider_create(&params)?;
+            let record = runtime.storage.create_provider_config(params, now_ms())?;
+            serialize(provider_reconciled(runtime, record)?)
+        }
+        "command.provider.update_config" => {
+            let params: UpdateProviderConfigRequest = parse_params(&request.params)?;
+            let current = runtime
+                .storage
+                .get_provider_config(params.provider_config_id.clone())?;
+            validate_provider_update(&current, &params)?;
+            let record = runtime.storage.update_provider_config(params, now_ms())?;
+            serialize(provider_reconciled(runtime, record)?)
+        }
+        "command.provider.store_credential" => {
+            let params: StoreCredentialRequest =
+                serde_json::from_value(std::mem::take(&mut request.params))
+                    .map_err(|error| DomainError::Validation(error.to_string()))?;
+            let record = runtime
+                .storage
+                .get_provider_config(params.provider_config_id.clone())?;
+            if record.view.lifecycle_status == ProviderLifecycle::Removed {
+                return Err(DomainError::TerminalResource);
+            }
+            runtime
+                .credentials
+                .store(
+                    &record.credential_ref,
+                    SecretBytes::new(params.secret.into_bytes()),
+                )
+                .map_err(|_| DomainError::Validation("CREDENTIAL_STORE_FAILED".into()))?;
+            let record = match runtime.storage.set_provider_credential_present(
+                record.view.id,
+                true,
+                now_ms(),
+            ) {
+                Ok(record) => record,
+                Err(error) => {
+                    let _ = runtime.credentials.delete(&record.credential_ref);
+                    return Err(error);
+                }
+            };
+            serialize(provider_reconciled(runtime, record)?)
+        }
+        "command.provider.delete_credential" => {
+            let params: ProviderConfigRequest = parse_params(&request.params)?;
+            let record = runtime
+                .storage
+                .get_provider_config(params.provider_config_id)?;
+            runtime
+                .credentials
+                .delete(&record.credential_ref)
+                .map_err(|_| DomainError::Validation("CREDENTIAL_DELETE_FAILED".into()))?;
+            let record =
+                runtime
+                    .storage
+                    .set_provider_credential_present(record.view.id, false, now_ms())?;
+            serialize(provider_reconciled(runtime, record)?)
+        }
+        "command.provider.remove_config" => {
+            let params: ProviderConfigRequest = parse_params(&request.params)?;
+            let record = runtime
+                .storage
+                .get_provider_config(params.provider_config_id)?;
+            runtime
+                .credentials
+                .delete(&record.credential_ref)
+                .map_err(|_| DomainError::Validation("CREDENTIAL_DELETE_FAILED".into()))?;
+            serialize(provider_reconciled(
+                runtime,
+                runtime
+                    .storage
+                    .remove_provider_config(record.view.id, now_ms())?,
+            )?)
+        }
+        "query.provider.list_configs" => serialize(
+            runtime
+                .storage
+                .list_provider_configs()?
+                .into_iter()
+                .map(|record| provider_reconciled(runtime, record))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        "query.provider.get_config" => {
+            let params: ProviderConfigRequest = parse_params(&request.params)?;
+            serialize(provider_reconciled(
+                runtime,
+                runtime
+                    .storage
+                    .get_provider_config(params.provider_config_id)?,
+            )?)
+        }
+        "command.provider.probe" => {
+            let params: ProviderConfigRequest = parse_params(&request.params)?;
+            let record = runtime
+                .storage
+                .get_provider_config(params.provider_config_id)?;
+            serialize(start_model(
+                runtime,
+                StartModelInvocationRequest {
+                    provider_config_id: record.view.id.clone(),
+                    model_id: Some(record.view.default_model.clone()),
+                    intent: ModelIntent::Ask,
+                    user_input: "Reply with FIELORA_PROVIDER_PROBE_OK".into(),
+                    context_package: vec![],
+                    response_mode: ResponseMode::Text,
+                },
+            )?)
+        }
+        "command.model.start" => serialize(start_model(runtime, parse_params(&request.params)?)?),
+        "command.model.cancel" => {
+            let params: CancelModelInvocationRequest = parse_params(&request.params)?;
+            let cancellation = runtime
+                .cancellations
+                .lock()
+                .unwrap()
+                .get(&params.invocation_id.0)
+                .cloned()
+                .ok_or(DomainError::NotFound)?;
+            cancellation.cancel();
+            serialize(Value::Null)
+        }
+        "command.capture.create" => {
+            let params: CreateCaptureRequest = parse_params(&request.params)?;
+            validate_capture_create(runtime, &params)?;
+            let capture = runtime.storage.create_capture(params, now_ms())?;
+            emit_capture(runtime, &capture);
+            serialize(capture)
+        }
+        "command.capture.attach" => {
+            let capture = runtime
+                .storage
+                .attach_capture(parse_params(&request.params)?, now_ms())?;
+            emit_capture(runtime, &capture);
+            serialize(capture)
+        }
+        "command.capture.promote" => {
+            let capture = runtime
+                .storage
+                .promote_capture(parse_params(&request.params)?, now_ms())?;
+            emit_capture(runtime, &capture);
+            serialize(capture)
+        }
+        "command.capture.archive" => {
+            let params: MutateCaptureRequest = parse_params(&request.params)?;
+            let capture = runtime.storage.set_capture_archived(
+                params.capture_id,
+                params.expected_revision,
+                true,
+                now_ms(),
+            )?;
+            emit_capture(runtime, &capture);
+            serialize(capture)
+        }
+        "command.capture.restore" => {
+            let params: MutateCaptureRequest = parse_params(&request.params)?;
+            let capture = runtime.storage.set_capture_archived(
+                params.capture_id,
+                params.expected_revision,
+                false,
+                now_ms(),
+            )?;
+            emit_capture(runtime, &capture);
+            serialize(capture)
+        }
+        "query.capture.list" => serialize(
+            runtime
+                .storage
+                .list_captures(parse_params(&request.params)?)?,
+        ),
+        "query.capture.get" => {
+            let params: CaptureRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.get_capture(params.capture_id)?)
+        }
         method => {
             warn!(method, "unknown FIPC method");
             Err(DomainError::Validation(format!("unknown_method:{method}")))
         }
     }
+}
+
+fn provider_public(
+    record: ProviderConfigRecord,
+    credentials: &dyn CredentialStore,
+) -> ProviderConfigView {
+    let mut view = record.view;
+    view.credential_present = credentials.exists(&record.credential_ref);
+    view
+}
+
+fn provider_reconciled(
+    runtime: &Runtime,
+    record: ProviderConfigRecord,
+) -> Result<ProviderConfigView, DomainError> {
+    let present = runtime.credentials.exists(&record.credential_ref);
+    if !present && record.view.lifecycle_status == ProviderLifecycle::Active {
+        return Ok(provider_public(
+            runtime
+                .storage
+                .set_provider_credential_present(record.view.id, false, now_ms())?,
+            runtime.credentials.as_ref(),
+        ));
+    }
+    Ok(provider_public(record, runtime.credentials.as_ref()))
+}
+
+fn validate_text(label: &str, value: &str, max: usize) -> Result<(), DomainError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.len() > max {
+        return Err(DomainError::Validation(format!(
+            "{label} is empty or too long"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_create_project(request: &CreateProjectRequest) -> Result<(), DomainError> {
+    validate_unicode_text("title", &request.title, 120, 480, false)?;
+    if let Some(goal) = request.goal.as_deref() {
+        validate_unicode_text("goal", goal, 4_000, 16 * 1024, true)?;
+    }
+    if request.root_path.trim() != request.root_path
+        || request.root_path.is_empty()
+        || request.root_path.len() > 32_767
+        || request.root_path.chars().any(char::is_control)
+        || !Path::new(&request.root_path).is_absolute()
+    {
+        return Err(DomainError::Validation("project root is invalid".into()));
+    }
+    Ok(())
+}
+
+fn validate_conversation_fields(title: &str, model_id: Option<&str>) -> Result<(), DomainError> {
+    validate_unicode_text("title", title, 120, 480, false)?;
+    if let Some(model_id) = model_id {
+        validate_unicode_text("model_id", model_id, 256, 1_024, false)?;
+    }
+    Ok(())
+}
+
+fn validate_create_conversation(request: &CreateConversationRequest) -> Result<(), DomainError> {
+    validate_conversation_fields(&request.title, request.model_id.as_deref())
+}
+
+fn validate_update_conversation(request: &UpdateConversationRequest) -> Result<(), DomainError> {
+    validate_conversation_fields(&request.title, request.model_id.as_deref())
+}
+
+fn validate_create_conversation_message(
+    request: &CreateConversationMessageRequest,
+) -> Result<(), DomainError> {
+    validate_unicode_text(
+        "message content",
+        &request.content,
+        1_048_576,
+        1_048_576,
+        false,
+    )?;
+    if let Some(model_id) = request.model_id.as_deref() {
+        validate_unicode_text("model_id", model_id, 256, 1_024, false)?;
+    }
+    if request.role == ConversationMessageRole::User
+        && (request.provider_config_id.is_some()
+            || request.model_id.is_some()
+            || request.invocation_id.is_some())
+    {
+        return Err(DomainError::Validation(
+            "user message cannot claim provider provenance".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_unicode_text(
+    label: &str,
+    value: &str,
+    max_scalars: usize,
+    max_bytes: usize,
+    allow_empty: bool,
+) -> Result<(), DomainError> {
+    if (!allow_empty && value.trim().is_empty())
+        || value.chars().count() > max_scalars
+        || value.len() > max_bytes
+    {
+        return Err(DomainError::Validation(format!(
+            "{label} is empty or too long"
+        )));
+    }
+    Ok(())
+}
+
+fn credential_like(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    let long_token_after = |marker: &str, minimum: usize| {
+        lower.match_indices(marker).any(|(index, _)| {
+            let suffix = lower[index + marker.len()..].trim_start();
+            let suffix = suffix.strip_prefix("bearer ").unwrap_or(suffix);
+            suffix
+                .bytes()
+                .take_while(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
+                })
+                .count()
+                >= minimum
+        })
+    };
+    long_token_after("authorization:", 16)
+        || long_token_after("x-api-key:", 16)
+        || long_token_after("api_key=", 16)
+        || long_token_after("api-key=", 16)
+        || long_token_after("bearer ", 16)
+        || long_token_after("sk-", 20)
+}
+
+fn valid_capture_uri(value: &str) -> bool {
+    if value.len() > 2048 || value.trim() != value || value.chars().any(char::is_control) {
+        return false;
+    }
+    let remainder = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"));
+    let Some(remainder) = remainder else {
+        return false;
+    };
+    let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
+    !authority.is_empty() && !authority.contains('@') && !authority.chars().any(char::is_whitespace)
+}
+
+fn validate_provider_create(request: &CreateProviderConfigRequest) -> Result<(), DomainError> {
+    validate_text("display_name", &request.display_name, 120)?;
+    validate_text("default_model", &request.default_model, 256)?;
+    match request.provider_kind {
+        ProviderKind::Openai | ProviderKind::Anthropic
+            if request.base_url.is_none() && !request.custom_endpoint_acknowledged =>
+        {
+            Ok(())
+        }
+        ProviderKind::OpenaiCompatible
+            if request.custom_endpoint_acknowledged
+                && request
+                    .base_url
+                    .as_deref()
+                    .is_some_and(|url| url.starts_with("https://")) =>
+        {
+            Ok(())
+        }
+        _ => Err(DomainError::Validation("CUSTOM_ENDPOINT_REJECTED".into())),
+    }
+}
+
+fn validate_provider_update(
+    current: &ProviderConfigRecord,
+    request: &UpdateProviderConfigRequest,
+) -> Result<(), DomainError> {
+    validate_text("display_name", &request.display_name, 120)?;
+    validate_text("default_model", &request.default_model, 256)?;
+    match current.view.provider_kind {
+        ProviderKind::Openai | ProviderKind::Anthropic
+            if request.base_url.is_none() && !request.custom_endpoint_acknowledged =>
+        {
+            Ok(())
+        }
+        ProviderKind::OpenaiCompatible
+            if request.custom_endpoint_acknowledged
+                && request
+                    .base_url
+                    .as_deref()
+                    .is_some_and(|url| url.starts_with("https://")) =>
+        {
+            Ok(())
+        }
+        _ => Err(DomainError::Validation("CUSTOM_ENDPOINT_REJECTED".into())),
+    }
+}
+
+fn validate_capture_create(
+    runtime: &Runtime,
+    request: &CreateCaptureRequest,
+) -> Result<(), DomainError> {
+    validate_unicode_text("title", &request.title, 120, 480, false)?;
+    validate_unicode_text("content", &request.content, 16_000, 64 * 1024, false)?;
+    if let Some(title) = request.source.title.as_deref() {
+        validate_unicode_text("source.title", title, 120, 480, true)?;
+    }
+    let kind_matches = matches!(
+        (request.kind, request.source.kind),
+        (CaptureKind::Text, CaptureSourceKind::UserInput)
+            | (CaptureKind::Text, CaptureSourceKind::ModelResponse)
+            | (CaptureKind::Page, CaptureSourceKind::RemotePage)
+            | (CaptureKind::Selection, CaptureSourceKind::RemoteSelection)
+            | (CaptureKind::ModelOutput, CaptureSourceKind::ModelResponse)
+            | (CaptureKind::FieldExcerpt, CaptureSourceKind::FieldResource)
+    );
+    if !kind_matches {
+        return Err(DomainError::Validation(
+            "capture kind/source mismatch".into(),
+        ));
+    }
+    match request.source.kind {
+        CaptureSourceKind::RemotePage | CaptureSourceKind::RemoteSelection => {
+            if !request.source.uri.as_deref().is_some_and(valid_capture_uri) {
+                return Err(DomainError::Validation(
+                    "invalid credential-free page URI".into(),
+                ));
+            }
+            if request.source.provider_config_id.is_some() || request.source.field_id.is_some() {
+                return Err(DomainError::Validation(
+                    "remote provenance contains unrelated identity".into(),
+                ));
+            }
+        }
+        CaptureSourceKind::ModelResponse => {
+            let invocation = request
+                .source
+                .provider_invocation_id
+                .as_ref()
+                .ok_or_else(|| DomainError::Validation("model provenance missing".into()))?;
+            if request.source.provider_config_id.is_none()
+                || request.source.provider_model_id.is_none()
+                || request.source.uri.is_some()
+                || request.source.field_id.is_some()
+            {
+                return Err(DomainError::Validation("model provenance invalid".into()));
+            }
+            validate_unicode_text(
+                "provider_model_id",
+                request
+                    .source
+                    .provider_model_id
+                    .as_deref()
+                    .unwrap_or_default(),
+                256,
+                1024,
+                false,
+            )?;
+            if !request.source.is_partial
+                && !runtime
+                    .completed_invocations
+                    .lock()
+                    .unwrap()
+                    .contains(&invocation.0)
+            {
+                return Err(DomainError::Validation(
+                    "MODEL_INVOCATION_NOT_COMPLETED".into(),
+                ));
+            }
+        }
+        CaptureSourceKind::FieldResource => {
+            let field = request
+                .source
+                .field_id
+                .as_ref()
+                .ok_or_else(|| DomainError::Validation("field provenance missing".into()))?;
+            let _ = runtime.field.get(field)?;
+            if request.source.resource_type.is_none()
+                || request.source.resource_id.is_none()
+                || request.source.resource_revision.is_none()
+                || request.source.provider_config_id.is_some()
+                || request.source.uri.is_some()
+            {
+                return Err(DomainError::Validation("field provenance invalid".into()));
+            }
+        }
+        CaptureSourceKind::UserInput => {
+            if request.source.uri.is_some()
+                || request.source.field_id.is_some()
+                || request.source.provider_config_id.is_some()
+            {
+                return Err(DomainError::Validation(
+                    "user input provenance invalid".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn normalize_context(
+    runtime: &Runtime,
+    chips: Vec<ContextChip>,
+) -> Result<Vec<ContextChip>, DomainError> {
+    if chips.len() > 8 {
+        return Err(DomainError::Validation("CONTEXT_TOO_LARGE".into()));
+    }
+    let mut result = Vec::with_capacity(chips.len());
+    let mut total_bytes = 0usize;
+    let mut total_scalars = 0usize;
+    for mut chip in chips {
+        if chip.sensitivity == ContextSensitivity::Blocked {
+            return Err(DomainError::Validation("CONTEXT_BLOCKED".into()));
+        }
+        match chip.kind {
+            ContextChipKind::CurrentField => {
+                let field = runtime
+                    .field
+                    .get(&FieldId::new(chip.source_identity.clone()))?;
+                chip.source_revision_or_navigation_generation = field.revision.to_string();
+                chip.content = format!("{}\n{}", field.title, field.goal.unwrap_or_default());
+            }
+            ContextChipKind::CurrentFocus => {
+                let field = runtime
+                    .field
+                    .get(&FieldId::new(chip.source_identity.clone()))?;
+                chip.source_revision_or_navigation_generation = field.revision.to_string();
+                chip.content = field
+                    .current_focus
+                    .map(|value| value.to_string())
+                    .unwrap_or_default();
+            }
+            ContextChipKind::Capture => {
+                let capture = runtime
+                    .storage
+                    .get_capture(CaptureId::new(chip.source_identity.clone()))?;
+                chip.source_revision_or_navigation_generation = capture.revision.to_string();
+                chip.content = capture.content;
+            }
+            ContextChipKind::CurrentPage
+            | ContextChipKind::CurrentSelection
+            | ContextChipKind::UserNote => {}
+        }
+        validate_text("context.display_label", &chip.display_label, 160)?;
+        validate_text("context.source_identity", &chip.source_identity, 256)?;
+        validate_text(
+            "context.source_revision_or_navigation_generation",
+            &chip.source_revision_or_navigation_generation,
+            64,
+        )?;
+        validate_unicode_text("context.content", &chip.content, 4_000, 16 * 1024, true)?;
+        if credential_like(&chip.content) {
+            return Err(DomainError::Validation("CONTEXT_BLOCKED".into()));
+        }
+        total_bytes = total_bytes.saturating_add(chip.content.len());
+        total_scalars = total_scalars.saturating_add(chip.content.chars().count());
+        if total_bytes > 48 * 1024 || total_scalars > 12_000 {
+            return Err(DomainError::Validation("CONTEXT_TOO_LARGE".into()));
+        }
+        result.push(chip);
+    }
+    Ok(result)
+}
+
+fn start_model(
+    runtime: &mut Runtime,
+    params: StartModelInvocationRequest,
+) -> Result<StartModelInvocationResult, DomainError> {
+    validate_unicode_text("user_input", &params.user_input, 8_000, 32 * 1024, false)?;
+    if credential_like(&params.user_input) {
+        return Err(DomainError::Validation("CONTEXT_BLOCKED".into()));
+    }
+    if let Some(model_id) = params.model_id.as_deref() {
+        validate_unicode_text("model_id", model_id, 256, 1024, false)?;
+    }
+    let record = runtime
+        .storage
+        .get_provider_config(params.provider_config_id.clone())?;
+    if record.view.lifecycle_status != ProviderLifecycle::Active {
+        return Err(DomainError::Validation("PROVIDER_DISABLED".into()));
+    }
+    let secret = runtime
+        .credentials
+        .read(&record.credential_ref)
+        .map_err(|_| DomainError::Validation("CREDENTIAL_MISSING".into()))?;
+    let invocation_id = ModelInvocationId::new(Uuid::now_v7().to_string());
+    let context_package_id = ContextPackageId::new(Uuid::now_v7().to_string());
+    let request = ModelInvocationRequest {
+        invocation_id: invocation_id.clone(),
+        context_package_id: context_package_id.clone(),
+        provider_config_id: record.view.id.clone(),
+        model_id: params.model_id.unwrap_or(record.view.default_model.clone()),
+        intent: params.intent,
+        user_input: params.user_input,
+        context_package: normalize_context(runtime, params.context_package)?,
+        response_mode: params.response_mode,
+    };
+    let cancellation = CancellationToken::new();
+    runtime
+        .cancellations
+        .lock()
+        .unwrap()
+        .insert(invocation_id.0.clone(), cancellation.clone());
+    let cancellations = runtime.cancellations.clone();
+    let completed = runtime.completed_invocations.clone();
+    let sender = runtime.event_sender.clone();
+    let id = invocation_id.0.clone();
+    let fixture_enabled = std::env::var("FIELORA_E2E").as_deref() == Ok("1");
+    let fixture_complete = fixture_enabled && request.model_id == "__fielora_fixture__";
+    let fixture_failure = fixture_enabled && request.model_id == "__fielora_fixture_failure__";
+    let terminal_storage = runtime.storage.clone();
+    let field_scope = request
+        .context_package
+        .iter()
+        .find(|chip| chip.kind == ContextChipKind::CurrentField)
+        .map(|chip| FieldId::new(chip.source_identity.clone()));
+    let terminal_provider = request.provider_config_id.clone();
+    let terminal_model = request.model_id.clone();
+    runtime.async_runtime.as_ref().expect("model runtime available").spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        if fixture_complete || fixture_failure {
+            send_model_event(&sender,ModelInvocationEvent{event:"event.model.invocation".into(),invocation_id:request.invocation_id.clone(),kind:ModelInvocationEventKind::Started,text_delta:None,tool_proposal:None,usage:None,error_code:None});
+            tokio::select!{_=cancellation.cancelled()=>send_terminal(&sender,&request.invocation_id,ModelInvocationEventKind::Cancelled,Some("INVOCATION_CANCELLED")),_=tokio::time::sleep(std::time::Duration::from_millis(40))=>{
+                if fixture_failure { send_terminal(&sender,&request.invocation_id,ModelInvocationEventKind::Failed,Some("PROVIDER_RATE_LIMITED")); }
+                else { send_model_event(&sender,ModelInvocationEvent{event:"event.model.invocation".into(),invocation_id:request.invocation_id.clone(),kind:ModelInvocationEventKind::OutputTextDelta,text_delta:Some("Fielora fixture response".into()),tool_proposal:None,usage:None,error_code:None});
+                send_model_event(&sender,ModelInvocationEvent{event:"event.model.invocation".into(),invocation_id:request.invocation_id.clone(),kind:ModelInvocationEventKind::Usage,text_delta:None,tool_proposal:None,usage:Some(ModelUsage{input_tokens:Some(3),output_tokens:Some(3)}),error_code:None});completed.lock().unwrap().insert(id.clone());send_terminal(&sender,&request.invocation_id,ModelInvocationEventKind::Completed,None); }}}
+        } else {
+            let result=match ModelClient::new(){Ok(client)=>client.invoke(ProviderEndpoint{kind:record.view.provider_kind,base_url:record.view.base_url},request.clone(),secret.expose(),cancellation.clone(),|event|send_model_event(&sender,event)).await,Err(error)=>Err(error)};
+            match result {Ok(())=>{completed.lock().unwrap().insert(id.clone());send_terminal(&sender,&request.invocation_id,ModelInvocationEventKind::Completed,None);},Err(ModelError::InvocationCancelled)=>send_terminal(&sender,&request.invocation_id,ModelInvocationEventKind::Cancelled,Some("INVOCATION_CANCELLED")),Err(error)=>send_terminal(&sender,&request.invocation_id,ModelInvocationEventKind::Failed,Some(error.code()))}
+        }
+        let was_completed=completed.lock().unwrap().contains(&id);let _=terminal_storage.record_model_terminal(field_scope,terminal_provider,terminal_model,was_completed,now_ms());cancellations.lock().unwrap().remove(&id);
+    });
+    Ok(StartModelInvocationResult {
+        invocation_id,
+        context_package_id,
+    })
+}
+
+fn send_model_event(sender: &SyncSender<Value>, event: ModelInvocationEvent) {
+    let _ = sender.send(json!({"jsonrpc":"2.0","method":"event.model.invocation","params":event}));
+}
+fn send_terminal(
+    sender: &SyncSender<Value>,
+    id: &ModelInvocationId,
+    kind: ModelInvocationEventKind,
+    error: Option<&str>,
+) {
+    send_model_event(
+        sender,
+        ModelInvocationEvent {
+            event: "event.model.invocation".into(),
+            invocation_id: id.clone(),
+            kind,
+            text_delta: None,
+            tool_proposal: None,
+            usage: None,
+            error_code: error.map(str::to_owned),
+        },
+    );
+}
+fn emit_capture(runtime: &Runtime, capture: &CaptureView) {
+    let event = CaptureChangedEvent {
+        event: "event.capture.changed".into(),
+        capture_id: capture.id.clone(),
+        placement_status: capture.placement_status,
+        lifecycle_status: capture.lifecycle_status,
+        attached_field_id: capture.attached_field_id.clone(),
+        revision: capture.revision,
+    };
+    let _ = runtime
+        .event_sender
+        .send(json!({"jsonrpc":"2.0","method":"event.capture.changed","params":event}));
 }
 
 fn mutation<T: serde::Serialize>(
@@ -824,5 +1608,37 @@ mod tests {
         });
         assert!(newer_minor.is_some_and(|(major, _)| major == PROTOCOL.major));
         assert!(wrong_major.is_none_or(|(major, _)| major != PROTOCOL.major));
+    }
+
+    #[test]
+    fn phase04_unicode_bounds_count_scalars_and_utf8_bytes() {
+        assert!(
+            validate_unicode_text("value", &"😀".repeat(4_000), 4_000, 16 * 1024, true).is_ok()
+        );
+        assert!(
+            validate_unicode_text("value", &"😀".repeat(4_001), 4_000, 16 * 1024, true).is_err()
+        );
+        assert!(
+            validate_unicode_text("value", &"界".repeat(16_001), 20_000, 48_000, true).is_err()
+        );
+    }
+
+    #[test]
+    fn external_send_blocks_credential_like_text_without_echoing_it() {
+        assert!(credential_like(
+            "Authorization: Bearer abcdefghijklmnopqrstuvwxyz"
+        ));
+        assert!(credential_like("token sk-abcdefghijklmnopqrstuvwxyz"));
+        assert!(!credential_like("Explain the Authorization header concept"));
+        assert!(!credential_like("a short sk-example placeholder"));
+    }
+
+    #[test]
+    fn capture_uri_is_http_only_and_credential_free() {
+        assert!(valid_capture_uri("https://example.com/path?q=1"));
+        assert!(valid_capture_uri("http://example.com"));
+        assert!(!valid_capture_uri("https://user:password@example.com/path"));
+        assert!(!valid_capture_uri("file:///tmp/example"));
+        assert!(!valid_capture_uri(" https://example.com"));
     }
 }

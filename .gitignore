@@ -31,6 +31,25 @@ artifacts/phase02/*
 !artifacts/phase02/*.json
 !artifacts/phase02/*.png
 !artifacts/phase02/FULL_GATE.log
+!artifacts/phase03/
+artifacts/phase03/*
+!artifacts/phase03/*.md
+!artifacts/phase03/*.json
+!artifacts/phase03/*.png
+!artifacts/phase03/FULL_GATE.log
+!artifacts/phase04/
+artifacts/phase04/*
+!artifacts/phase04/*.md
+!artifacts/phase04/*.json
+!artifacts/phase04/freeze/
+artifacts/phase04/freeze/*
+!artifacts/phase04/freeze/*.md
+!artifacts/phase04/freeze/*.json
+!artifacts/desktop-foundation/
+artifacts/desktop-foundation/*
+!artifacts/desktop-foundation/*.md
+!artifacts/desktop-foundation/*.json
+!artifacts/desktop-foundation/*.png
 
 # Local configuration and secrets
 .env
@@ -51,6 +70,7 @@ apps/desktop/.webpack/
 apps/desktop/out/
 
 # Temporary files
+.tmp-*/
 *.tmp
 *.temp
 *.swp

@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "https_only": "PASS",
+  "userinfo_fragment_ip_literal_denied": "PASS",
+  "local_private_link_local_reserved_mixed_dns_denied": "PASS",
+  "dns_revalidated_every_connection": "PASS",
+  "dns_rebinding_rejected": "PASS",
+  "redirects": "MANUAL_DENY",
+  "deterministic_cases": 12,
+  "external_requests": 0,
+  "product_code_changed": false
+}

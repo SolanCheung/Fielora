@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "context_chip_kinds": 6,
+  "chip_and_aggregate_bounds": "PASS",
+  "blocked_context_denied": "PASS",
+  "capture_transition_matrix": "PASS",
+  "immutable_content_and_provenance": "PASS",
+  "field_revision_and_activity_atomic_model": "PASS",
+  "failed_mutation_no_change": "PASS",
+  "partial_model_output_boundary": "PASS",
+  "freeform_defaults_to_ask": "PASS",
+  "capture_promote_always_confirm": "PASS",
+  "product_code_changed": false
+}

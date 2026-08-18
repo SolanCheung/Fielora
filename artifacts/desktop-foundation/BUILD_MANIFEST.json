@@ -1,0 +1,56 @@
+{
+  "status": "RESIZABLE_RIGHT_SIDEBAR_PREMERGE_PACKAGED_FRESH_PASS",
+  "platform": "win32-x64",
+  "schema_version": 5,
+  "provider_external_requests": 0,
+  "human_acceptance": "NOT_RUN",
+  "agent_runtime": "NOT_IMPLEMENTED",
+  "artifacts": [
+    {
+      "path": "apps/desktop/out/desktop-foundation-resizable-sidebar-v4/Fielora-win32-x64/Fielora.exe",
+      "bytes": 225533440,
+      "sha256": "36251744dca089333ff479a99710ac30d6d2c0fa12006af1b845449ac7bfb215"
+    },
+    {
+      "path": "apps/desktop/out/desktop-foundation-resizable-sidebar-v4/Fielora-win32-x64/resources/fielora-core.exe",
+      "bytes": 8721920,
+      "sha256": "ea1d9d348603df2ce63ed9a9bb54e7c4392704f72efac451953b311a6d70af0e"
+    },
+    {
+      "path": "apps/desktop/out/desktop-foundation-resizable-sidebar-v4/make/zip/win32/x64/Fielora-win32-x64-0.1.0.zip",
+      "bytes": 148121598,
+      "sha256": "ccf74f76458d08d8743ea21f7491d8ba860737dcd8aa03f115e6b2b7dba74279"
+    },
+    {
+      "path": "apps/desktop/assets/fielora.ico",
+      "bytes": 8794,
+      "sha256": "3f973c97aa139a0c742168d94b782e7f61ecc6083798de150d0e0107641c08c2"
+    }
+  ],
+  "verification": {
+    "premerge": "PASS",
+    "desktop_foundation_dev_e2e": "PASS",
+    "desktop_foundation_packaged_e2e": "PASS",
+    "desktop_foundation_fresh_zip_e2e": "PASS",
+    "browse_dev_e2e": "PASS",
+    "browse_packaged_e2e": "PASS",
+    "browse_fresh_zip_e2e": "PASS",
+    "single_instance_packaged_e2e": "PASS",
+    "single_instance_fresh_zip_e2e": "PASS",
+    "typescript_tests": 42,
+    "rust_tests": 30,
+    "core_integration_tests": 6
+  },
+  "verified_flows": [
+    "settings_owns_full_workspace_without_right_rail",
+    "browser_only_in_right_utility_sidebar",
+    "right_sidebar_pushes_center_and_never_overlays",
+    "project_navigation_settings_navigation_workspace_and_utility_dividers_are_draggable",
+    "window_resize_and_divider_drag_update_real_chromium_viewport",
+    "right_rail_focus_terminal_browser_and_tools_are_functional",
+    "composer_permission_and_model_menus_open_upward_inside_viewport",
+    "project_conversation_provider_file_diff_terminal_and_restart_resume",
+    "native_clipboard_context_menu_and_browser_security_boundary",
+    "historical_profile_upgrade_collision_and_single_instance_lifecycle"
+  ]
+}

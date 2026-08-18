@@ -120,6 +120,8 @@ async function waitExit(child, timeoutMs = 8_000) {
 }
 
 async function createAndResume(cdp) {
+  await waitExpression(cdp, `document.querySelector('[data-testid="project-workspace"]')`);
+  await cdp.evaluate(click('[data-testid="now-nav"]'));
   await waitExpression(cdp, `document.querySelector('[data-testid="now-screen"]')`);
   ownedCorePids.add((await cdp.evaluate('window.fielora.core.getHealth()')).pid);
   await cdp.evaluate(setValue('[data-testid="create-title"]', title));
@@ -134,6 +136,8 @@ async function createAndResume(cdp) {
 }
 
 async function assertResume(cdp) {
+  await waitExpression(cdp, `document.querySelector('[data-testid="project-workspace"]')`);
+  await cdp.evaluate(click('[data-testid="now-nav"]'));
   await waitExpression(cdp, `document.querySelector('[data-testid="now-screen"]')`);
   const field = await cdp.evaluate(`window.fielora.field.list().then((fields) => fields.find((field) => field.title === ${JSON.stringify(title)}))`);
   assert.equal(field.current_focus, focus);

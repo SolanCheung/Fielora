@@ -1,0 +1,74 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260816012947
+Username: DESKTOP-JP2DJBR\giants
+RunAs User: DESKTOP-JP2DJBR\giants
+Configuration Name: 
+Machine: DESKTOP-JP2DJBR (Microsoft Windows NT 10.0.26200.0)
+Host Application: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-phase03.ps1
+Process ID: 34216
+PSVersion: 5.1.26100.9168
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9168
+BuildVersion: 10.0.26100.9168
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+GATE_START context-manifest
+
+GATE_PASS context-manifest
+GATE_START contracts
+
+GATE_PASS contracts
+GATE_START typecheck
+
+GATE_PASS typecheck
+GATE_START lint
+
+GATE_PASS lint
+GATE_START rust-fmt
+
+GATE_PASS rust-fmt
+GATE_START ts-unit
+
+GATE_PASS ts-unit
+GATE_START rust-unit
+
+GATE_PASS rust-unit
+GATE_START rust-clippy
+
+GATE_PASS rust-clippy
+GATE_START rust-release
+
+GATE_PASS rust-release
+GATE_START integration
+
+GATE_PASS integration
+GATE_START phase02-desktop-e2e-dev
+
+GATE_PASS phase02-desktop-e2e-dev
+GATE_START phase03-browse-e2e-dev
+
+GATE_PASS phase03-browse-e2e-dev
+GATE_START package
+
+GATE_PASS package
+GATE_START phase02-packaged-regression
+
+GATE_PASS phase02-packaged-regression
+GATE_START phase03-browse-packaged-smoke
+
+GATE_PASS phase03-browse-packaged-smoke
+GATE_START portable
+
+GATE_PASS portable
+GATE_START phase02-and-phase03-portable-smoke
+
+GATE_PASS phase02-and-phase03-portable-smoke
+PHASE03_ENGINEERING_GATE=PASS
+**********************
+Windows PowerShell transcript end
+End time: 20260816013426
+**********************

@@ -15,11 +15,19 @@ use uuid::Uuid;
 
 const MIGRATION_0001: &str = include_str!("../migrations/0001_core.sql");
 const MIGRATION_0002: &str = include_str!("../migrations/0002_phase02_reality.sql");
+const MIGRATION_0004: &str = include_str!("../migrations/0004_phase04_entry.sql");
+const MIGRATION_0005: &str = include_str!("../migrations/0005_desktop_foundation.sql");
 const MIGRATION_0001_NAME: &str = "core";
 const MIGRATION_0002_NAME: &str = "phase02_reality";
+const MIGRATION_0004_NAME: &str = "phase04_entry";
+const MIGRATION_0005_NAME: &str = "desktop_foundation";
 const MIGRATION_0002_FROZEN_SHA256: &str =
     "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9";
-const SCHEMA_VERSION: u32 = 2;
+const MIGRATION_0004_FROZEN_SHA256: &str =
+    "4d142745b3e9a5ccd8c27f422ecdc888163a575a91b0515f90a1ee6aa0f869ab";
+const MIGRATION_0005_FROZEN_SHA256: &str =
+    "b7e1e586b47e50389502677e172741d69463e9518ed32211dfafe0dc910c1547";
+const SCHEMA_VERSION: u32 = 5;
 const LOCAL_USER_NAME: &str = "Local user";
 const SYSTEM_NAME: &str = "Fielora system";
 
@@ -92,6 +100,12 @@ pub struct StorageWorker {
     worker: Option<JoinHandle<()>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ProviderConfigRecord {
+    pub view: ProviderConfigView,
+    pub credential_ref: String,
+}
+
 impl StorageWorker {
     pub fn start(
         database_path: &Path,
@@ -137,6 +151,466 @@ impl Drop for StorageWorker {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
+    }
+}
+
+impl StorageHandle {
+    pub fn create_project(
+        &self,
+        request: CreateProjectRequest,
+        now: i64,
+    ) -> Result<ProjectView, DomainError> {
+        let owner = self.local_user.clone();
+        let device = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            let field_id = FieldId::new(Uuid::now_v7().to_string());
+            let binding_id = Uuid::now_v7().to_string();
+            let transaction = connection.transaction().map_err(storage_domain)?;
+            transaction.execute(
+                "INSERT INTO fields(id,owner_principal_id,title,goal,lifecycle_status,current_mode,current_focus_json,revision,created_at,updated_at) VALUES(?1,?2,?3,?4,'ACTIVE',NULL,NULL,1,?5,?5)",
+                params![field_id.0, owner.0, request.title, request.goal, now],
+            ).map_err(storage_domain)?;
+            transaction.execute(
+                "INSERT INTO device_bindings(id,device_id,object_id,binding_kind,local_locator,metadata_json,created_at,updated_at) VALUES(?1,?2,?3,'PROJECT_ROOT',?4,'{\"version\":1}',?5,?5)",
+                params![binding_id, device.0, field_id.0, request.root_path, now],
+            ).map_err(storage_domain)?;
+            insert_simple_activity(
+                &transaction,
+                Some(&field_id),
+                &owner,
+                "FIELD_CREATED",
+                "FIELD",
+                &field_id.0,
+                now,
+            )?;
+            transaction.commit().map_err(storage_domain)?;
+            get_project(connection, &owner, &device, &field_id)
+        })
+    }
+
+    pub fn list_projects(&self) -> Result<Vec<ProjectView>, DomainError> {
+        let owner = self.local_user.clone();
+        let device = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            let mut statement = connection.prepare(
+                "SELECT f.id,f.title,f.goal,b.local_locator,f.revision,f.created_at,MAX(f.updated_at,COALESCE((SELECT MAX(c.updated_at) FROM conversations c WHERE c.field_id=f.id AND c.lifecycle_status='ACTIVE'),f.updated_at)) AS project_activity_at FROM fields f JOIN device_bindings b ON b.object_id=f.id AND b.device_id=?1 AND b.binding_kind='PROJECT_ROOT' WHERE f.owner_principal_id=?2 AND f.lifecycle_status='ACTIVE' ORDER BY project_activity_at DESC,f.id DESC"
+            ).map_err(storage_domain)?;
+            let rows = statement
+                .query_map(params![device.0, owner.0], project_from_row)
+                .map_err(storage_domain)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(storage_domain)
+        })
+    }
+
+    pub fn get_project(&self, field_id: FieldId) -> Result<ProjectView, DomainError> {
+        let owner = self.local_user.clone();
+        let device = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            get_project(connection, &owner, &device, &field_id)
+        })
+    }
+
+    pub fn create_conversation(
+        &self,
+        request: CreateConversationRequest,
+        now: i64,
+    ) -> Result<ConversationView, DomainError> {
+        let owner = self.local_user.clone();
+        let device = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            get_project(connection, &owner, &device, &request.field_id)?;
+            ensure_provider_available(connection, &owner, request.provider_config_id.as_ref())?;
+            let id = ConversationId::new(Uuid::now_v7().to_string());
+            connection.execute(
+                "INSERT INTO conversations(id,field_id,title,provider_config_id,model_id,lifecycle_status,revision,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,'ACTIVE',1,?6,?6)",
+                params![id.0, request.field_id.0, request.title, request.provider_config_id.map(|value| value.0), request.model_id, now],
+            ).map_err(storage_domain)?;
+            get_conversation(connection, &owner, &id)
+        })
+    }
+
+    pub fn list_conversations(
+        &self,
+        field_id: FieldId,
+    ) -> Result<Vec<ConversationView>, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let mut statement = connection.prepare(
+                "SELECT c.id,c.field_id,c.title,c.provider_config_id,c.model_id,c.lifecycle_status,c.revision,c.created_at,c.updated_at FROM conversations c JOIN fields f ON f.id=c.field_id WHERE c.field_id=?1 AND f.owner_principal_id=?2 AND c.lifecycle_status='ACTIVE' ORDER BY c.updated_at DESC,c.id DESC"
+            ).map_err(storage_domain)?;
+            let rows = statement
+                .query_map(params![field_id.0, owner.0], conversation_from_row)
+                .map_err(storage_domain)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(storage_domain)
+        })
+    }
+
+    pub fn get_conversation(&self, id: ConversationId) -> Result<ConversationView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_conversation(connection, &owner, &id)
+        })
+    }
+
+    pub fn update_conversation(
+        &self,
+        request: UpdateConversationRequest,
+        now: i64,
+    ) -> Result<ConversationView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            ensure_provider_available(connection, &owner, request.provider_config_id.as_ref())?;
+            let changed = connection.execute(
+                "UPDATE conversations SET title=?1,provider_config_id=?2,model_id=?3,revision=revision+1,updated_at=?4 WHERE id=?5 AND revision=?6 AND lifecycle_status='ACTIVE' AND field_id IN (SELECT id FROM fields WHERE owner_principal_id=?7)",
+                params![request.title, request.provider_config_id.map(|value| value.0), request.model_id, now, request.conversation_id.0, revision_to_domain(request.expected_revision)?, owner.0],
+            ).map_err(storage_domain)?;
+            if changed == 0 {
+                return conversation_revision_or_not_found(
+                    connection,
+                    &owner,
+                    &request.conversation_id,
+                );
+            }
+            get_conversation(connection, &owner, &request.conversation_id)
+        })
+    }
+
+    pub fn archive_conversation(
+        &self,
+        request: ArchiveConversationRequest,
+        now: i64,
+    ) -> Result<ConversationView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let changed = connection.execute(
+                "UPDATE conversations SET lifecycle_status='ARCHIVED',revision=revision+1,updated_at=?1 WHERE id=?2 AND revision=?3 AND lifecycle_status='ACTIVE' AND field_id IN (SELECT id FROM fields WHERE owner_principal_id=?4)",
+                params![now, request.conversation_id.0, revision_to_domain(request.expected_revision)?, owner.0],
+            ).map_err(storage_domain)?;
+            if changed == 0 {
+                return conversation_revision_or_not_found(
+                    connection,
+                    &owner,
+                    &request.conversation_id,
+                );
+            }
+            get_conversation(connection, &owner, &request.conversation_id)
+        })
+    }
+
+    pub fn create_conversation_message(
+        &self,
+        request: CreateConversationMessageRequest,
+        now: i64,
+    ) -> Result<ConversationMessageView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let conversation = get_conversation(connection, &owner, &request.conversation_id)?;
+            if conversation.lifecycle_status != ConversationLifecycle::Active {
+                return Err(DomainError::TerminalResource);
+            }
+            ensure_provider_available(connection, &owner, request.provider_config_id.as_ref())?;
+            let id = MessageId::new(Uuid::now_v7().to_string());
+            let transaction = connection.transaction().map_err(storage_domain)?;
+            transaction.execute(
+                "INSERT INTO conversation_messages(id,conversation_id,role,content,status,provider_config_id,model_id,invocation_id,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                params![id.0, request.conversation_id.0, wire(&request.role), request.content, wire(&request.status), request.provider_config_id.map(|value| value.0), request.model_id, request.invocation_id.map(|value| value.0), now],
+            ).map_err(storage_domain)?;
+            transaction
+                .execute(
+                    "UPDATE conversations SET revision=revision+1,updated_at=?1 WHERE id=?2",
+                    params![now, request.conversation_id.0],
+                )
+                .map_err(storage_domain)?;
+            transaction.commit().map_err(storage_domain)?;
+            get_conversation_message(connection, &owner, &id)
+        })
+    }
+
+    pub fn list_conversation_messages(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Result<Vec<ConversationMessageView>, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_conversation(connection, &owner, &conversation_id)?;
+            let mut statement = connection.prepare(
+                "SELECT m.id,m.conversation_id,m.role,m.content,m.status,m.provider_config_id,m.model_id,m.invocation_id,m.created_at FROM conversation_messages m JOIN conversations c ON c.id=m.conversation_id JOIN fields f ON f.id=c.field_id WHERE m.conversation_id=?1 AND f.owner_principal_id=?2 ORDER BY m.created_at ASC,m.id ASC"
+            ).map_err(storage_domain)?;
+            let rows = statement
+                .query_map(
+                    params![conversation_id.0, owner.0],
+                    conversation_message_from_row,
+                )
+                .map_err(storage_domain)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(storage_domain)
+        })
+    }
+
+    pub fn create_provider_config(
+        &self,
+        request: CreateProviderConfigRequest,
+        now: i64,
+    ) -> Result<ProviderConfigRecord, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let id = ProviderConfigId::new(Uuid::now_v7().to_string());
+            let credential_ref = format!("Fielora/provider/{}", id.0);
+            let endpoint = match request.provider_kind {
+                ProviderKind::OpenaiCompatible => EndpointClass::Custom,
+                _ => EndpointClass::Official,
+            };
+            let tx = connection.transaction().map_err(storage_domain)?;
+            tx.execute(
+                "INSERT INTO provider_configs(id,owner_principal_id,provider_kind,display_name,endpoint_class,base_url,default_model,credential_ref,lifecycle_status,custom_endpoint_acknowledged_at,revision,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'DISABLED',?9,1,?10,?10)",
+                params![id.0, owner.0, wire(&request.provider_kind), request.display_name, wire(&endpoint), request.base_url, request.default_model, credential_ref, if request.custom_endpoint_acknowledged { Some(now) } else { None }, now]
+            ).map_err(storage_domain)?;
+            insert_simple_activity(
+                &tx,
+                None,
+                &owner,
+                "PROVIDER_CONFIG_CREATED",
+                "PROVIDER_CONFIG",
+                &id.0,
+                now,
+            )?;
+            tx.commit().map_err(storage_domain)?;
+            get_provider_record(connection, &owner, &id)
+        })
+    }
+
+    pub fn list_provider_configs(&self) -> Result<Vec<ProviderConfigRecord>, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let mut statement=connection.prepare("SELECT id,provider_kind,display_name,endpoint_class,base_url,default_model,credential_ref,lifecycle_status,revision,created_at,updated_at FROM provider_configs WHERE owner_principal_id=?1 AND lifecycle_status!='REMOVED' ORDER BY updated_at DESC,id DESC").map_err(storage_domain)?;
+            let rows = statement
+                .query_map([&owner.0], provider_record_from_row)
+                .map_err(storage_domain)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(storage_domain)
+        })
+    }
+
+    pub fn get_provider_config(
+        &self,
+        id: ProviderConfigId,
+    ) -> Result<ProviderConfigRecord, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_provider_record(connection, &owner, &id)
+        })
+    }
+
+    pub fn update_provider_config(
+        &self,
+        request: UpdateProviderConfigRequest,
+        now: i64,
+    ) -> Result<ProviderConfigRecord, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let acknowledged = if request.custom_endpoint_acknowledged {
+                Some(now)
+            } else {
+                None
+            };
+            let tx = connection.transaction().map_err(storage_domain)?;
+            let changed=tx.execute("UPDATE provider_configs SET display_name=?1,base_url=?2,default_model=?3,custom_endpoint_acknowledged_at=?4,revision=revision+1,updated_at=?5 WHERE id=?6 AND owner_principal_id=?7 AND revision=?8 AND lifecycle_status!='REMOVED'",params![request.display_name,request.base_url,request.default_model,acknowledged,now,request.provider_config_id.0,owner.0,revision_to_domain(request.expected_revision)?]).map_err(storage_domain)?;
+            if changed == 0 {
+                return provider_revision_or_not_found(
+                    &tx,
+                    &owner,
+                    &request.provider_config_id,
+                    request.expected_revision,
+                );
+            }
+            insert_simple_activity(
+                &tx,
+                None,
+                &owner,
+                "PROVIDER_CONFIG_UPDATED",
+                "PROVIDER_CONFIG",
+                &request.provider_config_id.0,
+                now,
+            )?;
+            tx.commit().map_err(storage_domain)?;
+            get_provider_record(connection, &owner, &request.provider_config_id)
+        })
+    }
+
+    pub fn set_provider_credential_present(
+        &self,
+        id: ProviderConfigId,
+        present: bool,
+        now: i64,
+    ) -> Result<ProviderConfigRecord, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let lifecycle = if present { "ACTIVE" } else { "DISABLED" };
+            let changed=connection.execute("UPDATE provider_configs SET lifecycle_status=?1,revision=revision+1,updated_at=?2 WHERE id=?3 AND owner_principal_id=?4 AND lifecycle_status!='REMOVED'",params![lifecycle,now,id.0,owner.0]).map_err(storage_domain)?;
+            if changed == 0 {
+                return Err(DomainError::NotFound);
+            }
+            get_provider_record(connection, &owner, &id)
+        })
+    }
+
+    pub fn remove_provider_config(
+        &self,
+        id: ProviderConfigId,
+        now: i64,
+    ) -> Result<ProviderConfigRecord, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let tx = connection.transaction().map_err(storage_domain)?;
+            let changed=tx.execute("UPDATE provider_configs SET lifecycle_status='REMOVED',revision=revision+1,updated_at=?1 WHERE id=?2 AND owner_principal_id=?3 AND lifecycle_status!='REMOVED'",params![now,id.0,owner.0]).map_err(storage_domain)?;
+            if changed == 0 {
+                return Err(DomainError::NotFound);
+            }
+            insert_simple_activity(
+                &tx,
+                None,
+                &owner,
+                "PROVIDER_CONFIG_REMOVED",
+                "PROVIDER_CONFIG",
+                &id.0,
+                now,
+            )?;
+            tx.commit().map_err(storage_domain)?;
+            get_provider_record(connection, &owner, &id)
+        })
+    }
+
+    pub fn create_capture(
+        &self,
+        request: CreateCaptureRequest,
+        now: i64,
+    ) -> Result<CaptureView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let id = CaptureId::new(Uuid::now_v7().to_string());
+            let activity_id = Uuid::now_v7().to_string();
+            let tx = connection.transaction().map_err(storage_domain)?;
+            insert_simple_activity_with_id(
+                &tx,
+                &activity_id,
+                None,
+                &owner,
+                "CAPTURE_CREATED",
+                "CAPTURE",
+                &id.0,
+                now,
+            )?;
+            tx.execute("INSERT INTO captures(id,owner_principal_id,created_by,source_activity_id,kind,title,content,placement_status,lifecycle_status,source_kind,source_title,source_uri,source_field_id,source_resource_type,source_resource_id,source_resource_revision,provider_config_id,provider_model_id,provider_invocation_id,source_is_partial,revision,created_at,updated_at) VALUES(?1,?2,?2,?3,?4,?5,?6,'INBOX','ACTIVE',?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,1,?18,?18)",params![id.0,owner.0,activity_id,wire(&request.kind),request.title,request.content,wire(&request.source.kind),request.source.title,request.source.uri,request.source.field_id.map(|v|v.0),request.source.resource_type,request.source.resource_id,request.source.resource_revision.map(revision_to_domain).transpose()?,request.source.provider_config_id.map(|v|v.0),request.source.provider_model_id,request.source.provider_invocation_id.map(|v|v.0),request.source.is_partial as i32,now]).map_err(storage_domain)?;
+            tx.commit().map_err(storage_domain)?;
+            get_capture(connection, &owner, &id)
+        })
+    }
+
+    pub fn get_capture(&self, id: CaptureId) -> Result<CaptureView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_capture(connection, &owner, &id)
+        })
+    }
+
+    pub fn list_captures(
+        &self,
+        request: ListCapturesRequest,
+    ) -> Result<Page<CaptureView, CaptureCursor>, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            list_captures(connection, &owner, &request)
+        })
+    }
+
+    pub fn attach_capture(
+        &self,
+        request: AttachCaptureRequest,
+        now: i64,
+    ) -> Result<CaptureView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            mutate_capture_placement(
+                connection,
+                &owner,
+                &request.capture_id,
+                request.expected_revision,
+                Some(&request.field_id),
+                "ATTACHED",
+                None,
+                "CAPTURE_ATTACHED",
+                now,
+            )
+        })
+    }
+
+    pub fn promote_capture(
+        &self,
+        request: PromoteCaptureRequest,
+        now: i64,
+    ) -> Result<CaptureView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            mutate_capture_placement(
+                connection,
+                &owner,
+                &request.capture_id,
+                request.expected_revision,
+                request.field_id.as_ref(),
+                "PROMOTED",
+                Some("IDEA_CANDIDATE"),
+                "CAPTURE_PROMOTED",
+                now,
+            )
+        })
+    }
+
+    pub fn set_capture_archived(
+        &self,
+        id: CaptureId,
+        expected_revision: u64,
+        archived: bool,
+        now: i64,
+    ) -> Result<CaptureView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let target = if archived { "ARCHIVED" } else { "ACTIVE" };
+            let action = if archived {
+                "CAPTURE_ARCHIVED"
+            } else {
+                "CAPTURE_RESTORED"
+            };
+            let tx = connection.transaction().map_err(storage_domain)?;
+            let changed=tx.execute("UPDATE captures SET lifecycle_status=?1,revision=revision+1,updated_at=?2 WHERE id=?3 AND owner_principal_id=?4 AND revision=?5",params![target,now,id.0,owner.0,revision_to_domain(expected_revision)?]).map_err(storage_domain)?;
+            if changed == 0 {
+                return capture_revision_or_not_found(&tx, &owner, &id, expected_revision);
+            }
+            insert_simple_activity(&tx, None, &owner, action, "CAPTURE", &id.0, now)?;
+            tx.commit().map_err(storage_domain)?;
+            get_capture(connection, &owner, &id)
+        })
+    }
+
+    pub fn record_model_terminal(
+        &self,
+        field_id: Option<FieldId>,
+        provider_config_id: ProviderConfigId,
+        model_id: String,
+        completed: bool,
+        now: i64,
+    ) -> Result<(), DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            if model_id.len() > 256 {
+                return Err(DomainError::Validation("model id too long".into()));
+            }
+            let action = if completed {
+                "MODEL_INVOCATION_COMPLETED"
+            } else {
+                "MODEL_INVOCATION_FAILED"
+            };
+            let summary=serde_json::json!({"provider_config_id":provider_config_id.0,"model_id":model_id,"terminal":if completed{"COMPLETED"}else{"FAILED"}}).to_string();
+            connection.execute("INSERT INTO activities(id,field_id,actor_principal_id,intent,action,target_type,target_id,summary,trace_id,created_at) VALUES(?1,?2,?3,NULL,?4,'PROVIDER_CONFIG',?5,?6,?7,?8)",params![Uuid::now_v7().to_string(),field_id.map(|v|v.0),owner.0,action,provider_config_id.0,summary,Uuid::now_v7().to_string(),now]).map_err(storage_domain)?;
+            Ok(())
+        })
     }
 }
 
@@ -510,6 +984,358 @@ impl RealityRepository for StorageHandle {
     }
 }
 
+fn wire<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+fn parse_wire<T: serde::de::DeserializeOwned>(value: String) -> rusqlite::Result<T> {
+    serde_json::from_value(Value::String(value))
+        .map_err(|error| conversion_error(error.to_string()))
+}
+
+fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectView> {
+    Ok(ProjectView {
+        field_id: FieldId::new(row.get::<_, String>(0)?),
+        title: row.get(1)?,
+        goal: row.get(2)?,
+        root_path: row.get(3)?,
+        revision: revision_from_row(row, 4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
+fn get_project(
+    connection: &Connection,
+    owner: &PrincipalId,
+    device: &DeviceId,
+    field_id: &FieldId,
+) -> Result<ProjectView, DomainError> {
+    connection.query_row(
+        "SELECT f.id,f.title,f.goal,b.local_locator,f.revision,f.created_at,MAX(f.updated_at,COALESCE((SELECT MAX(c.updated_at) FROM conversations c WHERE c.field_id=f.id AND c.lifecycle_status='ACTIVE'),f.updated_at)) FROM fields f JOIN device_bindings b ON b.object_id=f.id AND b.device_id=?1 AND b.binding_kind='PROJECT_ROOT' WHERE f.id=?2 AND f.owner_principal_id=?3 AND f.lifecycle_status='ACTIVE'",
+        params![device.0, field_id.0, owner.0],
+        project_from_row,
+    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
+fn conversation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConversationView> {
+    Ok(ConversationView {
+        id: ConversationId::new(row.get::<_, String>(0)?),
+        field_id: FieldId::new(row.get::<_, String>(1)?),
+        title: row.get(2)?,
+        provider_config_id: row.get::<_, Option<String>>(3)?.map(ProviderConfigId::new),
+        model_id: row.get(4)?,
+        lifecycle_status: parse_wire(row.get(5)?)?,
+        revision: revision_from_row(row, 6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+fn get_conversation(
+    connection: &Connection,
+    owner: &PrincipalId,
+    id: &ConversationId,
+) -> Result<ConversationView, DomainError> {
+    connection.query_row(
+        "SELECT c.id,c.field_id,c.title,c.provider_config_id,c.model_id,c.lifecycle_status,c.revision,c.created_at,c.updated_at FROM conversations c JOIN fields f ON f.id=c.field_id WHERE c.id=?1 AND f.owner_principal_id=?2",
+        params![id.0, owner.0],
+        conversation_from_row,
+    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
+fn conversation_revision_or_not_found(
+    connection: &Connection,
+    owner: &PrincipalId,
+    id: &ConversationId,
+) -> Result<ConversationView, DomainError> {
+    match get_conversation(connection, owner, id) {
+        Ok(_) => Err(DomainError::RevisionConflict),
+        Err(error) => Err(error),
+    }
+}
+
+fn conversation_message_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ConversationMessageView> {
+    Ok(ConversationMessageView {
+        id: MessageId::new(row.get::<_, String>(0)?),
+        conversation_id: ConversationId::new(row.get::<_, String>(1)?),
+        role: parse_wire(row.get(2)?)?,
+        content: row.get(3)?,
+        status: parse_wire(row.get(4)?)?,
+        provider_config_id: row.get::<_, Option<String>>(5)?.map(ProviderConfigId::new),
+        model_id: row.get(6)?,
+        invocation_id: row.get::<_, Option<String>>(7)?.map(ModelInvocationId::new),
+        created_at: row.get(8)?,
+    })
+}
+
+fn get_conversation_message(
+    connection: &Connection,
+    owner: &PrincipalId,
+    id: &MessageId,
+) -> Result<ConversationMessageView, DomainError> {
+    connection.query_row(
+        "SELECT m.id,m.conversation_id,m.role,m.content,m.status,m.provider_config_id,m.model_id,m.invocation_id,m.created_at FROM conversation_messages m JOIN conversations c ON c.id=m.conversation_id JOIN fields f ON f.id=c.field_id WHERE m.id=?1 AND f.owner_principal_id=?2",
+        params![id.0, owner.0],
+        conversation_message_from_row,
+    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
+fn ensure_provider_available(
+    connection: &Connection,
+    owner: &PrincipalId,
+    id: Option<&ProviderConfigId>,
+) -> Result<(), DomainError> {
+    let Some(id) = id else {
+        return Ok(());
+    };
+    let exists: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM provider_configs WHERE id=?1 AND owner_principal_id=?2 AND lifecycle_status!='REMOVED')",
+        params![id.0, owner.0],
+        |row| row.get(0),
+    ).map_err(storage_domain)?;
+    if exists {
+        Ok(())
+    } else {
+        Err(DomainError::NotFound)
+    }
+}
+
+fn provider_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProviderConfigRecord> {
+    Ok(ProviderConfigRecord {
+        view: ProviderConfigView {
+            id: ProviderConfigId::new(row.get::<_, String>(0)?),
+            provider_kind: parse_wire(row.get(1)?)?,
+            display_name: row.get(2)?,
+            endpoint_class: parse_wire(row.get(3)?)?,
+            base_url: row.get(4)?,
+            default_model: row.get(5)?,
+            lifecycle_status: parse_wire(row.get(7)?)?,
+            credential_present: false,
+            revision: revision_from_row(row, 8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        },
+        credential_ref: row.get(6)?,
+    })
+}
+
+fn get_provider_record(
+    connection: &Connection,
+    owner: &PrincipalId,
+    id: &ProviderConfigId,
+) -> Result<ProviderConfigRecord, DomainError> {
+    connection.query_row("SELECT id,provider_kind,display_name,endpoint_class,base_url,default_model,credential_ref,lifecycle_status,revision,created_at,updated_at FROM provider_configs WHERE id=?1 AND owner_principal_id=?2",params![id.0,owner.0],provider_record_from_row).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
+fn provider_revision_or_not_found(
+    connection: &Connection,
+    owner: &PrincipalId,
+    id: &ProviderConfigId,
+    _revision: u64,
+) -> Result<ProviderConfigRecord, DomainError> {
+    match get_provider_record(connection, owner, id) {
+        Ok(_) => Err(DomainError::RevisionConflict),
+        Err(error) => Err(error),
+    }
+}
+
+fn insert_simple_activity(
+    transaction: &Transaction<'_>,
+    field_id: Option<&FieldId>,
+    owner: &PrincipalId,
+    action: &str,
+    target_type: &str,
+    target_id: &str,
+    now: i64,
+) -> Result<(), DomainError> {
+    insert_simple_activity_with_id(
+        transaction,
+        &Uuid::now_v7().to_string(),
+        field_id,
+        owner,
+        action,
+        target_type,
+        target_id,
+        now,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_simple_activity_with_id(
+    transaction: &Transaction<'_>,
+    id: &str,
+    field_id: Option<&FieldId>,
+    owner: &PrincipalId,
+    action: &str,
+    target_type: &str,
+    target_id: &str,
+    now: i64,
+) -> Result<(), DomainError> {
+    transaction.execute("INSERT INTO activities(id,field_id,actor_principal_id,intent,action,target_type,target_id,summary,trace_id,created_at) VALUES(?1,?2,?3,NULL,?4,?5,?6,NULL,?7,?8)",params![id,field_id.map(|v|&v.0),owner.0,action,target_type,target_id,Uuid::now_v7().to_string(),now]).map_err(storage_domain)?;
+    Ok(())
+}
+
+fn capture_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CaptureView> {
+    Ok(CaptureView {
+        id: CaptureId::new(row.get::<_, String>(0)?),
+        kind: parse_wire(row.get(1)?)?,
+        title: row.get(2)?,
+        content: row.get(3)?,
+        placement_status: parse_wire(row.get(4)?)?,
+        lifecycle_status: parse_wire(row.get(5)?)?,
+        attached_field_id: row.get::<_, Option<String>>(6)?.map(FieldId::new),
+        promoted_as: row.get(7)?,
+        source: CaptureSource {
+            kind: parse_wire(row.get(8)?)?,
+            title: row.get(9)?,
+            uri: row.get(10)?,
+            field_id: row.get::<_, Option<String>>(11)?.map(FieldId::new),
+            resource_type: row.get(12)?,
+            resource_id: row.get(13)?,
+            resource_revision: row
+                .get::<_, Option<i64>>(14)?
+                .map(|v| u64::try_from(v).map_err(|_| conversion_error("negative revision".into())))
+                .transpose()?,
+            provider_config_id: row.get::<_, Option<String>>(15)?.map(ProviderConfigId::new),
+            provider_model_id: row.get(16)?,
+            provider_invocation_id: row
+                .get::<_, Option<String>>(17)?
+                .map(ModelInvocationId::new),
+            is_partial: row.get::<_, i64>(18)? != 0,
+        },
+        revision: revision_from_row(row, 19)?,
+        created_at: row.get(20)?,
+        updated_at: row.get(21)?,
+    })
+}
+
+const CAPTURE_SELECT: &str = "SELECT id,kind,title,content,placement_status,lifecycle_status,attached_field_id,promoted_as,source_kind,source_title,source_uri,source_field_id,source_resource_type,source_resource_id,source_resource_revision,provider_config_id,provider_model_id,provider_invocation_id,source_is_partial,revision,created_at,updated_at FROM captures";
+
+fn get_capture(
+    connection: &Connection,
+    owner: &PrincipalId,
+    id: &CaptureId,
+) -> Result<CaptureView, DomainError> {
+    connection
+        .query_row(
+            &format!("{CAPTURE_SELECT} WHERE id=?1 AND owner_principal_id=?2"),
+            params![id.0, owner.0],
+            capture_from_row,
+        )
+        .optional()
+        .map_err(storage_domain)?
+        .ok_or(DomainError::NotFound)
+}
+
+fn list_captures(
+    connection: &Connection,
+    owner: &PrincipalId,
+    request: &ListCapturesRequest,
+) -> Result<Page<CaptureView, CaptureCursor>, DomainError> {
+    let placement = request.placement.as_ref().map(wire);
+    let lifecycle = request.lifecycle.as_ref().map(wire);
+    let field = request.field_id.as_ref().map(|v| v.0.clone());
+    let cursor_time = request.cursor.as_ref().map(|v| v.updated_at);
+    let cursor_id = request.cursor.as_ref().map(|v| v.capture_id.0.clone());
+    let limit = i64::from(request.limit.unwrap_or(100).clamp(1, 100));
+    let sql = format!(
+        "{CAPTURE_SELECT} WHERE owner_principal_id=?1 AND (?2 IS NULL OR placement_status=?2) AND (?3 IS NULL OR lifecycle_status=?3) AND (?4 IS NULL OR attached_field_id=?4) AND (?5 IS NULL OR updated_at<?5 OR (updated_at=?5 AND id<?6)) ORDER BY updated_at DESC,id DESC LIMIT ?7"
+    );
+    let mut statement = connection.prepare(&sql).map_err(storage_domain)?;
+    let rows = statement
+        .query_map(
+            params![
+                owner.0,
+                placement,
+                lifecycle,
+                field,
+                cursor_time,
+                cursor_id,
+                limit
+            ],
+            capture_from_row,
+        )
+        .map_err(storage_domain)?;
+    let items = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(storage_domain)?;
+    let next_cursor = if items.len() == limit as usize {
+        items.last().map(|v| CaptureCursor {
+            updated_at: v.updated_at,
+            capture_id: v.id.clone(),
+        })
+    } else {
+        None
+    };
+    Ok(Page { items, next_cursor })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn mutate_capture_placement(
+    connection: &mut Connection,
+    owner: &PrincipalId,
+    id: &CaptureId,
+    expected_revision: u64,
+    field_id: Option<&FieldId>,
+    placement: &str,
+    promoted_as: Option<&str>,
+    action: &str,
+    now: i64,
+) -> Result<CaptureView, DomainError> {
+    let existing = get_capture(connection, owner, id)?;
+    if existing.revision != expected_revision {
+        return Err(DomainError::RevisionConflict);
+    }
+    if existing.lifecycle_status != CaptureLifecycle::Active {
+        return Err(DomainError::TerminalResource);
+    }
+    if placement == "ATTACHED" {
+        let Some(field) = field_id else {
+            return Err(DomainError::Validation("field is required".into()));
+        };
+        if existing.placement_status == CapturePlacement::Promoted {
+            return Err(DomainError::InvalidStateTransition);
+        }
+        if let Some(previous) = &existing.attached_field_id
+            && previous != field
+        {
+            return Err(DomainError::InvalidStateTransition);
+        }
+    }
+    let tx = connection.transaction().map_err(storage_domain)?;
+    if let Some(field) = field_id {
+        let changed=tx.execute("UPDATE fields SET revision=revision+1,updated_at=?1 WHERE id=?2 AND owner_principal_id=?3 AND lifecycle_status='ACTIVE'",params![now,field.0,owner.0]).map_err(storage_domain)?;
+        if changed == 0 {
+            return Err(DomainError::NotFound);
+        }
+    }
+    let changed=tx.execute("UPDATE captures SET placement_status=?1,attached_field_id=?2,promoted_as=?3,revision=revision+1,updated_at=?4 WHERE id=?5 AND owner_principal_id=?6 AND revision=?7",params![placement,field_id.map(|v|&v.0),promoted_as,now,id.0,owner.0,revision_to_domain(expected_revision)?]).map_err(storage_domain)?;
+    if changed == 0 {
+        return Err(DomainError::RevisionConflict);
+    }
+    insert_simple_activity(&tx, field_id, owner, action, "CAPTURE", &id.0, now)?;
+    tx.commit().map_err(storage_domain)?;
+    get_capture(connection, owner, id)
+}
+
+fn capture_revision_or_not_found(
+    connection: &Connection,
+    owner: &PrincipalId,
+    id: &CaptureId,
+    _revision: u64,
+) -> Result<CaptureView, DomainError> {
+    match get_capture(connection, owner, id) {
+        Ok(_) => Err(DomainError::RevisionConflict),
+        Err(error) => Err(error),
+    }
+}
+
 fn request<T>(
     sender: &SyncSender<StorageCommand>,
     command: impl FnOnce(SyncSender<Result<T, DomainError>>) -> StorageCommand,
@@ -638,8 +1464,16 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     )?;
     let checksum_0001 = migration_checksum(MIGRATION_0001);
     let checksum_0002 = frozen_migration_checksum(MIGRATION_0002);
+    let checksum_0004 = frozen_migration_checksum(MIGRATION_0004);
+    let checksum_0005 = frozen_migration_checksum(MIGRATION_0005);
     if checksum_0002 != MIGRATION_0002_FROZEN_SHA256 {
         return Err(StorageError::MigrationChecksum { version: 2 });
+    }
+    if checksum_0004 != MIGRATION_0004_FROZEN_SHA256 {
+        return Err(StorageError::MigrationChecksum { version: 4 });
+    }
+    if checksum_0005 != MIGRATION_0005_FROZEN_SHA256 {
+        return Err(StorageError::MigrationChecksum { version: 5 });
     }
 
     verify_applied_migration(connection, 1, MIGRATION_0001_NAME, &checksum_0001)?;
@@ -665,6 +1499,36 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
         transaction.execute(
             "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (2, ?1, ?2, ?3)",
             params![MIGRATION_0002_NAME, checksum_0002, now],
+        )?;
+        validate_base_schema(&transaction)?;
+        transaction.commit()?;
+    }
+    verify_applied_migration(connection, 4, MIGRATION_0004_NAME, &checksum_0004)?;
+    if !migration_exists(connection, 4)? {
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if transaction.execute_batch(MIGRATION_0004).is_err() {
+            return Err(StorageError::MigrationIncompatibleData);
+        }
+        transaction.execute(
+            "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (4, ?1, ?2, ?3)",
+            params![MIGRATION_0004_NAME, checksum_0004, now],
+        )?;
+        // The Phase 04 migration is followed immediately by additive 0005 on a
+        // fresh database. Full current-schema validation runs after 0005.
+        validate_base_schema(&transaction)?;
+        transaction.commit()?;
+    }
+    verify_applied_migration(connection, 5, MIGRATION_0005_NAME, &checksum_0005)?;
+    if !migration_exists(connection, 5)? {
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if transaction.execute_batch(MIGRATION_0005).is_err() {
+            return Err(StorageError::MigrationIncompatibleData);
+        }
+        transaction.execute(
+            "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (5, ?1, ?2, ?3)",
+            params![MIGRATION_0005_NAME, checksum_0005, now],
         )?;
         validate_schema(&transaction)?;
         transaction.commit()?;
@@ -880,14 +1744,160 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
         return Err(StorageError::OpenGate("foreign_key_check failed".into()));
     }
     let migrations: i64 = connection.query_row(
-        "SELECT COUNT(*) FROM schema_migrations WHERE version IN (1,2)",
+        "SELECT COUNT(*) FROM schema_migrations WHERE version IN (1,2,4,5)",
         [],
         |row| row.get(0),
     )?;
-    if migrations != 2 {
+    if migrations != 4 || migration_exists(connection, 3)? {
         return Err(StorageError::OpenGate(
             "migration registry incomplete".into(),
         ));
+    }
+    for table in ["provider_configs", "captures"] {
+        let exists: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            [table],
+            |row| row.get(0),
+        )?;
+        if exists != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "migration validation missing table {table}"
+            )));
+        }
+    }
+    for table in ["conversations", "conversation_messages"] {
+        let exists: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            [table],
+            |row| row.get(0),
+        )?;
+        if exists != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "migration validation missing table {table}"
+            )));
+        }
+    }
+    for (table, column) in [
+        ("provider_configs", "owner_principal_id"),
+        ("provider_configs", "credential_ref"),
+        ("provider_configs", "lifecycle_status"),
+        ("captures", "source_activity_id"),
+        ("captures", "content"),
+        ("captures", "placement_status"),
+        ("captures", "lifecycle_status"),
+        ("captures", "source_kind"),
+        ("captures", "revision"),
+        ("conversations", "field_id"),
+        ("conversations", "title"),
+        ("conversations", "lifecycle_status"),
+        ("conversations", "revision"),
+        ("conversation_messages", "conversation_id"),
+        ("conversation_messages", "role"),
+        ("conversation_messages", "content"),
+        ("conversation_messages", "status"),
+        ("conversation_messages", "created_at"),
+    ] {
+        let count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name=?2 AND \"notnull\"=1",
+            params![table, column],
+            |row| row.get(0),
+        )?;
+        if count != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required NOT NULL column missing: {table}.{column}"
+            )));
+        }
+    }
+    for (table, fragments) in [
+        (
+            "provider_configs",
+            vec![
+                "PROVIDER_KIND IN (",
+                "ENDPOINT_CLASS IN ('OFFICIAL', 'CUSTOM')",
+                "CREDENTIAL_REF",
+                "LIFECYCLE_STATUS IN ( 'ACTIVE', 'DISABLED', 'REMOVED'",
+            ],
+        ),
+        (
+            "captures",
+            vec![
+                "PLACEMENT_STATUS IN ( 'INBOX', 'ATTACHED', 'PROMOTED'",
+                "SOURCE_KIND = 'MODEL_RESPONSE'",
+                "PROMOTED_AS = 'IDEA_CANDIDATE'",
+                "SOURCE_IS_PARTIAL IN (0, 1)",
+            ],
+        ),
+        (
+            "conversations",
+            vec![
+                "LIFECYCLE_STATUS IN ('ACTIVE', 'ARCHIVED')",
+                "LENGTH(TITLE) BETWEEN 1 AND 120",
+                "REVISION >= 1",
+            ],
+        ),
+        (
+            "conversation_messages",
+            vec![
+                "ROLE IN ('USER', 'ASSISTANT')",
+                "STATUS IN ('COMPLETED', 'CANCELLED', 'FAILED')",
+                "LENGTH(CONTENT) BETWEEN 1 AND 1048576",
+                "ROLE = 'USER'",
+            ],
+        ),
+    ] {
+        let sql: String = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+            [table],
+            |row| row.get(0),
+        )?;
+        let normalized = sql
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_uppercase();
+        for fragment in fragments {
+            if !normalized.contains(fragment) {
+                return Err(StorageError::OpenGate(format!(
+                    "required CHECK missing: {table}:{fragment}"
+                )));
+            }
+        }
+    }
+    let credential_unique: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM pragma_index_list('provider_configs') WHERE \"unique\"=1",
+        [],
+        |row| row.get(0),
+    )?;
+    if credential_unique < 1 {
+        return Err(StorageError::OpenGate(
+            "provider credential_ref unique constraint missing".into(),
+        ));
+    }
+    let forbidden_table:i64=connection.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND (lower(name) LIKE '%credential%' OR lower(name) LIKE '%prompt%' OR lower(name) LIKE '%response%' OR lower(name) LIKE '%session%')",[],|row|row.get(0))?;
+    if forbidden_table != 0 {
+        return Err(StorageError::OpenGate(
+            "forbidden retention table detected".into(),
+        ));
+    }
+    for index in [
+        "idx_provider_configs_owner_lifecycle_updated",
+        "idx_captures_owner_inbox",
+        "idx_captures_attached_field",
+        "idx_captures_source_field",
+        "idx_conversations_field_lifecycle_updated",
+        "idx_conversation_messages_conversation_created",
+        "uq_conversation_message_invocation",
+    ] {
+        let exists: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+            [index],
+            |row| row.get(0),
+        )?;
+        if exists != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required index missing: {index}"
+            )));
+        }
     }
     Ok(())
 }
@@ -2455,6 +3465,12 @@ fn activity_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActivityView> 
         (Some("RELATION"), Some(id)) => Some(ResourceRef::Relation {
             relation_id: RelationId::new(id),
         }),
+        (Some("CAPTURE"), Some(id)) => Some(ResourceRef::Capture {
+            capture_id: CaptureId::new(id),
+        }),
+        (Some("PROVIDER_CONFIG"), Some(id)) => Some(ResourceRef::ProviderConfig {
+            provider_config_id: ProviderConfigId::new(id),
+        }),
         (None, None) => None,
         _ => return Err(conversion_error("invalid activity target".into())),
     };
@@ -2580,6 +3596,16 @@ fn activity_action_from_db(value: &str) -> rusqlite::Result<ActivityAction> {
         "REFERENCE_RESTORED" => Ok(ActivityAction::ReferenceRestored),
         "REFERENCE_SOURCE_ATTACHED" => Ok(ActivityAction::ReferenceSourceAttached),
         "REFERENCE_SOURCE_RETRACTED" => Ok(ActivityAction::ReferenceSourceRetracted),
+        "PROVIDER_CONFIG_CREATED" => Ok(ActivityAction::ProviderConfigCreated),
+        "PROVIDER_CONFIG_UPDATED" => Ok(ActivityAction::ProviderConfigUpdated),
+        "PROVIDER_CONFIG_REMOVED" => Ok(ActivityAction::ProviderConfigRemoved),
+        "CAPTURE_CREATED" => Ok(ActivityAction::CaptureCreated),
+        "CAPTURE_ATTACHED" => Ok(ActivityAction::CaptureAttached),
+        "CAPTURE_PROMOTED" => Ok(ActivityAction::CapturePromoted),
+        "CAPTURE_ARCHIVED" => Ok(ActivityAction::CaptureArchived),
+        "CAPTURE_RESTORED" => Ok(ActivityAction::CaptureRestored),
+        "MODEL_INVOCATION_COMPLETED" => Ok(ActivityAction::ModelInvocationCompleted),
+        "MODEL_INVOCATION_FAILED" => Ok(ActivityAction::ModelInvocationFailed),
         _ => Err(conversion_error(format!("unknown activity action {value}"))),
     }
 }
@@ -2822,7 +3848,72 @@ mod tests {
             frozen_migration_checksum(MIGRATION_0002),
             MIGRATION_0002_FROZEN_SHA256
         );
-        assert_eq!(schema_version(), 2);
+        assert_eq!(
+            frozen_migration_checksum(MIGRATION_0004),
+            MIGRATION_0004_FROZEN_SHA256
+        );
+        assert_eq!(
+            frozen_migration_checksum(MIGRATION_0005),
+            MIGRATION_0005_FROZEN_SHA256
+        );
+        assert_eq!(schema_version(), 5);
+    }
+
+    #[test]
+    fn project_conversation_and_messages_survive_reopen() {
+        let root = temporary_root();
+        let (field_id, conversation_id) = {
+            let worker = start(&root, 1);
+            let handle = worker.handle();
+            let project = handle
+                .create_project(
+                    CreateProjectRequest {
+                        title: "Desktop Foundation".into(),
+                        goal: Some("Persist a coding loop".into()),
+                        root_path: r"C:\work\desktop-foundation".into(),
+                    },
+                    2,
+                )
+                .unwrap();
+            let conversation = handle
+                .create_conversation(
+                    CreateConversationRequest {
+                        field_id: project.field_id.clone(),
+                        title: "Implement the loop".into(),
+                        provider_config_id: None,
+                        model_id: None,
+                    },
+                    3,
+                )
+                .unwrap();
+            handle
+                .create_conversation_message(
+                    CreateConversationMessageRequest {
+                        conversation_id: conversation.id.clone(),
+                        role: ConversationMessageRole::User,
+                        content: "Inspect the project".into(),
+                        status: ConversationMessageStatus::Completed,
+                        provider_config_id: None,
+                        model_id: None,
+                        invocation_id: None,
+                    },
+                    4,
+                )
+                .unwrap();
+            (project.field_id, conversation.id)
+        };
+        {
+            let worker = start(&root, 5);
+            let handle = worker.handle();
+            let project = handle.get_project(field_id).unwrap();
+            assert_eq!(project.root_path, r"C:\work\desktop-foundation");
+            let conversations = handle.list_conversations(project.field_id).unwrap();
+            assert_eq!(conversations.len(), 1);
+            let messages = handle.list_conversation_messages(conversation_id).unwrap();
+            assert_eq!(messages.len(), 1);
+            assert_eq!(messages[0].content, "Inspect the project");
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

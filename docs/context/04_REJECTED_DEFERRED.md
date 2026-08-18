@@ -55,6 +55,12 @@ Remote Repo 已确认为空，不等于本地工作目录已经确认。`LOCAL_W
 ### R-017 Parent 消失后保留 Rust Sidecar orphan
 Parent-pipe EOF 是权威退出信号。Core 不能因缺少显式 `system.shutdown` 而继续运行，也不能自行承担 restart ownership。
 
+### R-018 把 Field / Reality / Resume / Multi-provider 等名词当作护城河
+Projects、Goals、Memory、Browser、Coding、Plugins/MCP、Computer Use 与长任务已经属于成熟 AI Desktop 能力表面。Field 若只是 Chat/Files/Goal 容器就是另一种 Project；Reality 若不改变有效性、Resume、Completion 或 Reverification 就只是 metadata。差异只能由 Explicit Lifecycle、Operational Work State、Persistent Work Lineage + Verification 与 DXE 的真实行为证明。
+
+### R-019 在可用桌面基础前建设完整 Reality / Aegis / DXE 领域
+当前没有稳定 Project/Conversation/Coding/Long-task 工作流时，先扩充 Reality Graph、Aegis UI、DXE Runtime 或六件套 Freeze 文档只会制造空抽象。先交付 Codex-like multi-provider desktop；这些能力以后只能接入真实运行状态，不能先定义完整未来系统。
+
 ## B. 延后但保留
 
 - F-001：更深 Chromium Integration / Fork；Electron 成为关键阻塞后再评估。
@@ -70,3 +76,4 @@ Parent-pipe EOF 是权威退出信号。Core 不能因缺少显式 `system.shutd
 - F-011：macOS / Linux 正式交付与验收；V0.1 先保证架构可移植，唯一正式验收平台仍为 Windows 11 x64。
 - F-012：跨设备 Field Continuity；V0.1 只完成 identity / Device Binding 的模型边界。
 - F-013：Fielora Exchange 的完整通信、IM、共享 Field、Field Invite 交付与 Steward-to-Steward 自动协作；V0.1 只预留核心模型语义。
+- F-014：完整 DXE 扩展、自由 Surface 编辑器、任意 Pane 与 Generative UI；Alpha 只允许 fixed-primitive、deterministic、bounded 的最小 Runtime proof。

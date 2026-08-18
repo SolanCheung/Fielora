@@ -1,7 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { app, BrowserWindow, ipcMain, protocol, shell } from 'electron';
-import type { IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, Menu, dialog, ipcMain, protocol, shell } from 'electron';
+import type { ContextMenuParams, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
+import type { ProjectView } from '@fielora/contracts';
+import { BrowserRuntime } from './browser-runtime';
 import { channels } from './channels';
 import { assertTrustedSender, isAllowedNavigation, trustedOriginFor } from './security';
 import { CoreProcessSupervisor } from './supervisor';
@@ -12,7 +14,19 @@ import {
   validateRestoreReference, validateRetractReferenceSource, validateReviseReference,
   validateReviseState, validateSetFocusV1, validateSnapshot, validateSnapshotV1,
   validateStateReference, validateSupersedeState, validateTransitionState, validateUpdateMode,
+  validateBrowserBounds, validateBrowserNavigate, validateBrowserPageRequest,
+  validateCreateProvider, validateUpdateProvider, validateProviderReference, validateStoreCredential,
+  validateStartModel, validateCancelModel, validateCreateCapture, validateCaptureReference,
+  validateMutateCapture, validateAttachCapture, validatePromoteCapture, validateListCaptures,
+  validatePickProject, validateCreateProject, validateWorkspaceProject, validateCreateConversation,
+  validateConversationReference, validateUpdateConversation, validateArchiveConversation,
+  validateCreateConversationMessage, validateListConversationMessages, validateWorkspaceFile,
+  validateApplyWorkspaceFile, validateRunTerminal, validateCancelTerminal,
 } from './validation';
+import { WorkspaceRuntime } from './workspace-runtime';
+import { loadSelectedAttachments } from './attachment-runtime';
+import { focusUsableWindow, usableWindow, withUsableWindow } from './window-lifecycle';
+import { desktopFoundationUserDataPath, hasExplicitUserDataDirectory } from './runtime-identity';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
@@ -21,19 +35,66 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'fielora', privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 
+// Historical Phase 04 builds used Electron's default @fielora/desktop profile.
+// A stranded historical process can therefore own that profile's single-instance
+// lock and intercept a newer executable. Desktop Foundation has a stable runtime
+// profile of its own; Core data remains under LOCALAPPDATA/Fielora and is unchanged.
+if (process.env.FIELORA_E2E !== '1' && !hasExplicitUserDataDirectory(process.argv)) {
+  app.setPath('userData', desktopFoundationUserDataPath(app.getPath('appData')));
+}
+
+if (process.env.FIELORA_E2E === '1' && /^\d{2,5}$/.test(process.env.FIELORA_E2E_DEBUG_PORT ?? '')) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.FIELORA_E2E_DEBUG_PORT);
+  app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
+}
+
 let appWindow: BrowserWindow | undefined;
+let browserRuntime: BrowserRuntime | undefined;
 let trustedOrigin = '';
 let quitting = false;
 const supervisor = new CoreProcessSupervisor();
+const workspaceRuntime = new WorkspaceRuntime((event) => {
+  withUsableWindow(appWindow, (window) => window.webContents.send(channels.workspaceEvent, event));
+});
+
+function browser(): BrowserRuntime {
+  if (!browserRuntime) throw new Error('Browse runtime is unavailable');
+  return browserRuntime;
+}
 
 function assertBridgeEvent(event: IpcMainInvokeEvent): void {
-  if (!appWindow || !event.senderFrame) throw new Error('Untrusted bridge sender');
+  const window = usableWindow(appWindow);
+  if (!window || !event.senderFrame) throw new Error('Untrusted bridge sender');
   assertTrustedSender({
     senderId: event.sender.id,
-    expectedSenderId: appWindow.webContents.id,
+    expectedSenderId: window.webContents.id,
     frameUrl: event.senderFrame.url,
     isMainFrame: event.senderFrame === event.sender.mainFrame,
   }, trustedOrigin);
+}
+
+function showTrustedEditContextMenu(params: ContextMenuParams): void {
+  const window = usableWindow(appWindow);
+  if (!window) return;
+  const contents = window.webContents;
+  const template: MenuItemConstructorOptions[] = [];
+  if (params.isEditable) {
+    template.push({ label: '撤销', accelerator: 'Ctrl+Z', enabled: params.editFlags.canUndo, click: () => contents.undo() });
+    template.push({ label: '重做', accelerator: 'Ctrl+Y', enabled: params.editFlags.canRedo, click: () => contents.redo() });
+    template.push({ type: 'separator' });
+    template.push({ label: '剪切', accelerator: 'Ctrl+X', enabled: params.editFlags.canCut, click: () => contents.cut() });
+    template.push({ label: '复制', accelerator: 'Ctrl+C', enabled: params.editFlags.canCopy, click: () => contents.copy() });
+    template.push({ label: '粘贴', accelerator: 'Ctrl+V', enabled: params.editFlags.canPaste, click: () => contents.paste() });
+    template.push({ type: 'separator' });
+    template.push({ label: '全选', accelerator: 'Ctrl+A', enabled: params.editFlags.canSelectAll, click: () => contents.selectAll() });
+  } else if (params.selectionText) {
+    template.push({ label: '复制', accelerator: 'Ctrl+C', enabled: params.editFlags.canCopy, click: () => contents.copy() });
+  }
+  if (template.length === 0) return;
+  if (!app.isPackaged || process.env.FIELORA_E2E === '1') {
+    console.info(`[trusted-context-menu] editable=${params.isEditable} selection=${Boolean(params.selectionText)} items=${template.filter((item) => item.type !== 'separator').length}`);
+  }
+  Menu.buildFromTemplate(template).popup({ window });
 }
 
 function handle(channel: string, validator: (payload: unknown) => unknown, method: string): void {
@@ -43,7 +104,67 @@ function handle(channel: string, validator: (payload: unknown) => unknown, metho
   });
 }
 
+async function projectRoot(fieldId: string): Promise<string> {
+  const project = await supervisor.request('query.project.get', { field_id: fieldId }) as ProjectView;
+  return project.root_path;
+}
+
 function registerBridgeHandlers(): void {
+  ipcMain.handle(channels.projectPick, async (event, payload) => {
+    assertBridgeEvent(event);
+    const request = validatePickProject(payload);
+    if (!appWindow || appWindow.isDestroyed()) throw new Error('App window is unavailable');
+    const selection = await dialog.showOpenDialog(appWindow, { title: '选择 Project 文件夹', properties: ['openDirectory', 'createDirectory'] });
+    if (selection.canceled || selection.filePaths.length !== 1) return null;
+    const rootPath = path.resolve(selection.filePaths[0]!);
+    return supervisor.request('command.project.create', {
+      title: request.title.trim() || path.basename(rootPath), goal: request.goal, root_path: rootPath,
+    });
+  });
+  ipcMain.handle(channels.projectList, (event) => { assertBridgeEvent(event); return supervisor.request('query.project.list'); });
+  handle(channels.projectGet, validateReference, 'query.project.get');
+  handle(channels.conversationCreate, validateCreateConversation, 'command.conversation.create');
+  handle(channels.conversationList, validateReference, 'query.conversation.list');
+  handle(channels.conversationGet, validateConversationReference, 'query.conversation.get');
+  handle(channels.conversationUpdate, validateUpdateConversation, 'command.conversation.update');
+  handle(channels.conversationArchive, validateArchiveConversation, 'command.conversation.archive');
+  handle(channels.conversationMessageCreate, validateCreateConversationMessage, 'command.conversation.message.create');
+  handle(channels.conversationMessageList, validateListConversationMessages, 'query.conversation.message.list');
+  ipcMain.handle(channels.workspaceFileList, async (event, payload) => {
+    assertBridgeEvent(event); const request=validateWorkspaceProject(payload);
+    return workspaceRuntime.listFiles(await projectRoot(request.field_id));
+  });
+  ipcMain.handle(channels.workspaceFileRead, async (event, payload) => {
+    assertBridgeEvent(event); const request=validateWorkspaceFile(payload);
+    return workspaceRuntime.readFile(await projectRoot(request.field_id), request.relative_path);
+  });
+  ipcMain.handle(channels.workspaceAttachmentPick, async (event) => {
+    assertBridgeEvent(event);
+    if (!appWindow || appWindow.isDestroyed()) throw new Error('App window is unavailable');
+    let filePaths: string[];
+    if (process.env.FIELORA_E2E === '1' && process.env.FIELORA_E2E_ATTACHMENT_PATHS) {
+      const fixturePaths: unknown = JSON.parse(process.env.FIELORA_E2E_ATTACHMENT_PATHS);
+      if (!Array.isArray(fixturePaths) || fixturePaths.some((item) => typeof item !== 'string')) throw new Error('Invalid attachment fixture');
+      filePaths = fixturePaths;
+    } else {
+      const selection = await dialog.showOpenDialog(appWindow, { title: '添加附件', properties: ['openFile', 'multiSelections'] });
+      if (selection.canceled) return { attachments: [], truncated_count: 0 };
+      filePaths = selection.filePaths;
+    }
+    return loadSelectedAttachments(filePaths);
+  });
+  ipcMain.handle(channels.workspaceFileApply, async (event, payload) => {
+    assertBridgeEvent(event); const request=validateApplyWorkspaceFile(payload);
+    return workspaceRuntime.applyFile(await projectRoot(request.field_id), request);
+  });
+  ipcMain.handle(channels.workspaceTerminalRun, async (event, payload) => {
+    assertBridgeEvent(event); const request=validateRunTerminal(payload);
+    return workspaceRuntime.runTerminal(await projectRoot(request.field_id), request.field_id, request.command);
+  });
+  ipcMain.handle(channels.workspaceTerminalCancel, (event, payload) => {
+    assertBridgeEvent(event); const request=validateCancelTerminal(payload);
+    workspaceRuntime.cancelTerminal(request.run_id); return null;
+  });
   handle(channels.fieldCreate, validateCreate, 'command.field.create');
   ipcMain.handle(channels.fieldList, async (event) => {
     assertBridgeEvent(event);
@@ -73,6 +194,48 @@ function registerBridgeHandlers(): void {
   handle(channels.surfaceSaveSnapshot, validateSnapshot, 'command.surface.save_snapshot');
   handle(channels.surfaceSaveSnapshotV1, validateSnapshotV1, 'command.surface.save_snapshot_v1');
   handle(channels.surfaceLatestSnapshot, validateReference, 'query.surface.latest_snapshot');
+  handle(channels.providerCreate, validateCreateProvider, 'command.provider.create_config');
+  handle(channels.providerUpdate, validateUpdateProvider, 'command.provider.update_config');
+  handle(channels.providerStoreCredential, validateStoreCredential, 'command.provider.store_credential');
+  handle(channels.providerDeleteCredential, validateProviderReference, 'command.provider.delete_credential');
+  handle(channels.providerRemove, validateProviderReference, 'command.provider.remove_config');
+  handle(channels.providerProbe, validateProviderReference, 'command.provider.probe');
+  ipcMain.handle(channels.providerList, (event) => { assertBridgeEvent(event); return supervisor.request('query.provider.list_configs'); });
+  handle(channels.providerGet, validateProviderReference, 'query.provider.get_config');
+  ipcMain.handle(channels.modelStart, async (event, payload) => {
+    assertBridgeEvent(event);
+    const request=validateStartModel(payload);
+    if(request.context_package.some((chip)=>chip.kind==='CURRENT_PAGE'||chip.kind==='CURRENT_SELECTION')){
+      const candidate=await browser().getContextCandidate();
+      request.context_package=request.context_package.map((chip)=>{
+        if(chip.kind!=='CURRENT_PAGE'&&chip.kind!=='CURRENT_SELECTION')return chip;
+        if(chip.source_identity!==candidate.page_id||chip.source_revision_or_navigation_generation!==String(candidate.navigation_generation))throw new Error('Browse context became stale');
+        if(chip.kind==='CURRENT_SELECTION'&&!candidate.selection_text)throw new Error('Browse selection became stale');
+        return {...chip,display_label:chip.kind==='CURRENT_SELECTION'?'Current selection':(candidate.title||candidate.url),content:chip.kind==='CURRENT_SELECTION'?candidate.selection_text:`${candidate.url}\n\n${candidate.page_text}`,completeness:chip.kind==='CURRENT_SELECTION'||!candidate.is_partial?'COMPLETE':'PARTIAL'};
+      });
+    }
+    return supervisor.request('command.model.start',request);
+  });
+  handle(channels.modelCancel, validateCancelModel, 'command.model.cancel');
+  handle(channels.captureCreate, validateCreateCapture, 'command.capture.create');
+  handle(channels.captureAttach, validateAttachCapture, 'command.capture.attach');
+  handle(channels.capturePromote, validatePromoteCapture, 'command.capture.promote');
+  handle(channels.captureArchive, validateMutateCapture, 'command.capture.archive');
+  handle(channels.captureRestore, validateMutateCapture, 'command.capture.restore');
+  handle(channels.captureList, validateListCaptures, 'query.capture.list');
+  handle(channels.captureGet, validateCaptureReference, 'query.capture.get');
+  ipcMain.handle(channels.browserShow, (event, payload) => { assertBridgeEvent(event); return browser().show(validateBrowserBounds(payload)); });
+  ipcMain.handle(channels.browserHide, (event) => { assertBridgeEvent(event); return browser().hide(); });
+  ipcMain.handle(channels.browserCreatePage, (event) => { assertBridgeEvent(event); return browser().createPage(); });
+  ipcMain.handle(channels.browserSwitchPage, (event, payload) => { assertBridgeEvent(event); return browser().switchPage(validateBrowserPageRequest(payload).page_id); });
+  ipcMain.handle(channels.browserClosePage, (event, payload) => { assertBridgeEvent(event); return browser().closePage(validateBrowserPageRequest(payload).page_id); });
+  ipcMain.handle(channels.browserShowPageContextMenu, (event, payload) => { assertBridgeEvent(event); return browser().showPageContextMenu(validateBrowserPageRequest(payload).page_id); });
+  ipcMain.handle(channels.browserNavigate, (event, payload) => { assertBridgeEvent(event); return browser().navigate(validateBrowserNavigate(payload).url); });
+  ipcMain.handle(channels.browserBack, (event) => { assertBridgeEvent(event); return browser().back(); });
+  ipcMain.handle(channels.browserForward, (event) => { assertBridgeEvent(event); return browser().forward(); });
+  ipcMain.handle(channels.browserReload, (event) => { assertBridgeEvent(event); return browser().reload(); });
+  ipcMain.handle(channels.browserState, (event) => { assertBridgeEvent(event); return browser().getState(); });
+  ipcMain.handle(channels.browserContext, (event) => { assertBridgeEvent(event); return browser().getContextCandidate(); });
   ipcMain.handle(channels.coreHealth, (event) => { assertBridgeEvent(event); return supervisor.getHealth(); });
   ipcMain.handle(channels.coreRetry, async (event) => { assertBridgeEvent(event); await supervisor.retry(); });
   ipcMain.handle(channels.coreOpenLogs, async (event) => {
@@ -83,6 +246,23 @@ function registerBridgeHandlers(): void {
   ipcMain.handle(channels.coreQuit, (event) => { assertBridgeEvent(event); app.quit(); });
   if (process.env.FIELORA_E2E === '1') {
     ipcMain.handle(channels.testKillCore, (event) => { assertBridgeEvent(event); supervisor.killForTest(); });
+    ipcMain.handle(channels.testResizeWindow, (event, payload: unknown) => {
+      assertBridgeEvent(event);
+      if (!payload || typeof payload !== 'object') throw new Error('Window size must be an object');
+      if (Object.keys(payload).sort().join(',') !== 'height,width') throw new Error('Window size has unexpected fields');
+      const { width, height } = payload as Record<string, unknown>;
+      if (!Number.isInteger(width) || !Number.isInteger(height) || Number(width) < 900 || Number(width) > 2400 || Number(height) < 620 || Number(height) > 1600) {
+        throw new Error('Window size is outside the E2E range');
+      }
+      if (!appWindow || appWindow.isDestroyed()) throw new Error('App window is unavailable');
+      appWindow.setSize(Number(width), Number(height));
+      const bounds = appWindow.getBounds();
+      return { width: bounds.width, height: bounds.height };
+    });
+    ipcMain.handle(channels.testCreateProject, (event, payload) => {
+      assertBridgeEvent(event);
+      return supervisor.request('command.project.create', validateCreateProject(payload));
+    });
   }
 }
 
@@ -115,12 +295,15 @@ async function registerApplicationProtocol(): Promise<void> {
 
 async function createWindow(): Promise<void> {
   trustedOrigin = trustedOriginFor(app.isPackaged, MAIN_WINDOW_WEBPACK_ENTRY);
-  appWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1180,
     height: 760,
     minWidth: 900,
     minHeight: 620,
     backgroundColor: '#f5f7fb',
+    autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#f3f6fa', symbolColor: '#565d67', height: 40 },
     show: false,
     webPreferences: {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
@@ -131,29 +314,51 @@ async function createWindow(): Promise<void> {
       allowRunningInsecureContent: false,
     },
   });
-  appWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  appWindow.webContents.on('will-navigate', (event, url) => {
+  appWindow = window;
+  window.removeMenu();
+  browserRuntime = new BrowserRuntime(window, (state) => {
+    withUsableWindow(appWindow, (current) => current.webContents.send(channels.browserEvent, state));
+  }, !app.isPackaged || process.env.FIELORA_E2E === '1');
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('context-menu', (_event, params) => showTrustedEditContextMenu(params));
+  window.webContents.on('will-navigate', (event, url) => {
     if (!isAllowedNavigation(url, trustedOrigin)) event.preventDefault();
   });
-  appWindow.webContents.on('will-redirect', (event, url) => {
+  window.webContents.on('will-redirect', (event, url) => {
     if (!isAllowedNavigation(url, trustedOrigin)) event.preventDefault();
   });
-  appWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
-  appWindow.once('ready-to-show', () => appWindow?.show());
-  if (app.isPackaged) await appWindow.loadURL('fielora://app/index.html');
-  else await appWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
+  window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  window.once('ready-to-show', () => withUsableWindow(window, (current) => current.show()));
+  window.on('close', () => {
+    if (appWindow !== window) return;
+    appWindow = undefined;
+    const runtime = browserRuntime;
+    browserRuntime = undefined;
+    runtime?.destroy();
+  });
+  window.on('closed', () => {
+    if (appWindow === window) appWindow = undefined;
+  });
+  if (app.isPackaged) await window.loadURL('fielora://app/index.html');
+  else await window.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
 }
 
-const singleInstance = app.requestSingleInstanceLock();
+// E2E instances use isolated LOCALAPPDATA roots and must be able to run while a
+// user is reviewing a packaged build. Production still keeps the single-instance invariant.
+const singleInstance = process.env.FIELORA_E2E === '1' || app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
 else {
-  app.on('second-instance', () => { if (appWindow) { appWindow.restore(); appWindow.focus(); } });
+  app.on('second-instance', () => { focusUsableWindow(appWindow); });
   app.whenReady().then(async () => {
     registerBridgeHandlers();
     if (app.isPackaged) await registerApplicationProtocol();
     await createWindow();
-    supervisor.on('notification', (message) => appWindow?.webContents.send(channels.coreEvent, (message as { params: unknown }).params));
-    supervisor.on('health', (payload) => appWindow?.webContents.send(channels.coreEvent, { event: 'event.core.health', ...payload }));
+    supervisor.on('notification', (message) => {
+      withUsableWindow(appWindow, (window) => window.webContents.send(channels.coreEvent, (message as { params: unknown }).params));
+    });
+    supervisor.on('health', (payload) => {
+      withUsableWindow(appWindow, (window) => window.webContents.send(channels.coreEvent, { event: 'event.core.health', ...payload }));
+    });
     void supervisor.start().catch((error) => console.error('Core startup failed', error));
   });
 }
@@ -162,7 +367,12 @@ app.on('before-quit', (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
-  void supervisor.shutdown().finally(() => app.exit(0));
+  void supervisor.shutdown().finally(() => {
+    workspaceRuntime.dispose();
+    browserRuntime?.destroy();
+    browserRuntime = undefined;
+    app.exit(0);
+  });
 });
 
 app.on('window-all-closed', () => app.quit());

@@ -1,0 +1,29 @@
+{
+  "status": "PASS",
+  "schema_version": 4,
+  "checks": [
+    "provider_config",
+    "wincred_write_read_delete",
+    "fixture_started_delta_usage_completed",
+    "fixture_started_cancelled",
+    "fixture_started_failed_stable_error",
+    "context_core_reread",
+    "context_progressive_disclosure",
+    "sensitive_exception_disclosure",
+    "provider_setup_outside_ask",
+    "provider_model_retention_cost_disclosure",
+    "independent_inbox",
+    "inbox_bounded_preview",
+    "user_language_hides_domain_terms",
+    "capture_attach_promote",
+    "restart_resume",
+    "secret_not_in_files",
+    "unsaved_prompt_not_in_files",
+    "summon_focus_restore",
+    "no_provider_degraded_setup",
+    "no_equal_summon_tabs"
+  ],
+  "provider_external_requests": 0,
+  "dxe_surface_runtime": "NOT_IMPLEMENTED",
+  "captured_at": "2026-08-17T03:11:44.884Z"
+}
