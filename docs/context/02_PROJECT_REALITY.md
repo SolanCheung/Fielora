@@ -1079,3 +1079,21 @@ DESKTOP_FOUNDATION_PREMERGE_PACKAGED_FRESH: PASS
 DESKTOP_FOUNDATION_AGENT_RUNTIME: NOT_IMPLEMENTED
 DESKTOP_FOUNDATION_LAYOUT_HUMAN_REGATE: READY_NOT_RUN
 ```
+
+## 61. Complete Agent Program Authorization and Integrated Contract
+
+用户于 2026-08-18 授权一次性完成 Fielora Complete Agent Program 的设计、实现、自动测试、打包与人工验收准备，并授权实现侧自主解决旧路线、Contract 与执行范围冲突。当前工作在本地 `phase/complete-agent-v0.1` 分支连续推进，不授权 push、merge main、真实凭据提取、无界付费 Provider probe 或破坏性 Git。
+
+集成裁决以可用 Agent 为近期主线：`Project → Conversation → AgentRun`；Field identity 继续作为 Project compatibility，不额外制造 Thread/Project。append-only persistence 被严格限定为 Agent Execution Ledger，不替代全产品状态，也不把 Fielora 改造成 Full Event Sourcing/Workflow Engine。Reality Admission 只保留为可选受治理出口，不阻断核心 coding loop；Aegis/DXE 名称和 UI 仍按既有顺序延后，但本 Program 实现真实 Policy、Approval、Verification 与 Recovery 基础。
+
+首次 repo audit 证明 Desktop Foundation 具备 Provider/Model、Conversation、文件 Review、Terminal 与 Browser，但 Agent Runtime 仍为 `NOT_IMPLEMENTED`。fresh baseline 的静态、42 TS、30 Rust 与 6 Core integration 通过，Phase 02 Desktop E2E 因 CDP command 没有硬超时出现无限等待；现已增加 WebSocket/CDP/fetch deadline，针对性 dev E2E PASS。既有 51 tracked/63 untracked 工作已在 Agent 分支固定为 `009507a` checkpoint，未清理用户工作。
+
+```text
+COMPLETE_AGENT_PROGRAM: AUTHORIZED
+COMPLETE_AGENT_INTEGRATED_CONTRACT: ESTABLISHED
+COMPLETE_AGENT_PROJECT_CONVERSATION_RUN_RELATION: FROZEN
+COMPLETE_AGENT_LEDGER_SCOPE: AGENT_EXECUTION_ONLY
+COMPLETE_AGENT_SCHEMA_TARGET: 6
+COMPLETE_AGENT_IMPLEMENTATION: IN_PROGRESS
+LIVE_PROVIDER_PROBE: NOT_RUN
+```
