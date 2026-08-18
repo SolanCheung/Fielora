@@ -47,12 +47,12 @@
       "bytes": 12753
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "80f4414350d54e1a14265832846fe622978e19e25c0d9838a5f2c6afbccd8136",
-      "bytes": 97656
+      "sha256": "9162bbe8635ca7754363a2e3c288f8ea0c5a0c02e72607b482680c7345f6b4eb",
+      "bytes": 102329
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "d53b37b5a51f413bc1f34bbefcf247f320ff74fe026d242593404a8d22027599",
-      "bytes": 58277
+      "sha256": "00bbf142bc708dbdc549f35331d6790a9655a8ebbf7ea750cbc4ac033ffca30c",
+      "bytes": 60899
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
       "sha256": "0b4f9bd00ad5b9a198e4f3a6523503aaacbf8b5630aaa5d029577ee08abbc160",
@@ -327,8 +327,8 @@
       "bytes": 860
     },
     "artifacts/phase04/KNOWN_ISSUES.md": {
-      "sha256": "3a34283524d062a44a3976ee8cb2aba73455f7cc9fc53abc65fefabe22994813",
-      "bytes": 2130
+      "sha256": "e82ce427ecca2e7dfa02a320382d2fd54189cf471aa178bb74911cf03000a7c8",
+      "bytes": 3122
     },
     "artifacts/phase04/HUMAN_EXPERIENCE_REMEDIATION_REPORT.md": {
       "sha256": "1cfaacfdc0264804e69976b622b1e7fa4e3f55a79377d4574481f1f4c53fae91",

@@ -1097,3 +1097,26 @@ COMPLETE_AGENT_SCHEMA_TARGET: 6
 COMPLETE_AGENT_IMPLEMENTATION: IN_PROGRESS
 LIVE_PROVIDER_PROBE: NOT_RUN
 ```
+
+## 62. Complete Agent V0.1 Implemented Engineering Reality
+
+Complete Agent V0.1 has now moved from Foundation-only to a real Core-owned autonomous execution loop. Schema 6 persists AgentRun, append-only typed events, tool calls, one-time approvals, bounded context snapshots, and verification receipts. The provider-neutral loop accepts native tools from OpenAI Responses, Anthropic Messages, and OpenAI-compatible adapters; fragmented arguments never execute before complete JSON exists. Renderer remains a client rather than execution truth.
+
+The Coding profile now compiles bounded repository and Conversation context, excludes common secret paths/content, and offers controlled list/read/search/stat/git/skill/capability tools, hash-guarded create/write/exact-replace/move/delete/restore, typed argv command execution, and bounded read-only child AgentRuns. Writes create checkpoints and invalidate any earlier verification; completion after a mutation requires a later successful process receipt. Windows commands run under a sanitized environment and Job Object so stop/timeout terminates the process tree. Startup converts incomplete tools to UNKNOWN and active runs to PAUSED without replay.
+
+Desktop Composer now creates AgentRuns with read-only, review, or full-control policy presets. Conversation renders status, step, model, tools/events, exact approval summaries, allow/deny, stop/resume and persisted completion across restart. The same Agent hero flow passes dev, packaged and fresh-extracted portable E2E; packaged single-instance lifecycle also passes. Windows x64 ZIP SHA-256 is `fdd15124ee89103e10b60c974352677e1ce2be3692c9fd94171a11e36cc4acea`.
+
+The program does not claim leading model quality. Live-provider evaluation was not run because no eligible credential/model was explicitly authorized. Golden model-dependent bug-fix/feature/replay tasks, semantic compaction-and-continue, and proposal-only fallback for models without native tools remain non-passing. Web research, Archive, DOCX/PDF, XLSX/chart, PPTX, and image adapters return an honest unsupported boundary rather than fake completion. Full `pnpm verify:premerge` is also not green: every earlier gate passed, then the historic Chromium Ctrl+C/Ctrl+V native clipboard check repeatedly failed in the current Windows session and was not weakened.
+
+```text
+COMPLETE_AGENT_SCHEMA_6: IMPLEMENTED
+COMPLETE_AGENT_CORE_LOOP: IMPLEMENTED_AND_INTEGRATION_VERIFIED
+COMPLETE_AGENT_CODING_TOOLS_POLICY_RECOVERY: IMPLEMENTED
+COMPLETE_AGENT_BOUNDED_READONLY_SUBAGENT: IMPLEMENTED
+COMPLETE_AGENT_DESKTOP_DEV_PACKAGED_PORTABLE: PASS
+COMPLETE_AGENT_LIVE_PROVIDER_QUALITY: NOT_RUN
+COMPLETE_AGENT_GOLDEN_MODEL_QUALITY: NOT_PASS
+COMPLETE_AGENT_PREMERGE: FAIL_BROWSER_NATIVE_CLIPBOARD
+FIELORA_COMPLETE_AGENT_V0.1_ENGINEERING_PASS: NOT_ASSERTED
+COMPLETE_AGENT_HUMAN_ACCEPTANCE: READY_NOT_RUN
+```

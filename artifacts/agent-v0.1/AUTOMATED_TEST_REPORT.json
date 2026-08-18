@@ -1,0 +1,18 @@
+{
+  "program": "Fielora Complete Agent V0.1",
+  "captured_at": "2026-08-18",
+  "status": "NOT_PASS",
+  "results": {
+    "typescript_unit": {"status": "PASS", "passed": 43, "failed": 0},
+    "rust_workspace": {"status": "PASS", "passed": 42, "failed": 0},
+    "core_integration": {"status": "PASS", "passed": 8, "failed": 0},
+    "desktop_phase02_dev": {"status": "PASS"},
+    "agent_desktop_dev": {"status": "PASS"},
+    "agent_desktop_packaged": {"status": "PASS"},
+    "agent_desktop_portable": {"status": "PASS"},
+    "packaged_single_instance": {"status": "PASS"},
+    "premerge": {"status": "FAIL", "failed_gate": "desktop-e2e-browse", "reason": "Chromium native Ctrl+C/Ctrl+V clipboard round trip returned false in current Windows session"},
+    "live_provider": {"status": "NOT_RUN", "reason": "no explicitly authorized eligible test credential/model"},
+    "golden_model_quality": {"status": "NOT_PASS", "manifest": "tests/fixtures/agent-golden/MANIFEST.json"}
+  }
+}

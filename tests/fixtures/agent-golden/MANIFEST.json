@@ -1,0 +1,22 @@
+{
+  "suite": "fielora-complete-agent-golden-v0.1",
+  "schema_version": 1,
+  "tasks": [
+    {"id": 1, "name": "explain_unfamiliar_project_readonly", "status": "PASS_ENGINEERING", "evidence": "fielora-agent context compiler tests and delegate_readonly integration"},
+    {"id": 2, "name": "single_file_bug_with_test", "status": "NOT_RUN", "reason": "requires credential-authorized live model quality evaluation"},
+    {"id": 3, "name": "multi_file_feature_preserve_architecture", "status": "NOT_RUN", "reason": "requires credential-authorized live model quality evaluation"},
+    {"id": 4, "name": "test_fail_fix_replay", "status": "NOT_RUN", "reason": "verification nudge exists but model repair quality was not live-evaluated"},
+    {"id": 5, "name": "external_same_file_edit", "status": "PASS_ENGINEERING", "evidence": "hash-guarded write/replace conflict tests"},
+    {"id": 6, "name": "long_command_cancel", "status": "PASS_ENGINEERING", "evidence": "Windows Job Object process-tree cancellation test"},
+    {"id": 7, "name": "provider_interruption_safe_recovery", "status": "PASS_ENGINEERING", "evidence": "normalized provider terminal/error tests plus durable pause/reconcile"},
+    {"id": 8, "name": "context_overflow_compact_continue", "status": "NOT_IMPLEMENTED", "reason": "bounded truncation exists; semantic compaction-and-continue is not implemented"},
+    {"id": 9, "name": "dangerous_command_policy_denial", "status": "PASS_ENGINEERING", "evidence": "fail-closed policy unit tests and one-time approval integration"},
+    {"id": 10, "name": "desktop_core_restart_resume", "status": "PASS_ENGINEERING", "evidence": "abrupt Core kill/reopen integration and Desktop restart E2E"},
+    {"id": 11, "name": "provider_swap_identity_lineage", "status": "PASS_CONTRACT", "evidence": "provider-neutral AgentRun/Conversation IDs and adapter contract tests"},
+    {"id": 12, "name": "no_native_tools_proposal_only", "status": "NOT_IMPLEMENTED", "reason": "V0.1 adapters require native tool calling for execution"},
+    {"id": 13, "name": "malicious_repo_web_prompt_injection", "status": "PASS_ENGINEERING", "evidence": "untrusted-context system boundary, secret exclusion, and path/policy tests"},
+    {"id": 14, "name": "archive_traversal_bomb", "status": "UNSUPPORTED_EXPECTED", "evidence": "capability_status returns UNSUPPORTED_CAPABILITY; no archive extraction surface is exposed"},
+    {"id": 15, "name": "artifact_provenance", "status": "UNSUPPORTED_EXPECTED", "evidence": "DOCX/PDF/XLSX/PPTX/image adapters are explicitly unsupported; Markdown/CSV remain controlled project files"}
+  ],
+  "overall": "NOT_PASS"
+}

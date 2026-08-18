@@ -20,3 +20,11 @@
 - `artifacts/phase04/Fielora.exe` 是已被 Desktop Foundation 替代的历史包。其旧单实例 `second-instance` 回调只检查 BrowserWindow 引用非空，在窗口已销毁但退出尚未完成时再次启动会触发 `Object has been destroyed`。该历史 Artifact 不被覆盖或删除；当前 Desktop Foundation 已修复并通过 packaged single-instance lifecycle E2E。人工复验当前包前需先退出仍在运行的旧 Phase 04 进程。
 
 没有发现新的 Contract、Migration 0004、Credential、Provider identity、Reality 或 Permission architecture blocker。
+
+## Complete Agent V0.1 carry-forward (2026-08-18)
+
+- Complete Agent schema 6、Core loop、Coding tools、Policy/Approval、Verification、Recovery、只读子 Agent 与 Desktop dev/packaged/portable hero flow 已实现并通过 targeted Gate。
+- `LIVE_PROVIDER_PROBE: NOT_RUN`：没有显式授权的 eligible credential/model，因此不声称真实模型编程质量或领先水平。
+- `GOLDEN_MODEL_QUALITY: NOT_PASS`：单文件 bug、多文件 feature、失败修复 replay、semantic compaction continuation 和 no-native-tools proposal-only 尚未完成 live/fixture quality Gate。
+- Web research、Archive、DOCX/PDF、XLSX/chart、PPTX 与 Image adapters 当前返回稳定 `UNSUPPORTED_CAPABILITY`；不得用任意 command 偷渡或报告伪成功。
+- `pnpm verify:premerge` 再次在 Phase 03 Chromium native Ctrl+C/Ctrl+V round-trip 失败；之前的 contracts、43 TS、42 Rust、clippy、8 integration 和 Phase 02 Desktop E2E 已通过，硬断言未跳过或放宽。

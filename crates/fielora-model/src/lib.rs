@@ -777,14 +777,8 @@ fn append_tool_arguments(target: &mut String, delta: &str) -> Result<(), ModelEr
 
 fn model_usage(value: &Value, input: &str, output: &str) -> ModelUsage {
     ModelUsage {
-        input_tokens: value
-            .get(input)
-            .and_then(Value::as_u64)
-            .and_then(|value| value.try_into().ok()),
-        output_tokens: value
-            .get(output)
-            .and_then(Value::as_u64)
-            .and_then(|value| value.try_into().ok()),
+        input_tokens: value.get(input).and_then(Value::as_u64),
+        output_tokens: value.get(output).and_then(Value::as_u64),
     }
 }
 

@@ -50,6 +50,11 @@ artifacts/desktop-foundation/*
 !artifacts/desktop-foundation/*.md
 !artifacts/desktop-foundation/*.json
 !artifacts/desktop-foundation/*.png
+!artifacts/agent-v0.1/
+artifacts/agent-v0.1/*
+!artifacts/agent-v0.1/*.md
+!artifacts/agent-v0.1/*.json
+!artifacts/agent-v0.1/*.png
 
 # Local configuration and secrets
 .env

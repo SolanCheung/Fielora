@@ -1,0 +1,13 @@
+{
+  "program": "Fielora Complete Agent V0.1",
+  "platform": "win32-x64",
+  "schema_version": 6,
+  "artifacts": [
+    {"path": "apps/desktop/out/Fielora-win32-x64/Fielora.exe", "bytes": 225533440, "sha256": "71a3c11939df96c60f90fa75572ae81e72eb8b8b95c4df292c945bf0f3376f48"},
+    {"path": "apps/desktop/out/Fielora-win32-x64/resources/fielora-core.exe", "bytes": 10097664, "sha256": "7631a1ec5072eb7867b77e9cabcbff38bb21eca78fcfa0532788b49397bbd9f8"},
+    {"path": "apps/desktop/out/Fielora-win32-x64/resources/app.asar", "bytes": 538050, "sha256": "50c72406a57818fcd6ddaf1b8e5cec376beae1ee8fbda8cfa916c2af9d8890d6"},
+    {"path": "artifacts/agent-v0.1/Fielora-Complete-Agent-V0.1-win-x64.zip", "bytes": 148550659, "sha256": "fdd15124ee89103e10b60c974352677e1ce2be3692c9fd94171a11e36cc4acea"}
+  ],
+  "packaged_agent_e2e": "PASS",
+  "portable_agent_e2e": "PASS"
+}

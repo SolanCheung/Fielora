@@ -63,6 +63,20 @@ struct ExecutedTool {
     verification_passed: bool,
 }
 
+fn apply_execution_state(
+    wrote_workspace: &mut bool,
+    verification_passed: &mut bool,
+    executed: &ExecutedTool,
+) {
+    if executed.wrote_workspace {
+        *wrote_workspace = true;
+        *verification_passed = false;
+    }
+    if executed.verification_passed {
+        *verification_passed = true;
+    }
+}
+
 enum ToolDisposition {
     Executed(ExecutedTool),
     Waiting,
@@ -355,20 +369,30 @@ impl AgentCoordinator {
             .storage
             .list_agent_tool_calls(run_id.clone())
             .unwrap_or_default();
-        let mut wrote_workspace = existing_tools.iter().any(|tool| {
-            tool.status == AgentToolStatus::Completed
-                && tool.effect == AgentToolEffect::WorkspaceWrite
-        });
-        let mut verification_passed = existing_tools.iter().any(|tool| {
-            tool.status == AgentToolStatus::Completed
-                && tool.effect == AgentToolEffect::Process
+        let mut wrote_workspace = false;
+        let mut verification_passed = false;
+        for tool in existing_tools
+            .iter()
+            .filter(|tool| tool.status == AgentToolStatus::Completed)
+        {
+            if matches!(
+                tool.effect,
+                AgentToolEffect::WorkspaceWrite | AgentToolEffect::Destructive
+            ) {
+                wrote_workspace = true;
+                // A later mutation invalidates every earlier verification receipt.
+                verification_passed = false;
+            } else if tool.effect == AgentToolEffect::Process
                 && tool
                     .receipt
                     .as_ref()
                     .and_then(|value| value.get("success"))
                     .and_then(Value::as_bool)
                     == Some(true)
-        });
+            {
+                verification_passed = true;
+            }
+        }
 
         let task = prepared.run.task.clone();
         let root = prepared.project_root.clone();
@@ -470,8 +494,11 @@ impl AgentCoordinator {
                 .await
             {
                 ToolDisposition::Executed(executed) => {
-                    wrote_workspace |= executed.wrote_workspace;
-                    verification_passed |= executed.verification_passed;
+                    apply_execution_state(
+                        &mut wrote_workspace,
+                        &mut verification_passed,
+                        &executed,
+                    );
                     messages.push(executed.message);
                 }
                 ToolDisposition::Waiting => return,
@@ -664,8 +691,11 @@ impl AgentCoordinator {
                     .await
                 {
                     ToolDisposition::Executed(executed) => {
-                        wrote_workspace |= executed.wrote_workspace;
-                        verification_passed |= executed.verification_passed;
+                        apply_execution_state(
+                            &mut wrote_workspace,
+                            &mut verification_passed,
+                            &executed,
+                        );
                         messages.push(executed.message);
                     }
                     ToolDisposition::Waiting => return,
@@ -1315,7 +1345,10 @@ impl AgentCoordinator {
                         content: execution.observation,
                         is_error: false,
                     },
-                    wrote_workspace: tool.effect == AgentToolEffect::WorkspaceWrite,
+                    wrote_workspace: matches!(
+                        tool.effect,
+                        AgentToolEffect::WorkspaceWrite | AgentToolEffect::Destructive
+                    ),
                     verification_passed,
                 })
             }
@@ -1463,4 +1496,44 @@ fn now_ms() -> i64 {
         .unwrap_or_default()
         .as_millis()
         .min(i64::MAX as u128) as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn execution(wrote_workspace: bool, verification_passed: bool) -> ExecutedTool {
+        ExecutedTool {
+            message: AgentModelMessage::User(String::new()),
+            wrote_workspace,
+            verification_passed,
+        }
+    }
+
+    #[test]
+    fn later_workspace_write_invalidates_earlier_verification() {
+        let mut wrote_workspace = false;
+        let mut verification_passed = false;
+        apply_execution_state(
+            &mut wrote_workspace,
+            &mut verification_passed,
+            &execution(false, true),
+        );
+        assert!(verification_passed);
+
+        apply_execution_state(
+            &mut wrote_workspace,
+            &mut verification_passed,
+            &execution(true, false),
+        );
+        assert!(wrote_workspace);
+        assert!(!verification_passed);
+
+        apply_execution_state(
+            &mut wrote_workspace,
+            &mut verification_passed,
+            &execution(false, true),
+        );
+        assert!(verification_passed);
+    }
 }
