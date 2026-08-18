@@ -1,11 +1,12 @@
 use fielora_contracts::{
-    ContextSensitivity, ModelInvocationEvent, ModelInvocationEventKind, ModelInvocationRequest,
-    ModelUsage, ProviderKind, ToolProposal,
+    ContextSensitivity, ModelCapabilityProfile, ModelInvocationEvent, ModelInvocationEventKind,
+    ModelInvocationRequest, ModelToolDefinition, ModelUsage, ProviderKind, ToolProposal,
 };
 use futures_util::StreamExt;
 use reqwest::{Client, StatusCode, Url, redirect::Policy};
 use serde_json::{Value, json};
 use std::{
+    collections::BTreeMap,
     net::{IpAddr, SocketAddr},
     time::Duration,
 };
@@ -28,6 +29,73 @@ const MAX_TOOL_ARGUMENT_BYTES: usize = 64 * 1024;
 pub struct ProviderEndpoint {
     pub kind: ProviderKind,
     pub base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentModelToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentModelMessage {
+    User(String),
+    Assistant {
+        text: String,
+        tool_calls: Vec<AgentModelToolCall>,
+    },
+    ToolResult {
+        call_id: String,
+        name: String,
+        content: String,
+        is_error: bool,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentModelRequest {
+    pub model_id: String,
+    pub system: String,
+    pub messages: Vec<AgentModelMessage>,
+    pub tools: Vec<ModelToolDefinition>,
+    pub max_output_tokens: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentModelTurn {
+    pub text: String,
+    pub tool_calls: Vec<AgentModelToolCall>,
+    pub usage: Option<ModelUsage>,
+}
+
+pub fn provider_capabilities(kind: ProviderKind) -> ModelCapabilityProfile {
+    match kind {
+        ProviderKind::Openai => ModelCapabilityProfile {
+            streaming: true,
+            native_tools: true,
+            parallel_tools: true,
+            strict_schema: true,
+            usage: true,
+            cancellation: true,
+        },
+        ProviderKind::Anthropic => ModelCapabilityProfile {
+            streaming: true,
+            native_tools: true,
+            parallel_tools: true,
+            strict_schema: false,
+            usage: true,
+            cancellation: true,
+        },
+        ProviderKind::OpenaiCompatible => ModelCapabilityProfile {
+            streaming: true,
+            native_tools: true,
+            parallel_tools: false,
+            strict_schema: false,
+            usage: true,
+            cancellation: true,
+        },
+    }
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -202,6 +270,521 @@ impl ModelClient {
         } else {
             Err(ModelError::ProviderProtocolError)
         }
+    }
+
+    pub async fn invoke_agent_turn<F>(
+        &self,
+        endpoint: ProviderEndpoint,
+        request: AgentModelRequest,
+        secret: &[u8],
+        cancellation: CancellationToken,
+        mut emit_text: F,
+    ) -> Result<AgentModelTurn, ModelError>
+    where
+        F: FnMut(&str) + Send,
+    {
+        validate_agent_request(&request)?;
+        let (url, pinned) = endpoint_url(&endpoint).await?;
+        let client = if let Some((host, addresses)) = pinned {
+            Client::builder()
+                .redirect(Policy::none())
+                .no_proxy()
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(120))
+                .resolve_to_addrs(&host, &addresses)
+                .build()
+                .map_err(|_| ModelError::ProviderUnavailable)?
+        } else {
+            self.client.clone()
+        };
+        let body = agent_provider_body(endpoint.kind, &request);
+        let response = match endpoint.kind {
+            ProviderKind::Openai | ProviderKind::OpenaiCompatible => client
+                .post(url)
+                .bearer_auth(String::from_utf8_lossy(secret))
+                .json(&body)
+                .send(),
+            ProviderKind::Anthropic => client
+                .post(url)
+                .header("x-api-key", String::from_utf8_lossy(secret).as_ref())
+                .header("anthropic-version", "2023-06-01")
+                .json(&body)
+                .send(),
+        };
+        let response = tokio::select! {
+            _ = cancellation.cancelled() => return Err(ModelError::InvocationCancelled),
+            value = response => value.map_err(|_| ModelError::ProviderUnavailable)?,
+        };
+        map_status(response.status())?;
+        let mut stream = response.bytes_stream();
+        let mut decoder = SseDecoder::default();
+        let mut accumulator = AgentStreamAccumulator::new(endpoint.kind);
+        while let Some(chunk) = tokio::select! {
+            _ = cancellation.cancelled() => return Err(ModelError::InvocationCancelled),
+            value = stream.next() => value,
+        } {
+            let chunk = chunk.map_err(|_| ModelError::ProviderUnavailable)?;
+            for data in decoder.push(&chunk)? {
+                if data == "[DONE]" {
+                    if endpoint.kind == ProviderKind::OpenaiCompatible {
+                        accumulator.terminal = true;
+                    }
+                    continue;
+                }
+                let value: Value =
+                    serde_json::from_str(&data).map_err(|_| ModelError::ProviderProtocolError)?;
+                if provider_failure(endpoint.kind, &value) {
+                    return Err(ModelError::ProviderProtocolError);
+                }
+                for delta in accumulator.push(&value)? {
+                    emit_text(&delta);
+                }
+            }
+        }
+        accumulator.finish()
+    }
+}
+
+fn validate_agent_request(request: &AgentModelRequest) -> Result<(), ModelError> {
+    if request.model_id.is_empty()
+        || request.model_id.len() > 256
+        || request.system.len() > 64 * 1024
+        || request.messages.is_empty()
+        || request.messages.len() > 128
+        || request.tools.len() > 64
+        || !(1..=16_384).contains(&request.max_output_tokens)
+    {
+        return Err(ModelError::ContextTooLarge);
+    }
+    let message_bytes = request
+        .messages
+        .iter()
+        .map(|message| match message {
+            AgentModelMessage::User(text) => text.len(),
+            AgentModelMessage::Assistant { text, tool_calls } => {
+                text.len()
+                    + tool_calls
+                        .iter()
+                        .map(|call| {
+                            call.id.len() + call.name.len() + call.arguments.to_string().len()
+                        })
+                        .sum::<usize>()
+            }
+            AgentModelMessage::ToolResult {
+                call_id,
+                name,
+                content,
+                ..
+            } => call_id.len() + name.len() + content.len(),
+        })
+        .sum::<usize>();
+    let tool_bytes = request
+        .tools
+        .iter()
+        .map(|tool| tool.name.len() + tool.description.len() + tool.input_schema.to_string().len())
+        .sum::<usize>();
+    if message_bytes > 1024 * 1024 || tool_bytes > 256 * 1024 {
+        return Err(ModelError::ContextTooLarge);
+    }
+    if request.tools.iter().any(|tool| {
+        tool.name.is_empty()
+            || tool.name.len() > 128
+            || tool.description.len() > 4096
+            || !tool.input_schema.is_object()
+    }) {
+        return Err(ModelError::ProviderProtocolError);
+    }
+    Ok(())
+}
+
+fn agent_provider_body(kind: ProviderKind, request: &AgentModelRequest) -> Value {
+    match kind {
+        ProviderKind::Openai => {
+            let mut input = Vec::new();
+            for message in &request.messages {
+                match message {
+                    AgentModelMessage::User(text) => {
+                        input.push(json!({"role":"user","content":text}));
+                    }
+                    AgentModelMessage::Assistant { text, tool_calls } => {
+                        if !text.is_empty() {
+                            input.push(json!({"role":"assistant","content":text}));
+                        }
+                        input.extend(tool_calls.iter().map(|call| {
+                            json!({
+                                "type":"function_call",
+                                "call_id":call.id,
+                                "name":call.name,
+                                "arguments":call.arguments.to_string()
+                            })
+                        }));
+                    }
+                    AgentModelMessage::ToolResult {
+                        call_id, content, ..
+                    } => input.push(json!({
+                        "type":"function_call_output",
+                        "call_id":call_id,
+                        "output":content
+                    })),
+                }
+            }
+            let tools = request
+                .tools
+                .iter()
+                .map(|tool| {
+                    json!({
+                        "type":"function",
+                        "name":tool.name,
+                        "description":tool.description,
+                        "parameters":tool.input_schema,
+                        "strict":false
+                    })
+                })
+                .collect::<Vec<_>>();
+            json!({
+                "model":request.model_id,
+                "instructions":request.system,
+                "input":input,
+                "tools":tools,
+                "parallel_tool_calls":false,
+                "max_output_tokens":request.max_output_tokens,
+                "stream":true,
+                "store":false
+            })
+        }
+        ProviderKind::Anthropic => {
+            let messages = request.messages.iter().map(|message| match message {
+                AgentModelMessage::User(text) => json!({"role":"user","content":text}),
+                AgentModelMessage::Assistant { text, tool_calls } => {
+                    let mut content = Vec::new();
+                    if !text.is_empty() {
+                        content.push(json!({"type":"text","text":text}));
+                    }
+                    content.extend(tool_calls.iter().map(|call| json!({
+                        "type":"tool_use","id":call.id,"name":call.name,"input":call.arguments
+                    })));
+                    json!({"role":"assistant","content":content})
+                }
+                AgentModelMessage::ToolResult { call_id, content, is_error, .. } => json!({
+                    "role":"user","content":[{"type":"tool_result","tool_use_id":call_id,"content":content,"is_error":is_error}]
+                }),
+            }).collect::<Vec<_>>();
+            let tools = request.tools.iter().map(|tool| json!({
+                "name":tool.name,"description":tool.description,"input_schema":tool.input_schema
+            })).collect::<Vec<_>>();
+            json!({
+                "model":request.model_id,
+                "system":request.system,
+                "messages":messages,
+                "tools":tools,
+                "max_tokens":request.max_output_tokens,
+                "stream":true
+            })
+        }
+        ProviderKind::OpenaiCompatible => {
+            let mut messages = vec![json!({"role":"system","content":request.system})];
+            messages.extend(request.messages.iter().map(|message| match message {
+                AgentModelMessage::User(text) => json!({"role":"user","content":text}),
+                AgentModelMessage::Assistant { text, tool_calls } => json!({
+                    "role":"assistant",
+                    "content":if text.is_empty(){Value::Null}else{Value::String(text.clone())},
+                    "tool_calls":tool_calls.iter().map(|call|json!({"id":call.id,"type":"function","function":{"name":call.name,"arguments":call.arguments.to_string()}})).collect::<Vec<_>>()
+                }),
+                AgentModelMessage::ToolResult { call_id, name, content, .. } => json!({
+                    "role":"tool","tool_call_id":call_id,"name":name,"content":content
+                }),
+            }));
+            let tools = request.tools.iter().map(|tool|json!({
+                "type":"function","function":{"name":tool.name,"description":tool.description,"parameters":tool.input_schema}
+            })).collect::<Vec<_>>();
+            json!({
+                "model":request.model_id,
+                "messages":messages,
+                "tools":tools,
+                "tool_choice":"auto",
+                "parallel_tool_calls":false,
+                "max_tokens":request.max_output_tokens,
+                "stream":true,
+                "stream_options":{"include_usage":true}
+            })
+        }
+    }
+}
+
+#[derive(Default)]
+struct PendingAgentToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+    complete_arguments: Option<Value>,
+}
+
+struct AgentStreamAccumulator {
+    kind: ProviderKind,
+    text: String,
+    calls: BTreeMap<u64, PendingAgentToolCall>,
+    usage: Option<ModelUsage>,
+    terminal: bool,
+}
+
+impl AgentStreamAccumulator {
+    fn new(kind: ProviderKind) -> Self {
+        Self {
+            kind,
+            text: String::new(),
+            calls: BTreeMap::new(),
+            usage: None,
+            terminal: false,
+        }
+    }
+
+    fn push(&mut self, value: &Value) -> Result<Vec<String>, ModelError> {
+        let mut deltas = Vec::new();
+        match self.kind {
+            ProviderKind::Openai => match value.get("type").and_then(Value::as_str).unwrap_or("") {
+                "response.output_text.delta" => {
+                    if let Some(delta) = value.get("delta").and_then(Value::as_str) {
+                        self.push_text(delta, &mut deltas)?;
+                    }
+                }
+                "response.output_item.added" => {
+                    if value.pointer("/item/type").and_then(Value::as_str) == Some("function_call")
+                    {
+                        let index = value
+                            .get("output_index")
+                            .and_then(Value::as_u64)
+                            .ok_or(ModelError::ProviderProtocolError)?;
+                        let call = self.calls.entry(index).or_default();
+                        merge_string(&mut call.id, value.pointer("/item/call_id"))?;
+                        merge_string(&mut call.name, value.pointer("/item/name"))?;
+                        if let Some(arguments) =
+                            value.pointer("/item/arguments").and_then(Value::as_str)
+                        {
+                            call.arguments.push_str(arguments);
+                        }
+                    }
+                }
+                "response.function_call_arguments.delta" => {
+                    let index = value
+                        .get("output_index")
+                        .and_then(Value::as_u64)
+                        .ok_or(ModelError::ProviderProtocolError)?;
+                    let call = self.calls.entry(index).or_default();
+                    merge_string(&mut call.id, value.get("call_id"))?;
+                    if let Some(delta) = value.get("delta").and_then(Value::as_str) {
+                        append_tool_arguments(&mut call.arguments, delta)?;
+                    }
+                }
+                "response.output_item.done" => {
+                    if value.pointer("/item/type").and_then(Value::as_str) == Some("function_call")
+                    {
+                        let index = value
+                            .get("output_index")
+                            .and_then(Value::as_u64)
+                            .ok_or(ModelError::ProviderProtocolError)?;
+                        let call = self.calls.entry(index).or_default();
+                        merge_string(&mut call.id, value.pointer("/item/call_id"))?;
+                        merge_string(&mut call.name, value.pointer("/item/name"))?;
+                        if let Some(arguments) =
+                            value.pointer("/item/arguments").and_then(Value::as_str)
+                        {
+                            call.arguments.clear();
+                            append_tool_arguments(&mut call.arguments, arguments)?;
+                        }
+                    }
+                }
+                "response.completed" => {
+                    self.terminal = true;
+                    if let Some(usage) = value.pointer("/response/usage") {
+                        self.usage = Some(model_usage(usage, "input_tokens", "output_tokens"));
+                    }
+                }
+                _ => {}
+            },
+            ProviderKind::Anthropic => {
+                match value.get("type").and_then(Value::as_str).unwrap_or("") {
+                    "content_block_start" => {
+                        if value.pointer("/content_block/type").and_then(Value::as_str)
+                            == Some("tool_use")
+                        {
+                            let index = value
+                                .get("index")
+                                .and_then(Value::as_u64)
+                                .ok_or(ModelError::ProviderProtocolError)?;
+                            let call = self.calls.entry(index).or_default();
+                            merge_string(&mut call.id, value.pointer("/content_block/id"))?;
+                            merge_string(&mut call.name, value.pointer("/content_block/name"))?;
+                            if let Some(input) = value.pointer("/content_block/input")
+                                && input != &json!({})
+                            {
+                                call.complete_arguments = Some(input.clone());
+                            }
+                        }
+                    }
+                    "content_block_delta" => {
+                        let delta_type = value.pointer("/delta/type").and_then(Value::as_str);
+                        if delta_type == Some("text_delta") {
+                            if let Some(delta) =
+                                value.pointer("/delta/text").and_then(Value::as_str)
+                            {
+                                self.push_text(delta, &mut deltas)?;
+                            }
+                        } else if delta_type == Some("input_json_delta") {
+                            let index = value
+                                .get("index")
+                                .and_then(Value::as_u64)
+                                .ok_or(ModelError::ProviderProtocolError)?;
+                            let delta = value
+                                .pointer("/delta/partial_json")
+                                .and_then(Value::as_str)
+                                .ok_or(ModelError::ProviderProtocolError)?;
+                            append_tool_arguments(
+                                &mut self.calls.entry(index).or_default().arguments,
+                                delta,
+                            )?;
+                        }
+                    }
+                    "message_start" => {
+                        if let Some(usage) = value.pointer("/message/usage") {
+                            self.usage = Some(model_usage(usage, "input_tokens", "output_tokens"));
+                        }
+                    }
+                    "message_delta" => {
+                        if let Some(usage) = value.get("usage") {
+                            let delta = model_usage(usage, "input_tokens", "output_tokens");
+                            let current = self.usage.get_or_insert(ModelUsage {
+                                input_tokens: None,
+                                output_tokens: None,
+                            });
+                            current.input_tokens = delta.input_tokens.or(current.input_tokens);
+                            current.output_tokens = delta.output_tokens.or(current.output_tokens);
+                        }
+                    }
+                    "message_stop" => self.terminal = true,
+                    _ => {}
+                }
+            }
+            ProviderKind::OpenaiCompatible => {
+                if let Some(delta) = value
+                    .pointer("/choices/0/delta/content")
+                    .and_then(Value::as_str)
+                {
+                    self.push_text(delta, &mut deltas)?;
+                }
+                if let Some(calls) = value
+                    .pointer("/choices/0/delta/tool_calls")
+                    .and_then(Value::as_array)
+                {
+                    for item in calls {
+                        let index = item
+                            .get("index")
+                            .and_then(Value::as_u64)
+                            .ok_or(ModelError::ProviderProtocolError)?;
+                        let call = self.calls.entry(index).or_default();
+                        merge_string(&mut call.id, item.get("id"))?;
+                        merge_string(&mut call.name, item.pointer("/function/name"))?;
+                        if let Some(delta) =
+                            item.pointer("/function/arguments").and_then(Value::as_str)
+                        {
+                            append_tool_arguments(&mut call.arguments, delta)?;
+                        }
+                    }
+                }
+                if let Some(usage) = value.get("usage")
+                    && !usage.is_null()
+                {
+                    self.usage = Some(model_usage(usage, "prompt_tokens", "completion_tokens"));
+                }
+                if value
+                    .pointer("/choices/0/finish_reason")
+                    .and_then(Value::as_str)
+                    .is_some()
+                {
+                    self.terminal = true;
+                }
+            }
+        }
+        Ok(deltas)
+    }
+
+    fn push_text(&mut self, delta: &str, emitted: &mut Vec<String>) -> Result<(), ModelError> {
+        if self.text.len().saturating_add(delta.len()) > MAX_RESPONSE_BYTES {
+            return Err(ModelError::ProviderResponseTooLarge);
+        }
+        self.text.push_str(delta);
+        emitted.push(delta.to_owned());
+        Ok(())
+    }
+
+    fn finish(self) -> Result<AgentModelTurn, ModelError> {
+        if !self.terminal {
+            return Err(ModelError::ProviderProtocolError);
+        }
+        let tool_calls = self
+            .calls
+            .into_values()
+            .map(|call| {
+                if call.id.is_empty() || call.name.is_empty() {
+                    return Err(ModelError::ProviderProtocolError);
+                }
+                let arguments = if let Some(value) = call.complete_arguments {
+                    value
+                } else if call.arguments.trim().is_empty() {
+                    json!({})
+                } else {
+                    serde_json::from_str(&call.arguments)
+                        .map_err(|_| ModelError::ProviderProtocolError)?
+                };
+                if !arguments.is_object() {
+                    return Err(ModelError::ProviderProtocolError);
+                }
+                Ok(AgentModelToolCall {
+                    id: call.id,
+                    name: call.name,
+                    arguments: bounded_arguments(&arguments),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(AgentModelTurn {
+            text: self.text,
+            tool_calls,
+            usage: self.usage,
+        })
+    }
+}
+
+fn merge_string(target: &mut String, value: Option<&Value>) -> Result<(), ModelError> {
+    if let Some(value) = value {
+        let value = value.as_str().ok_or(ModelError::ProviderProtocolError)?;
+        if !value.is_empty() {
+            if target.is_empty() {
+                *target = value.chars().take(256).collect();
+            } else if target != value {
+                return Err(ModelError::ProviderProtocolError);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn append_tool_arguments(target: &mut String, delta: &str) -> Result<(), ModelError> {
+    if target.len().saturating_add(delta.len()) > MAX_TOOL_ARGUMENT_BYTES {
+        return Err(ModelError::ProviderResponseTooLarge);
+    }
+    target.push_str(delta);
+    Ok(())
+}
+
+fn model_usage(value: &Value, input: &str, output: &str) -> ModelUsage {
+    ModelUsage {
+        input_tokens: value
+            .get(input)
+            .and_then(Value::as_u64)
+            .and_then(|value| value.try_into().ok()),
+        output_tokens: value
+            .get(output)
+            .and_then(Value::as_u64)
+            .and_then(|value| value.try_into().ok()),
     }
 }
 
@@ -784,5 +1367,92 @@ mod tests {
             ProviderKind::OpenaiCompatible,
             &json!({"error":{"message":"redacted"}})
         ));
+    }
+
+    #[test]
+    fn fragmented_native_tool_calls_converge_to_the_same_agent_turn() {
+        let mut openai = AgentStreamAccumulator::new(ProviderKind::Openai);
+        openai.push(&json!({"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-1","name":"read_file","arguments":""}})).unwrap();
+        openai.push(&json!({"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"path\":\"src/"})).unwrap();
+        openai.push(&json!({"type":"response.function_call_arguments.delta","output_index":0,"delta":"lib.rs\"}"})).unwrap();
+        openai.push(&json!({"type":"response.completed","response":{"usage":{"input_tokens":4,"output_tokens":2}}})).unwrap();
+
+        let mut anthropic = AgentStreamAccumulator::new(ProviderKind::Anthropic);
+        anthropic.push(&json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call-1","name":"read_file","input":{}}})).unwrap();
+        anthropic.push(&json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"src/"}})).unwrap();
+        anthropic.push(&json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"lib.rs\"}"}})).unwrap();
+        anthropic.push(&json!({"type":"message_stop"})).unwrap();
+
+        let mut compatible = AgentStreamAccumulator::new(ProviderKind::OpenaiCompatible);
+        compatible.push(&json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read_file","arguments":"{\"path\":\"src/"}}]},"finish_reason":null}]})).unwrap();
+        compatible.push(&json!({"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"lib.rs\"}"}}]},"finish_reason":"tool_calls"}]})).unwrap();
+
+        for turn in [
+            openai.finish().unwrap(),
+            anthropic.finish().unwrap(),
+            compatible.finish().unwrap(),
+        ] {
+            assert_eq!(turn.tool_calls.len(), 1);
+            assert_eq!(turn.tool_calls[0].id, "call-1");
+            assert_eq!(turn.tool_calls[0].name, "read_file");
+            assert_eq!(turn.tool_calls[0].arguments, json!({"path":"src/lib.rs"}));
+        }
+    }
+
+    #[test]
+    fn agent_provider_bodies_preserve_tools_results_and_retention_boundary() {
+        let request = AgentModelRequest {
+            model_id: "model".into(),
+            system: "Work carefully".into(),
+            messages: vec![
+                AgentModelMessage::User("Inspect".into()),
+                AgentModelMessage::Assistant {
+                    text: String::new(),
+                    tool_calls: vec![AgentModelToolCall {
+                        id: "call-1".into(),
+                        name: "read_file".into(),
+                        arguments: json!({"path":"src/lib.rs"}),
+                    }],
+                },
+                AgentModelMessage::ToolResult {
+                    call_id: "call-1".into(),
+                    name: "read_file".into(),
+                    content: "contents".into(),
+                    is_error: false,
+                },
+            ],
+            tools: vec![ModelToolDefinition {
+                name: "read_file".into(),
+                description: "Read a project file".into(),
+                input_schema: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}),
+            }],
+            max_output_tokens: 1024,
+        };
+        let openai = agent_provider_body(ProviderKind::Openai, &request);
+        assert_eq!(openai.get("store"), Some(&Value::Bool(false)));
+        assert_eq!(
+            openai.pointer("/input/2/type"),
+            Some(&json!("function_call_output"))
+        );
+        assert_eq!(openai.pointer("/tools/0/name"), Some(&json!("read_file")));
+        let anthropic = agent_provider_body(ProviderKind::Anthropic, &request);
+        assert_eq!(
+            anthropic.pointer("/messages/2/content/0/type"),
+            Some(&json!("tool_result"))
+        );
+        assert!(anthropic.get("store").is_none());
+        let compatible = agent_provider_body(ProviderKind::OpenaiCompatible, &request);
+        assert_eq!(compatible.pointer("/messages/3/role"), Some(&json!("tool")));
+        assert_eq!(
+            compatible.pointer("/tools/0/type"),
+            Some(&json!("function"))
+        );
+    }
+
+    #[test]
+    fn incomplete_tool_json_never_becomes_a_tool_intent() {
+        let mut accumulator = AgentStreamAccumulator::new(ProviderKind::OpenaiCompatible);
+        accumulator.push(&json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"read_file","arguments":"{\"path\":"}}]},"finish_reason":"tool_calls"}]})).unwrap();
+        assert_eq!(accumulator.finish(), Err(ModelError::ProviderProtocolError));
     }
 }

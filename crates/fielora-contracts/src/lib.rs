@@ -37,6 +37,12 @@ typed_id!(ContextPackageId);
 typed_id!(ModelInvocationId);
 typed_id!(ConversationId);
 typed_id!(MessageId);
+typed_id!(AgentRunId);
+typed_id!(AgentEventId);
+typed_id!(ToolCallId);
+typed_id!(ApprovalId);
+typed_id!(ContextSnapshotId);
+typed_id!(VerificationReceiptId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ProtocolVersion {
@@ -1319,6 +1325,302 @@ pub struct CreateConversationMessageRequest {
 #[serde(deny_unknown_fields)]
 pub struct ListConversationMessagesRequest {
     pub conversation_id: ConversationId,
+}
+
+// Complete Agent Program contracts. These model durable execution, not a
+// second Conversation/Project domain and not full-product event sourcing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentRunStatus {
+    Queued,
+    Running,
+    WaitingApproval,
+    Paused,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl AgentRunStatus {
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentPermission {
+    ReadOnly,
+    ReviewChanges,
+    FullControl,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentEventKind {
+    RunCreated,
+    RunStarted,
+    RunPaused,
+    RunResumed,
+    RunCompleted,
+    RunFailed,
+    RunCancelled,
+    StepStarted,
+    ContextCompiled,
+    ModelStarted,
+    ModelTextDelta,
+    ModelCompleted,
+    ModelFailed,
+    ToolProposed,
+    ApprovalRequested,
+    ApprovalResolved,
+    ToolStarted,
+    ToolProgress,
+    ToolCompleted,
+    ToolFailed,
+    ToolDenied,
+    ToolCancelled,
+    ToolUnknown,
+    VerificationRecorded,
+    CheckpointCreated,
+    RecoveryReconciled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentToolEffect {
+    Observe,
+    WorkspaceWrite,
+    Process,
+    Network,
+    Destructive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentToolStatus {
+    Proposed,
+    WaitingApproval,
+    Running,
+    Completed,
+    Failed,
+    Denied,
+    Cancelled,
+    Unknown,
+}
+
+impl AgentToolStatus {
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Denied | Self::Cancelled | Self::Unknown
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentPolicyDecision {
+    Allow,
+    Ask,
+    Deny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ApprovalDecision {
+    AllowOnce,
+    Deny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum VerificationOutcome {
+    Pass,
+    Fail,
+    Blocked,
+    NotRun,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct AgentRunView {
+    pub id: AgentRunId,
+    pub field_id: FieldId,
+    pub conversation_id: ConversationId,
+    pub provider_config_id: ProviderConfigId,
+    pub model_id: String,
+    pub task: String,
+    pub permission: AgentPermission,
+    pub status: AgentRunStatus,
+    #[ts(type = "number")]
+    pub current_step: u32,
+    #[ts(type = "number")]
+    pub max_steps: u32,
+    #[ts(type = "number")]
+    pub next_sequence: u64,
+    pub error_code: Option<String>,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+    #[ts(type = "number | null")]
+    pub finished_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct StartAgentRunRequest {
+    pub field_id: FieldId,
+    pub conversation_id: ConversationId,
+    pub provider_config_id: ProviderConfigId,
+    pub model_id: Option<String>,
+    pub task: String,
+    pub permission: AgentPermission,
+    pub max_steps: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AgentRunRequest {
+    pub run_id: AgentRunId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ListAgentRunsRequest {
+    pub conversation_id: ConversationId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct AgentEventView {
+    pub id: AgentEventId,
+    pub run_id: AgentRunId,
+    #[ts(type = "number")]
+    pub sequence: u64,
+    pub schema_version: u16,
+    pub kind: AgentEventKind,
+    #[ts(type = "unknown")]
+    pub payload: Value,
+    #[ts(type = "number")]
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ListAgentEventsRequest {
+    pub run_id: AgentRunId,
+    #[ts(type = "number | null")]
+    pub after_sequence: Option<u64>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct AgentToolCallView {
+    pub id: ToolCallId,
+    pub run_id: AgentRunId,
+    pub name: String,
+    pub effect: AgentToolEffect,
+    pub status: AgentToolStatus,
+    pub policy_decision: AgentPolicyDecision,
+    #[ts(type = "unknown")]
+    pub arguments: Value,
+    #[ts(type = "unknown | null")]
+    pub receipt: Option<Value>,
+    pub error_code: Option<String>,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ApprovalView {
+    pub id: ApprovalId,
+    pub run_id: AgentRunId,
+    pub tool_call_id: ToolCallId,
+    pub decision: Option<ApprovalDecision>,
+    pub nonce: String,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number | null")]
+    pub resolved_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ResolveAgentApprovalRequest {
+    pub run_id: AgentRunId,
+    pub approval_id: ApprovalId,
+    pub nonce: String,
+    pub decision: ApprovalDecision,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct AgentContextSnapshotView {
+    pub id: ContextSnapshotId,
+    pub run_id: AgentRunId,
+    #[ts(type = "number")]
+    pub step: u32,
+    pub project_root_hash: String,
+    #[ts(type = "number")]
+    pub selected_files: u32,
+    #[ts(type = "number")]
+    pub estimated_tokens: u32,
+    pub content_sha256: String,
+    #[ts(type = "unknown")]
+    pub manifest: Value,
+    #[ts(type = "number")]
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct VerificationReceiptView {
+    pub id: VerificationReceiptId,
+    pub run_id: AgentRunId,
+    pub tool_call_id: Option<ToolCallId>,
+    pub check_kind: String,
+    pub outcome: VerificationOutcome,
+    pub summary: String,
+    pub artifact_sha256: Option<String>,
+    #[ts(type = "number | null")]
+    pub exit_code: Option<i32>,
+    #[ts(type = "number")]
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct AgentChangedEvent {
+    pub event: String,
+    pub run_id: AgentRunId,
+    #[ts(type = "number")]
+    pub sequence: u64,
+    pub status: AgentRunStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ModelToolDefinition {
+    pub name: String,
+    pub description: String,
+    #[ts(type = "unknown")]
+    pub input_schema: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ModelCapabilityProfile {
+    pub streaming: bool,
+    pub native_tools: bool,
+    pub parallel_tools: bool,
+    pub strict_schema: bool,
+    pub usage: bool,
+    pub cancellation: bool,
 }
 
 #[cfg(test)]

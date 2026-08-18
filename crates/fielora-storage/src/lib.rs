@@ -17,17 +17,21 @@ const MIGRATION_0001: &str = include_str!("../migrations/0001_core.sql");
 const MIGRATION_0002: &str = include_str!("../migrations/0002_phase02_reality.sql");
 const MIGRATION_0004: &str = include_str!("../migrations/0004_phase04_entry.sql");
 const MIGRATION_0005: &str = include_str!("../migrations/0005_desktop_foundation.sql");
+const MIGRATION_0006: &str = include_str!("../migrations/0006_complete_agent.sql");
 const MIGRATION_0001_NAME: &str = "core";
 const MIGRATION_0002_NAME: &str = "phase02_reality";
 const MIGRATION_0004_NAME: &str = "phase04_entry";
 const MIGRATION_0005_NAME: &str = "desktop_foundation";
+const MIGRATION_0006_NAME: &str = "complete_agent";
 const MIGRATION_0002_FROZEN_SHA256: &str =
     "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9";
 const MIGRATION_0004_FROZEN_SHA256: &str =
     "4d142745b3e9a5ccd8c27f422ecdc888163a575a91b0515f90a1ee6aa0f869ab";
 const MIGRATION_0005_FROZEN_SHA256: &str =
     "b7e1e586b47e50389502677e172741d69463e9518ed32211dfafe0dc910c1547";
-const SCHEMA_VERSION: u32 = 5;
+const MIGRATION_0006_FROZEN_SHA256: &str =
+    "5257959801424a13426259ce10c9ed2d5037795ec7a3a207171c568bc80dbaae";
+const SCHEMA_VERSION: u32 = 6;
 const LOCAL_USER_NAME: &str = "Local user";
 const SYSTEM_NAME: &str = "Fielora system";
 
@@ -104,6 +108,19 @@ pub struct StorageWorker {
 pub struct ProviderConfigRecord {
     pub view: ProviderConfigView,
     pub credential_ref: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AgentProjectionUpdate {
+    pub status: Option<AgentRunStatus>,
+    pub current_step: Option<u32>,
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentEventCommit {
+    pub event: AgentEventView,
+    pub run: AgentRunView,
 }
 
 impl StorageWorker {
@@ -343,6 +360,435 @@ impl StorageHandle {
                 )
                 .map_err(storage_domain)?;
             rows.collect::<Result<Vec<_>, _>>().map_err(storage_domain)
+        })
+    }
+
+    pub fn create_agent_run(
+        &self,
+        request: StartAgentRunRequest,
+        now: i64,
+    ) -> Result<AgentEventCommit, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let conversation = get_conversation(connection, &owner, &request.conversation_id)?;
+            if conversation.lifecycle_status != ConversationLifecycle::Active
+                || conversation.field_id != request.field_id
+            {
+                return Err(DomainError::Validation(
+                    "AGENT_CONVERSATION_SCOPE_INVALID".into(),
+                ));
+            }
+            let provider = get_provider_record(connection, &owner, &request.provider_config_id)?;
+            if provider.view.lifecycle_status != ProviderLifecycle::Active {
+                return Err(DomainError::Validation("PROVIDER_DISABLED".into()));
+            }
+            let model_id = request.model_id.unwrap_or(provider.view.default_model);
+            let max_steps = request.max_steps.unwrap_or(24);
+            if !(1..=64).contains(&max_steps) {
+                return Err(DomainError::Validation("AGENT_MAX_STEPS_INVALID".into()));
+            }
+            let run_id = AgentRunId::new(Uuid::now_v7().to_string());
+            let event_id = AgentEventId::new(Uuid::now_v7().to_string());
+            let payload = serde_json::json!({
+                "permission": wire(&request.permission),
+                "max_steps": max_steps,
+                "task_bytes": request.task.len(),
+            });
+            let transaction = connection.transaction().map_err(storage_domain)?;
+            transaction.execute(
+                "INSERT INTO agent_runs(id,field_id,conversation_id,provider_config_id,model_id,task,permission,status,current_step,max_steps,next_sequence,error_code,created_at,updated_at,finished_at) VALUES(?1,?2,?3,?4,?5,?6,?7,'QUEUED',0,?8,2,NULL,?9,?9,NULL)",
+                params![run_id.0,request.field_id.0,request.conversation_id.0,request.provider_config_id.0,model_id,request.task,wire(&request.permission),i64::from(max_steps),now],
+            ).map_err(storage_domain)?;
+            transaction.execute(
+                "INSERT INTO agent_events(id,run_id,sequence,schema_version,kind,payload_json,created_at) VALUES(?1,?2,1,1,?3,?4,?5)",
+                params![event_id.0,run_id.0,wire(&AgentEventKind::RunCreated),payload.to_string(),now],
+            ).map_err(storage_domain)?;
+            transaction.commit().map_err(storage_domain)?;
+            let run = get_agent_run(connection, &owner, &run_id)?;
+            Ok(AgentEventCommit {
+                event: AgentEventView {
+                    id: event_id,
+                    run_id,
+                    sequence: 1,
+                    schema_version: 1,
+                    kind: AgentEventKind::RunCreated,
+                    payload,
+                    created_at: now,
+                },
+                run,
+            })
+        })
+    }
+
+    pub fn get_agent_run(&self, run_id: AgentRunId) -> Result<AgentRunView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_agent_run(connection, &owner, &run_id)
+        })
+    }
+
+    pub fn list_agent_runs(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Result<Vec<AgentRunView>, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_conversation(connection, &owner, &conversation_id)?;
+            let mut statement = connection.prepare(
+                "SELECT r.id,r.field_id,r.conversation_id,r.provider_config_id,r.model_id,r.task,r.permission,r.status,r.current_step,r.max_steps,r.next_sequence,r.error_code,r.created_at,r.updated_at,r.finished_at FROM agent_runs r JOIN fields f ON f.id=r.field_id WHERE r.conversation_id=?1 AND f.owner_principal_id=?2 ORDER BY r.updated_at DESC,r.id DESC"
+            ).map_err(storage_domain)?;
+            let rows = statement
+                .query_map(params![conversation_id.0, owner.0], agent_run_from_row)
+                .map_err(storage_domain)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(storage_domain)
+        })
+    }
+
+    pub fn append_agent_event(
+        &self,
+        run_id: AgentRunId,
+        kind: AgentEventKind,
+        payload: Value,
+        update: AgentProjectionUpdate,
+        now: i64,
+    ) -> Result<AgentEventCommit, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let current = get_agent_run(connection, &owner, &run_id)?;
+            if current.status.is_terminal() {
+                return Err(DomainError::TerminalResource);
+            }
+            let status = update.status.unwrap_or(current.status);
+            let current_step = update.current_step.unwrap_or(current.current_step);
+            if current_step > current.max_steps {
+                return Err(DomainError::Validation("AGENT_STEP_BUDGET_EXCEEDED".into()));
+            }
+            if let Some(code) = update.error_code.as_deref()
+                && (code.is_empty() || code.len() > 128)
+            {
+                return Err(DomainError::Validation("AGENT_ERROR_CODE_INVALID".into()));
+            }
+            let payload_json = payload.to_string();
+            if payload_json.len() > 1024 * 1024 {
+                return Err(DomainError::Validation("AGENT_EVENT_TOO_LARGE".into()));
+            }
+            let sequence = current.next_sequence;
+            let event_id = AgentEventId::new(Uuid::now_v7().to_string());
+            let finished_at = status.is_terminal().then_some(now);
+            let transaction = connection.transaction().map_err(storage_domain)?;
+            transaction.execute(
+                "INSERT INTO agent_events(id,run_id,sequence,schema_version,kind,payload_json,created_at) VALUES(?1,?2,?3,1,?4,?5,?6)",
+                params![event_id.0,run_id.0,revision_to_domain(sequence)?,wire(&kind),payload_json,now],
+            ).map_err(storage_domain)?;
+            transaction.execute(
+                "UPDATE agent_runs SET status=?1,current_step=?2,next_sequence=?3,error_code=?4,updated_at=?5,finished_at=?6 WHERE id=?7",
+                params![wire(&status),i64::from(current_step),revision_to_domain(sequence+1)?,update.error_code,now,finished_at,run_id.0],
+            ).map_err(storage_domain)?;
+            transaction.commit().map_err(storage_domain)?;
+            Ok(AgentEventCommit {
+                event: AgentEventView {
+                    id: event_id,
+                    run_id: run_id.clone(),
+                    sequence,
+                    schema_version: 1,
+                    kind,
+                    payload,
+                    created_at: now,
+                },
+                run: get_agent_run(connection, &owner, &run_id)?,
+            })
+        })
+    }
+
+    pub fn list_agent_events(
+        &self,
+        request: ListAgentEventsRequest,
+    ) -> Result<Vec<AgentEventView>, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_agent_run(connection, &owner, &request.run_id)?;
+            let after = request.after_sequence.unwrap_or(0);
+            let limit = request.limit.unwrap_or(200).clamp(1, 500);
+            let mut statement = connection.prepare(
+                "SELECT id,run_id,sequence,schema_version,kind,payload_json,created_at FROM agent_events WHERE run_id=?1 AND sequence>?2 ORDER BY sequence ASC LIMIT ?3"
+            ).map_err(storage_domain)?;
+            let rows = statement
+                .query_map(
+                    params![
+                        request.run_id.0,
+                        revision_to_domain(after)?,
+                        i64::from(limit)
+                    ],
+                    agent_event_from_row,
+                )
+                .map_err(storage_domain)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(storage_domain)
+        })
+    }
+
+    pub fn create_agent_tool_call(
+        &self,
+        run_id: AgentRunId,
+        name: String,
+        effect: AgentToolEffect,
+        decision: AgentPolicyDecision,
+        arguments: Value,
+        now: i64,
+    ) -> Result<AgentToolCallView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let run = get_agent_run(connection, &owner, &run_id)?;
+            if run.status.is_terminal() {
+                return Err(DomainError::TerminalResource);
+            }
+            if name.is_empty() || name.len() > 128 {
+                return Err(DomainError::Validation("AGENT_TOOL_NAME_INVALID".into()));
+            }
+            let arguments_json = arguments.to_string();
+            if arguments_json.len() > 1024 * 1024 {
+                return Err(DomainError::Validation(
+                    "AGENT_TOOL_ARGUMENTS_TOO_LARGE".into(),
+                ));
+            }
+            let id = ToolCallId::new(Uuid::now_v7().to_string());
+            connection.execute(
+                "INSERT INTO agent_tool_calls(id,run_id,name,effect,status,policy_decision,arguments_json,receipt_json,error_code,created_at,updated_at,finished_at) VALUES(?1,?2,?3,?4,'PROPOSED',?5,?6,NULL,NULL,?7,?7,NULL)",
+                params![id.0,run_id.0,name,wire(&effect),wire(&decision),arguments_json,now],
+            ).map_err(storage_domain)?;
+            get_agent_tool_call(connection, &owner, &id)
+        })
+    }
+
+    pub fn update_agent_tool_call(
+        &self,
+        id: ToolCallId,
+        status: AgentToolStatus,
+        receipt: Option<Value>,
+        error_code: Option<String>,
+        now: i64,
+    ) -> Result<AgentToolCallView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let current = get_agent_tool_call(connection, &owner, &id)?;
+            if current.status.is_terminal() {
+                return Err(DomainError::TerminalResource);
+            }
+            let receipt_json = receipt.map(|value| value.to_string());
+            if receipt_json
+                .as_ref()
+                .is_some_and(|value| value.len() > 1024 * 1024)
+            {
+                return Err(DomainError::Validation(
+                    "AGENT_TOOL_RECEIPT_TOO_LARGE".into(),
+                ));
+            }
+            let finished_at = status.is_terminal().then_some(now);
+            connection.execute(
+                "UPDATE agent_tool_calls SET status=?1,receipt_json=?2,error_code=?3,updated_at=?4,finished_at=?5 WHERE id=?6",
+                params![wire(&status),receipt_json,error_code,now,finished_at,id.0],
+            ).map_err(storage_domain)?;
+            get_agent_tool_call(connection, &owner, &id)
+        })
+    }
+
+    pub fn list_agent_tool_calls(
+        &self,
+        run_id: AgentRunId,
+    ) -> Result<Vec<AgentToolCallView>, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_agent_run(connection, &owner, &run_id)?;
+            let mut statement = connection.prepare(
+                "SELECT t.id,t.run_id,t.name,t.effect,t.status,t.policy_decision,t.arguments_json,t.receipt_json,t.error_code,t.created_at,t.updated_at FROM agent_tool_calls t JOIN agent_runs r ON r.id=t.run_id JOIN fields f ON f.id=r.field_id WHERE t.run_id=?1 AND f.owner_principal_id=?2 ORDER BY t.created_at ASC,t.id ASC"
+            ).map_err(storage_domain)?;
+            let rows = statement
+                .query_map(params![run_id.0, owner.0], agent_tool_call_from_row)
+                .map_err(storage_domain)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(storage_domain)
+        })
+    }
+
+    pub fn create_agent_approval(
+        &self,
+        run_id: AgentRunId,
+        tool_call_id: ToolCallId,
+        now: i64,
+    ) -> Result<ApprovalView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let run = get_agent_run(connection, &owner, &run_id)?;
+            let tool = get_agent_tool_call(connection, &owner, &tool_call_id)?;
+            if run.status.is_terminal()
+                || tool.run_id != run_id
+                || tool.status != AgentToolStatus::Proposed
+                || tool.policy_decision != AgentPolicyDecision::Ask
+            {
+                return Err(DomainError::Validation("AGENT_APPROVAL_INVALID".into()));
+            }
+            let id = ApprovalId::new(Uuid::now_v7().to_string());
+            let nonce = format!(
+                "{}{}",
+                Uuid::now_v7().as_simple(),
+                Uuid::now_v7().as_simple()
+            );
+            let transaction = connection.transaction().map_err(storage_domain)?;
+            transaction.execute(
+                "INSERT INTO agent_approvals(id,run_id,tool_call_id,decision,nonce,created_at,resolved_at) VALUES(?1,?2,?3,NULL,?4,?5,NULL)",
+                params![id.0,run_id.0,tool_call_id.0,nonce,now],
+            ).map_err(storage_domain)?;
+            transaction.execute(
+                "UPDATE agent_tool_calls SET status='WAITING_APPROVAL',updated_at=?1 WHERE id=?2",
+                params![now,tool_call_id.0],
+            ).map_err(storage_domain)?;
+            transaction
+                .execute(
+                    "UPDATE agent_runs SET status='WAITING_APPROVAL',updated_at=?1 WHERE id=?2",
+                    params![now, run_id.0],
+                )
+                .map_err(storage_domain)?;
+            transaction.commit().map_err(storage_domain)?;
+            get_agent_approval(connection, &owner, &id)
+        })
+    }
+
+    pub fn resolve_agent_approval(
+        &self,
+        request: ResolveAgentApprovalRequest,
+        now: i64,
+    ) -> Result<ApprovalView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let current = get_agent_approval(connection, &owner, &request.approval_id)?;
+            if current.run_id != request.run_id || current.nonce != request.nonce {
+                return Err(DomainError::Validation(
+                    "AGENT_APPROVAL_REPLAY_DENIED".into(),
+                ));
+            }
+            if current.decision.is_some() {
+                return Err(DomainError::TerminalResource);
+            }
+            let tool_status = match request.decision {
+                ApprovalDecision::AllowOnce => AgentToolStatus::Proposed,
+                ApprovalDecision::Deny => AgentToolStatus::Denied,
+            };
+            let transaction = connection.transaction().map_err(storage_domain)?;
+            let changed = transaction.execute(
+                "UPDATE agent_approvals SET decision=?1,resolved_at=?2 WHERE id=?3 AND decision IS NULL AND nonce=?4",
+                params![wire(&request.decision),now,request.approval_id.0,request.nonce],
+            ).map_err(storage_domain)?;
+            if changed != 1 {
+                return Err(DomainError::TerminalResource);
+            }
+            transaction.execute(
+                "UPDATE agent_tool_calls SET status=?1,error_code=?2,updated_at=?3,finished_at=?4 WHERE id=?5",
+                params![wire(&tool_status),if tool_status==AgentToolStatus::Denied{Some("USER_DENIED")}else{None},now,if tool_status.is_terminal(){Some(now)}else{None},current.tool_call_id.0],
+            ).map_err(storage_domain)?;
+            transaction.execute(
+                "UPDATE agent_runs SET status='RUNNING',updated_at=?1 WHERE id=?2 AND status='WAITING_APPROVAL'",
+                params![now,request.run_id.0],
+            ).map_err(storage_domain)?;
+            transaction.commit().map_err(storage_domain)?;
+            get_agent_approval(connection, &owner, &request.approval_id)
+        })
+    }
+
+    pub fn save_agent_context_snapshot(
+        &self,
+        snapshot: AgentContextSnapshotView,
+    ) -> Result<AgentContextSnapshotView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_agent_run(connection, &owner, &snapshot.run_id)?;
+            let manifest = snapshot.manifest.to_string();
+            if manifest.len() > 1024 * 1024 {
+                return Err(DomainError::Validation("AGENT_CONTEXT_TOO_LARGE".into()));
+            }
+            connection.execute(
+                "INSERT INTO agent_context_snapshots(id,run_id,step,project_root_hash,selected_files,estimated_tokens,content_sha256,manifest_json,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                params![snapshot.id.0,snapshot.run_id.0,i64::from(snapshot.step),snapshot.project_root_hash,i64::from(snapshot.selected_files),i64::from(snapshot.estimated_tokens),snapshot.content_sha256,manifest,snapshot.created_at],
+            ).map_err(storage_domain)?;
+            Ok(snapshot)
+        })
+    }
+
+    pub fn record_agent_verification(
+        &self,
+        receipt: VerificationReceiptView,
+    ) -> Result<VerificationReceiptView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_agent_run(connection, &owner, &receipt.run_id)?;
+            if let Some(tool_call_id) = receipt.tool_call_id.as_ref() {
+                let tool = get_agent_tool_call(connection, &owner, tool_call_id)?;
+                if tool.run_id != receipt.run_id {
+                    return Err(DomainError::Validation(
+                        "AGENT_VERIFICATION_SCOPE_INVALID".into(),
+                    ));
+                }
+            }
+            connection.execute(
+                "INSERT INTO agent_verification_receipts(id,run_id,tool_call_id,check_kind,outcome,summary,artifact_sha256,exit_code,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                params![receipt.id.0,receipt.run_id.0,receipt.tool_call_id.as_ref().map(|value|value.0.as_str()),receipt.check_kind,wire(&receipt.outcome),receipt.summary,receipt.artifact_sha256,receipt.exit_code,receipt.created_at],
+            ).map_err(storage_domain)?;
+            Ok(receipt)
+        })
+    }
+
+    pub fn reconcile_agent_runs(&self, now: i64) -> Result<Vec<AgentEventCommit>, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let mut statement = connection.prepare(
+                "SELECT r.id FROM agent_runs r JOIN fields f ON f.id=r.field_id WHERE f.owner_principal_id=?1 AND r.status='RUNNING' ORDER BY r.updated_at ASC,r.id ASC"
+            ).map_err(storage_domain)?;
+            let run_ids = statement
+                .query_map([&owner.0], |row| row.get::<_, String>(0))
+                .map_err(storage_domain)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(storage_domain)?;
+            drop(statement);
+            let mut commits = Vec::new();
+            for raw_run_id in run_ids {
+                let run_id = AgentRunId::new(raw_run_id);
+                let current = get_agent_run(connection, &owner, &run_id)?;
+                let mut tool_statement = connection.prepare(
+                    "SELECT id FROM agent_tool_calls WHERE run_id=?1 AND status='RUNNING' ORDER BY created_at ASC,id ASC"
+                ).map_err(storage_domain)?;
+                let unknown_tools = tool_statement
+                    .query_map([&run_id.0], |row| row.get::<_, String>(0))
+                    .map_err(storage_domain)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(storage_domain)?;
+                drop(tool_statement);
+                let event_id = AgentEventId::new(Uuid::now_v7().to_string());
+                let payload = serde_json::json!({"reason":"CORE_RESTARTED","unknown_tool_call_ids":unknown_tools});
+                let transaction = connection.transaction().map_err(storage_domain)?;
+                transaction.execute(
+                    "UPDATE agent_tool_calls SET status='UNKNOWN',error_code='CORE_RESTARTED',updated_at=?1,finished_at=?1 WHERE run_id=?2 AND status='RUNNING'",
+                    params![now,run_id.0],
+                ).map_err(storage_domain)?;
+                transaction.execute(
+                    "INSERT INTO agent_events(id,run_id,sequence,schema_version,kind,payload_json,created_at) VALUES(?1,?2,?3,1,?4,?5,?6)",
+                    params![event_id.0,run_id.0,revision_to_domain(current.next_sequence)?,wire(&AgentEventKind::RecoveryReconciled),payload.to_string(),now],
+                ).map_err(storage_domain)?;
+                transaction.execute(
+                    "UPDATE agent_runs SET status='PAUSED',next_sequence=?1,error_code='CORE_RESTARTED',updated_at=?2 WHERE id=?3",
+                    params![revision_to_domain(current.next_sequence+1)?,now,run_id.0],
+                ).map_err(storage_domain)?;
+                transaction.commit().map_err(storage_domain)?;
+                commits.push(AgentEventCommit {
+                    event: AgentEventView {
+                        id: event_id,
+                        run_id: run_id.clone(),
+                        sequence: current.next_sequence,
+                        schema_version: 1,
+                        kind: AgentEventKind::RecoveryReconciled,
+                        payload,
+                        created_at: now,
+                    },
+                    run: get_agent_run(connection, &owner, &run_id)?,
+                });
+            }
+            Ok(commits)
         })
     }
 
@@ -1074,6 +1520,116 @@ fn conversation_message_from_row(
     })
 }
 
+fn agent_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRunView> {
+    Ok(AgentRunView {
+        id: AgentRunId::new(row.get::<_, String>(0)?),
+        field_id: FieldId::new(row.get::<_, String>(1)?),
+        conversation_id: ConversationId::new(row.get::<_, String>(2)?),
+        provider_config_id: ProviderConfigId::new(row.get::<_, String>(3)?),
+        model_id: row.get(4)?,
+        task: row.get(5)?,
+        permission: parse_wire(row.get(6)?)?,
+        status: parse_wire(row.get(7)?)?,
+        current_step: u32_from_row(row, 8)?,
+        max_steps: u32_from_row(row, 9)?,
+        next_sequence: revision_from_row(row, 10)?,
+        error_code: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
+        finished_at: row.get(14)?,
+    })
+}
+
+fn get_agent_run(
+    connection: &Connection,
+    owner: &PrincipalId,
+    run_id: &AgentRunId,
+) -> Result<AgentRunView, DomainError> {
+    connection.query_row(
+        "SELECT r.id,r.field_id,r.conversation_id,r.provider_config_id,r.model_id,r.task,r.permission,r.status,r.current_step,r.max_steps,r.next_sequence,r.error_code,r.created_at,r.updated_at,r.finished_at FROM agent_runs r JOIN fields f ON f.id=r.field_id WHERE r.id=?1 AND f.owner_principal_id=?2",
+        params![run_id.0,owner.0],
+        agent_run_from_row,
+    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
+fn agent_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentEventView> {
+    let payload: String = row.get(5)?;
+    Ok(AgentEventView {
+        id: AgentEventId::new(row.get::<_, String>(0)?),
+        run_id: AgentRunId::new(row.get::<_, String>(1)?),
+        sequence: revision_from_row(row, 2)?,
+        schema_version: row
+            .get::<_, i64>(3)?
+            .try_into()
+            .map_err(|_| conversion_error("event schema version out of range".into()))?,
+        kind: parse_wire(row.get(4)?)?,
+        payload: serde_json::from_str(&payload)
+            .map_err(|error| conversion_error(error.to_string()))?,
+        created_at: row.get(6)?,
+    })
+}
+
+fn agent_tool_call_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentToolCallView> {
+    let arguments: String = row.get(6)?;
+    let receipt: Option<String> = row.get(7)?;
+    Ok(AgentToolCallView {
+        id: ToolCallId::new(row.get::<_, String>(0)?),
+        run_id: AgentRunId::new(row.get::<_, String>(1)?),
+        name: row.get(2)?,
+        effect: parse_wire(row.get(3)?)?,
+        status: parse_wire(row.get(4)?)?,
+        policy_decision: parse_wire(row.get(5)?)?,
+        arguments: serde_json::from_str(&arguments)
+            .map_err(|error| conversion_error(error.to_string()))?,
+        receipt: receipt
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|error| conversion_error(error.to_string()))?,
+        error_code: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+fn get_agent_tool_call(
+    connection: &Connection,
+    owner: &PrincipalId,
+    id: &ToolCallId,
+) -> Result<AgentToolCallView, DomainError> {
+    connection.query_row(
+        "SELECT t.id,t.run_id,t.name,t.effect,t.status,t.policy_decision,t.arguments_json,t.receipt_json,t.error_code,t.created_at,t.updated_at FROM agent_tool_calls t JOIN agent_runs r ON r.id=t.run_id JOIN fields f ON f.id=r.field_id WHERE t.id=?1 AND f.owner_principal_id=?2",
+        params![id.0,owner.0],
+        agent_tool_call_from_row,
+    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
+fn agent_approval_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApprovalView> {
+    Ok(ApprovalView {
+        id: ApprovalId::new(row.get::<_, String>(0)?),
+        run_id: AgentRunId::new(row.get::<_, String>(1)?),
+        tool_call_id: ToolCallId::new(row.get::<_, String>(2)?),
+        decision: row
+            .get::<_, Option<String>>(3)?
+            .map(parse_wire)
+            .transpose()?,
+        nonce: row.get(4)?,
+        created_at: row.get(5)?,
+        resolved_at: row.get(6)?,
+    })
+}
+
+fn get_agent_approval(
+    connection: &Connection,
+    owner: &PrincipalId,
+    id: &ApprovalId,
+) -> Result<ApprovalView, DomainError> {
+    connection.query_row(
+        "SELECT a.id,a.run_id,a.tool_call_id,a.decision,a.nonce,a.created_at,a.resolved_at FROM agent_approvals a JOIN agent_runs r ON r.id=a.run_id JOIN fields f ON f.id=r.field_id WHERE a.id=?1 AND f.owner_principal_id=?2",
+        params![id.0,owner.0],
+        agent_approval_from_row,
+    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
 fn get_conversation_message(
     connection: &Connection,
     owner: &PrincipalId,
@@ -1466,6 +2022,7 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     let checksum_0002 = frozen_migration_checksum(MIGRATION_0002);
     let checksum_0004 = frozen_migration_checksum(MIGRATION_0004);
     let checksum_0005 = frozen_migration_checksum(MIGRATION_0005);
+    let checksum_0006 = frozen_migration_checksum(MIGRATION_0006);
     if checksum_0002 != MIGRATION_0002_FROZEN_SHA256 {
         return Err(StorageError::MigrationChecksum { version: 2 });
     }
@@ -1474,6 +2031,9 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     }
     if checksum_0005 != MIGRATION_0005_FROZEN_SHA256 {
         return Err(StorageError::MigrationChecksum { version: 5 });
+    }
+    if checksum_0006 != MIGRATION_0006_FROZEN_SHA256 {
+        return Err(StorageError::MigrationChecksum { version: 6 });
     }
 
     verify_applied_migration(connection, 1, MIGRATION_0001_NAME, &checksum_0001)?;
@@ -1529,6 +2089,20 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
         transaction.execute(
             "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (5, ?1, ?2, ?3)",
             params![MIGRATION_0005_NAME, checksum_0005, now],
+        )?;
+        validate_base_schema(&transaction)?;
+        transaction.commit()?;
+    }
+    verify_applied_migration(connection, 6, MIGRATION_0006_NAME, &checksum_0006)?;
+    if !migration_exists(connection, 6)? {
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if transaction.execute_batch(MIGRATION_0006).is_err() {
+            return Err(StorageError::MigrationIncompatibleData);
+        }
+        transaction.execute(
+            "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (6, ?1, ?2, ?3)",
+            params![MIGRATION_0006_NAME, checksum_0006, now],
         )?;
         validate_schema(&transaction)?;
         transaction.commit()?;
@@ -1744,11 +2318,11 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
         return Err(StorageError::OpenGate("foreign_key_check failed".into()));
     }
     let migrations: i64 = connection.query_row(
-        "SELECT COUNT(*) FROM schema_migrations WHERE version IN (1,2,4,5)",
+        "SELECT COUNT(*) FROM schema_migrations WHERE version IN (1,2,4,5,6)",
         [],
         |row| row.get(0),
     )?;
-    if migrations != 4 || migration_exists(connection, 3)? {
+    if migrations != 5 || migration_exists(connection, 3)? {
         return Err(StorageError::OpenGate(
             "migration registry incomplete".into(),
         ));
@@ -1766,6 +2340,25 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
         }
     }
     for table in ["conversations", "conversation_messages"] {
+        let exists: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            [table],
+            |row| row.get(0),
+        )?;
+        if exists != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "migration validation missing table {table}"
+            )));
+        }
+    }
+    for table in [
+        "agent_runs",
+        "agent_events",
+        "agent_tool_calls",
+        "agent_approvals",
+        "agent_context_snapshots",
+        "agent_verification_receipts",
+    ] {
         let exists: i64 = connection.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
             [table],
@@ -1796,6 +2389,18 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
         ("conversation_messages", "content"),
         ("conversation_messages", "status"),
         ("conversation_messages", "created_at"),
+        ("agent_runs", "conversation_id"),
+        ("agent_runs", "status"),
+        ("agent_runs", "next_sequence"),
+        ("agent_events", "run_id"),
+        ("agent_events", "sequence"),
+        ("agent_events", "payload_json"),
+        ("agent_tool_calls", "run_id"),
+        ("agent_tool_calls", "status"),
+        ("agent_tool_calls", "arguments_json"),
+        ("agent_approvals", "nonce"),
+        ("agent_context_snapshots", "manifest_json"),
+        ("agent_verification_receipts", "outcome"),
     ] {
         let count: i64 = connection.query_row(
             "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name=?2 AND \"notnull\"=1",
@@ -1844,6 +2449,30 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
                 "ROLE = 'USER'",
             ],
         ),
+        (
+            "agent_runs",
+            vec![
+                "STATUS IN ('QUEUED', 'RUNNING', 'WAITING_APPROVAL', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED')",
+                "MAX_STEPS BETWEEN 1 AND 64",
+                "NEXT_SEQUENCE >= 1",
+            ],
+        ),
+        (
+            "agent_events",
+            vec![
+                "JSON_VALID(PAYLOAD_JSON)",
+                "UNIQUE (RUN_ID, SEQUENCE)",
+                "LENGTH(PAYLOAD_JSON) <= 1048576",
+            ],
+        ),
+        (
+            "agent_tool_calls",
+            vec![
+                "POLICY_DECISION IN ('ALLOW', 'ASK', 'DENY')",
+                "JSON_VALID(ARGUMENTS_JSON)",
+                "RECEIPT_JSON IS NULL OR JSON_VALID(RECEIPT_JSON)",
+            ],
+        ),
     ] {
         let sql: String = connection.query_row(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
@@ -1887,6 +2516,12 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
         "idx_conversations_field_lifecycle_updated",
         "idx_conversation_messages_conversation_created",
         "uq_conversation_message_invocation",
+        "idx_agent_runs_conversation_updated",
+        "idx_agent_runs_status_updated",
+        "idx_agent_events_run_sequence",
+        "idx_agent_tool_calls_run_created",
+        "idx_agent_approvals_run_unresolved",
+        "idx_agent_verification_run_created",
     ] {
         let exists: i64 = connection.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
@@ -1896,6 +2531,21 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
         if exists != 1 {
             return Err(StorageError::OpenGate(format!(
                 "required index missing: {index}"
+            )));
+        }
+    }
+    for trigger in [
+        "agent_events_immutable_update",
+        "agent_events_immutable_delete",
+    ] {
+        let exists: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?1",
+            [trigger],
+            |row| row.get(0),
+        )?;
+        if exists != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required trigger missing: {trigger}"
             )));
         }
     }
@@ -3656,6 +4306,12 @@ fn revision_from_row(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<
     u64::try_from(value).map_err(|_| conversion_error("negative revision".into()))
 }
 
+fn u32_from_row(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u32> {
+    row.get::<_, i64>(index)?
+        .try_into()
+        .map_err(|_| conversion_error("integer out of u32 range".into()))
+}
+
 fn lifecycle_to_db(value: FieldLifecycle) -> &'static str {
     match value {
         FieldLifecycle::Active => "ACTIVE",
@@ -3856,7 +4512,11 @@ mod tests {
             frozen_migration_checksum(MIGRATION_0005),
             MIGRATION_0005_FROZEN_SHA256
         );
-        assert_eq!(schema_version(), 5);
+        assert_eq!(
+            frozen_migration_checksum(MIGRATION_0006),
+            MIGRATION_0006_FROZEN_SHA256
+        );
+        assert_eq!(schema_version(), 6);
     }
 
     #[test]
@@ -4392,6 +5052,172 @@ mod tests {
             56
         );
         drop(worker);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn agent_ledger_is_append_only_and_restart_reconciles_incomplete_tools() {
+        let root = temporary_root();
+        let (run_id, tool_id) = {
+            let worker = start(&root, 1);
+            let handle = worker.handle();
+            let project = handle
+                .create_project(
+                    CreateProjectRequest {
+                        title: "Agent fixture".into(),
+                        goal: None,
+                        root_path: root.join("workspace").to_string_lossy().into_owned(),
+                    },
+                    2,
+                )
+                .unwrap();
+            let provider = handle
+                .create_provider_config(
+                    CreateProviderConfigRequest {
+                        provider_kind: ProviderKind::Openai,
+                        display_name: "Fixture".into(),
+                        base_url: None,
+                        default_model: "fixture-model".into(),
+                        custom_endpoint_acknowledged: false,
+                    },
+                    3,
+                )
+                .unwrap();
+            handle
+                .set_provider_credential_present(provider.view.id.clone(), true, 4)
+                .unwrap();
+            let conversation = handle
+                .create_conversation(
+                    CreateConversationRequest {
+                        field_id: project.field_id.clone(),
+                        title: "Agent run".into(),
+                        provider_config_id: Some(provider.view.id.clone()),
+                        model_id: Some("fixture-model".into()),
+                    },
+                    5,
+                )
+                .unwrap();
+            let created = handle
+                .create_agent_run(
+                    StartAgentRunRequest {
+                        field_id: project.field_id,
+                        conversation_id: conversation.id,
+                        provider_config_id: provider.view.id,
+                        model_id: None,
+                        task: "Fix the fixture".into(),
+                        permission: AgentPermission::ReviewChanges,
+                        max_steps: Some(8),
+                    },
+                    6,
+                )
+                .unwrap();
+            assert_eq!((created.event.sequence, created.run.next_sequence), (1, 2));
+            let started = handle
+                .append_agent_event(
+                    created.run.id.clone(),
+                    AgentEventKind::RunStarted,
+                    serde_json::json!({}),
+                    AgentProjectionUpdate {
+                        status: Some(AgentRunStatus::Running),
+                        ..Default::default()
+                    },
+                    7,
+                )
+                .unwrap();
+            assert_eq!(started.event.sequence, 2);
+            let tool = handle
+                .create_agent_tool_call(
+                    created.run.id.clone(),
+                    "run_command".into(),
+                    AgentToolEffect::Process,
+                    AgentPolicyDecision::Ask,
+                    serde_json::json!({"program":"cargo","argv":["test"]}),
+                    8,
+                )
+                .unwrap();
+            let approval = handle
+                .create_agent_approval(created.run.id.clone(), tool.id.clone(), 9)
+                .unwrap();
+            handle
+                .resolve_agent_approval(
+                    ResolveAgentApprovalRequest {
+                        run_id: created.run.id.clone(),
+                        approval_id: approval.id.clone(),
+                        nonce: approval.nonce.clone(),
+                        decision: ApprovalDecision::AllowOnce,
+                    },
+                    10,
+                )
+                .unwrap();
+            assert_eq!(
+                handle
+                    .resolve_agent_approval(
+                        ResolveAgentApprovalRequest {
+                            run_id: created.run.id.clone(),
+                            approval_id: approval.id,
+                            nonce: approval.nonce,
+                            decision: ApprovalDecision::AllowOnce,
+                        },
+                        11,
+                    )
+                    .unwrap_err(),
+                DomainError::TerminalResource
+            );
+            handle
+                .update_agent_tool_call(tool.id.clone(), AgentToolStatus::Running, None, None, 12)
+                .unwrap();
+            (created.run.id, tool.id)
+        };
+        {
+            let worker = start(&root, 13);
+            let handle = worker.handle();
+            let reconciled = handle.reconcile_agent_runs(14).unwrap();
+            assert_eq!(reconciled.len(), 1);
+            assert_eq!(reconciled[0].run.status, AgentRunStatus::Paused);
+            assert_eq!(
+                handle.list_agent_tool_calls(run_id.clone()).unwrap()[0].status,
+                AgentToolStatus::Unknown
+            );
+            let events = handle
+                .list_agent_events(ListAgentEventsRequest {
+                    run_id: run_id.clone(),
+                    after_sequence: None,
+                    limit: None,
+                })
+                .unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .map(|event| event.sequence)
+                    .collect::<Vec<_>>(),
+                vec![1, 2, 3]
+            );
+            let connection = open_connection(&handle.database_path).unwrap();
+            assert!(
+                connection
+                    .execute(
+                        "UPDATE agent_events SET kind='RUN_FAILED' WHERE run_id=?1 AND sequence=1",
+                        [&run_id.0],
+                    )
+                    .is_err()
+            );
+            assert!(
+                connection
+                    .execute("DELETE FROM agent_events WHERE run_id=?1", [&run_id.0])
+                    .is_err()
+            );
+            assert_eq!(
+                handle
+                    .list_agent_tool_calls(run_id)
+                    .unwrap()
+                    .into_iter()
+                    .find(|tool| tool.id == tool_id)
+                    .unwrap()
+                    .error_code
+                    .as_deref(),
+                Some("CORE_RESTARTED")
+            );
+        }
         fs::remove_dir_all(root).unwrap();
     }
 }

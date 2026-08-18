@@ -32,6 +32,18 @@ export type ConversationId = string;
 
 export type MessageId = string;
 
+export type AgentRunId = string;
+
+export type AgentEventId = string;
+
+export type ToolCallId = string;
+
+export type ApprovalId = string;
+
+export type ContextSnapshotId = string;
+
+export type VerificationReceiptId = string;
+
 export type ProtocolVersion = { major: number, minor: number, };
 
 export type FipcErrorData = { code: string, trace_id: string, retryable: boolean, details: unknown, };
@@ -283,4 +295,48 @@ export type ConversationMessageView = { id: MessageId, conversation_id: Conversa
 export type CreateConversationMessageRequest = { conversation_id: ConversationId, role: ConversationMessageRole, content: string, status: ConversationMessageStatus, provider_config_id: ProviderConfigId | null, model_id: string | null, invocation_id: ModelInvocationId | null, };
 
 export type ListConversationMessagesRequest = { conversation_id: ConversationId, };
+
+export type AgentRunStatus = "QUEUED" | "RUNNING" | "WAITING_APPROVAL" | "PAUSED" | "COMPLETED" | "FAILED" | "CANCELLED";
+
+export type AgentPermission = "READ_ONLY" | "REVIEW_CHANGES" | "FULL_CONTROL";
+
+export type AgentEventKind = "RUN_CREATED" | "RUN_STARTED" | "RUN_PAUSED" | "RUN_RESUMED" | "RUN_COMPLETED" | "RUN_FAILED" | "RUN_CANCELLED" | "STEP_STARTED" | "CONTEXT_COMPILED" | "MODEL_STARTED" | "MODEL_TEXT_DELTA" | "MODEL_COMPLETED" | "MODEL_FAILED" | "TOOL_PROPOSED" | "APPROVAL_REQUESTED" | "APPROVAL_RESOLVED" | "TOOL_STARTED" | "TOOL_PROGRESS" | "TOOL_COMPLETED" | "TOOL_FAILED" | "TOOL_DENIED" | "TOOL_CANCELLED" | "TOOL_UNKNOWN" | "VERIFICATION_RECORDED" | "CHECKPOINT_CREATED" | "RECOVERY_RECONCILED";
+
+export type AgentToolEffect = "OBSERVE" | "WORKSPACE_WRITE" | "PROCESS" | "NETWORK" | "DESTRUCTIVE";
+
+export type AgentToolStatus = "PROPOSED" | "WAITING_APPROVAL" | "RUNNING" | "COMPLETED" | "FAILED" | "DENIED" | "CANCELLED" | "UNKNOWN";
+
+export type AgentPolicyDecision = "ALLOW" | "ASK" | "DENY";
+
+export type ApprovalDecision = "ALLOW_ONCE" | "DENY";
+
+export type VerificationOutcome = "PASS" | "FAIL" | "BLOCKED" | "NOT_RUN";
+
+export type AgentRunView = { id: AgentRunId, field_id: FieldId, conversation_id: ConversationId, provider_config_id: ProviderConfigId, model_id: string, task: string, permission: AgentPermission, status: AgentRunStatus, current_step: number, max_steps: number, next_sequence: number, error_code: string | null, created_at: number, updated_at: number, finished_at: number | null, };
+
+export type StartAgentRunRequest = { field_id: FieldId, conversation_id: ConversationId, provider_config_id: ProviderConfigId, model_id: string | null, task: string, permission: AgentPermission, max_steps: number | null, };
+
+export type AgentRunRequest = { run_id: AgentRunId, };
+
+export type ListAgentRunsRequest = { conversation_id: ConversationId, };
+
+export type AgentEventView = { id: AgentEventId, run_id: AgentRunId, sequence: number, schema_version: number, kind: AgentEventKind, payload: unknown, created_at: number, };
+
+export type ListAgentEventsRequest = { run_id: AgentRunId, after_sequence: number | null, limit: number | null, };
+
+export type AgentToolCallView = { id: ToolCallId, run_id: AgentRunId, name: string, effect: AgentToolEffect, status: AgentToolStatus, policy_decision: AgentPolicyDecision, arguments: unknown, receipt: unknown | null, error_code: string | null, created_at: number, updated_at: number, };
+
+export type ApprovalView = { id: ApprovalId, run_id: AgentRunId, tool_call_id: ToolCallId, decision: ApprovalDecision | null, nonce: string, created_at: number, resolved_at: number | null, };
+
+export type ResolveAgentApprovalRequest = { run_id: AgentRunId, approval_id: ApprovalId, nonce: string, decision: ApprovalDecision, };
+
+export type AgentContextSnapshotView = { id: ContextSnapshotId, run_id: AgentRunId, step: number, project_root_hash: string, selected_files: number, estimated_tokens: number, content_sha256: string, manifest: unknown, created_at: number, };
+
+export type VerificationReceiptView = { id: VerificationReceiptId, run_id: AgentRunId, tool_call_id: ToolCallId | null, check_kind: string, outcome: VerificationOutcome, summary: string, artifact_sha256: string | null, exit_code: number | null, created_at: number, };
+
+export type AgentChangedEvent = { event: string, run_id: AgentRunId, sequence: number, status: AgentRunStatus, };
+
+export type ModelToolDefinition = { name: string, description: string, input_schema: unknown, };
+
+export type ModelCapabilityProfile = { streaming: boolean, native_tools: boolean, parallel_tools: boolean, strict_schema: boolean, usage: boolean, cancellation: boolean, };
 
