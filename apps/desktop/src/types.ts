@@ -29,6 +29,8 @@ import type {
   ConversationView, CreateConversationRequest, ConversationRequest, UpdateConversationRequest,
   ArchiveConversationRequest, ConversationMessageView, CreateConversationMessageRequest,
   ListConversationMessagesRequest,
+  AgentChangedEvent, AgentRunView, StartAgentRunRequest, AgentRunRequest, ListAgentRunsRequest,
+  AgentEventView, ListAgentEventsRequest, AgentToolCallView, ApprovalView, ResolveAgentApprovalRequest,
 } from '@fielora/contracts';
 import type { BrowserContextCandidate, BrowserNavigateRequest, BrowserPageRequest, BrowserPageState, BrowserViewBounds } from './browser-types';
 import type {
@@ -38,7 +40,13 @@ import type {
 } from './workspace-types';
 
 export type Unsubscribe = () => void;
-export type DesktopCoreEvent = DomainEventDTO | ModelInvocationEvent | CaptureChangedEvent | {
+export type AgentTextDeltaEvent = {
+  event: 'event.agent.text_delta';
+  run_id: string;
+  step: number;
+  text_delta: string;
+};
+export type DesktopCoreEvent = DomainEventDTO | ModelInvocationEvent | CaptureChangedEvent | AgentChangedEvent | AgentTextDeltaEvent | {
   event: 'event.core.health';
   state: HealthDTO['state'];
   error?: string;
@@ -134,6 +142,16 @@ export interface FieloraBridge {
   model: {
     start(request: StartModelInvocationRequest): Promise<StartModelInvocationResult>;
     cancel(request: CancelModelInvocationRequest): Promise<null>;
+  };
+  agent: {
+    start(request: StartAgentRunRequest): Promise<AgentRunView>;
+    get(request: AgentRunRequest): Promise<AgentRunView>;
+    list(request: ListAgentRunsRequest): Promise<AgentRunView[]>;
+    events(request: ListAgentEventsRequest): Promise<AgentEventView[]>;
+    toolCalls(request: AgentRunRequest): Promise<AgentToolCallView[]>;
+    cancel(request: AgentRunRequest): Promise<AgentRunView>;
+    resume(request: AgentRunRequest): Promise<AgentRunView>;
+    resolveApproval(request: ResolveAgentApprovalRequest): Promise<ApprovalView>;
   };
   capture: {
     create(request: CreateCaptureRequest): Promise<CaptureView>;

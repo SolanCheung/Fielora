@@ -176,6 +176,41 @@ button:disabled { opacity: .55; cursor: wait; }
 .message-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; color: #77747e; font-size: 10px; }
 .message-meta strong { color: #403a50; font-size: 11px; }
 .message-content { display: block; width: 100%; min-width: 0; max-width: 100%; margin: 0; overflow-wrap: anywhere; word-break: break-all; white-space: pre-wrap; color: #303036; font: 13px/1.65 Inter,"Segoe UI",sans-serif; }
+.agent-run-card { max-width: 760px; margin: 6px auto 20px; overflow: hidden; border: 1px solid #dfe3e8; border-radius: 14px; background: #fafbfc; }
+.agent-run-card > header { min-height: 50px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid #e6e9ed; }
+.agent-run-card > header > div { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.agent-run-card > header strong { color: #30353c; font-size: 11px; }
+.agent-run-card > header small { min-width: 0; overflow: hidden; color: #858c95; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+.agent-run-card > header button { padding: 6px 10px; border: 1px solid #d8dce2; border-radius: 8px; color: #4b525c; background: #fff; font-size: 10px; }
+.agent-run-card > header button:hover { background: #f0f2f5; }
+.agent-status-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #77808b; }
+.agent-run-card.status-running .agent-status-dot, .agent-run-card.status-queued .agent-status-dot { background: #4c73d8; box-shadow: 0 0 0 4px rgba(76,115,216,.12); animation: agent-pulse 1.5s ease-in-out infinite; }
+.agent-run-card.status-waiting_approval .agent-status-dot { background: #d47b28; }
+.agent-run-card.status-completed .agent-status-dot { background: #3f9666; }
+.agent-run-card.status-failed .agent-status-dot { background: #c04d59; }
+@keyframes agent-pulse { 50% { opacity: .45; } }
+.agent-tool-list { display: grid; padding: 4px 8px; }
+.agent-tool { min-width: 0; display: grid; grid-template-columns: 22px minmax(0,1fr) auto; align-items: center; gap: 8px; padding: 8px 6px; border-bottom: 1px solid #eceef1; }
+.agent-tool:last-child { border-bottom: 0; }
+.agent-tool .shell-icon { width: 16px; height: 16px; color: #747c86; }
+.agent-tool > div { min-width: 0; display: grid; gap: 2px; }
+.agent-tool strong { overflow: hidden; color: #3c424a; text-overflow: ellipsis; white-space: nowrap; font: 600 10px/1.2 ui-monospace,"Cascadia Code",monospace; }
+.agent-tool small { color: #9298a0; font-size: 8px; }
+.agent-tool code { padding: 3px 6px; border-radius: 6px; color: #555d67; background: #edf0f3; font-size: 8px; }
+.agent-tool.status-failed strong, .agent-tool.status-denied strong { color: #a54551; }
+.agent-approval { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 8px; padding: 12px; border: 1px solid #ecc99d; border-radius: 11px; background: #fff8ef; }
+.agent-approval > div:first-child { min-width: 0; }
+.agent-approval strong { color: #633d1b; font-size: 11px; }
+.agent-approval p { margin: 4px 0 0; color: #87694d; font-size: 9px; line-height: 1.45; }
+.agent-approval small { display: block; margin-top: 3px; color: #a18569; font-size: 8px; }
+.agent-approval > div:last-child { flex: 0 0 auto; display: flex; gap: 6px; }
+.agent-approval button { min-height: 32px; padding: 6px 10px; font-size: 9px; }
+.agent-error { margin: 0; padding: 8px 12px; color: #a84551; background: #fff4f5; font: 10px/1.4 ui-monospace,"Cascadia Code",monospace; }
+.agent-event-details { padding: 7px 12px 9px; border-top: 1px solid #e8ebee; color: #848b94; font-size: 9px; }
+.agent-event-details summary { cursor: pointer; }
+.agent-event-details ol { max-height: 120px; margin: 7px 0 0; padding: 0; overflow: auto; list-style: none; }
+.agent-event-details li { display: grid; grid-template-columns: 30px 1fr; gap: 6px; padding: 2px 0; font-family: ui-monospace,"Cascadia Code",monospace; }
+.agent-event-details li span { color: #afb4ba; text-align: right; }
 .conversation-composer { width: min(calc(100% - 40px),840px); min-width: 0; margin: 0 auto 18px; padding: 10px 12px 9px; border: 1px solid #d9dde3; border-radius: 22px; background: white; box-shadow: 0 8px 28px rgba(29,34,42,.09); }
 .conversation-composer textarea { min-height: 76px; max-height: 180px; padding: 9px 8px 7px; border: 0; border-radius: 0; resize: vertical; background: transparent; box-shadow: none; font-size: 14px; }
 .composer-attachments { display: flex; gap: 7px; padding: 3px 4px 5px; overflow-x: auto; }

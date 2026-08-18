@@ -28,6 +28,7 @@ async function quit(cdp){await cdp.eval('void window.fielora.core.quit()');cdp.c
 await mkdir(path.join(projectRoot,'src'),{recursive:true});
 await writeFile(path.join(projectRoot,'src','app.ts'),'export const answer = 1;\n');
 await writeFile(path.join(projectRoot,'package.json'),`${JSON.stringify({name:'fixture',private:true,scripts:{test:"node -e \"console.log('desktop-foundation-test-pass')\""}},null,2)}\n`);
+assert.equal(spawnSync('git',['init'],{cwd:projectRoot,windowsHide:true,stdio:'ignore'}).status,0);
 await writeFile(attachmentPath,'# Uploaded context\nThis text reached the bounded Composer attachment flow.\n');
 await mkdir(evidence,{recursive:true});
 
@@ -108,7 +109,7 @@ try{
   await wait(cdp,`document.querySelector('[data-testid="summon-panel"]')`);
   await cdp.eval(`document.querySelector('[data-testid="summon-panel"] > header [aria-label="关闭"]').click()`);
   await wait(cdp,`!document.querySelector('[data-testid="summon-panel"]')`);
-  const created=await cdp.eval(`(async()=>{const provider=await window.fielora.provider.create({provider_kind:'OPENAI_COMPATIBLE',display_name:'Desktop Fixture',base_url:'https://example.com/v1',default_model:'__fielora_fixture__',custom_endpoint_acknowledged:true});await window.fielora.provider.storeCredential({provider_config_id:provider.id,secret:${JSON.stringify(secret)}});const project=await window.fieloraTest.createProject({title:'Sample Project',goal:'Desktop hero flow',root_path:${JSON.stringify(projectRoot)}});return{providerId:provider.id,fieldId:project.field_id};})()`);
+  const created=await cdp.eval(`(async()=>{const provider=await window.fielora.provider.create({provider_kind:'OPENAI_COMPATIBLE',display_name:'Desktop Fixture',base_url:'https://example.com/v1',default_model:'__fielora_agent_fixture__',custom_endpoint_acknowledged:true});await window.fielora.provider.storeCredential({provider_config_id:provider.id,secret:${JSON.stringify(secret)}});const project=await window.fieloraTest.createProject({title:'Sample Project',goal:'Desktop hero flow',root_path:${JSON.stringify(projectRoot)}});return{providerId:provider.id,fieldId:project.field_id};})()`);
   providerId=created.providerId;
   await cdp.eval('location.reload()');await wait(cdp,`document.querySelector('[data-testid="project-workspace"]')`);
   await wait(cdp,`document.body.innerText.includes('Sample Project')`);
@@ -117,7 +118,7 @@ try{
   const conversation=await cdp.eval(`window.fielora.conversation.list({field_id:${JSON.stringify(created.fieldId)}}).then((items)=>items[0])`);
   assert.equal(conversation.provider_config_id,providerId);
 
-  assert.equal(await cdp.eval(`document.querySelector('[data-testid="conversation-model"]')?.innerText.includes('__fielora_fixture__')`),true);
+  assert.equal(await cdp.eval(`document.querySelector('[data-testid="conversation-model"]')?.innerText.includes('__fielora_agent_fixture__')`),true);
   await cdp.eval(`document.querySelector('[data-testid="conversation-model"]').click()`);
   await wait(cdp,`document.querySelector('[data-testid="conversation-model-menu"]')`);
   const modelMenuBounds=await cdp.eval(`(()=>{const trigger=document.querySelector('[data-testid="conversation-model"]').getBoundingClientRect();const menu=document.querySelector('[data-testid="conversation-model-menu"]').getBoundingClientRect();return{triggerTop:trigger.top,menuBottom:menu.bottom,menuLeft:menu.left,menuRight:menu.right,viewport:innerWidth};})()`);
@@ -141,10 +142,19 @@ try{
   await cdp.eval(`document.querySelector('[data-testid="composer-permission-option-REVIEW_CHANGES"]').click()`);
   const composerScreenshot=await cdp.send('Page.captureScreenshot',{format:'png'});await writeFile(path.join(evidence,`${mode}-composer-inputs.png`),Buffer.from(composerScreenshot.data,'base64'));
 
-  await cdp.eval(setValue('.conversation-composer textarea','Explain the selected project briefly.'));
+  await cdp.eval(setValue('.conversation-composer textarea','FIELORA_AGENT_FIXTURE_CREATE Explain the selected project briefly.'));
   await cdp.eval(`document.querySelector('[data-testid="send-message"]').click()`);
-  await wait(cdp,`[...document.querySelectorAll('[data-testid="message-assistant"]')].some((item)=>item.innerText.includes('Fielora fixture response'))`);
-  assert.equal(await cdp.eval(`document.querySelector('[data-testid="message-user"] .message-content').textContent.includes('Explain the selected project briefly.\\n\\n附件：uploaded-context.md')`),true);
+  await wait(cdp,`document.querySelector('[data-testid="agent-approval"]')`);
+  assert.equal(await cdp.eval(`document.querySelector('[data-testid="agent-run-card"]')?.innerText.includes('等待批准')`),true);
+  const agentApprovalScreenshot=await cdp.send('Page.captureScreenshot',{format:'png'});await writeFile(path.join(evidence,`${mode}-agent-approval.png`),Buffer.from(agentApprovalScreenshot.data,'base64'));
+  await cdp.eval(`document.querySelector('[data-testid="agent-allow-once"]').click()`);
+  await wait(cdp,`!document.querySelector('[data-testid="agent-approval"]')`);
+  await wait(cdp,`document.querySelector('[data-testid="agent-approval"]')`);
+  await cdp.eval(`document.querySelector('[data-testid="agent-allow-once"]').click()`);
+  await wait(cdp,`[...document.querySelectorAll('[data-testid="message-assistant"]')].some((item)=>item.innerText.includes('Fielora Agent fixture completed'))`,30_000);
+  assert.equal(await readFile(path.join(projectRoot,'fielora-agent-fixture.txt'),'utf8'),'created by the Fielora Agent fixture\n');
+  assert.equal(await cdp.eval(`document.querySelector('[data-testid="agent-run-card"]')?.innerText.includes('已完成')`),true);
+  assert.equal(await cdp.eval(`document.querySelector('[data-testid="message-user"] .message-content').textContent.includes('FIELORA_AGENT_FIXTURE_CREATE Explain the selected project briefly.\\n\\n附件：uploaded-context.md')`),true);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="composer-attachments"]')===null`),true);
   assert.equal(await cdp.eval(`(()=>{const item=document.querySelector('[data-testid="message-user"] .message-content');return item.scrollWidth<=item.clientWidth;})()`),true);
   assert.equal(await cdp.eval(`document.querySelectorAll('[data-testid="project-navigation"]').length`),1);
@@ -216,7 +226,7 @@ try{
   await quit(cdp);
 
   child=await launch();cdp=await connect();await wait(cdp,`document.querySelector('[data-testid="project-workspace"]')`);
-  await wait(cdp,`document.body.innerText.includes('Sample Project')&&document.body.innerText.includes('Fielora fixture response')&&document.body.innerText.includes('desktop-foundation-test-pass')`,30_000);
+  await wait(cdp,`document.body.innerText.includes('Sample Project')&&document.body.innerText.includes('Fielora Agent fixture completed')&&document.body.innerText.includes('desktop-foundation-test-pass')`,30_000);
   const resumed=await cdp.eval(`(async()=>{const projects=await window.fielora.project.list();const conversations=await window.fielora.conversation.list({field_id:projects[0].field_id});const messages=await window.fielora.conversation.listMessages({conversation_id:conversations[0].id});return{project:projects[0],conversation:conversations[0],messages};})()`);
   assert.equal(resumed.project.root_path,projectRoot);assert.equal(resumed.conversation.provider_config_id,providerId);assert.equal(resumed.messages.length>=3,true);
   await quit(cdp);

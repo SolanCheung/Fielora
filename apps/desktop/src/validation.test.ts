@@ -6,6 +6,7 @@ import {
   validateCreateProvider, validateStoreCredential, validateStartModel, validateCreateCapture,
   validateCreateConversation, validateCreateConversationMessage, validateApplyWorkspaceFile,
   validateRunTerminal,
+  validateStartAgent, validateListAgentEvents, validateResolveAgentApproval,
 } from './validation.ts';
 
 const fieldId = '018f84cb-7c4e-7a12-a6d4-3c441f80a227';
@@ -78,4 +79,16 @@ test('Desktop Foundation bridge keeps Project, Conversation, file, and terminal 
   assert.throws(() => validateApplyWorkspaceFile({ field_id: fieldId, relative_path: '../secret', expected_sha256: 'a'.repeat(64), content: 'no' }));
   assert.equal(validateRunTerminal({ field_id: fieldId, command: 'pnpm test' }).command, 'pnpm test');
   assert.throws(() => validateRunTerminal({ field_id: fieldId, command: '' }));
+});
+
+test('Complete Agent bridge accepts only bounded typed execution and approval payloads', () => {
+  const start={field_id:fieldId,conversation_id:fieldId,provider_config_id:fieldId,model_id:'gpt-test',task:'Fix the failing test',permission:'REVIEW_CHANGES',max_steps:24} as const;
+  assert.equal(validateStartAgent(start).permission,'REVIEW_CHANGES');
+  assert.throws(()=>validateStartAgent({...start,permission:'UNRESTRICTED'}));
+  assert.throws(()=>validateStartAgent({...start,max_steps:65}));
+  assert.throws(()=>validateStartAgent({...start,tool:{name:'shell'}}));
+  assert.deepEqual(validateListAgentEvents({run_id:fieldId,after_sequence:0,limit:500}),{run_id:fieldId,after_sequence:0,limit:500});
+  assert.throws(()=>validateListAgentEvents({run_id:fieldId,after_sequence:0,limit:501}));
+  assert.equal(validateResolveAgentApproval({run_id:fieldId,approval_id:fieldId,nonce:'one-time-nonce',decision:'ALLOW_ONCE'}).decision,'ALLOW_ONCE');
+  assert.throws(()=>validateResolveAgentApproval({run_id:fieldId,approval_id:fieldId,nonce:'one-time-nonce',decision:'ALWAYS_ALLOW'}));
 });

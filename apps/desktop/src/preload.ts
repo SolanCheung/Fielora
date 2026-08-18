@@ -102,6 +102,16 @@ const bridge: FieloraBridge = {
     start: (request) => ipcRenderer.invoke(channels.modelStart, request),
     cancel: (request) => ipcRenderer.invoke(channels.modelCancel, request),
   },
+  agent: {
+    start: (request) => ipcRenderer.invoke(channels.agentStart, request),
+    get: (request) => ipcRenderer.invoke(channels.agentGet, request),
+    list: (request) => ipcRenderer.invoke(channels.agentList, request),
+    events: (request) => ipcRenderer.invoke(channels.agentEvents, request),
+    toolCalls: (request) => ipcRenderer.invoke(channels.agentToolCalls, request),
+    cancel: (request) => ipcRenderer.invoke(channels.agentCancel, request),
+    resume: (request) => ipcRenderer.invoke(channels.agentResume, request),
+    resolveApproval: (request) => ipcRenderer.invoke(channels.agentResolveApproval, request),
+  },
   capture: {
     create: (request) => ipcRenderer.invoke(channels.captureCreate, request),
     attach: (request) => ipcRenderer.invoke(channels.captureAttach, request),
