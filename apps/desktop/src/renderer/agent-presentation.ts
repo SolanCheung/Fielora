@@ -98,6 +98,7 @@ export function buildAgentResultViewModel(
   status: AgentTerminalStatus,
   content: string,
   presentation: AgentPresentation | null,
+  tools: readonly AgentToolCallView[] = [],
 ): AgentResultViewModel {
   const evidence: string[] = [];
   if (presentation?.changedFiles) {
@@ -108,14 +109,70 @@ export function buildAgentResultViewModel(
     evidence.push(`${presentation.changedFiles} 个文件${changeLabel}`);
   }
   if (presentation?.passedVerifications) evidence.push('验证通过');
+  const concrete = concreteTerminalResult(status, presentation, tools);
   return {
     outcome: presentation?.outcome ?? (status === 'COMPLETED' ? 'SUCCESS' : status),
-    title: agentTerminalTitle(status, presentation),
-    detail: agentTerminalBody(status, content, presentation),
+    title: concrete?.title ?? agentTerminalTitle(status, presentation),
+    detail: concrete?.detail ?? agentTerminalBody(status, content, presentation),
     evidence,
     duration: presentation?.elapsed ?? '',
     changedFiles: presentation?.changedFiles ?? 0,
     verificationPassed: Boolean(presentation?.passedVerifications),
+  };
+}
+
+function fileName(path: string): string {
+  return path.replaceAll('\\', '/').split('/').filter(Boolean).at(-1) ?? path;
+}
+
+function boundedInline(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized && normalized.length <= 180 ? normalized : null;
+}
+
+function concreteTerminalResult(
+  status: AgentTerminalStatus,
+  presentation: AgentPresentation | null,
+  tools: readonly AgentToolCallView[],
+): { title: string; detail: string } | null {
+  if (status !== 'COMPLETED' || !presentation?.primaryChange || presentation.changedFiles < 1) return null;
+  const mutations = tools.filter((tool) => tool.status === 'COMPLETED' && ['WORKSPACE_WRITE', 'DESTRUCTIVE'].includes(tool.effect));
+  const mutation = mutations.at(-1);
+  if (!mutation?.arguments || typeof mutation.arguments !== 'object') return null;
+  const root = mutation.arguments as Record<string, unknown>;
+  const patch = Array.isArray(root.patches) && root.patches[0] && typeof root.patches[0] === 'object'
+    ? root.patches[0] as Record<string, unknown>
+    : root;
+  const path = typeof patch.path === 'string' ? patch.path : typeof root.to === 'string' ? root.to : argumentPaths(mutation).at(-1);
+  if (!path) return null;
+  const name = fileName(path);
+  const verification = [...tools].reverse().find((tool) => tool.status === 'COMPLETED' && tool.effect === 'PROCESS' && receiptPassed(tool));
+  const command = verification ? boundedInline(toolDetail(verification)) : null;
+  const scope = presentation.changedFiles === 1 ? '没有修改其他文件。' : `本次共涉及 ${presentation.changedFiles} 个文件。`;
+  const verified = command ? `并已通过 \`${command}\`；` : '';
+
+  if (presentation.primaryChange === 'CREATE') {
+    const created = boundedInline(patch.content ?? root.content);
+    return {
+      title: `已创建 ${name}`,
+      detail: `${created ? `文件内容为 \`${created}\`，` : '目标内容已经写入，'}${verified}${scope}`,
+    };
+  }
+  if (presentation.primaryChange === 'DELETE') return { title: `已删除 ${name}`, detail: `${verified}${scope}` };
+  if (presentation.primaryChange === 'RENAME') {
+    const previous = typeof root.from === 'string' ? fileName(root.from) : null;
+    return { title: previous ? `已将 ${previous} 重命名为 ${name}` : `已重命名为 ${name}`, detail: `${verified}${scope}` };
+  }
+
+  const replacement = Array.isArray(patch.replacements) && patch.replacements[0] && typeof patch.replacements[0] === 'object'
+    ? patch.replacements[0] as Record<string, unknown>
+    : patch;
+  const before = boundedInline(replacement.old_text);
+  const after = boundedInline(replacement.new_text);
+  return {
+    title: `已更新 ${name}`,
+    detail: `${before && after ? `已将 \`${before}\` 调整为 \`${after}\`，` : '目标修改已经应用，'}${verified}${scope}`,
   };
 }
 
@@ -199,7 +256,7 @@ function phaseIdForTool(tool: AgentToolCallView): PhaseId {
 function phaseDetail(tools: AgentToolCallView[]): string {
   const latest = tools.at(-1)!;
   const suffix = tools.length > 1 ? ` · ${tools.length} 项操作` : '';
-  return `${toolTitle(latest.name)}${suffix}`;
+  return `${toolDetail(latest)}${suffix}`;
 }
 
 function failureNarrative(errorCode: string | null, changedFiles: number): string {
@@ -296,13 +353,66 @@ function activeStepState(state: AgentWorkPhaseState): boolean {
   return state === 'active' || state === 'failed' || state === 'blocked';
 }
 
+function taskFileNames(task: string): string[] {
+  const matches = task.match(/(?:[\p{L}\p{N}_@.-]+[\\/])*(?:[\p{L}\p{N}_@.-]+)\.(?:[cm]?[jt]sx?|html?|css|scss|json|md|rs|toml|ya?ml|py|vue|svelte)/giu) ?? [];
+  return [...new Set(matches.map(fileName))].slice(0, 3);
+}
+
+function taskProjectName(task: string): string | null {
+  return task.match(/([\p{L}\p{N}_.-]+)\s+Project\b/iu)?.[1] ?? null;
+}
+
+function taskVerificationCommand(task: string): string | null {
+  const command = task.match(/(?:运行|执行)\s+((?:node|pnpm|npm|yarn|bun|npx|cargo)\b[^，。；\r\n]*)/iu)?.[1]
+    ?.replace(/\s+(?:进行)?验证\s*$/u, '')
+    .trim();
+  return command ? command.slice(0, 120) : null;
+}
+
 function planLabels(task: string): Record<'INSPECT' | 'SCOPE' | 'MODIFY' | 'VERIFY' | 'FINISH', string> {
-  if (/(?:创建|新建|新增文件)/u.test(task)) return { INSPECT: '定位创建位置', SCOPE: '确认文件范围', MODIFY: '创建目标文件', VERIFY: '验证新文件', FINISH: '整理结果' };
-  if (/(?:删除|移除)/u.test(task)) return { INSPECT: '定位目标内容', SCOPE: '确认删除范围', MODIFY: '删除目标内容', VERIFY: '检查删除结果', FINISH: '整理结果' };
-  if (/(?:重命名|移动文件)/u.test(task)) return { INSPECT: '定位目标文件', SCOPE: '确认移动范围', MODIFY: '重命名目标文件', VERIFY: '检查引用与结果', FINISH: '整理结果' };
-  if (/(?:Git|提交|分支|推送)/iu.test(task)) return { INSPECT: '核对工作区变更', SCOPE: '确认版本操作范围', MODIFY: '执行版本操作', VERIFY: '确认仓库状态', FINISH: '整理结果' };
-  if (/(?:执行|运行|测试|验证)/u.test(task) && !/(?:修改|改成|调整|修复|实现|重构|写入)/u.test(task)) return { INSPECT: '确认执行目标', SCOPE: '检查运行条件', MODIFY: '执行目标命令', VERIFY: '核对运行结果', FINISH: '整理结果' };
-  return { INSPECT: '定位相关实现', SCOPE: '确认修改范围', MODIFY: '修改目标代码', VERIFY: '运行验证', FINISH: '整理结果' };
+  const files = taskFileNames(task);
+  const target = files[0] ?? null;
+  const project = taskProjectName(task);
+  const verification = taskVerificationCommand(task);
+  const root = project ? `${project} 项目根目录` : '项目根目录';
+  const count = files.length || 1;
+
+  if (/(?:创建|新建|新增文件)/u.test(task)) return {
+    INSPECT: `定位 ${root}`,
+    SCOPE: target ? `确认没有同名 ${target}` : '确认目标文件尚不存在',
+    MODIFY: target ? `创建 ${target}` : '创建目标文件',
+    VERIFY: verification ? `运行 ${verification}` : target ? `检查 ${target}` : '验证新文件',
+    FINISH: `核对只新增 ${count} 个文件`,
+  };
+  if (/(?:删除|移除)/u.test(task)) return {
+    INSPECT: target ? `定位 ${target}` : '定位目标内容',
+    SCOPE: target ? `确认只删除 ${target}` : '确认删除范围',
+    MODIFY: target ? `删除 ${target}` : '删除目标内容',
+    VERIFY: verification ? `运行 ${verification}` : '检查删除结果',
+    FINISH: `核对只删除 ${count} 个文件`,
+  };
+  if (/(?:重命名|移动文件)/u.test(task)) return {
+    INSPECT: target ? `定位 ${target}` : '定位目标文件',
+    SCOPE: files.length > 1 ? `确认 ${files[0]} → ${files[1]}` : '确认移动范围',
+    MODIFY: files.length > 1 ? `重命名为 ${files[1]}` : '重命名目标文件',
+    VERIFY: verification ? `运行 ${verification}` : '检查引用与结果',
+    FINISH: '核对只发生本次重命名',
+  };
+  if (/(?:Git|提交|分支|推送)/iu.test(task)) return { INSPECT: '核对当前 Git 变更', SCOPE: '确认本次提交文件', MODIFY: '执行指定 Git 操作', VERIFY: '确认仓库最终状态', FINISH: '核对提交与任务一致' };
+  if (/(?:执行|运行|测试|验证)/u.test(task) && !/(?:修改|改成|调整|修复|实现|重构|写入)/u.test(task)) return {
+    INSPECT: target ? `定位 ${target}` : '确认执行目标',
+    SCOPE: project ? `检查 ${project} 项目运行条件` : '检查运行条件',
+    MODIFY: verification ? `执行 ${verification}` : '执行目标命令',
+    VERIFY: '核对命令退出状态',
+    FINISH: '整理本次运行结果',
+  };
+  return {
+    INSPECT: target ? `定位 ${target}` : project ? `定位 ${project} 项目相关实现` : '定位相关实现',
+    SCOPE: target ? `确认只修改 ${target}` : '确认修改范围',
+    MODIFY: target ? `更新 ${target}` : '修改目标代码',
+    VERIFY: verification ? `运行 ${verification}` : target ? `验证 ${target}` : '运行相关验证',
+    FINISH: target ? `核对只修改 ${count} 个文件` : '核对修改与验证结果',
+  };
 }
 
 function genericPlan(

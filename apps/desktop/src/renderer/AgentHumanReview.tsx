@@ -25,8 +25,31 @@ function CodeSurface({ value, tone }: { value: string; tone?: 'before' | 'after'
   return <pre className={`human-code-surface${tone ? ` is-${tone}` : ''}`}><code>{value}</code></pre>;
 }
 
+function compactModify(change: AgentReviewChange): boolean {
+  if (change.before === null || change.before.length + change.after.length > 520) return false;
+  return change.before.split(/\r?\n/).length <= 3 && change.after.split(/\r?\n/).length <= 3;
+}
+
+function changeBindingLabel(change: AgentReviewChange): string | null {
+  if (change.before === null) return null;
+  const before = change.before.match(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\b/u)?.[1];
+  const after = change.after.match(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\b/u)?.[1];
+  return before && before === after ? before : null;
+}
+
+function InlineModifyChange({ change, label }: { change: AgentReviewChange; label: string | null }) {
+  return <div className="human-inline-change" data-human-diff-layout="inline">
+    {label && <p className="human-diff-semantic-label">{label}</p>}
+    <pre className="human-inline-diff" aria-label="紧凑代码变更"><code>
+      {change.before!.split(/\r?\n/).map((line, index) => <span className="is-remove" key={`remove-${index}`}><i aria-hidden="true">−</i>{line}</span>)}
+      {change.after.split(/\r?\n/).map((line, index) => <span className="is-add" key={`add-${index}`}><i aria-hidden="true">+</i>{line}</span>)}
+    </code></pre>
+  </div>;
+}
+
 function ModifyChange({ change, semantic }: { change: AgentReviewChange; semantic: boolean }) {
-  const label = semantic ? semanticReviewLabel(change) : null;
+  const label = semantic ? semanticReviewLabel(change) : changeBindingLabel(change);
+  if (compactModify(change)) return <InlineModifyChange change={change} label={label}/>;
   return <div className="human-diff-change">
     {label && <p className="human-diff-semantic-label">{label}</p>}
     <div className="human-diff-state-label">修改前</div>
@@ -70,14 +93,14 @@ export function AgentHumanReview({ review, task, runId, onOpenFile }: AgentHuman
 
     {selected && <p className="human-review-summary" title={taskLabel(task)}>{changeVerb(selected)} <code>{selected.path.split('/').at(-1)}</code></p>}
 
-    <div className="human-review-files" aria-label="已修改文件">
+    {review.files.length > 1 && <div className="human-review-files" aria-label="已修改文件">
       {review.files.map((file) => <button type="button" className={file.path === selected?.path ? 'active' : ''} onClick={() => { setSelectedPath(file.path); setMode(reviewDisplayFor(file) === 'RAW' ? 'RAW' : 'VISUAL'); }} key={file.path} data-testid="agent-review-file" data-change-type={file.changeType}>
         <span>{file.path}</span><small><b className="diff-additions">+{file.additions}</b><b className="diff-deletions">−{file.deletions}</b></small>
       </button>)}
-    </div>
+    </div>}
 
-    {selected && <div className="human-review-detail" data-change-type={selected.changeType}>
-      <h3>{changeHeading(selected)}</h3>
+    {selected && <div className={`human-review-detail${review.files.length === 1 ? ' is-single-file' : ''}`} data-change-type={selected.changeType} data-testid="agent-review-file" data-change-type-summary={selected.changeType}>
+      {selected.changeType !== 'CREATE' && <h3>{changeHeading(selected)}</h3>}
       {mode === 'VISUAL' && display !== 'RAW'
         ? <VisualReview file={selected} display={display}/>
         : <pre className="human-review-raw" data-testid="agent-review-diff">{selected.diff}</pre>}

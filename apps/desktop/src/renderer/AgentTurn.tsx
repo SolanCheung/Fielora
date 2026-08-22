@@ -84,6 +84,7 @@ function AgentLiveActivity({ presentation, tools, review, paused, onCancel, onRe
   expanded: boolean;
 }) {
   const evidence = activityEvidence(tools);
+  const currentPhase = presentation.phases[presentation.activeStep - 1] ?? presentation.phases.find((phase) => phase.state === 'active');
   const changeSummary = review && review.files.length > 0
     ? `${review.files.length} 个文件 +${review.additions} −${review.deletions}`
     : presentation.changedFiles > 0 ? `${presentation.changedFiles} 个文件` : '';
@@ -92,7 +93,7 @@ function AgentLiveActivity({ presentation, tools, review, paused, onCancel, onRe
       <button type="button" onClick={onToggleSteps} aria-expanded={expanded} data-testid="agent-steps-toggle" data-step-current={presentation.activeStep} data-step-total={presentation.totalSteps}>
         <span className="agent-progress-orbit" aria-hidden="true"/>
         <span className="agent-step-count">第 {presentation.activeStep} / {presentation.totalSteps} 步</span>
-        <strong>· {presentation.headline}</strong>
+        <strong>· {currentPhase?.label ?? presentation.headline}</strong>
         {changeSummary && <span>· {changeSummary}</span>}
         <span>· {presentation.elapsed}</span>
       </button>
@@ -127,7 +128,7 @@ function InlineSteps({ run, presentation, events, tools }: {
     {presentation.phases.length > 0 && <ol>{presentation.phases.map((phase, index) => <li className={`status-${phase.state}`} key={phase.id} data-step-state={phase.state} aria-current={phase.state === 'active' ? 'step' : undefined}>
       <i className="agent-step-marker" aria-label={stateLabel[phase.state]}><span aria-hidden="true"/></i>
       <span className="agent-step-label"><b>{index + 1}</b>{phase.label}</span>
-      <small>{phase.detail}</small>
+      {['active', 'completed', 'failed', 'blocked'].includes(phase.state) && phase.detail && <small data-step-detail>{phase.detail}</small>}
     </li>)}</ol>}
     <details className="agent-turn-technical"><summary>技术信息</summary>
       {tools.length > 0 && <div>{tools.map((tool) => <p key={tool.id}><code>{toolTitle(tool.name)}</code><span>{toolDetail(tool)}</span></p>)}</div>}
@@ -146,10 +147,11 @@ function ResultText({ content }: { content: string }) {
   </p>)}</div>;
 }
 
-function AgentTerminalResult({ status, message, presentation, canExpand, expanded, partial, review, onToggleSteps, onRetry, onReview }: {
+function AgentTerminalResult({ status, message, presentation, tools, canExpand, expanded, partial, review, onToggleSteps, onRetry, onReview }: {
   status: AgentTerminalStatus;
   message: ConversationMessageView | null;
   presentation: AgentPresentation | null;
+  tools: AgentToolCallView[];
   canExpand: boolean;
   expanded: boolean;
   partial: boolean;
@@ -158,13 +160,15 @@ function AgentTerminalResult({ status, message, presentation, canExpand, expande
   onRetry?: () => void;
   onReview?: () => void;
 }) {
-  const result = buildAgentResultViewModel(status, message?.content ?? '', presentation);
+  const result = buildAgentResultViewModel(status, message?.content ?? '', presentation, tools);
+  const completedSteps = presentation?.phases.filter((phase) => phase.state === 'completed').length ?? 0;
   return <div className="agent-terminal-result" data-testid="agent-terminal-result" data-result-outcome={presentation?.outcome ?? status}>
     <h2>{result.title}</h2>
     <div className="agent-terminal-body"><ResultText content={result.detail}/></div>
-    {result.evidence.length > 0 && <p className="agent-terminal-meta">{result.evidence.join(' · ')}</p>}
     <div className="agent-terminal-actions">
       {result.duration && <span className="agent-result-duration">{result.duration}</span>}
+      {presentation && <span className="agent-result-step-summary">{completedSteps}/{presentation.totalSteps} 步</span>}
+      {result.evidence.map((item) => <span className="agent-terminal-meta" key={item}>{item}</span>)}
       {canExpand && <button type="button" className="agent-text-action agent-step-action" onClick={onToggleSteps} aria-expanded={expanded} data-testid="agent-steps-toggle">{expanded ? '收起步骤' : '查看步骤'}</button>}
       {status === 'FAILED' && onRetry && <button type="button" className="agent-primary-action" onClick={onRetry} data-testid="agent-retry">{partial ? '继续完成' : '重新尝试'}</button>}
       {review && review.files.length > 0 && onReview && <button type="button" className="agent-text-action agent-review-action" onClick={onReview} data-testid="agent-change-review">查看修改</button>}
@@ -184,6 +188,9 @@ export function AgentTurn({
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [run, terminal]);
+  useEffect(() => {
+    if (terminal) setExpanded(false);
+  }, [terminal]);
   const presentation = useMemo(() => run ? buildAgentPresentation(run, events, tools, now) : null, [events, now, run, tools]);
   const status = terminalStatus(run, terminalMessage);
   const canExpand = Boolean(run && (presentation?.phases.length || events.length || tools.length));
@@ -217,7 +224,7 @@ export function AgentTurn({
       }
     </>}
     {!answerOnly && terminal && status && (
-      <AgentTerminalResult status={status} message={terminalMessage} presentation={presentation} canExpand={canExpand} expanded={expanded} partial={partial} review={review} onToggleSteps={() => setExpanded((value) => !value)} onRetry={onRetry} onReview={onReview}/>
+      <AgentTerminalResult status={status} message={terminalMessage} presentation={presentation} tools={tools} canExpand={canExpand} expanded={expanded} partial={partial} review={review} onToggleSteps={() => setExpanded((value) => !value)} onRetry={onRetry} onReview={onReview}/>
     )}
     {!answerOnly && expanded && run && presentation && (
       <InlineSteps run={run} presentation={presentation} events={events} tools={tools}/>

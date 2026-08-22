@@ -74,3 +74,17 @@ test('completed steps use the shared quiet marker instead of checkmark glyphs an
   assert.match(styles, /\.project-layout\.agent-review-open \.workspace-panel \{ position: absolute;[^}]*grid-column: 3 \/ -1/);
   assert.doesNotMatch([workspace, styles].join('\n'), /message-navigator/);
 });
+
+test('polished steps collapse on completion and omit pending explanations', () => {
+  assert.match(turn, /if \(terminal\) setExpanded\(false\)/);
+  assert.match(turn, /\['active', 'completed', 'failed', 'blocked'\]\.includes\(phase\.state\)/);
+  assert.match(turn, /\{completedSteps\}\/\{presentation\.totalSteps\} 步/);
+  assert.doesNotMatch(turn, /phase\.state === 'pending'.*<small/s);
+});
+
+test('single create review removes the duplicate file row and small modify uses inline diff', () => {
+  assert.match(review, /review\.files\.length > 1 && <div className="human-review-files"/);
+  assert.match(review, /selected\.changeType !== 'CREATE' && <h3>/);
+  assert.match(review, /data-human-diff-layout="inline"/);
+  assert.match(styles, /\.human-inline-diff/);
+});

@@ -42,7 +42,7 @@ test('completed work summarizes files and verification without exposing runtime 
   assert.equal(presentation.changedFiles, 1);
   assert.equal(presentation.passedVerifications, 1);
   assert.deepEqual(presentation.summary, ['5 秒', '1 个文件修改', '1 项验证通过']);
-  assert.equal(presentation.phases.at(-1)?.label, '整理结果');
+  assert.equal(presentation.phases.at(-1)?.label, '核对修改与验证结果');
   assert.equal(presentation.phases.at(-1)?.state, 'completed');
 });
 
@@ -169,6 +169,38 @@ test('generic action plan stays stable as tools arrive and contains three to six
   ], 4_000);
   assert.deepEqual(before.phases.map((phase) => [phase.id, phase.label]), after.phases.map((phase) => [phase.id, phase.label]));
   assert.ok(before.phases.length >= 3 && before.phases.length <= 6);
+});
+
+test('action plan names the real project file and verification command without another model turn', () => {
+  const task = '在当前 web Project 根目录新建 fielora-plan-review-polish.js，内容仅为 export const fieloraPlanReview = true;，不要修改其他文件；完成后运行 node --check fielora-plan-review-polish.js 验证。';
+  const specificRun = { ...run('RUNNING'), task };
+  const before = buildAgentPresentation(specificRun, [], [], 2_000);
+  const after = buildAgentPresentation(specificRun, [], [
+    tool({ name: 'stat_path', effect: 'OBSERVE', arguments: { path: 'fielora-plan-review-polish.js' } }),
+    tool({ id: 'write', name: 'create_file', effect: 'WORKSPACE_WRITE', status: 'RUNNING', arguments: { path: 'fielora-plan-review-polish.js', content: 'export const fieloraPlanReview = true;' } }),
+  ], 4_000);
+  assert.deepEqual(before.phases.map((phase) => phase.label), [
+    '定位 web 项目根目录',
+    '确认没有同名 fielora-plan-review-polish.js',
+    '创建 fielora-plan-review-polish.js',
+    '运行 node --check fielora-plan-review-polish.js',
+    '核对只新增 1 个文件',
+  ]);
+  assert.deepEqual(after.phases.map((phase) => phase.label), before.phases.map((phase) => phase.label));
+});
+
+test('structured result uses exact mutation and verification facts instead of generic completion prose', () => {
+  const completed = buildAgentPresentation({ ...run('COMPLETED'), task: '新建 acceptance.js 后运行 node --check acceptance.js' }, [], [
+    tool({ name: 'create_file', effect: 'WORKSPACE_WRITE', arguments: { path: 'acceptance.js', content: 'export const accepted = true;' } }),
+    tool({ id: 'verify', name: 'run_command', effect: 'PROCESS', arguments: { program: 'node', argv: ['--check', 'acceptance.js'] }, receipt: { verification_eligible: true, success: true } }),
+  ]);
+  const result = buildAgentResultViewModel('COMPLETED', '## 已完成\n\n任务已经完成。', completed, [
+    tool({ name: 'create_file', effect: 'WORKSPACE_WRITE', arguments: { path: 'acceptance.js', content: 'export const accepted = true;' } }),
+    tool({ id: 'verify', name: 'run_command', effect: 'PROCESS', arguments: { program: 'node', argv: ['--check', 'acceptance.js'] }, receipt: { verification_eligible: true, success: true } }),
+  ]);
+  assert.equal(result.title, '已创建 acceptance.js');
+  assert.equal(result.detail, '文件内容为 `export const accepted = true;`，并已通过 `node --check acceptance.js`；没有修改其他文件。');
+  assert.doesNotMatch(result.detail, /任务已经完成|变更：|验证：/);
 });
 
 test('verified optional finalization failure projects as success with warning', () => {

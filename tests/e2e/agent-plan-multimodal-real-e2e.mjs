@@ -6,7 +6,9 @@ import path from 'node:path';
 if (process.env.FIELORA_REAL_PLAN_MULTIMODAL !== '1') throw new Error('Set FIELORA_REAL_PLAN_MULTIMODAL=1 for real Production acceptance.');
 
 const root = path.resolve(import.meta.dirname, '..', '..');
-const planEvidence = path.join(root, 'artifacts', 'agentic-plan-result-review-convergence');
+const planEvidence = process.env.FIELORA_PLAN_EVIDENCE_DIR
+  ? path.resolve(process.env.FIELORA_PLAN_EVIDENCE_DIR)
+  : path.join(root, 'artifacts', 'agentic-plan-result-review-convergence');
 const imageEvidence = path.join(root, 'artifacts', 'multimodal-attachment-fix');
 const savedImagePath = process.env.FIELORA_E2E_ATTACHMENT_SAVE_PATH ?? path.join(imageEvidence, 'saved-image.png');
 const port = Number(process.env.FIELORA_E2E_DEBUG_PORT ?? 9334);
@@ -172,9 +174,9 @@ try {
     assert.equal(run.status, 'COMPLETED', JSON.stringify(run));
     await wait(cdp, `document.querySelector('[data-agent-run-id=${JSON.stringify(run.id)}] [data-testid="agent-change-review"]')`, 60_000);
     await cdp.eval(`document.querySelector('[data-agent-run-id=${JSON.stringify(run.id)}] [data-testid="agent-change-review"]')?.click()`);
-    await wait(cdp, `document.querySelector('[data-testid="agent-review-human-diff"][data-human-diff-kind="structured"]')`, 30_000);
-    const review = await cdp.eval(`(()=>{const root=document.querySelector('[data-testid="agent-review"]');return{runId:root?.dataset.agentRunId,type:root?.querySelector('[data-testid="agent-review-file"]')?.dataset.changeType,visual:Boolean(root?.querySelector('[data-testid="agent-review-human-diff"]')),raw:Boolean(root?.querySelector('[data-testid="agent-review-diff"]')),text:root?.innerText??''};})()`);
-    assert.equal(review.runId, run.id); assert.equal(review.type, 'MODIFY'); assert.equal(review.visual, true); assert.equal(review.raw, false); assert.match(review.text, /修改前.*修改后/s);
+    await wait(cdp, `document.querySelector('[data-testid="agent-review-human-diff"] [data-human-diff-layout="inline"]')`, 30_000);
+    const review = await cdp.eval(`(()=>{const root=document.querySelector('[data-testid="agent-review"]');return{runId:root?.dataset.agentRunId,type:root?.querySelector('[data-testid="agent-review-file"]')?.dataset.changeType,visual:Boolean(root?.querySelector('[data-testid="agent-review-human-diff"]')),inline:Boolean(root?.querySelector('[data-human-diff-layout="inline"]')),raw:Boolean(root?.querySelector('[data-testid="agent-review-diff"]')),text:root?.innerText??''};})()`);
+    assert.equal(review.runId, run.id); assert.equal(review.type, 'MODIFY'); assert.equal(review.visual, true); assert.equal(review.inline, true); assert.equal(review.raw, false);
     await resize(cdp, 1600, 920);
     planScreenshots.push(await capture(cdp, planEvidence, '06-modify-review.png'));
     planScreenshots.push(await capture(cdp, planEvidence, '08-review-wide-window.png'));
@@ -204,9 +206,9 @@ try {
     await wait(cdp, `document.querySelector('[data-testid="agent-review"]')`);
     if (scope === 'REVIEW_ONLY') {
       await resize(cdp, 1600, 920);
-      await wait(cdp, `document.querySelector('[data-testid="agent-review-human-diff"][data-human-diff-kind="structured"]')`);
-      const review = await cdp.eval(`(()=>{const root=document.querySelector('[data-testid="agent-review"]');return{runId:root?.dataset.agentRunId,type:root?.querySelector('[data-testid="agent-review-file"]')?.dataset.changeType,visual:Boolean(root?.querySelector('[data-testid="agent-review-human-diff"]')),raw:Boolean(root?.querySelector('[data-testid="agent-review-diff"]')),text:root?.innerText??''};})()`);
-      assert.equal(review.runId, recentRun.id); assert.equal(review.type, 'MODIFY'); assert.equal(review.visual, true); assert.equal(review.raw, false); assert.match(review.text, /修改前.*修改后/s);
+      await wait(cdp, `document.querySelector('[data-testid="agent-review-human-diff"] [data-human-diff-layout="inline"]')`);
+      const review = await cdp.eval(`(()=>{const root=document.querySelector('[data-testid="agent-review"]');return{runId:root?.dataset.agentRunId,type:root?.querySelector('[data-testid="agent-review-file"]')?.dataset.changeType,visual:Boolean(root?.querySelector('[data-testid="agent-review-human-diff"]')),inline:Boolean(root?.querySelector('[data-human-diff-layout="inline"]')),raw:Boolean(root?.querySelector('[data-testid="agent-review-diff"]')),text:root?.innerText??''};})()`);
+      assert.equal(review.runId, recentRun.id); assert.equal(review.type, 'MODIFY'); assert.equal(review.visual, true); assert.equal(review.inline, true); assert.equal(review.raw, false);
       planScreenshots.push(await capture(cdp, planEvidence, '06-modify-review.png'));
       planScreenshots.push(await capture(cdp, planEvidence, '08-review-wide-window.png'));
     }
@@ -242,14 +244,17 @@ try {
   planScreenshots.push(await capture(cdp, planEvidence, '02-action-plan-running.png'));
   await cdp.eval(`document.querySelector('[data-agent-run-id=${JSON.stringify(createRun.id)}] [data-testid="agent-steps-toggle"]')?.click()`);
   await wait(cdp, `document.querySelector('[data-agent-run-id=${JSON.stringify(createRun.id)}] [data-testid="agent-inline-steps"]')`);
-  const plan = await cdp.eval(`(()=>{const turn=document.querySelector('[data-agent-run-id=${JSON.stringify(createRun.id)}]');return{steps:turn?.querySelectorAll('[data-step-state]').length,checkmarks:/[✓✔✅]/u.test(turn?.innerText??''),states:[...turn.querySelectorAll('[data-step-state]')].map((item)=>item.dataset.stepState)};})()`);
+  const plan = await cdp.eval(`(()=>{const turn=document.querySelector('[data-agent-run-id=${JSON.stringify(createRun.id)}]');const items=[...turn.querySelectorAll('[data-step-state]')];return{steps:items.length,checkmarks:/[✓✔✅]/u.test(turn?.innerText??''),states:items.map((item)=>item.dataset.stepState),labels:items.map((item)=>item.querySelector('.agent-step-label')?.innerText??''),pendingDetails:items.filter((item)=>item.dataset.stepState==='pending'&&item.querySelector('[data-step-detail]')).length};})()`);
   assert.equal(plan.steps, running.total); assert.equal(plan.checkmarks, false); assert.ok(plan.states.includes('active') || plan.states.includes('completed'));
+  assert.equal(plan.pendingDetails, 0); assert.ok(plan.labels.some((label)=>label.includes('web 项目根目录'))); assert.ok(plan.labels.some((label)=>label.includes(acceptanceFile))); assert.ok(plan.labels.some((label)=>label.includes(`node --check ${acceptanceFile}`)));
   planScreenshots.push(await capture(cdp, planEvidence, '03-action-plan-expanded.png'));
 
   const createTerminal = await waitTerminal(cdp, createConversationView.id);
   assert.equal(createTerminal.status, 'COMPLETED', JSON.stringify(createTerminal));
-  const result = await cdp.eval(`(()=>{const turn=document.querySelector('[data-agent-run-id=${JSON.stringify(createTerminal.id)}]');turn?.scrollIntoView({block:'center'});const title=turn?.querySelector('.agent-terminal-result h2');const body=turn?.querySelector('.agent-terminal-body');const meta=turn?.querySelector('.agent-terminal-meta');const action=turn?.querySelector('.agent-terminal-actions button');const style=(element)=>{const value=getComputedStyle(element);return{size:value.fontSize,weight:value.fontWeight,line:value.lineHeight};};return{live:Boolean(turn?.querySelector('[data-testid="agent-live-activity"]')),terminal:Boolean(turn?.querySelector('[data-testid="agent-terminal-result"]')),review:Boolean(turn?.querySelector('[data-testid="agent-change-review"]')),steps:Boolean(turn?.querySelector('[data-testid="agent-steps-toggle"]')),title:title?.innerText??'',body:body?.innerText??'',titleStyle:style(title),bodyStyle:style(body),metaStyle:style(meta),actionStyle:style(action)};})()`);
+  await wait(cdp, `!document.querySelector('[data-agent-run-id=${JSON.stringify(createTerminal.id)}] [data-testid="agent-inline-steps"]')`);
+  const result = await cdp.eval(`(()=>{const turn=document.querySelector('[data-agent-run-id=${JSON.stringify(createTerminal.id)}]');turn?.scrollIntoView({block:'center'});const title=turn?.querySelector('.agent-terminal-result h2');const body=turn?.querySelector('.agent-terminal-body');const meta=turn?.querySelector('.agent-terminal-meta');const action=turn?.querySelector('.agent-terminal-actions button');const style=(element)=>{const value=getComputedStyle(element);return{size:value.fontSize,weight:value.fontWeight,line:value.lineHeight};};return{live:Boolean(turn?.querySelector('[data-testid="agent-live-activity"]')),terminal:Boolean(turn?.querySelector('[data-testid="agent-terminal-result"]')),review:Boolean(turn?.querySelector('[data-testid="agent-change-review"]')),steps:Boolean(turn?.querySelector('[data-testid="agent-steps-toggle"]')),expanded:Boolean(turn?.querySelector('[data-testid="agent-inline-steps"]')),actions:turn?.querySelector('.agent-terminal-actions')?.innerText??'',title:title?.innerText??'',body:body?.innerText??'',titleStyle:style(title),bodyStyle:style(body),metaStyle:style(meta),actionStyle:style(action)};})()`);
   assert.equal(result.terminal && !result.live && result.review && result.steps, true);
+  assert.equal(result.expanded, false); assert.match(result.title, new RegExp(acceptanceFile.replaceAll('.', '\\.'))); assert.match(result.body, /fieloraPlanReview = true/); assert.match(result.body, new RegExp(`node --check ${acceptanceFile.replaceAll('.', '\\.')}`)); assert.match(result.actions, /5\/5 步/);
   assert.deepEqual({ size: result.titleStyle.size, weight: result.titleStyle.weight }, { size: '17px', weight: '600' });
   assert.deepEqual({ size: result.bodyStyle.size, weight: result.bodyStyle.weight }, { size: '15px', weight: '400' });
   assert.deepEqual({ size: result.metaStyle.size, weight: result.metaStyle.weight }, { size: '13px', weight: '400' });
@@ -259,8 +264,8 @@ try {
 
   await cdp.eval(`document.querySelector('[data-agent-run-id=${JSON.stringify(createTerminal.id)}] [data-testid="agent-change-review"]')?.click()`);
   await wait(cdp, `document.querySelector('[data-testid="agent-review"]')`);
-  const createReview = await cdp.eval(`(()=>{const review=document.querySelector('[data-testid="agent-review"]');return{runId:review?.dataset.agentRunId,type:review?.querySelector('[data-testid="agent-review-file"]')?.dataset.changeType,text:review?.innerText??'',kind:review?.querySelector('[data-human-diff-kind]')?.dataset.humanDiffKind};})()`);
-  assert.equal(createReview.runId, createTerminal.id); assert.equal(createReview.type, 'CREATE'); assert.equal(createReview.kind, 'create'); assert.doesNotMatch(createReview.text, /修改前\s*无/);
+  const createReview = await cdp.eval(`(()=>{const review=document.querySelector('[data-testid="agent-review"]');const text=review?.innerText??'';return{runId:review?.dataset.agentRunId,type:review?.querySelector('[data-testid="agent-review-file"]')?.dataset.changeType,text,kind:review?.querySelector('[data-human-diff-kind]')?.dataset.humanDiffKind,fileList:Boolean(review?.querySelector('.human-review-files')),filenameCount:text.split(${JSON.stringify(acceptanceFile)}).length-1,repeatedHeading:/新增文件/.test(text)};})()`);
+  assert.equal(createReview.runId, createTerminal.id); assert.equal(createReview.type, 'CREATE'); assert.equal(createReview.kind, 'create'); assert.equal(createReview.fileList, false); assert.equal(createReview.filenameCount, 1); assert.equal(createReview.repeatedHeading, false); assert.doesNotMatch(createReview.text, /修改前\s*无/);
   planScreenshots.push(await capture(cdp, planEvidence, '05-create-review.png'));
   await cdp.eval(`document.querySelector('[data-testid="workspace-close"]')?.click()`);
 
@@ -270,8 +275,8 @@ try {
   assert.equal(modifyRun.status, 'COMPLETED', JSON.stringify(modifyRun));
   await cdp.eval(`document.querySelector('[data-agent-run-id=${JSON.stringify(modifyRun.id)}] [data-testid="agent-change-review"]')?.click()`);
   await wait(cdp, `document.querySelector('[data-testid="agent-review"]')`);
-  const modifyReview = await cdp.eval(`(()=>{const review=document.querySelector('[data-testid="agent-review"]');return{runId:review?.dataset.agentRunId,type:review?.querySelector('[data-testid="agent-review-file"]')?.dataset.changeType,visual:Boolean(review?.querySelector('[data-testid="agent-review-human-diff"]')),raw:Boolean(review?.querySelector('[data-testid="agent-review-diff"]')),unsafe:(review?.innerText??'').includes('修改前内容请查看原始 Diff')};})()`);
-  assert.equal(modifyReview.runId, modifyRun.id); assert.equal(modifyReview.type, 'MODIFY'); assert.equal(modifyReview.visual, true); assert.equal(modifyReview.raw, false); assert.equal(modifyReview.unsafe, false);
+  const modifyReview = await cdp.eval(`(()=>{const review=document.querySelector('[data-testid="agent-review"]');return{runId:review?.dataset.agentRunId,type:review?.querySelector('[data-testid="agent-review-file"]')?.dataset.changeType,visual:Boolean(review?.querySelector('[data-testid="agent-review-human-diff"]')),inline:Boolean(review?.querySelector('[data-human-diff-layout="inline"]')),largeBlocks:Boolean(review?.querySelector('.human-code-surface.is-before,.human-code-surface.is-after')),raw:Boolean(review?.querySelector('[data-testid="agent-review-diff"]')),unsafe:(review?.innerText??'').includes('修改前内容请查看原始 Diff')};})()`);
+  assert.equal(modifyReview.runId, modifyRun.id); assert.equal(modifyReview.type, 'MODIFY'); assert.equal(modifyReview.visual, true); assert.equal(modifyReview.inline, true); assert.equal(modifyReview.largeBlocks, false); assert.equal(modifyReview.raw, false); assert.equal(modifyReview.unsafe, false);
   planScreenshots.push(await capture(cdp, planEvidence, '06-modify-review.png'));
   planScreenshots.push(await capture(cdp, planEvidence, '08-review-wide-window.png'));
   await resize(cdp, 1200, 760);
@@ -279,6 +284,12 @@ try {
   const narrow = await cdp.eval(`(()=>{const conversation=document.querySelector('.conversation-column').getBoundingClientRect();const composer=document.querySelector('.conversation-composer').getBoundingClientRect();const review=document.querySelector('.workspace-panel').getBoundingClientRect();return{conversation:conversation.width,composer:composer.width,review:review.width,viewport:innerWidth};})()`);
   assert.ok(narrow.conversation >= 640, JSON.stringify(narrow)); assert.ok(narrow.composer >= 600, JSON.stringify(narrow)); assert.ok(narrow.review <= 560, JSON.stringify(narrow));
   planScreenshots.push(await capture(cdp, planEvidence, '07-review-narrow-window.png'));
+  }
+
+  if (scope === 'PLAN_ONLY') {
+    process.stdout.write(`${JSON.stringify({ project: acceptance.project.title, model: acceptance.provider.default_model, planScreenshots }, null, 2)}\n`);
+    cdp.close();
+    process.exit(0);
   }
 
   console.error('multimodal: prepare');
