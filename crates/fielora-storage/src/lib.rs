@@ -227,6 +227,68 @@ impl StorageHandle {
         })
     }
 
+    pub fn update_project(
+        &self,
+        request: UpdateProjectRequest,
+        now: i64,
+    ) -> Result<ProjectView, DomainError> {
+        let owner = self.local_user.clone();
+        let device = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            let changed = connection.execute(
+                "UPDATE fields SET title=?1,revision=revision+1,updated_at=?2 WHERE id=?3 AND owner_principal_id=?4 AND revision=?5 AND lifecycle_status='ACTIVE' AND id IN (SELECT object_id FROM device_bindings WHERE device_id=?6 AND binding_kind='PROJECT_ROOT')",
+                params![request.title, now, request.field_id.0, owner.0, revision_to_domain(request.expected_revision)?, device.0],
+            ).map_err(storage_domain)?;
+            if changed == 0 {
+                return project_revision_or_not_found(
+                    connection,
+                    &owner,
+                    &device,
+                    &request.field_id,
+                );
+            }
+            get_project(connection, &owner, &device, &request.field_id)
+        })
+    }
+
+    pub fn archive_project(
+        &self,
+        request: ArchiveProjectRequest,
+        now: i64,
+    ) -> Result<ProjectView, DomainError> {
+        let owner = self.local_user.clone();
+        let device = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            let mut project = get_project(connection, &owner, &device, &request.field_id)?;
+            let transaction = connection.transaction().map_err(storage_domain)?;
+            let changed = transaction.execute(
+                "UPDATE fields SET lifecycle_status='ARCHIVED',revision=revision+1,updated_at=?1 WHERE id=?2 AND owner_principal_id=?3 AND revision=?4 AND lifecycle_status='ACTIVE' AND id IN (SELECT object_id FROM device_bindings WHERE device_id=?5 AND binding_kind='PROJECT_ROOT')",
+                params![now, request.field_id.0, owner.0, revision_to_domain(request.expected_revision)?, device.0],
+            ).map_err(storage_domain)?;
+            if changed == 0 {
+                return project_revision_or_not_found(
+                    &transaction,
+                    &owner,
+                    &device,
+                    &request.field_id,
+                );
+            }
+            insert_simple_activity(
+                &transaction,
+                Some(&request.field_id),
+                &owner,
+                "FIELD_ARCHIVED",
+                "FIELD",
+                &request.field_id.0,
+                now,
+            )?;
+            transaction.commit().map_err(storage_domain)?;
+            project.revision += 1;
+            project.updated_at = now;
+            Ok(project)
+        })
+    }
+
     pub fn create_conversation(
         &self,
         request: CreateConversationRequest,
@@ -391,6 +453,7 @@ impl StorageHandle {
             let event_id = AgentEventId::new(Uuid::now_v7().to_string());
             let payload = serde_json::json!({
                 "permission": wire(&request.permission),
+                "user_message_id": request.user_message_id,
                 "max_steps": max_steps,
                 "task_bytes": request.task.len(),
             });
@@ -1465,6 +1528,18 @@ fn get_project(
         params![device.0, field_id.0, owner.0],
         project_from_row,
     ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
+fn project_revision_or_not_found(
+    connection: &Connection,
+    owner: &PrincipalId,
+    device: &DeviceId,
+    id: &FieldId,
+) -> Result<ProjectView, DomainError> {
+    match get_project(connection, owner, device, id) {
+        Ok(_) => Err(DomainError::RevisionConflict),
+        Err(error) => Err(error),
+    }
 }
 
 fn conversation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConversationView> {
@@ -4577,6 +4652,96 @@ mod tests {
     }
 
     #[test]
+    fn project_title_update_is_revision_guarded_and_preserves_root() {
+        let root = temporary_root();
+        let worker = start(&root, 1);
+        let handle = worker.handle();
+        let project = handle
+            .create_project(
+                CreateProjectRequest {
+                    title: "Before".into(),
+                    goal: None,
+                    root_path: r"C:\work\rename-project".into(),
+                },
+                2,
+            )
+            .unwrap();
+        let updated = handle
+            .update_project(
+                UpdateProjectRequest {
+                    field_id: project.field_id.clone(),
+                    expected_revision: project.revision,
+                    title: "After".into(),
+                },
+                3,
+            )
+            .unwrap();
+        assert_eq!(updated.title, "After");
+        assert_eq!(updated.root_path, r"C:\work\rename-project");
+        assert_eq!(updated.revision, project.revision + 1);
+        let stale = handle.update_project(
+            UpdateProjectRequest {
+                field_id: project.field_id,
+                expected_revision: project.revision,
+                title: "Stale".into(),
+            },
+            4,
+        );
+        assert!(matches!(stale, Err(DomainError::RevisionConflict)));
+        drop(worker);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn project_archive_hides_metadata_and_preserves_local_folder() {
+        let root = temporary_root();
+        let workspace = root.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(workspace.join("keep.txt"), "keep me").unwrap();
+        let worker = start(&root, 1);
+        let handle = worker.handle();
+        let project = handle
+            .create_project(
+                CreateProjectRequest {
+                    title: "Remove from Fielora".into(),
+                    goal: None,
+                    root_path: workspace.to_string_lossy().into_owned(),
+                },
+                2,
+            )
+            .unwrap();
+        let stale = handle.archive_project(
+            ArchiveProjectRequest {
+                field_id: project.field_id.clone(),
+                expected_revision: project.revision + 1,
+            },
+            3,
+        );
+        assert!(matches!(stale, Err(DomainError::RevisionConflict)));
+        let archived = handle
+            .archive_project(
+                ArchiveProjectRequest {
+                    field_id: project.field_id.clone(),
+                    expected_revision: project.revision,
+                },
+                4,
+            )
+            .unwrap();
+        assert_eq!(archived.revision, project.revision + 1);
+        assert!(handle.list_projects().unwrap().is_empty());
+        assert!(matches!(
+            handle.get_project(project.field_id),
+            Err(DomainError::NotFound)
+        ));
+        assert_eq!(
+            fs::read_to_string(workspace.join("keep.txt")).unwrap(),
+            "keep me"
+        );
+        drop(worker);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn incompatible_legacy_rows_roll_back_migration_0002() {
         let root = temporary_root();
         let paths = PlatformPaths::from_root(root.clone()).unwrap();
@@ -5102,11 +5267,13 @@ mod tests {
                     StartAgentRunRequest {
                         field_id: project.field_id,
                         conversation_id: conversation.id,
+                        user_message_id: None,
                         provider_config_id: provider.view.id,
                         model_id: None,
                         task: "Fix the fixture".into(),
                         permission: AgentPermission::ReviewChanges,
                         max_steps: Some(8),
+                        attachments: None,
                     },
                     6,
                 )

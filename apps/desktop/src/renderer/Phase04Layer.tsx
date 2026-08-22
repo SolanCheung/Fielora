@@ -19,6 +19,8 @@ import {
   invocationStatusLabel,
   providerKindLabels,
 } from './phase04-presentation';
+import { SelectMenu, TextActionDialog } from './UiPrimitives';
+import { chinaProviderPresets } from './china-provider-presets';
 
 type ExperienceSurface = 'SUMMON' | 'INBOX' | 'PROVIDER_SETUP' | null;
 type CaptureAction = { captureId: string; mode: 'ATTACH' | 'PROMOTE' } | null;
@@ -40,6 +42,18 @@ const emptySource = (kind: CaptureSource['kind']): CaptureSource => ({
 
 function message(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason);
+}
+
+function providerProbeFailure(provider: ProviderConfigView | undefined, code?: string | null): string {
+  if (provider?.provider_kind === 'OPENAI' && /^qwen/i.test(provider.default_model)) return '连接失败：当前是 OpenAI 官方协议，但模型像兼容服务；请检查协议与 Base URL';
+  const labels: Record<string, string> = {
+    CREDENTIAL_REJECTED: 'API Key 无效或已失效',
+    MODEL_NOT_AVAILABLE: '模型不可用，请检查 Model ID',
+    PROVIDER_RATE_LIMITED: '服务限流，请稍后重试',
+    PROVIDER_UNAVAILABLE: '服务不可达，请检查网络与 Base URL',
+    PROVIDER_PROTOCOL_ERROR: '服务响应与所选协议不兼容',
+  };
+  return `连接失败：${labels[code ?? ''] ?? code ?? '服务异常'}`;
 }
 
 function contextContentFits(value: string): boolean {
@@ -65,7 +79,10 @@ export function Phase04Layer() {
   const [providers, setProviders] = useState<ProviderConfigView[]>([]);
   const [providerId, setProviderId] = useState('');
   const [providerKind, setProviderKind] = useState<ProviderKind>('OPENAI');
+  const [providerPreset, setProviderPreset] = useState('MANUAL');
+  const [providerDraft, setProviderDraft] = useState({ displayName: '', model: '', baseUrl: '' });
   const [providerFormOpen, setProviderFormOpen] = useState(false);
+  const [editingProviderId, setEditingProviderId] = useState('');
   const [probeState, setProbeState] = useState<{ invocationId: string; providerId: string; label: string } | null>(null);
   const [chips, setChips] = useState<ContextChip[]>([]);
   const [contextOpen, setContextOpen] = useState(false);
@@ -83,6 +100,7 @@ export function Phase04Layer() {
   const [customAck, setCustomAck] = useState(false);
   const [sendAck, setSendAck] = useState(false);
   const [sensitiveAck, setSensitiveAck] = useState(false);
+  const [noteEdit, setNoteEdit] = useState<{ index: number; value: string } | null>(null);
   const secretRef = useRef<HTMLInputElement>(null);
   const invocationRef = useRef('');
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -97,6 +115,8 @@ export function Phase04Layer() {
     [captures],
   );
   const hasSensitiveContext = chips.some((chip) => chip.sensitivity === 'SENSITIVE');
+  const isQwenCodingPlan = providerKind === 'OPENAI_COMPATIBLE'
+    && providerDraft.baseUrl.replace(/\/+$/, '') === 'https://coding.dashscope.aliyuncs.com/v1';
 
   const refresh = useCallback(async () => {
     const [nextProviders, nextCaptures, nextFields] = await Promise.all([
@@ -185,7 +205,17 @@ export function Phase04Layer() {
 
   useEffect(() => {
     const openInbox = () => showSurface('INBOX');
-    const openProviderSetup = () => { setProviderFormOpen(false); showSurface('PROVIDER_SETUP'); };
+    const openProviderSetup = (event: Event) => {
+      const requestedProviderId = (event as CustomEvent<string | undefined>).detail;
+      setProviderFormOpen(false);
+      setEditingProviderId('');
+      showSurface('PROVIDER_SETUP');
+      if (requestedProviderId) {
+        void window.fielora.provider.get({ provider_config_id: requestedProviderId })
+          .then((provider) => beginEditProvider(provider))
+          .catch((reason) => setError(message(reason)));
+      }
+    };
     const openSummon = () => { void summon(); };
     window.addEventListener('fielora:open-inbox', openInbox);
     window.addEventListener('fielora:open-provider-setup', openProviderSetup);
@@ -214,7 +244,7 @@ export function Phase04Layer() {
     const model = event as ModelInvocationEvent;
     if (probeState?.invocationId === model.invocation_id) {
       if (model.kind === 'COMPLETED') setProbeState((current) => current ? { ...current, label: '连接正常' } : null);
-      if (model.kind === 'FAILED') setProbeState((current) => current ? { ...current, label: '连接失败' } : null);
+      if (model.kind === 'FAILED') setProbeState((current) => current ? { ...current, label: providerProbeFailure(providers.find((provider) => provider.id === current.providerId), model.error_code) } : null);
       if (model.kind === 'CANCELLED') setProbeState((current) => current ? { ...current, label: '测试已取消' } : null);
       return;
     }
@@ -225,7 +255,7 @@ export function Phase04Layer() {
     if (model.kind === 'COMPLETED') setTerminal('COMPLETED');
     if (model.kind === 'CANCELLED') setTerminal('CANCELLED');
     if (model.kind === 'FAILED') { setTerminal('FAILED'); setError(model.error_code ?? '模型服务暂时不可用'); }
-  }), [probeState?.invocationId]);
+  }), [probeState?.invocationId, providers]);
 
   async function ask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -269,34 +299,82 @@ export function Phase04Layer() {
     } catch (reason) { setError(message(reason)); }
   }
 
-  async function createProvider(event: React.FormEvent<HTMLFormElement>) {
+  function resetProviderForm() {
+    setEditingProviderId('');
+    setProviderPreset('MANUAL');
+    setProviderKind('OPENAI');
+    setProviderDraft({ displayName: '', model: '', baseUrl: '' });
+    setCustomAck(false);
+    setProviderFormOpen(false);
+    if (secretRef.current) secretRef.current.value = '';
+  }
+
+  function beginAddProvider() {
+    if (providerFormOpen && !editingProviderId) { resetProviderForm(); return; }
+    setEditingProviderId('');
+    setProviderPreset('MANUAL');
+    setProviderKind('OPENAI');
+    setProviderDraft({ displayName: '', model: '', baseUrl: '' });
+    setCustomAck(false);
+    setProviderFormOpen(true);
+    if (secretRef.current) secretRef.current.value = '';
+  }
+
+  function beginEditProvider(provider: ProviderConfigView) {
+    setEditingProviderId(provider.id);
+    setProviderPreset('MANUAL');
+    setProviderKind(provider.provider_kind);
+    setProviderDraft({ displayName: provider.display_name, model: provider.default_model, baseUrl: provider.base_url ?? '' });
+    setCustomAck(provider.endpoint_class === 'CUSTOM');
+    setProviderFormOpen(true);
+    if (secretRef.current) secretRef.current.value = '';
+  }
+
+  async function saveProvider(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
     setError('');
     try {
       const custom = providerKind === 'OPENAI_COMPATIBLE';
-      const provider = await window.fielora.provider.create({
-        provider_kind: providerKind,
+      const existing = editingProviderId ? providers.find((item) => item.id === editingProviderId) : undefined;
+      if (editingProviderId && !existing) throw new Error('要编辑的模型配置已发生变化，请重新打开。');
+      const common = {
         display_name: String(data.get('display_name') ?? ''),
         base_url: custom ? String(data.get('base_url') ?? '') : null,
         default_model: String(data.get('default_model') ?? ''),
         custom_endpoint_acknowledged: custom && customAck,
-      });
+      };
+      const provider = existing
+        ? await window.fielora.provider.update({ provider_config_id: existing.id, expected_revision: existing.revision, ...common })
+        : await window.fielora.provider.create({ provider_kind: providerKind, ...common });
       const secret = secretRef.current?.value ?? '';
       if (secret) {
         await window.fielora.provider.storeCredential({ provider_config_id: provider.id, secret });
         if (secretRef.current) secretRef.current.value = '';
       }
       form.reset();
-      setCustomAck(false);
-      setProviderFormOpen(false);
+      resetProviderForm();
       await refresh();
       setProviderId(provider.id);
+      window.dispatchEvent(new Event('fielora:providers-changed'));
     } catch (reason) {
       if (secretRef.current) secretRef.current.value = '';
       setError(message(reason));
     }
+  }
+
+  function applyProviderPreset(value: string) {
+    const existing = editingProviderId ? providers.find((item) => item.id === editingProviderId) : undefined;
+    if (existing && existing.provider_kind !== 'OPENAI_COMPATIBLE') {
+      setError('已保存配置的协议不能直接变更；请新增一个模型服务。');
+      return;
+    }
+    setProviderPreset(value);
+    const preset = chinaProviderPresets.find((item) => item.value === value) ?? chinaProviderPresets[0]!;
+    setProviderKind('OPENAI_COMPATIBLE');
+    setProviderDraft({ displayName: preset.displayName, model: preset.model, baseUrl: preset.baseUrl });
+    setCustomAck(false);
   }
 
   async function probeProvider(provider: ProviderConfigView) {
@@ -368,11 +446,10 @@ export function Phase04Layer() {
     if (sensitivity === 'SENSITIVE') setSensitiveAck(false);
   }
 
-  function editNote(index: number, chip: ContextChip) {
-    const content = window.prompt('修改本次补充', chip.content);
-    if (content === null || !content.trim()) return;
-    const trimmed = content.trim();
-    const next = chips.map((item, itemIndex) => itemIndex === index
+  function saveEditedNote() {
+    if (!noteEdit?.value.trim()) return;
+    const trimmed = noteEdit.value.trim();
+    const next = chips.map((item, itemIndex) => itemIndex === noteEdit.index
       ? { ...item, content: trimmed, sensitivity: inferUserNoteSensitivity(trimmed) }
       : item);
     if (!contextContentFits(trimmed)) { setError('单条补充最多 4,000 字符 / 16 KiB。'); return; }
@@ -380,13 +457,14 @@ export function Phase04Layer() {
     setChips(next);
     setSensitiveAck(false);
     setError('');
+    setNoteEdit(null);
   }
 
   const header = surface === 'SUMMON'
     ? <><div><p className="eyebrow">SUMMON</p><h2>询问当前内容</h2></div><div className="experience-header-actions"><button className="text-button" onClick={() => showSurface('INBOX')} data-testid="summon-open-inbox">Inbox <span>{activeCaptures.length}</span></button><button className="icon-button" onClick={close} aria-label="关闭">×</button></div></>
     : surface === 'INBOX'
       ? <><div><p className="eyebrow">CAPTURE</p><h2>Inbox</h2><p>暂时收好，之后再决定放到哪里。</p></div><button className="icon-button" onClick={close} aria-label="关闭">×</button></>
-      : <><div><button className="back-link" onClick={() => setSurface('SUMMON')}>← 返回 Summon</button><h2>模型服务</h2><p>低频设置，不会占用日常工作现场。</p></div><button className="icon-button" onClick={close} aria-label="关闭">×</button></>;
+      : <><div><p className="eyebrow">SETTINGS</p><h2>模型与服务</h2><p>独立管理 Provider、Model 与安全凭据。</p></div><button className="icon-button" onClick={close} aria-label="关闭">×</button></>;
 
   return <>
     <button className="summon-button" onClick={() => void summon()} title="Summon (Ctrl+Shift+Space)" data-testid="summon-button">Summon</button>
@@ -406,7 +484,7 @@ export function Phase04Layer() {
               <div className="context-inspector-heading"><div><strong>这次会参考</strong><small>可以检查、移除或补充；关闭后不会自动保存本次补充。</small></div><button type="button" className="icon-button" aria-label="收起上下文" onClick={() => setContextOpen(false)}>×</button></div>
               {chips.length === 0 ? <p className="muted">没有自动加入上下文，你仍然可以直接提问。</p> : <div className="context-list">{chips.map((chip, index) => <article key={`${chip.kind}-${chip.source_identity}-${index}`} className="context-item">
                 <div><span className="context-kind">{contextKindLabels[chip.kind]}</span><strong>{chip.display_label}</strong><small>{contextDetail(chip)}{chip.completeness === 'PARTIAL' ? ' · 内容不完整' : ''}</small>{chip.sensitivity === 'SENSITIVE' && <em>发送前需要确认</em>}</div>
-                <div>{chip.kind === 'USER_NOTE' && <button type="button" className="quiet-button" onClick={() => editNote(index, chip)}>修改</button>}<button type="button" className="quiet-button" onClick={() => { setChips((items) => items.filter((_, itemIndex) => itemIndex !== index)); setSensitiveAck(false); }}>移除</button></div>
+                <div>{chip.kind === 'USER_NOTE' && <button type="button" className="quiet-button" onClick={() => setNoteEdit({ index, value: chip.content })}>修改</button>}<button type="button" className="quiet-button" onClick={() => { setChips((items) => items.filter((_, itemIndex) => itemIndex !== index)); setSensitiveAck(false); }}>移除</button></div>
               </article>)}</div>}
               <div className="context-note"><input value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder="补充一句本次需要参考的内容" data-testid="context-note" /><button type="button" className="secondary-button" onClick={addNote} data-testid="context-add">添加</button></div>
             </section>}
@@ -418,9 +496,7 @@ export function Phase04Layer() {
             </section>}
 
             <div className="model-bar">
-              {availableProviders.length > 0 ? <select className="provider-indicator" aria-label="切换模型服务" value={providerId} onChange={(event) => { setProviderId(event.target.value); setSendAck(false); }} data-testid="provider-indicator">
-                {availableProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.display_name}{provider.credential_present ? '' : ' · 需要凭据'}</option>)}
-              </select> : <div className="provider-degraded" data-testid="provider-degraded"><span><strong>尚未配置模型</strong><small>配置后即可在当前内容上提问。</small></span><button type="button" onClick={() => { setProviderFormOpen(true); setSurface('PROVIDER_SETUP'); }}>配置模型服务</button></div>}
+              {availableProviders.length > 0 ? <SelectMenu className="provider-indicator" ariaLabel="切换模型服务" value={providerId} onChange={(value) => { setProviderId(value); setSendAck(false); }} testId="provider-indicator" options={availableProviders.map((provider) => ({ value: provider.id, label: provider.display_name, description: `${provider.default_model}${provider.credential_present ? '' : ' · 需要凭据'}`, disabled: !provider.credential_present }))} /> : <div className="provider-degraded" data-testid="provider-degraded"><span><strong>尚未配置模型</strong><small>配置后即可在当前内容上提问。</small></span><button type="button" onClick={() => { setProviderFormOpen(true); setSurface('PROVIDER_SETUP'); }}>配置模型服务</button></div>}
               {availableProviders.length > 0 && <button type="button" className="settings-button" aria-label="管理模型服务" title="管理模型服务" onClick={() => setSurface('PROVIDER_SETUP')}>⚙</button>}
             </div>
 
@@ -450,16 +526,11 @@ export function Phase04Layer() {
               {expanded && <pre className="capture-full-content" data-testid="capture-full-content">{capture.content}</pre>}
               {currentAction && <div className="capture-decision" data-testid="capture-decision">
                 <div><strong>{currentAction === 'ATTACH' ? '加入哪个 Field？' : '在哪里继续这份灵感？'}</strong><small>{currentAction === 'ATTACH' ? '让这份材料属于一件持续工作。' : '保留来源，并把它作为后续工作入口。'}</small></div>
-                <select defaultValue="" aria-label="选择 Field" onChange={(event) => {
-                  const fieldId = event.target.value;
+                <SelectMenu value="" ariaLabel="选择 Field" options={[{ value: '', label: '选择…', disabled: true }, ...(currentAction === 'PROMOTE' ? [{ value: '__global', label: '先作为独立灵感保留' }] : []), ...fields.map((field) => ({ value: field.id, label: field.title }))]} onChange={(fieldId) => {
                   if (currentAction === 'ATTACH') void attach(capture, fieldId);
                   else if (fieldId === '__global') void promote(capture, '');
                   else void promote(capture, fieldId);
-                }}>
-                  <option value="" disabled>选择…</option>
-                  {currentAction === 'PROMOTE' && <option value="__global">先作为独立灵感保留</option>}
-                  {fields.map((field) => <option key={field.id} value={field.id}>{field.title}</option>)}
-                </select>
+                }} />
                 <button type="button" className="quiet-button" onClick={() => setCaptureAction(null)}>取消</button>
               </div>}
               <div className="capture-card-actions">
@@ -473,24 +544,27 @@ export function Phase04Layer() {
 
         {surface === 'PROVIDER_SETUP' && <div className="experience-body provider-setup-body">
           <section className="provider-disclosure"><strong>发送边界</strong><p>Fielora 默认不保存完整提问与回答。使用模型时，内容会发送给所选服务；是否保留以及费用由服务方和账号政策决定。</p></section>
-          <div className="provider-setup-heading"><div><h3>已配置的模型服务</h3><p>日常 Summon 只显示当前选择和必要异常。</p></div><button type="button" className="secondary-button" onClick={() => setProviderFormOpen((open) => !open)} data-testid="provider-add-toggle">{providerFormOpen ? '取消添加' : '添加模型服务'}</button></div>
-          <div className="provider-list">{availableProviders.length === 0 ? <div className="empty compact-empty"><p>还没有模型服务。添加后，Summon 才能发送问题。</p></div> : availableProviders.map((provider) => <article key={provider.id}>
-            <div><strong>{provider.display_name}</strong><small>{providerKindLabels[provider.provider_kind]} · {provider.default_model}</small><span className={provider.credential_present ? 'ready' : 'needs-attention'}>{provider.credential_present ? '已就绪' : '需要凭据'}</span>{probeState?.providerId === provider.id && <em>{probeState.label}</em>}</div>
-            <div><button type="button" onClick={() => void probeProvider(provider)} disabled={!provider.credential_present}>测试连接</button><button type="button" onClick={async () => { await window.fielora.provider.deleteCredential({ provider_config_id: provider.id }); await refresh(); }} disabled={!provider.credential_present}>删除凭据</button><button type="button" className="quiet" onClick={async () => { await window.fielora.provider.remove({ provider_config_id: provider.id }); await refresh(); }}>移除配置</button></div>
+          <div className="provider-setup-heading"><div><h3>已配置的模型服务</h3><p>这些模型可供 Project 对话、Agent 与其他模型入口选择。</p></div><button type="button" className="secondary-button" onClick={beginAddProvider} data-testid="provider-add-toggle">{providerFormOpen && !editingProviderId ? '取消添加' : '添加模型服务'}</button></div>
+          <div className="provider-list">{availableProviders.length === 0 ? <div className="empty compact-empty"><p>还没有模型服务。添加并通过连接测试后即可在对话中选择。</p></div> : availableProviders.map((provider) => <article key={provider.id}>
+            <div><strong>{provider.display_name}</strong><small>{providerKindLabels[provider.provider_kind]} · {provider.default_model}</small><span className={provider.credential_present ? 'ready' : 'needs-attention'}>{provider.credential_present ? '凭据已保存 · 未测试' : '需要凭据'}</span>{probeState?.providerId === provider.id && <em>{probeState.label}</em>}</div>
+            <div><button type="button" onClick={() => beginEditProvider(provider)} data-testid={`provider-edit-${provider.id}`}>编辑</button><button type="button" onClick={() => void probeProvider(provider)} disabled={!provider.credential_present}>测试连接</button><button type="button" onClick={async () => { await window.fielora.provider.deleteCredential({ provider_config_id: provider.id }); await refresh(); window.dispatchEvent(new Event('fielora:providers-changed')); }} disabled={!provider.credential_present}>删除凭据</button><button type="button" className="quiet" onClick={async () => { await window.fielora.provider.remove({ provider_config_id: provider.id }); await refresh(); window.dispatchEvent(new Event('fielora:providers-changed')); }}>移除配置</button></div>
           </article>)}</div>
-          {providerFormOpen && <form className="provider-form" onSubmit={createProvider} data-testid="provider-form">
-            <div className="provider-form-intro"><h3>添加模型服务</h3><p>凭据只写入 Windows Credential Manager，不会显示在配置列表中。</p></div>
-            <label>协议<select value={providerKind} onChange={(event) => { setProviderKind(event.target.value as ProviderKind); setCustomAck(false); }}><option value="OPENAI">OpenAI Responses</option><option value="ANTHROPIC">Anthropic Messages</option><option value="OPENAI_COMPATIBLE">OpenAI-compatible</option></select></label>
-            <label>显示名称<input name="display_name" required maxLength={120} placeholder="例如：工作模型" /></label>
-            <label>模型<input name="default_model" required maxLength={256} placeholder="模型标识" /></label>
-            {providerKind === 'OPENAI_COMPATIBLE' && <><label>HTTPS 服务地址<input name="base_url" type="url" required placeholder="https://gateway.example/v1" /></label><label className="disclosure"><input type="checkbox" checked={customAck} onChange={(event) => setCustomAck(event.target.checked)} />我理解这个自定义服务的运营方、DNS 和内容保留风险。</label></>}
-            <label>API Key<input ref={secretRef} name="secret" type="password" autoComplete="off" required maxLength={2048} /><small>只写入 Windows Credential Manager，保存后不可查看。</small></label>
-            <button type="submit" className="primary-button">保存模型服务</button>
+          {providerFormOpen && <form className="provider-form" onSubmit={saveProvider} data-testid="provider-form">
+            <div className="provider-form-intro"><h3>{editingProviderId ? '编辑模型服务' : '添加模型服务'}</h3><p>{editingProviderId ? '可以修改名称、Base URL、Model ID，或填写新的 API Key。留空 API Key 会保留现有凭据。' : '凭据只写入 Windows Credential Manager，不会显示在配置列表中。'}</p></div>
+            <label>国产模型快捷配置<SelectMenu value={providerPreset} ariaLabel="国产模型快捷配置" testId="provider-preset" onChange={applyProviderPreset} options={chinaProviderPresets.map((preset) => ({ value: preset.value, label: preset.label, description: preset.description }))} /></label>
+            <small className="provider-preset-note">快捷配置会填写协议和官方 Base URL；Model ID 仍以你的账号控制台实际可用列表为准，可以直接修改。</small>
+            <label>协议<SelectMenu value={providerKind} ariaLabel="协议" onChange={(value) => { if (editingProviderId) return; setProviderKind(value); setProviderPreset('MANUAL'); setCustomAck(false); }} options={[{ value: 'OPENAI', label: 'OpenAI Responses', disabled: Boolean(editingProviderId) && providerKind !== 'OPENAI' }, { value: 'ANTHROPIC', label: 'Anthropic Messages', disabled: Boolean(editingProviderId) && providerKind !== 'ANTHROPIC' }, { value: 'OPENAI_COMPATIBLE', label: 'OpenAI-compatible', disabled: Boolean(editingProviderId) && providerKind !== 'OPENAI_COMPATIBLE' }]} /></label>
+            <label>显示名称<input name="display_name" required maxLength={120} placeholder="例如：工作模型" value={providerDraft.displayName} onChange={(event) => setProviderDraft((draft) => ({ ...draft, displayName: event.target.value }))} /></label>
+            <label>模型<input name="default_model" required maxLength={256} placeholder="模型标识" value={providerDraft.model} onChange={(event) => setProviderDraft((draft) => ({ ...draft, model: event.target.value }))} /></label>
+            {providerKind === 'OPENAI_COMPATIBLE' && <><label>HTTPS 服务地址<input name="base_url" type="url" required placeholder="https://gateway.example/v1" value={providerDraft.baseUrl} onChange={(event) => setProviderDraft((draft) => ({ ...draft, baseUrl: event.target.value }))} /></label>{isQwenCodingPlan && <aside className="provider-verified-config" data-testid="qwen-coding-plan-config"><strong>Qwen Coding Plan 已验证配置</strong><span>OpenAI-compatible Chat Completions · Base URL 如上 · Model ID 区分大小写。</span><small>Fielora 会自动发送 Coding Agent 所需的客户端标识，无需额外填写 Header。</small></aside>}<label className="disclosure"><input type="checkbox" checked={customAck} onChange={(event) => setCustomAck(event.target.checked)} />我理解这个自定义服务的运营方、DNS 和内容保留风险。</label></>}
+            <label>API Key<input ref={secretRef} name="secret" type="password" autoComplete="off" required={!editingProviderId} maxLength={2048} placeholder={editingProviderId ? '留空以保留现有 API Key' : ''} /><small>只写入 Windows Credential Manager，保存后不可查看。</small></label>
+            <div className="provider-form-actions"><button type="submit" className="primary-button" data-testid="provider-form-save">{editingProviderId ? '保存修改' : '保存模型服务'}</button>{editingProviderId && <button type="button" className="secondary-button" onClick={resetProviderForm}>取消编辑</button>}</div>
           </form>}
         </div>}
 
         {error && <p className="experience-message error" role="alert">{error}</p>}
       </section>
     </div>}
+    {noteEdit && <TextActionDialog title="修改本次补充" description="修改只作用于本次请求，不会写回来源。" value={noteEdit.value} multiline confirmLabel="保存修改" onChange={(value) => setNoteEdit((current) => current ? { ...current, value } : null)} onCancel={() => setNoteEdit(null)} onConfirm={saveEditedNote} testId="edit-context-note-dialog" />}
   </>;
 }

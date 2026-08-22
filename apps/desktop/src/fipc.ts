@@ -2,12 +2,15 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
-const MAX_FRAME_BYTES = 4 * 1024 * 1024;
+const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 
 interface Pending {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
   timeout: NodeJS.Timeout;
+  method: string;
+  startedAt: number;
+  runId?: string;
 }
 
 export class FipcClient extends EventEmitter {
@@ -35,7 +38,10 @@ export class FipcClient extends EventEmitter {
         this.pending.delete(id);
         reject(new Error(`FIPC request timed out: ${method}`));
       }, deadlineMs);
-      this.pending.set(id, { resolve, reject, timeout });
+      const runId = params && typeof params === 'object' && typeof (params as { run_id?: unknown }).run_id === 'string'
+        ? (params as { run_id: string }).run_id
+        : undefined;
+      this.pending.set(id, { resolve, reject, timeout, method, startedAt: performance.now(), runId });
       this.child.stdin.write(`${JSON.stringify(envelope)}\n`, 'utf8', (error) => {
         if (error) {
           clearTimeout(timeout);
@@ -59,22 +65,31 @@ export class FipcClient extends EventEmitter {
   }
 
   private push(chunk: Buffer): void {
-    for (const byte of chunk) {
-      if (this.discarding) {
-        if (byte === 10) this.discarding = false;
-        continue;
+    let offset = 0;
+    while (offset < chunk.length) {
+      const newline = chunk.indexOf(10, offset);
+      const end = newline === -1 ? chunk.length : newline;
+      if (!this.discarding && end > offset) {
+        const segment = chunk.subarray(offset, end);
+        if (this.buffer.length + segment.length > MAX_FRAME_BYTES) {
+          this.buffer = Buffer.alloc(0);
+          this.discarding = true;
+          this.emit('protocol-error', new Error('Core emitted oversized frame'));
+        } else {
+          this.buffer = this.buffer.length === 0
+            ? Buffer.from(segment)
+            : Buffer.concat([this.buffer, segment], this.buffer.length + segment.length);
+        }
       }
-      if (byte === 10) {
+      if (newline === -1) break;
+      if (this.discarding) {
+        this.discarding = false;
+      } else {
         const frame = this.buffer;
         this.buffer = Buffer.alloc(0);
         this.handleFrame(frame);
-      } else if (this.buffer.length === MAX_FRAME_BYTES) {
-        this.buffer = Buffer.alloc(0);
-        this.discarding = true;
-        this.emit('protocol-error', new Error('Core emitted oversized frame'));
-      } else {
-        this.buffer = Buffer.concat([this.buffer, Buffer.of(byte)]);
       }
+      offset = newline + 1;
     }
   }
 
@@ -98,6 +113,12 @@ export class FipcClient extends EventEmitter {
     }
     clearTimeout(pending.timeout);
     this.pending.delete(message.id);
+    this.emit('request-completed', {
+      method: pending.method,
+      run_id: pending.runId,
+      duration_ms: Math.max(0, Math.round(performance.now() - pending.startedAt)),
+      success: !('error' in message),
+    });
     if ('error' in message) {
       const error = message.error as { message?: string; data?: { code?: string } };
       const failure = new Error(error.message ?? 'Core request failed');

@@ -4,10 +4,15 @@ import type { FieloraBridge } from './types';
 import type { DesktopCoreEvent } from './types';
 
 const bridge: FieloraBridge = {
+  window: {
+    setTitlebarTheme: (theme) => ipcRenderer.invoke(channels.windowTitlebarTheme, theme),
+  },
   project: {
     pick: (request) => ipcRenderer.invoke(channels.projectPick, request),
     list: () => ipcRenderer.invoke(channels.projectList),
     get: (request) => ipcRenderer.invoke(channels.projectGet, request),
+    update: (request) => ipcRenderer.invoke(channels.projectUpdate, request),
+    archive: (request) => ipcRenderer.invoke(channels.projectArchive, request),
   },
   conversation: {
     create: (request) => ipcRenderer.invoke(channels.conversationCreate, request),
@@ -21,8 +26,14 @@ const bridge: FieloraBridge = {
   workspace: {
     listFiles: (request) => ipcRenderer.invoke(channels.workspaceFileList, request),
     readFile: (request) => ipcRenderer.invoke(channels.workspaceFileRead, request),
+    previewFile: (request) => ipcRenderer.invoke(channels.workspaceFilePreview, request),
     applyFile: (request) => ipcRenderer.invoke(channels.workspaceFileApply, request),
+    getEnvironment: (request) => ipcRenderer.invoke(channels.workspaceEnvironment, request),
     pickAttachments: () => ipcRenderer.invoke(channels.workspaceAttachmentPick),
+    storeAttachment: (request) => ipcRenderer.invoke(channels.workspaceAttachmentStore, request),
+    readAttachment: (request) => ipcRenderer.invoke(channels.workspaceAttachmentRead, request),
+    copyAttachment: (request) => ipcRenderer.invoke(channels.workspaceAttachmentCopy, request),
+    saveAttachment: (request) => ipcRenderer.invoke(channels.workspaceAttachmentSave, request),
     runTerminal: (request) => ipcRenderer.invoke(channels.workspaceTerminalRun, request),
     cancelTerminal: (request) => ipcRenderer.invoke(channels.workspaceTerminalCancel, request),
     subscribe: (listener) => {
@@ -88,6 +99,9 @@ const bridge: FieloraBridge = {
       return () => ipcRenderer.removeListener(channels.browserEvent, wrapped);
     },
   },
+  clipboard: {
+    writeText: (text) => ipcRenderer.invoke(channels.clipboardWriteText, text),
+  },
   provider: {
     create: (request) => ipcRenderer.invoke(channels.providerCreate, request),
     update: (request) => ipcRenderer.invoke(channels.providerUpdate, request),
@@ -123,6 +137,7 @@ const bridge: FieloraBridge = {
   },
   core: {
     getHealth: () => ipcRenderer.invoke(channels.coreHealth),
+    getBuildProvenance: () => ipcRenderer.invoke(channels.coreBuildProvenance),
     subscribe: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: DesktopCoreEvent) => listener(payload);
       ipcRenderer.on(channels.coreEvent, wrapped);

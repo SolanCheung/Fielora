@@ -118,6 +118,47 @@ function alphaRange(pixels) {
   return { minimum, maximum };
 }
 
+function fitVisiblePixels(source, sourceWidth, sourceHeight, paddingRatio = 0.055) {
+  let left = sourceWidth;
+  let top = sourceHeight;
+  let right = -1;
+  let bottom = -1;
+  for (let y = 0; y < sourceHeight; y += 1) {
+    for (let x = 0; x < sourceWidth; x += 1) {
+      const alpha = source[(y * sourceWidth + x) * 4 + 3];
+      if (alpha <= 8) continue;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  if (right < left || bottom < top) throw new Error('Rendered icon has no visible pixels');
+
+  const cropWidth = right - left + 1;
+  const cropHeight = bottom - top + 1;
+  const cropped = Buffer.alloc(cropWidth * cropHeight * 4);
+  for (let y = 0; y < cropHeight; y += 1) {
+    const sourceStart = ((top + y) * sourceWidth + left) * 4;
+    source.copy(cropped, y * cropWidth * 4, sourceStart, sourceStart + cropWidth * 4);
+  }
+
+  const available = Math.round(Math.min(sourceWidth, sourceHeight) * (1 - paddingRatio * 2));
+  const scale = Math.min(available / cropWidth, available / cropHeight);
+  const fittedWidth = Math.max(1, Math.round(cropWidth * scale));
+  const fittedHeight = Math.max(1, Math.round(cropHeight * scale));
+  const fitted = resizeRgba(cropped, cropWidth, cropHeight, fittedWidth, fittedHeight);
+  const canvas = Buffer.alloc(sourceWidth * sourceHeight * 4);
+  const offsetX = Math.floor((sourceWidth - fittedWidth) / 2);
+  const offsetY = Math.floor((sourceHeight - fittedHeight) / 2);
+  for (let y = 0; y < fittedHeight; y += 1) {
+    const sourceStart = y * fittedWidth * 4;
+    const targetStart = ((offsetY + y) * sourceWidth + offsetX) * 4;
+    fitted.copy(canvas, targetStart, sourceStart, sourceStart + fittedWidth * 4);
+  }
+  return { pixels: canvas, bounds: { left, top, right, bottom, fittedWidth, fittedHeight, offsetX, offsetY } };
+}
+
 function resizeRgba(source, sourceWidth, sourceHeight, targetWidth, targetHeight) {
   if (sourceWidth === targetWidth && sourceHeight === targetHeight) return Buffer.from(source);
   const target = Buffer.alloc(targetWidth * targetHeight * 4);
@@ -212,15 +253,16 @@ function main() {
     }
     if (!source) throw new Error(`No browser could render the icon:\n${errors.join('\n')}`);
 
+    const fittedSource = fitVisiblePixels(source.pixels, source.width, source.height);
     const images = sizes.map((size) => {
-      const pixels = resizeRgba(source.pixels, source.width, source.height, size, size);
+      const pixels = resizeRgba(fittedSource.pixels, source.width, source.height, size, size);
       const alpha = alphaRange(pixels);
       if (alpha.minimum !== 0 || alpha.maximum !== 255) throw new Error(`Invalid alpha range for ${size}px: ${JSON.stringify(alpha)}`);
       return { size, png: encodePng(size, size, pixels) };
     });
     writeFileSync(outputPath, encodeIco(images));
     if (previewPath) writeFileSync(previewPath, images.at(-1).png);
-    process.stdout.write(`Generated transparent Windows icon: ${outputPath}\n`);
+    process.stdout.write(`Generated transparent Windows icon: ${outputPath}\nVisible mark fitted to ${fittedSource.bounds.fittedWidth}x${fittedSource.bounds.fittedHeight}px at ${fittedSource.bounds.offsetX},${fittedSource.bounds.offsetY}\n`);
   } finally {
     rmSync(directory, { recursive: true, force: true, maxRetries: 12, retryDelay: 150 });
   }

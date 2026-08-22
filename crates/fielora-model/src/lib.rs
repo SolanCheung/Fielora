@@ -24,11 +24,118 @@ const MAX_CONTEXT_BYTES: usize = 48 * 1024;
 const MAX_USER_INPUT_SCALARS: usize = 8_000;
 const MAX_USER_INPUT_BYTES: usize = 32 * 1024;
 const MAX_TOOL_ARGUMENT_BYTES: usize = 64 * 1024;
+const DIRECT_INVOCATION_MAX_OUTPUT_TOKENS: u32 = 1_024;
+const FIELORA_PROVIDER_USER_AGENT: &str = concat!(
+    "Fielora/",
+    env!("CARGO_PKG_VERSION"),
+    " interactive-coding-agent"
+);
 
 #[derive(Debug, Clone)]
 pub struct ProviderEndpoint {
     pub kind: ProviderKind,
     pub base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodingModelFamily {
+    Generic,
+    Qwen,
+    DeepSeek,
+    Kimi,
+    Glm,
+    MiniMax,
+    Doubao,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodingBehaviorProfile {
+    pub id: &'static str,
+    pub family: CodingModelFamily,
+    pub chinese_primary: bool,
+    pub prefer_serial_tool_calls: bool,
+    pub nudge_action_tasks: bool,
+}
+
+impl CodingBehaviorProfile {
+    pub fn system_guidance(self) -> &'static str {
+        match self.family {
+            CodingModelFamily::Generic => "",
+            _ => {
+                "\
+国产模型执行约束（不改变权限）：\n\
+1. 用户使用中文时，用简洁中文沟通；代码、标识符、命令和错误码保持原文。\n\
+2. 编程任务按“读取证据 -> 小范围修改 -> 运行最窄测试 -> 检查 git diff -> 总结”执行。需要行动时直接调用工具，不要只描述计划。\n\
+3. 工具参数必须是严格符合 schema 的 JSON。存在依赖的工具逐个调用；只有互不依赖的读取可以并行。\n\
+4. 不猜测文件内容、测试结果或 Git 状态。失败 receipt 是失败，不得改写为成功。\n\
+5. commit/push 只能使用 typed Git tools，并等待用户批准；不得通过 run_command 绕过。"
+            }
+        }
+    }
+}
+
+pub fn coding_behavior_profile(
+    endpoint: &ProviderEndpoint,
+    model_id: &str,
+) -> CodingBehaviorProfile {
+    let model = model_id.trim().to_ascii_lowercase();
+    let host = endpoint
+        .base_url
+        .as_deref()
+        .and_then(|value| Url::parse(value).ok())
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .unwrap_or_default();
+    let family = if model.starts_with("qwen") || host.ends_with("dashscope.aliyuncs.com") {
+        CodingModelFamily::Qwen
+    } else if model.starts_with("deepseek") || host.ends_with("deepseek.com") {
+        CodingModelFamily::DeepSeek
+    } else if model.starts_with("kimi")
+        || model.starts_with("moonshot")
+        || host.ends_with("moonshot.cn")
+    {
+        CodingModelFamily::Kimi
+    } else if model.starts_with("glm-") || host.ends_with("bigmodel.cn") {
+        CodingModelFamily::Glm
+    } else if model.starts_with("minimax-") || host.ends_with("minimax.io") {
+        CodingModelFamily::MiniMax
+    } else if model.starts_with("doubao-") || model.starts_with("doubao_") {
+        CodingModelFamily::Doubao
+    } else {
+        CodingModelFamily::Generic
+    };
+    if family == CodingModelFamily::Generic {
+        CodingBehaviorProfile {
+            id: "generic-coding-v1",
+            family,
+            chinese_primary: false,
+            prefer_serial_tool_calls: false,
+            nudge_action_tasks: false,
+        }
+    } else {
+        CodingBehaviorProfile {
+            id: "china-coding-v1",
+            family,
+            chinese_primary: true,
+            prefer_serial_tool_calls: true,
+            nudge_action_tasks: true,
+        }
+    }
+}
+
+fn uses_qwen_plan_thinking(endpoint: &ProviderEndpoint, model_id: &str) -> bool {
+    if !model_id.trim().to_ascii_lowercase().starts_with("qwen") {
+        return false;
+    }
+    endpoint
+        .base_url
+        .as_deref()
+        .and_then(|value| Url::parse(value).ok())
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|host| {
+            host == "coding.dashscope.aliyuncs.com"
+                || host == "coding-intl.dashscope.aliyuncs.com"
+                || host == "token-plan.cn-beijing.maas.aliyuncs.com"
+        })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,8 +146,20 @@ pub struct AgentModelToolCall {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct AgentModelImage {
+    pub id: String,
+    pub filename: String,
+    pub mime_type: String,
+    pub data_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum AgentModelMessage {
     User(String),
+    UserMultimodal {
+        text: String,
+        images: Vec<AgentModelImage>,
+    },
     Assistant {
         text: String,
         tool_calls: Vec<AgentModelToolCall>,
@@ -67,6 +186,56 @@ pub struct AgentModelTurn {
     pub text: String,
     pub tool_calls: Vec<AgentModelToolCall>,
     pub usage: Option<ModelUsage>,
+}
+
+/// Removes provider-specific hidden-reasoning wrappers before text crosses the
+/// Agent/Conversation boundary. This intentionally works on the completed
+/// response so tags split across SSE frames cannot leak partial reasoning.
+pub fn sanitize_agent_text(text: &str) -> String {
+    fn tag_end(lower: &str, start: usize) -> Option<usize> {
+        lower[start..].find('>').map(|offset| start + offset + 1)
+    }
+    let lower = text.to_ascii_lowercase();
+    let mut visible = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while cursor < text.len() {
+        let open = lower[cursor..].find("<think").map(|offset| cursor + offset);
+        let close = lower[cursor..]
+            .find("</think")
+            .map(|offset| cursor + offset);
+        match (open, close) {
+            (None, None) => {
+                visible.push_str(&text[cursor..]);
+                break;
+            }
+            (Some(open), Some(close)) if close < open => {
+                if !visible.trim().is_empty() {
+                    visible.push_str(&text[cursor..close]);
+                }
+                cursor = tag_end(&lower, close).unwrap_or(text.len());
+            }
+            (None, Some(close)) => {
+                if !visible.trim().is_empty() {
+                    visible.push_str(&text[cursor..close]);
+                }
+                cursor = tag_end(&lower, close).unwrap_or(text.len());
+            }
+            (Some(open), _) => {
+                visible.push_str(&text[cursor..open]);
+                let Some(open_end) = tag_end(&lower, open) else {
+                    break;
+                };
+                let Some(close) = lower[open_end..]
+                    .find("</think")
+                    .map(|offset| open_end + offset)
+                else {
+                    break;
+                };
+                cursor = tag_end(&lower, close).unwrap_or(text.len());
+            }
+        }
+    }
+    visible.trim().to_owned()
 }
 
 pub fn provider_capabilities(kind: ProviderKind) -> ModelCapabilityProfile {
@@ -180,6 +349,7 @@ pub struct ModelClient {
 impl ModelClient {
     pub fn new() -> Result<Self, ModelError> {
         let client = Client::builder()
+            .user_agent(FIELORA_PROVIDER_USER_AGENT)
             .redirect(Policy::none())
             .no_proxy()
             .connect_timeout(Duration::from_secs(10))
@@ -205,6 +375,7 @@ impl ModelClient {
         let (url, pinned) = endpoint_url(&endpoint).await?;
         let client = if let Some((host, addresses)) = pinned {
             Client::builder()
+                .user_agent(FIELORA_PROVIDER_USER_AGENT)
                 .redirect(Policy::none())
                 .no_proxy()
                 .connect_timeout(Duration::from_secs(10))
@@ -217,7 +388,7 @@ impl ModelClient {
         };
         let response = match endpoint.kind {
             ProviderKind::Openai | ProviderKind::OpenaiCompatible => {
-                let body = provider_body(endpoint.kind, &request);
+                let body = provider_body(&endpoint, &request);
                 client
                     .post(url)
                     .bearer_auth(String::from_utf8_lossy(secret))
@@ -225,7 +396,7 @@ impl ModelClient {
                     .send()
             }
             ProviderKind::Anthropic => {
-                let body = provider_body(endpoint.kind, &request);
+                let body = provider_body(&endpoint, &request);
                 client
                     .post(url)
                     .header("x-api-key", String::from_utf8_lossy(secret).as_ref())
@@ -238,6 +409,7 @@ impl ModelClient {
             _ = cancellation.cancelled() => return Err(ModelError::InvocationCancelled),
             value = response => value.map_err(|_| ModelError::ProviderUnavailable)?,
         };
+        trace_provider_status("invoke", response.status());
         map_status(response.status())?;
         let mut stream = response.bytes_stream();
         let mut decoder = SseDecoder::default();
@@ -254,8 +426,11 @@ impl ModelClient {
                     }
                     continue;
                 }
-                let value: Value =
-                    serde_json::from_str(&data).map_err(|_| ModelError::ProviderProtocolError)?;
+                let value: Value = serde_json::from_str(&data).map_err(|error| {
+                    trace_provider_parse_error("invoke", data.len(), &error);
+                    ModelError::ProviderProtocolError
+                })?;
+                trace_provider_value("invoke", &value);
                 if provider_failure(endpoint.kind, &value) {
                     return Err(ModelError::ProviderProtocolError);
                 }
@@ -287,6 +462,7 @@ impl ModelClient {
         let (url, pinned) = endpoint_url(&endpoint).await?;
         let client = if let Some((host, addresses)) = pinned {
             Client::builder()
+                .user_agent(FIELORA_PROVIDER_USER_AGENT)
                 .redirect(Policy::none())
                 .no_proxy()
                 .connect_timeout(Duration::from_secs(10))
@@ -297,7 +473,7 @@ impl ModelClient {
         } else {
             self.client.clone()
         };
-        let body = agent_provider_body(endpoint.kind, &request);
+        let body = agent_provider_body(&endpoint, &request);
         let response = match endpoint.kind {
             ProviderKind::Openai | ProviderKind::OpenaiCompatible => client
                 .post(url)
@@ -315,6 +491,7 @@ impl ModelClient {
             _ = cancellation.cancelled() => return Err(ModelError::InvocationCancelled),
             value = response => value.map_err(|_| ModelError::ProviderUnavailable)?,
         };
+        trace_provider_status("agent", response.status());
         map_status(response.status())?;
         let mut stream = response.bytes_stream();
         let mut decoder = SseDecoder::default();
@@ -331,8 +508,11 @@ impl ModelClient {
                     }
                     continue;
                 }
-                let value: Value =
-                    serde_json::from_str(&data).map_err(|_| ModelError::ProviderProtocolError)?;
+                let value: Value = serde_json::from_str(&data).map_err(|error| {
+                    trace_provider_parse_error("agent", data.len(), &error);
+                    ModelError::ProviderProtocolError
+                })?;
+                trace_provider_value("agent", &value);
                 if provider_failure(endpoint.kind, &value) {
                     return Err(ModelError::ProviderProtocolError);
                 }
@@ -361,6 +541,13 @@ fn validate_agent_request(request: &AgentModelRequest) -> Result<(), ModelError>
         .iter()
         .map(|message| match message {
             AgentModelMessage::User(text) => text.len(),
+            AgentModelMessage::UserMultimodal { text, images } => {
+                text.len()
+                    + images
+                        .iter()
+                        .map(|image| image.data_url.len() + image.filename.len())
+                        .sum::<usize>()
+            }
             AgentModelMessage::Assistant { text, tool_calls } => {
                 text.len()
                     + tool_calls
@@ -383,7 +570,7 @@ fn validate_agent_request(request: &AgentModelRequest) -> Result<(), ModelError>
         .iter()
         .map(|tool| tool.name.len() + tool.description.len() + tool.input_schema.to_string().len())
         .sum::<usize>();
-    if message_bytes > 1024 * 1024 || tool_bytes > 256 * 1024 {
+    if message_bytes > 8 * 1024 * 1024 || tool_bytes > 256 * 1024 {
         return Err(ModelError::ContextTooLarge);
     }
     if request.tools.iter().any(|tool| {
@@ -397,14 +584,23 @@ fn validate_agent_request(request: &AgentModelRequest) -> Result<(), ModelError>
     Ok(())
 }
 
-fn agent_provider_body(kind: ProviderKind, request: &AgentModelRequest) -> Value {
-    match kind {
+fn agent_provider_body(endpoint: &ProviderEndpoint, request: &AgentModelRequest) -> Value {
+    match endpoint.kind {
         ProviderKind::Openai => {
             let mut input = Vec::new();
             for message in &request.messages {
                 match message {
                     AgentModelMessage::User(text) => {
                         input.push(json!({"role":"user","content":text}));
+                    }
+                    AgentModelMessage::UserMultimodal { text, images } => {
+                        let mut content = vec![json!({"type":"input_text","text":text})];
+                        content.extend(
+                            images.iter().map(
+                                |image| json!({"type":"input_image","image_url":image.data_url}),
+                            ),
+                        );
+                        input.push(json!({"role":"user","content":content}));
                     }
                     AgentModelMessage::Assistant { text, tool_calls } => {
                         if !text.is_empty() {
@@ -455,6 +651,14 @@ fn agent_provider_body(kind: ProviderKind, request: &AgentModelRequest) -> Value
         ProviderKind::Anthropic => {
             let messages = request.messages.iter().map(|message| match message {
                 AgentModelMessage::User(text) => json!({"role":"user","content":text}),
+                AgentModelMessage::UserMultimodal { text, images } => {
+                    let mut content = vec![json!({"type":"text","text":text})];
+                    content.extend(images.iter().map(|image| {
+                        let data = image.data_url.split_once(',').map(|(_, value)| value).unwrap_or_default();
+                        json!({"type":"image","source":{"type":"base64","media_type":image.mime_type,"data":data}})
+                    }));
+                    json!({"role":"user","content":content})
+                }
                 AgentModelMessage::Assistant { text, tool_calls } => {
                     let mut content = Vec::new();
                     if !text.is_empty() {
@@ -485,6 +689,11 @@ fn agent_provider_body(kind: ProviderKind, request: &AgentModelRequest) -> Value
             let mut messages = vec![json!({"role":"system","content":request.system})];
             messages.extend(request.messages.iter().map(|message| match message {
                 AgentModelMessage::User(text) => json!({"role":"user","content":text}),
+                AgentModelMessage::UserMultimodal { text, images } => {
+                    let mut content = vec![json!({"type":"text","text":text})];
+                    content.extend(images.iter().map(|image| json!({"type":"image_url","image_url":{"url":image.data_url}})));
+                    json!({"role":"user","content":content})
+                }
                 AgentModelMessage::Assistant { text, tool_calls } => json!({
                     "role":"assistant",
                     "content":if text.is_empty(){Value::Null}else{Value::String(text.clone())},
@@ -497,16 +706,32 @@ fn agent_provider_body(kind: ProviderKind, request: &AgentModelRequest) -> Value
             let tools = request.tools.iter().map(|tool|json!({
                 "type":"function","function":{"name":tool.name,"description":tool.description,"parameters":tool.input_schema}
             })).collect::<Vec<_>>();
-            json!({
+            let mut body = json!({
                 "model":request.model_id,
                 "messages":messages,
                 "tools":tools,
                 "tool_choice":"auto",
-                "parallel_tool_calls":false,
-                "max_tokens":request.max_output_tokens,
-                "stream":true,
-                "stream_options":{"include_usage":true}
-            })
+                "stream":true
+            });
+            let profile = coding_behavior_profile(endpoint, &request.model_id);
+            if let Some(object) = body.as_object_mut() {
+                if profile.family == CodingModelFamily::MiniMax {
+                    object.insert(
+                        "max_completion_tokens".into(),
+                        json!(request.max_output_tokens),
+                    );
+                } else {
+                    object.insert("max_tokens".into(), json!(request.max_output_tokens));
+                    object.insert("stream_options".into(), json!({"include_usage":true}));
+                }
+                if profile.prefer_serial_tool_calls {
+                    object.insert("parallel_tool_calls".into(), Value::Bool(false));
+                }
+                if uses_qwen_plan_thinking(endpoint, &request.model_id) {
+                    object.insert("enable_thinking".into(), Value::Bool(false));
+                }
+            }
+            body
         }
     }
 }
@@ -746,7 +971,7 @@ impl AgentStreamAccumulator {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(AgentModelTurn {
-            text: self.text,
+            text: sanitize_agent_text(&self.text),
             tool_calls,
             usage: self.usage,
         })
@@ -758,9 +983,19 @@ fn merge_string(target: &mut String, value: Option<&Value>) -> Result<(), ModelE
         let value = value.as_str().ok_or(ModelError::ProviderProtocolError)?;
         if !value.is_empty() {
             if target.is_empty() {
-                *target = value.chars().take(256).collect();
-            } else if target != value {
-                return Err(ModelError::ProviderProtocolError);
+                target.push_str(value);
+            } else if target == value || target.starts_with(value) {
+                // Some compatible gateways repeat the complete identifier on later chunks.
+            } else if value.starts_with(target.as_str()) {
+                // Some gateways send expanding snapshots instead of strict deltas.
+                target.clear();
+                target.push_str(value);
+            } else {
+                // Qwen-compatible streams may split both call IDs and function names.
+                target.push_str(value);
+            }
+            if target.len() > 256 {
+                return Err(ModelError::ProviderResponseTooLarge);
             }
         }
     }
@@ -849,8 +1084,8 @@ fn render_input(request: &ModelInvocationRequest) -> String {
     input
 }
 
-fn provider_body(kind: ProviderKind, request: &ModelInvocationRequest) -> Value {
-    match kind {
+fn provider_body(endpoint: &ProviderEndpoint, request: &ModelInvocationRequest) -> Value {
+    match endpoint.kind {
         ProviderKind::Openai => {
             json!({"model":request.model_id,"input":render_input(request),"stream":true,"store":false})
         }
@@ -858,7 +1093,26 @@ fn provider_body(kind: ProviderKind, request: &ModelInvocationRequest) -> Value 
             json!({"model":request.model_id,"max_tokens":1024,"stream":true,"messages":[{"role":"user","content":render_input(request)}]})
         }
         ProviderKind::OpenaiCompatible => {
-            json!({"model":request.model_id,"messages":[{"role":"user","content":render_input(request)}],"stream":true,"stream_options":{"include_usage":true}})
+            let mut body = json!({"model":request.model_id,"messages":[{"role":"user","content":render_input(request)}],"stream":true});
+            let profile = coding_behavior_profile(endpoint, &request.model_id);
+            if let Some(object) = body.as_object_mut() {
+                if profile.family == CodingModelFamily::MiniMax {
+                    object.insert(
+                        "max_completion_tokens".into(),
+                        json!(DIRECT_INVOCATION_MAX_OUTPUT_TOKENS),
+                    );
+                } else {
+                    object.insert(
+                        "max_tokens".into(),
+                        json!(DIRECT_INVOCATION_MAX_OUTPUT_TOKENS),
+                    );
+                    object.insert("stream_options".into(), json!({"include_usage":true}));
+                }
+                if uses_qwen_plan_thinking(endpoint, &request.model_id) {
+                    object.insert("enable_thinking".into(), Value::Bool(true));
+                }
+            }
+            body
         }
     }
 }
@@ -939,8 +1193,56 @@ fn provider_failure(kind: ProviderKind, value: &Value) -> bool {
             Some("response.failed" | "error")
         ),
         ProviderKind::Anthropic => value.get("type").and_then(Value::as_str) == Some("error"),
-        ProviderKind::OpenaiCompatible => value.get("error").is_some(),
+        ProviderKind::OpenaiCompatible => value.get("error").is_some_and(|error| !error.is_null()),
     }
+}
+
+fn trace_provider_status(context: &str, status: StatusCode) {
+    if std::env::var_os("FIELORA_PROVIDER_PROTOCOL_TRACE").is_some() {
+        eprintln!(
+            "provider_protocol_trace context={context} http_status={}",
+            status.as_u16()
+        );
+    }
+}
+
+fn trace_provider_parse_error(context: &str, bytes: usize, error: &serde_json::Error) {
+    if std::env::var_os("FIELORA_PROVIDER_PROTOCOL_TRACE").is_some() {
+        eprintln!(
+            "provider_protocol_trace context={context} parse_error={:?} bytes={bytes} line={} column={}",
+            error.classify(),
+            error.line(),
+            error.column()
+        );
+    }
+}
+
+fn trace_provider_value(context: &str, value: &Value) {
+    if std::env::var_os("FIELORA_PROVIDER_PROTOCOL_TRACE").is_none() {
+        return;
+    }
+    let keys = |candidate: Option<&Value>| {
+        candidate
+            .and_then(Value::as_object)
+            .map(|object| object.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    let top = keys(Some(value));
+    let choice = keys(value.pointer("/choices/0"));
+    let delta = keys(value.pointer("/choices/0/delta"));
+    let message = keys(value.pointer("/choices/0/message"));
+    let usage = keys(value.get("usage"));
+    let error = keys(value.get("error"));
+    let finish_reason = value
+        .pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str);
+    let error_code = value
+        .pointer("/error/code")
+        .and_then(Value::as_str)
+        .map(|code| code.chars().take(96).collect::<String>());
+    eprintln!(
+        "provider_protocol_trace context={context} top={top:?} choice={choice:?} delta={delta:?} message={message:?} usage={usage:?} error={error:?} finish_reason={finish_reason:?} error_code={error_code:?}"
+    );
 }
 
 fn provider_terminal(kind: ProviderKind, value: &Value) -> bool {
@@ -1175,6 +1477,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn provider_user_agent_identifies_fielora_as_an_interactive_coding_agent() {
+        assert!(FIELORA_PROVIDER_USER_AGENT.starts_with("Fielora/"));
+        assert!(FIELORA_PROVIDER_USER_AGENT.contains("interactive-coding-agent"));
+    }
+
+    fn test_endpoint(kind: ProviderKind) -> ProviderEndpoint {
+        ProviderEndpoint {
+            kind,
+            base_url: (kind == ProviderKind::OpenaiCompatible)
+                .then(|| "https://models.example.com/v1".into()),
+        }
+    }
+
+    #[test]
     fn different_wire_protocols_normalize_to_same_delta_and_usage() {
         let openai = normalize_provider_event(
             ProviderKind::Openai,
@@ -1312,18 +1628,42 @@ mod tests {
             response_mode: fielora_contracts::ResponseMode::Text,
         };
         assert_eq!(
-            provider_body(ProviderKind::Openai, &request).get("store"),
+            provider_body(&test_endpoint(ProviderKind::Openai), &request).get("store"),
             Some(&Value::Bool(false))
         );
         assert!(
-            provider_body(ProviderKind::Anthropic, &request)
+            provider_body(&test_endpoint(ProviderKind::Anthropic), &request)
                 .get("store")
                 .is_none()
         );
         assert_eq!(
-            provider_body(ProviderKind::OpenaiCompatible, &request)
+            provider_body(&test_endpoint(ProviderKind::OpenaiCompatible), &request)
                 .pointer("/stream_options/include_usage"),
             Some(&Value::Bool(true))
+        );
+        assert_eq!(
+            provider_body(&test_endpoint(ProviderKind::OpenaiCompatible), &request)
+                .get("max_tokens"),
+            Some(&json!(DIRECT_INVOCATION_MAX_OUTPUT_TOKENS))
+        );
+
+        let mut qwen_request = request.clone();
+        qwen_request.model_id = "qwen3.7-plus".into();
+        let qwen_plan = ProviderEndpoint {
+            kind: ProviderKind::OpenaiCompatible,
+            base_url: Some("https://coding.dashscope.aliyuncs.com/v1".into()),
+        };
+        assert_eq!(
+            provider_body(&qwen_plan, &qwen_request).get("enable_thinking"),
+            Some(&Value::Bool(true))
+        );
+        assert!(
+            provider_body(
+                &test_endpoint(ProviderKind::OpenaiCompatible),
+                &qwen_request
+            )
+            .get("enable_thinking")
+            .is_none()
         );
     }
 
@@ -1394,6 +1734,53 @@ mod tests {
     }
 
     #[test]
+    fn qwen_compatible_tool_identifiers_accept_deltas_snapshots_and_repeats() {
+        let mut compatible = AgentStreamAccumulator::new(ProviderKind::OpenaiCompatible);
+        compatible
+            .push(&json!({"choices":[{"delta":{"reasoning_content":"I should inspect first."},"finish_reason":null}]}))
+            .unwrap();
+        compatible
+            .push(&json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_","function":{"name":"read","arguments":"{\"path\":\"src/"}}]},"finish_reason":null}]}))
+            .unwrap();
+        compatible
+            .push(&json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","function":{"name":"_file","arguments":"lib.rs\"}"}}]},"finish_reason":null}]}))
+            .unwrap();
+        compatible
+            .push(&json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","function":{}}]},"finish_reason":"tool_calls"}]}))
+            .unwrap();
+
+        let turn = compatible.finish().unwrap();
+        assert_eq!(turn.text, "");
+        assert_eq!(turn.tool_calls[0].id, "call_abc");
+        assert_eq!(turn.tool_calls[0].name, "read_file");
+        assert_eq!(turn.tool_calls[0].arguments, json!({"path":"src/lib.rs"}));
+    }
+
+    #[test]
+    fn hidden_reasoning_is_removed_after_fragmented_stream_assembly() {
+        let assembled = ["<thi", "nk>private plan", "</think>", "最终答案"].concat();
+        assert_eq!(sanitize_agent_text(&assembled), "最终答案");
+        assert_eq!(sanitize_agent_text("前言<think>private"), "前言");
+        assert_eq!(
+            sanitize_agent_text("private plan</think>最终答案"),
+            "最终答案"
+        );
+        assert_eq!(
+            sanitize_agent_text("答案一<think data-x='1'>private</think>\n答案二"),
+            "答案一\n答案二"
+        );
+        assert_eq!(sanitize_agent_text("普通回答"), "普通回答");
+    }
+
+    #[test]
+    fn compatible_success_chunk_with_null_error_is_not_a_failure() {
+        assert!(!provider_failure(
+            ProviderKind::OpenaiCompatible,
+            &json!({"error":null,"choices":[{"delta":{"content":"ok"}}]})
+        ));
+    }
+
+    #[test]
     fn agent_provider_bodies_preserve_tools_results_and_retention_boundary() {
         let request = AgentModelRequest {
             model_id: "model".into(),
@@ -1422,25 +1809,95 @@ mod tests {
             }],
             max_output_tokens: 1024,
         };
-        let openai = agent_provider_body(ProviderKind::Openai, &request);
+        let openai = agent_provider_body(&test_endpoint(ProviderKind::Openai), &request);
         assert_eq!(openai.get("store"), Some(&Value::Bool(false)));
         assert_eq!(
             openai.pointer("/input/2/type"),
             Some(&json!("function_call_output"))
         );
         assert_eq!(openai.pointer("/tools/0/name"), Some(&json!("read_file")));
-        let anthropic = agent_provider_body(ProviderKind::Anthropic, &request);
+        let anthropic = agent_provider_body(&test_endpoint(ProviderKind::Anthropic), &request);
         assert_eq!(
             anthropic.pointer("/messages/2/content/0/type"),
             Some(&json!("tool_result"))
         );
         assert!(anthropic.get("store").is_none());
-        let compatible = agent_provider_body(ProviderKind::OpenaiCompatible, &request);
+        let compatible =
+            agent_provider_body(&test_endpoint(ProviderKind::OpenaiCompatible), &request);
         assert_eq!(compatible.pointer("/messages/3/role"), Some(&json!("tool")));
         assert_eq!(
             compatible.pointer("/tools/0/type"),
             Some(&json!("function"))
         );
+        assert!(compatible.get("parallel_tool_calls").is_none());
+
+        let mut minimax_request = request.clone();
+        minimax_request.model_id = "MiniMax-M2.7".into();
+        let minimax = agent_provider_body(
+            &ProviderEndpoint {
+                kind: ProviderKind::OpenaiCompatible,
+                base_url: Some("https://api.minimaxi.com/v1".into()),
+            },
+            &minimax_request,
+        );
+        assert_eq!(minimax.get("max_completion_tokens"), Some(&json!(1024)));
+        assert!(minimax.get("max_tokens").is_none());
+        assert!(minimax.get("stream_options").is_none());
+
+        let mut qwen_request = request.clone();
+        qwen_request.model_id = "qwen3.7-plus".into();
+        let qwen_plan = agent_provider_body(
+            &ProviderEndpoint {
+                kind: ProviderKind::OpenaiCompatible,
+                base_url: Some("https://coding.dashscope.aliyuncs.com/v1".into()),
+            },
+            &qwen_request,
+        );
+        assert_eq!(qwen_plan.get("enable_thinking"), Some(&Value::Bool(false)));
+        assert_eq!(
+            qwen_plan.get("parallel_tool_calls"),
+            Some(&Value::Bool(false))
+        );
+        assert_eq!(qwen_plan.get("max_tokens"), Some(&json!(1024)));
+    }
+
+    #[test]
+    fn qwen_coding_plan_serializes_images_as_native_multimodal_content_parts() {
+        let request = AgentModelRequest {
+            model_id: "qwen3.7-plus".into(),
+            system: "Describe the supplied image".into(),
+            messages: vec![AgentModelMessage::UserMultimodal {
+                text: "说明这张图里显示了什么".into(),
+                images: vec![AgentModelImage {
+                    id: "image-1".into(),
+                    filename: "screen.png".into(),
+                    mime_type: "image/png".into(),
+                    data_url: "data:image/png;base64,iVBORw0KGgo=".into(),
+                }],
+            }],
+            tools: Vec::new(),
+            max_output_tokens: 512,
+        };
+        let body = agent_provider_body(
+            &ProviderEndpoint {
+                kind: ProviderKind::OpenaiCompatible,
+                base_url: Some("https://coding.dashscope.aliyuncs.com/v1".into()),
+            },
+            &request,
+        );
+        assert_eq!(
+            body.pointer("/messages/1/content/0"),
+            Some(&json!({"type":"text","text":"说明这张图里显示了什么"}))
+        );
+        assert_eq!(
+            body.pointer("/messages/1/content/1/type"),
+            Some(&json!("image_url"))
+        );
+        assert_eq!(
+            body.pointer("/messages/1/content/1/image_url/url"),
+            Some(&json!("data:image/png;base64,iVBORw0KGgo="))
+        );
+        assert!(!body.to_string().contains("附件：screen.png"));
     }
 
     #[test]
@@ -1448,5 +1905,79 @@ mod tests {
         let mut accumulator = AgentStreamAccumulator::new(ProviderKind::OpenaiCompatible);
         accumulator.push(&json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"read_file","arguments":"{\"path\":"}}]},"finish_reason":"tool_calls"}]})).unwrap();
         assert_eq!(accumulator.finish(), Err(ModelError::ProviderProtocolError));
+    }
+
+    #[test]
+    fn china_coding_profiles_cover_the_six_initial_model_families() {
+        let endpoint = |base_url: &str| ProviderEndpoint {
+            kind: ProviderKind::OpenaiCompatible,
+            base_url: Some(base_url.into()),
+        };
+        for (base_url, model, family) in [
+            (
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "qwen3-coder-plus",
+                CodingModelFamily::Qwen,
+            ),
+            (
+                "https://api.deepseek.com/v1",
+                "deepseek-chat",
+                CodingModelFamily::DeepSeek,
+            ),
+            (
+                "https://api.moonshot.cn/v1",
+                "kimi-k2.5",
+                CodingModelFamily::Kimi,
+            ),
+            (
+                "https://open.bigmodel.cn/api/paas/v4",
+                "glm-4.7",
+                CodingModelFamily::Glm,
+            ),
+            (
+                "https://api.minimax.io/v1",
+                "MiniMax-M2.5",
+                CodingModelFamily::MiniMax,
+            ),
+            (
+                "https://ark.cn-beijing.volces.com/api/v3",
+                "doubao-seed-2-0-code",
+                CodingModelFamily::Doubao,
+            ),
+        ] {
+            let profile = coding_behavior_profile(&endpoint(base_url), model);
+            assert_eq!(profile.id, "china-coding-v1");
+            assert_eq!(profile.family, family);
+            assert!(profile.chinese_primary);
+            assert!(profile.prefer_serial_tool_calls);
+            assert!(profile.nudge_action_tasks);
+            assert!(profile.system_guidance().contains("严格符合 schema"));
+        }
+    }
+
+    #[test]
+    fn unknown_models_fail_safe_to_generic_behavior_without_new_authority() {
+        let profile = coding_behavior_profile(
+            &ProviderEndpoint {
+                kind: ProviderKind::OpenaiCompatible,
+                base_url: Some("https://models.example.com/v1".into()),
+            },
+            "future-code-model",
+        );
+        assert_eq!(profile.family, CodingModelFamily::Generic);
+        assert_eq!(profile.id, "generic-coding-v1");
+        assert!(!profile.chinese_primary);
+        assert!(!profile.nudge_action_tasks);
+        assert!(profile.system_guidance().is_empty());
+
+        // Ark can route several model families; endpoint alone must not label a model Doubao.
+        let routed = coding_behavior_profile(
+            &ProviderEndpoint {
+                kind: ProviderKind::OpenaiCompatible,
+                base_url: Some("https://ark.cn-beijing.volces.com/api/v3".into()),
+            },
+            "ark-code-latest",
+        );
+        assert_eq!(routed.family, CodingModelFamily::Generic);
     }
 }

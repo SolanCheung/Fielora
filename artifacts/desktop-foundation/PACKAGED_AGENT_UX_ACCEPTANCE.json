@@ -1,0 +1,23 @@
+{
+  "status": "PASS",
+  "checks": [
+    "project_permission_inheritance",
+    "elapsed_process_row",
+    "animated_generation_indicator",
+    "terminal_markdown_response",
+    "agent_typography_contract",
+    "turn_ownership",
+    "inline_change_summary",
+    "agent_review",
+    "image_preview",
+    "terminal_card_under_90px",
+    "steps_closed_by_default",
+    "expandable_execution_steps",
+    "semantic_work_phases",
+    "collapsed_technical_details",
+    "jump_to_latest",
+    "message_copy_on_hover",
+    "visible_message_copy_confirmation"
+  ],
+  "captured_at": "2026-08-21T13:59:55.457Z"
+}

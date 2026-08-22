@@ -1,13 +1,14 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, readdir, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   ApplyWorkspaceFileRequest, TerminalEvent, TerminalRunResult, WorkspaceFileEntry,
-  WorkspaceFileView,
+  WorkspaceEnvironmentView, WorkspaceFileView, WorkspaceImagePreview,
 } from './workspace-types';
 
 const MAX_FILE_BYTES = 1024 * 1024;
+const MAX_IMAGE_PREVIEW_BYTES = 8 * 1024 * 1024;
 const MAX_FILES = 2_500;
 const MAX_DEPTH = 16;
 const MAX_TERMINAL_OUTPUT_BYTES = 512 * 1024;
@@ -50,6 +51,15 @@ function decodeText(bytes: Uint8Array): string {
   }
 }
 
+function imageMime(relativePath: string, bytes: Uint8Array): WorkspaceImagePreview['mime_type'] | null {
+  const extension = path.extname(relativePath).toLowerCase();
+  if (extension === '.png' && bytes.length >= 8 && Buffer.from(bytes.subarray(0, 8)).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
+  if ((extension === '.jpg' || extension === '.jpeg') && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9) return 'image/jpeg';
+  if (extension === '.gif' && ['GIF87a', 'GIF89a'].includes(Buffer.from(bytes.subarray(0, 6)).toString('ascii'))) return 'image/gif';
+  if (extension === '.webp' && Buffer.from(bytes.subarray(0, 4)).toString('ascii') === 'RIFF' && Buffer.from(bytes.subarray(8, 12)).toString('ascii') === 'WEBP') return 'image/webp';
+  return null;
+}
+
 export class WorkspaceRuntime {
   readonly #runs = new Map<string, TerminalRun>();
   readonly #emit: (event: TerminalEvent) => void;
@@ -89,7 +99,8 @@ export class WorkspaceRuntime {
         }
         if (!entry.isFile()) continue;
         const info = await stat(absolute);
-        if (info.size > MAX_FILE_BYTES) continue;
+        const image = ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(path.extname(entry.name).toLowerCase());
+        if (info.size > (image ? MAX_IMAGE_PREVIEW_BYTES : MAX_FILE_BYTES)) continue;
         files.push({ relative_path: path.relative(root, absolute).replaceAll('\\', '/'), size: info.size });
       }
     };
@@ -106,6 +117,21 @@ export class WorkspaceRuntime {
       size: bytes.byteLength,
       content: decodeText(bytes),
       sha256: digest(bytes),
+    };
+  }
+
+  async previewImage(rootPath: string, relativePath: string): Promise<WorkspaceImagePreview> {
+    const file = await this.#file(rootPath, relativePath);
+    const bytes = await readFile(file.target);
+    if (bytes.byteLength > MAX_IMAGE_PREVIEW_BYTES) throw new Error('Image preview is too large');
+    const mimeType = imageMime(file.relative, bytes);
+    if (!mimeType) throw new Error('Unsupported image preview');
+    return {
+      kind: 'IMAGE',
+      relative_path: file.relative,
+      size: bytes.byteLength,
+      mime_type: mimeType,
+      data_url: `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`,
     };
   }
 
@@ -127,6 +153,41 @@ export class WorkspaceRuntime {
       throw error;
     }
     return this.readFile(rootPath, request.relative_path);
+  }
+
+  async getEnvironment(rootPath: string): Promise<WorkspaceEnvironmentView> {
+    const root = await this.#root(rootPath);
+    const git = (args: string[]) => new Promise<string>((resolve, reject) => {
+      execFile('git.exe', args, { cwd: root, windowsHide: true, timeout: 5_000, maxBuffer: 256 * 1024 }, (error, stdout) => {
+        if (error) reject(error); else resolve(stdout.trim());
+      });
+    });
+    try {
+      await git(['rev-parse', '--is-inside-work-tree']);
+    } catch {
+      return { is_git_repository: false, branch: null, upstream: null, changed_files: 0, ahead: 0, behind: 0 };
+    }
+    const [branch, status, upstream] = await Promise.all([
+      git(['branch', '--show-current']).catch(() => ''),
+      git(['status', '--porcelain=v1']).catch(() => ''),
+      git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']).catch(() => ''),
+    ]);
+    let ahead = 0;
+    let behind = 0;
+    if (upstream) {
+      const counts = await git(['rev-list', '--left-right', '--count', `${upstream}...HEAD`]).catch(() => '0\t0');
+      const [remoteCount, localCount] = counts.split(/\s+/).map((value) => Number.parseInt(value, 10) || 0);
+      behind = remoteCount ?? 0;
+      ahead = localCount ?? 0;
+    }
+    return {
+      is_git_repository: true,
+      branch: branch || null,
+      upstream: upstream || null,
+      changed_files: status ? status.split(/\r?\n/).filter(Boolean).length : 0,
+      ahead,
+      behind,
+    };
   }
 
   async runTerminal(rootPath: string, fieldId: string, command: string): Promise<TerminalRunResult> {

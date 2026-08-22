@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
-const core = path.join(root, 'target', 'debug', 'fielora-core.exe');
+const core = process.env.FIELORA_CORE_EXE
+  ? path.resolve(process.env.FIELORA_CORE_EXE)
+  : path.join(root, 'target', 'debug', 'fielora-core.exe');
 
 function request(child, id, method, params = {}, protocol = '1.0') {
   child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params, _meta: { protocol, trace_id: randomUUID(), deadline_ms: 10000 } })}\n`);
@@ -49,6 +51,25 @@ async function mutation(h, id, method, params) {
   assert.equal(event.params.revision, revision);
   return response.result;
 }
+
+test('Core exposes complete build provenance for differential evidence', async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'fielora-core-provenance-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const h = harness(dataDir);
+  const greeting = await hello(h);
+  assert.ok(greeting.result.capabilities.includes('system.build_provenance'));
+  h.send('provenance', 'query.system.build_provenance');
+  const provenance = (await h.next()).result;
+  assert.match(provenance.git_head, /^[0-9a-f]{40}$|^UNKNOWN$/);
+  assert.equal(typeof provenance.git_dirty, 'boolean');
+  assert.match(provenance.source_fingerprint, /^[0-9a-f]{64}$/);
+  assert.match(provenance.agent_core_fingerprint, /^[0-9a-f]{64}$/);
+  assert.equal(provenance.fast_edit_implementation_version, 'FAST_EDIT_BOUNDED_V1');
+  assert.equal(provenance.context_compiler_version, 'LEXICAL_REPOSITORY_INDEX_V1');
+  h.send('shutdown', 'system.shutdown');
+  await h.next();
+  await h.exit();
+});
 
 test('real Core persists create/focus/snapshot through close and restart', async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'fielora-core-integration-'));
@@ -97,9 +118,10 @@ test('Desktop Foundation persists Project, Conversation, provider selection, and
   const dataDir=await mkdtemp(path.join(tmpdir(),'fielora-desktop-foundation-'));t.after(()=>rm(dataDir,{recursive:true,force:true}));
   const projectRoot=path.join(dataDir,'local-project');
   const first=harness(dataDir);const greeting=await hello(first);assert.equal(greeting.result.schema_version,6);
-  for(const capability of ['project.create','conversation.create','conversation.message.create'])assert.ok(greeting.result.capabilities.includes(capability));
+  for(const capability of ['project.create','project.update','project.archive','conversation.create','conversation.message.create'])assert.ok(greeting.result.capabilities.includes(capability));
   first.send('provider','command.provider.create_config',{provider_kind:'OPENAI_COMPATIBLE',display_name:'Desktop fixture',base_url:'https://example.com/v1',default_model:'__fielora_fixture__',custom_endpoint_acknowledged:true});const provider=(await first.next()).result;
   first.send('project','command.project.create',{title:'Local Project',goal:'Persist the coding loop',root_path:projectRoot});const project=(await first.next()).result;assert.equal(project.root_path,projectRoot);
+  first.send('rename-project','command.project.update',{field_id:project.field_id,expected_revision:project.revision,title:'Renamed Local Project'});const renamedProject=(await first.next()).result;assert.equal(renamedProject.title,'Renamed Local Project');assert.equal(renamedProject.root_path,projectRoot);
   first.send('conversation','command.conversation.create',{field_id:project.field_id,title:'Build the feature',provider_config_id:provider.id,model_id:'__fielora_fixture__'});let conversation=(await first.next()).result;
   first.send('user-message','command.conversation.message.create',{conversation_id:conversation.id,role:'USER',content:'Inspect the project',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null});assert.equal((await first.next()).result.role,'USER');
   first.send('assistant-message','command.conversation.message.create',{conversation_id:conversation.id,role:'ASSISTANT',content:'Ready to review a bounded change.',status:'COMPLETED',provider_config_id:provider.id,model_id:'__fielora_fixture__',invocation_id:null});assert.equal((await first.next()).result.role,'ASSISTANT');
@@ -108,11 +130,13 @@ test('Desktop Foundation persists Project, Conversation, provider selection, and
   first.send('shutdown','system.shutdown');await first.next();await first.exit();
 
   const second=harness(dataDir);await hello(second);
-  second.send('projects','query.project.list');assert.equal((await second.next()).result[0].field_id,project.field_id);
+  second.send('projects','query.project.list');const resumedProjects=(await second.next()).result;assert.equal(resumedProjects[0].field_id,project.field_id);assert.equal(resumedProjects[0].title,'Renamed Local Project');
   second.send('conversations','query.conversation.list',{field_id:project.field_id});const resumed=(await second.next()).result;assert.equal(resumed[0].title,'Review and test');assert.equal(resumed[0].provider_config_id,provider.id);
   second.send('messages','query.conversation.message.list',{conversation_id:conversation.id});assert.deepEqual((await second.next()).result.map((message)=>message.content),['Inspect the project','Ready to review a bounded change.']);
   second.send('archive','command.conversation.archive',{conversation_id:conversation.id,expected_revision:conversation.revision});assert.equal((await second.next()).result.lifecycle_status,'ARCHIVED');
   second.send('active-after-archive','query.conversation.list',{field_id:project.field_id});assert.deepEqual((await second.next()).result,[]);
+  second.send('archive-project','command.project.archive',{field_id:project.field_id,expected_revision:renamedProject.revision});assert.equal((await second.next()).result.field_id,project.field_id);
+  second.send('projects-after-archive','query.project.list');assert.deepEqual((await second.next()).result,[]);
   second.send('shutdown','system.shutdown');await second.next();await second.exit();
 });
 
@@ -219,8 +243,8 @@ test('Complete Agent executes an approved coding loop with durable tools, verifi
   h.send('agent-credential','command.provider.store_credential',{provider_config_id:provider.id,secret:`agent-fixture-${randomUUID()}`});assert.equal((await response('agent-credential')).result.lifecycle_status,'ACTIVE');t.after(()=>spawnSync('cmdkey.exe',[`/delete:Fielora/provider/${provider.id}`],{windowsHide:true,stdio:'ignore'}));
   h.send('agent-project','command.project.create',{title:'Agent Project',goal:'Prove a real tool loop',root_path:projectRoot});const project=(await response('agent-project')).result;
   h.send('agent-conversation','command.conversation.create',{field_id:project.field_id,title:'Agent execution',provider_config_id:provider.id,model_id:'__fielora_agent_fixture__'});const conversation=(await response('agent-conversation')).result;
-  h.send('agent-user-message','command.conversation.message.create',{conversation_id:conversation.id,role:'USER',content:'FIELORA_AGENT_FIXTURE_CREATE',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null});await response('agent-user-message');
-  h.send('agent-start','command.agent.start',{field_id:project.field_id,conversation_id:conversation.id,provider_config_id:provider.id,model_id:'__fielora_agent_fixture__',task:'FIELORA_AGENT_FIXTURE_CREATE',permission:'REVIEW_CHANGES',max_steps:8});const run=(await response('agent-start')).result;
+  h.send('agent-user-message','command.conversation.message.create',{conversation_id:conversation.id,role:'USER',content:'FIELORA_AGENT_FIXTURE_CREATE',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null});const userMessage=(await response('agent-user-message')).result;
+  h.send('agent-start','command.agent.start',{field_id:project.field_id,conversation_id:conversation.id,user_message_id:userMessage.id,provider_config_id:provider.id,model_id:'__fielora_agent_fixture__',task:'FIELORA_AGENT_FIXTURE_CREATE',permission:'READ_ONLY',max_steps:8});const run=(await response('agent-start')).result;
 
   let sequence=0;let approvalCount=0;let finalRun=null;
   for(let attempt=0;attempt<120;attempt+=1){
@@ -234,19 +258,61 @@ test('Complete Agent executes an approved coding loop with durable tools, verifi
     if(['COMPLETED','FAILED','CANCELLED'].includes(finalRun.status))break;
     await new Promise((resolve)=>setTimeout(resolve,25));
   }
-  assert.equal(finalRun.status,'COMPLETED',JSON.stringify(finalRun));assert.equal(approvalCount,2);
+  if(finalRun.status!=='COMPLETED'){
+    h.send('agent-failure-tools','query.agent.tool_calls',{run_id:run.id});const failureTools=(await response('agent-failure-tools')).result;
+    h.send('agent-failure-events','query.agent.events',{run_id:run.id,after_sequence:null,limit:500});const failureEvents=(await response('agent-failure-events')).result;
+    assert.fail(JSON.stringify({run:finalRun,tools:failureTools.map((tool)=>({name:tool.name,status:tool.status,error_code:tool.error_code})),events:failureEvents.map((event)=>({sequence:event.sequence,kind:event.kind,payload:event.payload}))}));
+  }
+  assert.equal(approvalCount,2);
   assert.equal(await readFile(path.join(projectRoot,'fielora-agent-fixture.txt'),'utf8'),'created by the Fielora Agent fixture\n');
   h.send('agent-tools','query.agent.tool_calls',{run_id:run.id});const tools=(await response('agent-tools')).result;assert.deepEqual(tools.map((tool)=>[tool.name,tool.status]),[['create_file','COMPLETED'],['run_command','COMPLETED']]);assert.equal(tools[1].receipt.success,true);assert.equal(tools[1].receipt.execution_boundary,'CONTROLLED_WORKSPACE_EXECUTION');
-  h.send('agent-all-events','query.agent.events',{run_id:run.id,after_sequence:null,limit:500});const kinds=(await response('agent-all-events')).result.map((event)=>event.kind);for(const kind of ['RUN_CREATED','CONTEXT_COMPILED','APPROVAL_REQUESTED','TOOL_COMPLETED','VERIFICATION_RECORDED','RUN_COMPLETED'])assert.ok(kinds.includes(kind),kind);
-  h.send('agent-messages','query.conversation.message.list',{conversation_id:conversation.id});const messages=(await response('agent-messages')).result;assert.deepEqual(messages.map((message)=>message.role),['USER','ASSISTANT']);assert.match(messages[1].content,/completed the task/i);
+  h.send('agent-all-events','query.agent.events',{run_id:run.id,after_sequence:null,limit:500});const allEvents=(await response('agent-all-events')).result;const kinds=allEvents.map((event)=>event.kind);for(const kind of ['RUN_CREATED','CONTEXT_COMPILED','APPROVAL_REQUESTED','TOOL_COMPLETED','VERIFICATION_RECORDED','RUN_COMPLETED'])assert.ok(kinds.includes(kind),kind);assert.equal(allEvents.find((event)=>event.kind==='RUN_CREATED').payload.user_message_id,userMessage.id);
+  h.send('agent-messages','query.conversation.message.list',{conversation_id:conversation.id});const messages=(await response('agent-messages')).result;assert.deepEqual(messages.map((message)=>message.role),['USER','ASSISTANT']);assert.match(messages[1].content,/completed the task/i);assert.equal(messages[1].invocation_id,run.id);
   h.send('delegate-start','command.agent.start',{field_id:project.field_id,conversation_id:conversation.id,provider_config_id:provider.id,model_id:'__fielora_agent_fixture__',task:'FIELORA_AGENT_FIXTURE_DELEGATE',permission:'FULL_CONTROL',max_steps:8});const delegated=(await response('delegate-start')).result;
-  let delegatedRun=null;for(let attempt=0;attempt<80;attempt+=1){h.send(`delegate-get-${attempt}`,'query.agent.get',{run_id:delegated.id});delegatedRun=(await response(`delegate-get-${attempt}`)).result;if(['COMPLETED','FAILED','CANCELLED'].includes(delegatedRun.status))break;await new Promise((resolve)=>setTimeout(resolve,25));}assert.equal(delegatedRun.status,'COMPLETED');
+  let delegatedRun=null;for(let attempt=0;attempt<80;attempt+=1){h.send(`delegate-get-${attempt}`,'query.agent.get',{run_id:delegated.id});delegatedRun=(await response(`delegate-get-${attempt}`)).result;if(['COMPLETED','FAILED','CANCELLED'].includes(delegatedRun.status))break;await new Promise((resolve)=>setTimeout(resolve,25));}
+  if(delegatedRun.status!=='COMPLETED'){
+    h.send('delegate-failure-tools','query.agent.tool_calls',{run_id:delegated.id});const failureTools=(await response('delegate-failure-tools')).result;
+    h.send('delegate-failure-events','query.agent.events',{run_id:delegated.id,after_sequence:null,limit:500});const failureEvents=(await response('delegate-failure-events')).result;
+    assert.fail(JSON.stringify({run:delegatedRun,tools:failureTools.map((tool)=>({name:tool.name,status:tool.status,error_code:tool.error_code})),events:failureEvents.map((event)=>({sequence:event.sequence,kind:event.kind,payload:event.payload}))}));
+  }
   h.send('delegate-runs','query.agent.list',{conversation_id:conversation.id});const allRuns=(await response('delegate-runs')).result;const child=allRuns.find((item)=>item.task.startsWith('[SUBAGENT parent='));assert.ok(child);assert.equal(child.permission,'READ_ONLY');assert.equal(child.status,'COMPLETED');
   h.send('delegate-parent-tools','query.agent.tool_calls',{run_id:delegated.id});const delegationTool=(await response('delegate-parent-tools')).result.find((tool)=>tool.name==='delegate_readonly');assert.equal(delegationTool.status,'COMPLETED');assert.equal(delegationTool.receipt.child_run_id,child.id);
   h.send('delegate-child-tools','query.agent.tool_calls',{run_id:child.id});assert.deepEqual((await response('delegate-child-tools')).result.map((tool)=>[tool.name,tool.effect,tool.status]),[['list_files','OBSERVE','COMPLETED']]);
   h.send('cancel-start','command.agent.start',{field_id:project.field_id,conversation_id:conversation.id,provider_config_id:provider.id,model_id:'__fielora_agent_fixture_slow__',task:'Wait until cancelled',permission:'READ_ONLY',max_steps:4});const cancellable=(await response('cancel-start')).result;
-  h.send('cancel-agent','command.agent.cancel',{run_id:cancellable.id});await response('cancel-agent');let cancelledRun=null;for(let attempt=0;attempt<50;attempt+=1){h.send(`cancel-get-${attempt}`,'query.agent.get',{run_id:cancellable.id});cancelledRun=(await response(`cancel-get-${attempt}`)).result;if(cancelledRun.status==='CANCELLED')break;await new Promise((resolve)=>setTimeout(resolve,20));}assert.equal(cancelledRun.status,'CANCELLED');assert.equal(cancelledRun.error_code,'AGENT_CANCELLED');
+  h.send('cancel-agent','command.agent.cancel',{run_id:cancellable.id});await response('cancel-agent');let cancelledRun=null;for(let attempt=0;attempt<50;attempt+=1){h.send(`cancel-get-${attempt}`,'query.agent.get',{run_id:cancellable.id});cancelledRun=(await response(`cancel-get-${attempt}`)).result;if(cancelledRun.status==='CANCELLED')break;await new Promise((resolve)=>setTimeout(resolve,20));}assert.equal(cancelledRun.status,'CANCELLED');assert.equal(cancelledRun.error_code,'AGENT_CANCELLED');h.send('cancel-messages','query.conversation.message.list',{conversation_id:conversation.id});const cancelMessages=(await response('cancel-messages')).result;const cancelledReply=cancelMessages.find((message)=>message.invocation_id===cancellable.id);assert.equal(cancelledReply.status,'CANCELLED');assert.match(cancelledReply.content,/已停止/);
+  await rm(path.join(projectRoot,'fielora-agent-fixture.txt'));
+  h.send('warning-conversation','command.conversation.create',{field_id:project.field_id,title:'Verified warning',provider_config_id:provider.id,model_id:'__fielora_agent_fixture__'});const warningConversation=(await response('warning-conversation')).result;
+  const warningTask='FIELORA_AGENT_FIXTURE_CREATE FIELORA_AGENT_FIXTURE_FINALIZATION_FAILURE';h.send('warning-start','command.agent.start',{field_id:project.field_id,conversation_id:warningConversation.id,provider_config_id:provider.id,model_id:'__fielora_agent_fixture__',task:warningTask,permission:'FULL_CONTROL',max_steps:8});const warningRun=(await response('warning-start')).result;let warningFinal=null;
+  for(let attempt=0;attempt<120;attempt+=1){h.send(`warning-get-${attempt}`,'query.agent.get',{run_id:warningRun.id});warningFinal=(await response(`warning-get-${attempt}`)).result;if(['COMPLETED','FAILED','CANCELLED'].includes(warningFinal.status))break;await new Promise((resolve)=>setTimeout(resolve,25));}
+  assert.equal(warningFinal.status,'COMPLETED');assert.equal(warningFinal.error_code,null);h.send('warning-events','query.agent.events',{run_id:warningRun.id,after_sequence:null,limit:500});const warningEvents=(await response('warning-events')).result;const warningCompletion=warningEvents.find((event)=>event.kind==='RUN_COMPLETED');assert.equal(warningCompletion.payload.outcome,'SUCCESS_WITH_WARNING');assert.equal(warningCompletion.payload.goal_satisfied,true);assert.equal(warningCompletion.payload.verification_passed,true);assert.equal(warningCompletion.payload.remaining_required_work,false);h.send('warning-messages','query.conversation.message.list',{conversation_id:warningConversation.id});const warningMessages=(await response('warning-messages')).result;assert.equal(warningMessages.at(-1).status,'COMPLETED');assert.match(warningMessages.at(-1).content,/修改并通过验证/);
   h.send('agent-shutdown','system.shutdown');await response('agent-shutdown');await h.exit();
+});
+
+test('FAST_EDIT uses the adaptive evidence-bounded pipeline with canonical phases', async (t) => {
+  const dataDir=await mkdtemp(path.join(tmpdir(),'fielora-fast-edit-integration-'));const projectRoot=path.join(dataDir,'project');await mkdir(path.join(projectRoot,'src'),{recursive:true});
+  await writeFile(path.join(projectRoot,'src/config.js'),'export const columns = {\n  name: true,\n  stage: true,\n  status: true,\n};\n');
+  await writeFile(path.join(projectRoot,'verify.cjs'),"const fs=require('node:fs');const value=fs.readFileSync('src/config.js','utf8');if(/stage/.test(value))process.exit(1);\n");
+  for(const args of [['init'],['config','user.email','fixture@fielora.local'],['config','user.name','Fielora'],['add','.'],['commit','-m','fixture']])assert.equal(spawnSync('git',args,{cwd:projectRoot,windowsHide:true,stdio:'ignore'}).status,0);
+  const h=harness(dataDir);t.after(async()=>{if(h.child.exitCode===null)spawnSync('taskkill.exe',['/PID',String(h.child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});await rm(dataDir,{recursive:true,force:true});});await hello(h);const notices=[];async function response(id){for(;;){const value=await h.next();if(value.id===id)return value;notices.push(value);}}
+  h.send('fast-provider','command.provider.create_config',{provider_kind:'OPENAI_COMPATIBLE',display_name:'Fast fixture',base_url:'https://example.com/v1',default_model:'__fielora_agent_fixture__',custom_endpoint_acknowledged:true});const provider=(await response('fast-provider')).result;t.after(()=>spawnSync('cmdkey.exe',[`/delete:Fielora/provider/${provider.id}`],{windowsHide:true,stdio:'ignore'}));
+  h.send('fast-credential','command.provider.store_credential',{provider_config_id:provider.id,secret:`fast-fixture-${randomUUID()}`});await response('fast-credential');
+  h.send('fast-project','command.project.create',{title:'Fast Edit',goal:'Bounded pipeline',root_path:projectRoot});const project=(await response('fast-project')).result;
+  h.send('fast-conversation','command.conversation.create',{field_id:project.field_id,title:'Fast Edit',provider_config_id:provider.id,model_id:'__fielora_agent_fixture__'});const conversation=(await response('fast-conversation')).result;
+  const task='FIELORA_AGENT_FIXTURE_FAST_EDIT 删除列表中的 stage 字段配置';h.send('fast-message','command.conversation.message.create',{conversation_id:conversation.id,role:'USER',content:task,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null});await response('fast-message');
+  h.send('fast-start','command.agent.start',{field_id:project.field_id,conversation_id:conversation.id,provider_config_id:provider.id,model_id:'__fielora_agent_fixture__',task,permission:'FULL_CONTROL',max_steps:8});const run=(await response('fast-start')).result;let finalRun;
+  for(let attempt=0;attempt<120;attempt+=1){h.send(`fast-get-${attempt}`,'query.agent.get',{run_id:run.id});finalRun=(await response(`fast-get-${attempt}`)).result;if(['COMPLETED','FAILED','CANCELLED'].includes(finalRun.status))break;await new Promise((resolve)=>setTimeout(resolve,25));}
+  assert.equal(finalRun.status,'COMPLETED');assert.equal(finalRun.current_step,2);assert.doesNotMatch(await readFile(path.join(projectRoot,'src/config.js'),'utf8'),/stage/);
+  h.send('fast-tools','query.agent.tool_calls',{run_id:run.id});const tools=(await response('fast-tools')).result;assert.deepEqual(tools.map((tool)=>[tool.name,tool.status]),[['apply_patches','COMPLETED'],['run_command','COMPLETED'],['git_read','COMPLETED']]);
+  h.send('fast-events','query.agent.events',{run_id:run.id,after_sequence:null,limit:500});const events=(await response('fast-events')).result;assert.equal(events.filter((event)=>event.kind==='MODEL_COMPLETED').length,2);const phase=events.filter((event)=>event.kind==='PHASE_CHANGED').at(-1).payload;assert.equal(phase.active_phase,'FINALIZE');assert.deepEqual(phase.phases,{LOCATE:'SUCCEEDED',EDIT:'SUCCEEDED',VERIFY:'SUCCEEDED',FINALIZE:'SUCCEEDED'});assert.equal(events.some((event)=>event.kind==='RUN_COMPLETED'&&event.payload.completion_invariant_passed===true),true);
+  await writeFile(path.join(projectRoot,'src/config.js'),'export const columns = {\n  name: true,\n  stage: true,\n  status: true,\n};\n');
+  h.send('repair-conversation','command.conversation.create',{field_id:project.field_id,title:'Repair once',provider_config_id:provider.id,model_id:'__fielora_agent_fixture__'});const repairConversation=(await response('repair-conversation')).result;const repairTask='FIELORA_AGENT_FIXTURE_FAST_EDIT_CONFLICT_ONCE 删除列表中的 stage 字段配置';h.send('repair-start','command.agent.start',{field_id:project.field_id,conversation_id:repairConversation.id,provider_config_id:provider.id,model_id:'__fielora_agent_fixture__',task:repairTask,permission:'FULL_CONTROL',max_steps:8});const repairRun=(await response('repair-start')).result;let repairFinal;
+  for(let attempt=0;attempt<120;attempt+=1){h.send(`repair-get-${attempt}`,'query.agent.get',{run_id:repairRun.id});repairFinal=(await response(`repair-get-${attempt}`)).result;if(['COMPLETED','FAILED','CANCELLED'].includes(repairFinal.status))break;await new Promise((resolve)=>setTimeout(resolve,25));}
+  assert.equal(repairFinal.status,'COMPLETED');assert.equal(repairFinal.current_step,3);h.send('repair-tools','query.agent.tool_calls',{run_id:repairRun.id});const repairTools=(await response('repair-tools')).result;assert.equal(repairTools.filter((tool)=>tool.name==='apply_patches').length,2);assert.equal(repairTools.filter((tool)=>tool.name==='read_file').length,1);assert.equal(repairTools.find((tool)=>tool.name==='apply_patches').status,'FAILED');
+  await writeFile(path.join(projectRoot,'src/config.js'),'export const columns = {\n  name: true,\n  stage: true,\n  status: true,\n};\n');
+  h.send('stop-conversation','command.conversation.create',{field_id:project.field_id,title:'Stop after retry',provider_config_id:provider.id,model_id:'__fielora_agent_fixture__'});const stopConversation=(await response('stop-conversation')).result;const stopTask='FIELORA_AGENT_FIXTURE_FAST_EDIT_DOUBLE_CONFLICT 删除列表中的 stage 字段配置';h.send('stop-user','command.conversation.message.create',{conversation_id:stopConversation.id,role:'USER',content:stopTask,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null});const stopUser=(await response('stop-user')).result;h.send('stop-start','command.agent.start',{field_id:project.field_id,conversation_id:stopConversation.id,user_message_id:stopUser.id,provider_config_id:provider.id,model_id:'__fielora_agent_fixture__',task:stopTask,permission:'FULL_CONTROL',max_steps:8});const stopRun=(await response('stop-start')).result;let stopFinal;
+  for(let attempt=0;attempt<120;attempt+=1){h.send(`stop-get-${attempt}`,'query.agent.get',{run_id:stopRun.id});stopFinal=(await response(`stop-get-${attempt}`)).result;if(['COMPLETED','FAILED','CANCELLED'].includes(stopFinal.status))break;await new Promise((resolve)=>setTimeout(resolve,25));}
+  assert.equal(stopFinal.status,'FAILED');assert.equal(stopFinal.error_code,'FAST_EDIT_PATCH_RETRY_EXHAUSTED');h.send('stop-tools','query.agent.tool_calls',{run_id:stopRun.id});const stopTools=(await response('stop-tools')).result;assert.equal(stopTools.filter((tool)=>tool.name==='apply_patches').length,2);assert.equal(stopTools.filter((tool)=>tool.name==='read_file').length,1);assert.match(await readFile(path.join(projectRoot,'src/config.js'),'utf8'),/stage/);h.send('stop-messages','query.conversation.message.list',{conversation_id:stopConversation.id});const stopMessages=(await response('stop-messages')).result;const failedReply=stopMessages.find((message)=>message.invocation_id===stopRun.id);assert.equal(failedReply.status,'FAILED');assert.match(failedReply.content,/没有(?:完成|修改)/);h.send('retry-start','command.agent.start',{field_id:project.field_id,conversation_id:stopConversation.id,user_message_id:stopUser.id,provider_config_id:provider.id,model_id:'__fielora_agent_fixture__',task:stopTask,permission:'FULL_CONTROL',max_steps:8});const retryRun=(await response('retry-start')).result;assert.notEqual(retryRun.id,stopRun.id);h.send('retry-events','query.agent.events',{run_id:retryRun.id,after_sequence:null,limit:20});const retryEvents=(await response('retry-events')).result;assert.equal(retryEvents.find((event)=>event.kind==='RUN_CREATED').payload.user_message_id,stopUser.id);h.send('retry-cancel','command.agent.cancel',{run_id:retryRun.id});await response('retry-cancel');
+  h.send('fast-shutdown','system.shutdown');await response('fast-shutdown');await h.exit();
 });
 
 test('Complete Agent reconciles an abrupt Core crash to PAUSED without replaying work', async (t) => {

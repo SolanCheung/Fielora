@@ -8,6 +8,7 @@
     "pnpm": "11.21.0"
   },
   "scripts": {
+    "agent:performance": "python scripts/report-agent-performance.py",
     "dev": "pnpm build:core:debug && pnpm --filter @fielora/desktop start",
     "build": "pnpm typecheck && pnpm build:core:release && pnpm --filter @fielora/desktop package",
     "build:core:debug": "cargo build -p fielora-core",
@@ -27,6 +28,12 @@
     "test:e2e:phase04:packaged": "node tests/e2e/phase04-desktop-e2e.mjs packaged",
     "test:e2e:desktop-foundation": "pnpm build:core:debug && node tests/e2e/desktop-foundation-e2e.mjs dev",
     "test:e2e:desktop-foundation:packaged": "node tests/e2e/desktop-foundation-e2e.mjs packaged",
+    "test:e2e:project-navigation": "pnpm build:core:debug && node tests/e2e/project-navigation-e2e.mjs",
+    "test:e2e:appearance": "pnpm build:core:debug && node tests/e2e/appearance-settings-e2e.mjs",
+    "probe:configured-providers": "pnpm build:core:debug && node scripts/probe-configured-providers.mjs",
+    "test:eval:china-model": "node --test tests/eval/china-model-preflight.test.mjs",
+    "eval:agent:china:preflight": "pnpm build:core:debug && cargo test -p fielora-model -p fielora-agent && pnpm test:eval:china-model && node scripts/eval-agent-china-preflight.mjs",
+    "eval:agent:qwen:preflight": "pnpm eval:agent:china:preflight",
     "test:e2e:single-instance:packaged": "node tests/e2e/single-instance-e2e.mjs",
     "make:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-portable.ps1",
     "make:portable:phase03": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-phase03-portable.ps1",

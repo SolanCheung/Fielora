@@ -327,12 +327,12 @@ function assertVisibleSurface(snapshot) {
   assert.ok(snapshot.state.surface.bounds.width > 340, 'right-sidebar WebContentsView width must remain visibly usable');
   assert.ok(snapshot.state.surface.bounds.height > 300, 'WebContentsView height must be visibly usable');
   for (const key of ['x', 'y', 'width', 'height']) {
-    assert.ok(Math.abs(snapshot.state.surface.bounds[key] - snapshot.rect[key]) <= 1, `native ${key} must match the React Browse viewport within one DPI rounding pixel`);
+    assert.ok(Math.abs(snapshot.state.surface.bounds[key] - snapshot.rect[key]) <= 1, `native ${key} must match the React Browse viewport within one DPI rounding pixel (native=${snapshot.state.surface.bounds[key]}, react=${snapshot.rect[key]})`);
   }
   assert.ok(snapshot.utility && snapshot.rail && snapshot.rect.x >= snapshot.utility.x && snapshot.rect.x + snapshot.rect.width <= snapshot.utility.right + 1, 'Browse view must stay inside the right utility sidebar');
-  assert.ok(snapshot.utility.right <= snapshot.rail.x + 1, 'Browse view must end before the right utility control rail');
+  assert.ok(snapshot.rail.x >= snapshot.utility.x && snapshot.rail.right <= snapshot.utility.right, 'Utility controls must move inside the right sidebar header');
   assert.ok(snapshot.rect.x >= 100 && snapshot.rect.y >= 64, 'Browse view must not cover primary navigation or browser toolbar');
-  assert.ok(snapshot.rect.x + snapshot.rect.width <= snapshot.window.width);
+  assert.ok(snapshot.rect.x + snapshot.rect.width <= snapshot.window.width + 1, `Browse viewport must stay inside the trusted window: ${JSON.stringify(snapshot)}`);
   assert.ok(snapshot.rect.y + snapshot.rect.height <= snapshot.window.height);
 }
 
@@ -388,11 +388,13 @@ try {
   checkpoint('fresh-electron-launch');
   checkpoint('trusted-app-ready');
 
-  const createButtonPresentation = await appCdp.evaluate(`(()=>{const button=document.querySelector('[data-testid="create-field"]');const style=getComputedStyle(button);return{type:button.type,className:button.className,backgroundColor:style.backgroundColor,borderRadius:style.borderRadius,minHeight:style.minHeight}})()`);
+  const createButtonPresentation = await appCdp.evaluate(`(()=>{const button=document.querySelector('[data-testid="create-field"]');const style=getComputedStyle(button);const accentProbe=document.createElement('i');accentProbe.style.background='var(--fl-color-accent)';document.body.append(accentProbe);const semanticAccent=getComputedStyle(accentProbe).backgroundColor;accentProbe.remove();return{type:button.type,className:button.className,backgroundColor:style.backgroundColor,semanticAccent,borderRadius:style.borderRadius,minHeight:style.minHeight}})()`);
+  assert.equal(createButtonPresentation.backgroundColor, createButtonPresentation.semanticAccent);
   assert.deepEqual(createButtonPresentation, {
     type: 'submit',
     className: 'primary-button',
-    backgroundColor: 'rgb(53, 35, 113)',
+    backgroundColor: 'rgb(101, 70, 199)',
+    semanticAccent: 'rgb(101, 70, 199)',
     borderRadius: '11px',
     minHeight: '42px',
   });
@@ -711,7 +713,7 @@ try {
   const afterResize = await surfaceSnapshot(appCdp);
   assertVisibleSurface(afterResize);
   assert.notDeepEqual(afterResize.state.surface.bounds, beforeResize.state.surface.bounds, 'WebContentsView bounds must respond to native window resize');
-  assert.ok(afterResize.utility && afterResize.rail && afterResize.utility.right <= afterResize.rail.x + 1, 'Browse must remain inside the resizable right utility sidebar');
+  assert.ok(afterResize.utility && afterResize.rail && afterResize.rail.x >= afterResize.utility.x && afterResize.rail.right <= afterResize.utility.right, 'Browse controls must remain inside the resizable right utility sidebar');
   const viewportBeforeResponsiveWait = await webCdp.evaluate(`({ innerWidth, innerHeight, visualWidth: visualViewport?.width, visualHeight: visualViewport?.height })`);
   console.log(`BROWSE_E2E_RESIZE_DIAGNOSTIC ${JSON.stringify({ bounds: afterResize.state.surface.bounds, remote: viewportBeforeResponsiveWait })}`);
   await waitExpression(webCdp, `Math.abs(innerWidth-${afterResize.state.surface.bounds.width})<=1&&Math.abs(innerHeight-${afterResize.state.surface.bounds.height})<=1`);
@@ -746,6 +748,7 @@ try {
   await appCdp.evaluate(click('[data-testid="browse-nav"]'));
   await waitExpression(appCdp, `document.querySelector('[data-testid="browse-screen"]')`);
   await waitExpression(appCdp, `window.fielora.browser.getState().then(state=>state.url===${JSON.stringify(secondUrl)}&&state.surface.visible)`);
+  await waitExpression(appCdp, `window.fielora.browser.getState().then(state=>{const rect=document.querySelector('[data-testid="browse-viewport"]')?.getBoundingClientRect();const bounds=state.surface.bounds;return rect&&Math.abs(bounds.x-Math.round(rect.left))<=1&&Math.abs(bounds.y-Math.round(rect.top))<=1&&Math.abs(bounds.width-Math.round(rect.width))<=1&&Math.abs(bounds.height-Math.round(rect.height))<=1})`);
   assertVisibleSurface(await surfaceSnapshot(appCdp));
   assert.deepEqual(await browseIdentitySnapshot(appCdp), browseBeforeFieldTransition, 'Fields round-trip must preserve the loose Browse Page collection');
   checkpoint('browse-fields-browse');

@@ -1,6 +1,109 @@
+import type { AgentEventView, AgentPermission, AgentRunView, ConversationMessageView } from '@fielora/contracts';
+
 export interface FileProposal {
   relativePath: string;
   content: string;
+}
+
+export interface ComposerKeyStroke {
+  key: string;
+  shiftKey: boolean;
+  isComposing: boolean;
+}
+
+export function shouldSubmitComposerKey(stroke: ComposerKeyStroke): boolean {
+  return stroke.key === 'Enter' && !stroke.shiftKey && !stroke.isComposing;
+}
+
+export function hasUserMessage(messages: ReadonlyArray<{ role: string }>): boolean {
+  return messages.some((message) => message.role === 'USER');
+}
+
+const permissions = new Set<AgentPermission>(['READ_ONLY', 'REVIEW_CHANGES', 'FULL_CONTROL']);
+
+export function resolveComposerPermission(
+  conversationOverride: string | null,
+  projectDefault: string | null,
+  globalDefault: string | null,
+): AgentPermission {
+  for (const candidate of [conversationOverride, projectDefault, globalDefault]) {
+    if (permissions.has(candidate as AgentPermission)) return candidate as AgentPermission;
+  }
+  return 'REVIEW_CHANGES';
+}
+
+export function agentTurnOwnership(
+  messages: readonly ConversationMessageView[],
+  run: AgentRunView,
+  events: readonly AgentEventView[],
+): { userMessageId: string | null; assistantMessageId: string | null } {
+  const created = events.find((event) => event.kind === 'RUN_CREATED');
+  const payload = created?.payload && typeof created.payload === 'object' ? created.payload as Record<string, unknown> : null;
+  const recordedUserId = typeof payload?.user_message_id === 'string' ? payload.user_message_id : null;
+  const fallbackUser = [...messages].reverse().find((message) => message.role === 'USER' && message.created_at <= run.created_at) ?? null;
+  const userMessageId = messages.some((message) => message.id === recordedUserId && message.role === 'USER')
+    ? recordedUserId
+    : fallbackUser?.id ?? null;
+  const exactAssistant = messages.find((message) => message.role === 'ASSISTANT' && message.invocation_id === run.id) ?? null;
+  if (exactAssistant) return { userMessageId, assistantMessageId: exactAssistant.id };
+  const nextUser = messages.find((message) => message.role === 'USER' && message.created_at > run.created_at);
+  const fallbackAssistant = messages.find((message) => message.role === 'ASSISTANT'
+    && message.created_at >= run.created_at
+    && (!nextUser || message.created_at < nextUser.created_at)) ?? null;
+  return { userMessageId, assistantMessageId: fallbackAssistant?.id ?? null };
+}
+
+export type WorkspacePreviewKind = 'TEXT' | 'IMAGE' | 'UNSUPPORTED';
+
+export function workspacePreviewKind(relativePath: string): WorkspacePreviewKind {
+  const extension = relativePath.toLowerCase().match(/\.([^.\\/]+)$/)?.[1] ?? '';
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(extension)) return 'IMAGE';
+  if (['pdf', 'zip', '7z', 'rar', 'exe', 'dll', 'ico', 'mp3', 'wav', 'mp4', 'mov', 'woff', 'woff2', 'ttf'].includes(extension)) return 'UNSUPPORTED';
+  return 'TEXT';
+}
+
+export function friendlyFilePreviewFailure(reason: unknown): string {
+  const raw = reason instanceof Error ? reason.message : String(reason);
+  if (/binary files|utf-?8|unsupported|too large/i.test(raw)) {
+    return '这种文件暂不支持在 Fielora 中预览，可以用系统默认应用打开。';
+  }
+  return '无法预览这个文件，请稍后重试。';
+}
+
+export function isDefaultConversationTitle(title: string): boolean {
+  return /^\s*新对话(?:\s*\d+)?\s*$/.test(title);
+}
+
+export function conversationTitleFromContent(content: string, maximumLength = 24): string {
+  const normalized = content
+    .replace(/[`*_>#]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return '新对话';
+
+  const firstThought = normalized.split(/[。！？!?\n]/, 1)[0]?.trim() ?? normalized;
+  const concise = firstThought
+    .replace(/^(?:请(?:帮我)?|麻烦(?:帮我)?|帮我|我(?:现在)?(?:需要|想要)|我们(?:准备|打算)(?:在这里)?(?:去|来)?)\s*/u, '')
+    .replace(/^(?:去|来)?改一些/u, '修改')
+    .replace(/[，,\s]*(?:可以吗|行吗|好吗|是否可以)\s*$/u, '')
+    .trim() || firstThought;
+  const characters = Array.from(concise);
+  return characters.length > maximumLength
+    ? `${characters.slice(0, maximumLength).join('')}…`
+    : concise;
+}
+
+export function collapseDuplicateUnsentConversations<T extends { id: string }>(
+  conversations: readonly T[],
+  unsentIds: ReadonlySet<string>,
+): T[] {
+  let retainedDraft = false;
+  return conversations.filter((conversation) => {
+    if (!unsentIds.has(conversation.id)) return true;
+    if (retainedDraft) return false;
+    retainedDraft = true;
+    return true;
+  });
 }
 
 export function parseFileProposal(output: string): FileProposal | null {

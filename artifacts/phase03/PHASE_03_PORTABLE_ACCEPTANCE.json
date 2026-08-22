@@ -1,7 +1,7 @@
 {
   "status": "PASS",
   "mode": "portable",
-  "application": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-resizable-sidebar-1e0ad770fdff41a38e37b44d11e016e8\\Fielora.exe",
+  "application": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-agent-portable-1af06efa8ca74ab89af0a5579b8e7007\\Fielora.exe",
   "trusted_origin": "fielora://app",
   "checks": [
     "portable-runtime-selected",
@@ -33,5 +33,5 @@
     "zero-page-lifecycle",
     "zero-page-omnibox"
   ],
-  "captured_at": "2026-08-17T15:37:50.682Z"
+  "captured_at": "2026-08-18T09:04:38.832Z"
 }

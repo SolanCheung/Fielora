@@ -23,6 +23,10 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Complete Agent Portable E2E failed with exit code $LASTEXITCODE"
     }
+    node tests/e2e/browse-slice01-e2e.mjs portable
+    if ($LASTEXITCODE -ne 0) {
+        throw "Complete Agent Portable Browse E2E failed with exit code $LASTEXITCODE"
+    }
 }
 finally {
     Remove-Item Env:FIELORA_PACKAGED_APP -ErrorAction SilentlyContinue

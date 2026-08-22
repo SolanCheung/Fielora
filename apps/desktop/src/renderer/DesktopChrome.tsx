@@ -3,6 +3,7 @@ import type { AppView } from './view-state';
 import { BrowsePanel } from './BrowseScreen';
 import { ShellIcon } from './PrimaryNav';
 import { ResizableDivider } from './ResizableDivider';
+import { ToolbarAction } from './UiPrimitives';
 
 type ChromeMenu = 'FILE' | 'EDIT' | 'VIEW' | 'HELP';
 type WorkspaceTool = 'FILES' | 'DIFF' | 'TERMINAL';
@@ -14,9 +15,14 @@ interface RouteState {
   canForward: boolean;
 }
 
+interface TerminalLayoutState {
+  open: boolean;
+  height: number;
+}
+
 const initialRoute: RouteState = { route: 'PROJECTS', canBack: false, canForward: false };
 const utilityWidthKey = 'fielora:utility-panel-width-v2';
-const utilityMin = 380;
+const utilityMin = 340;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), Math.max(min, max));
@@ -45,36 +51,67 @@ function ChromeGlyph({ name }: { name: 'sidebar' | 'back' | 'forward' | 'focus' 
 export function DesktopChrome({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState<ChromeMenu | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [renderTools, setRenderTools] = useState(false);
   const [utilityView, setUtilityView] = useState<UtilityView>('HOME');
   const [utilityWidth, setUtilityWidth] = useState(readUtilityWidth);
   const [route, setRoute] = useState<RouteState>(initialRoute);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [terminalLayout, setTerminalLayout] = useState<TerminalLayoutState>({ open: false, height: 250 });
   const chromeRef = useRef<HTMLElement>(null);
   const workAreaRef = useRef<HTMLDivElement>(null);
+  const utilityOpenFrameRef = useRef<number | null>(null);
   const previousRouteRef = useRef<AppView>(initialRoute.route);
 
-  const openWorkspace = (tool: WorkspaceTool) => { setToolsOpen(false); emit('fielora:open-workspace', tool); };
+  const openWorkspace = (tool: WorkspaceTool) => {
+    if (!toolsOpen) { emit('fielora:open-workspace', tool); return; }
+    closeUtility();
+    window.setTimeout(() => emit('fielora:open-workspace', tool), 300);
+  };
   const toggleSidebar = () => setSidebarCollapsed((value) => !value);
-  const toggleFocus = () => setFocusMode((value) => !value);
   const settingsRoute = route.route === 'SETTINGS';
 
   function openUtility(view: UtilityView) {
     if (settingsRoute) return;
     setUtilityWidth((current) => clamp(current, utilityMin, utilityMaximum()));
     setUtilityView(view);
-    setToolsOpen(true);
+    if (toolsOpen) return;
+    if (utilityOpenFrameRef.current !== null) window.cancelAnimationFrame(utilityOpenFrameRef.current);
+    setRenderTools(true);
+    utilityOpenFrameRef.current = window.requestAnimationFrame(() => {
+      utilityOpenFrameRef.current = null;
+      setToolsOpen(true);
+    });
+  }
+
+  function closeUtility() {
+    if (utilityOpenFrameRef.current !== null) {
+      window.cancelAnimationFrame(utilityOpenFrameRef.current);
+      utilityOpenFrameRef.current = null;
+    }
+    setToolsOpen(false);
+    setFocusMode(false);
+  }
+
+  function toggleFocus() {
+    if (settingsRoute) return;
+    if (focusMode) {
+      setFocusMode(false);
+      return;
+    }
+    if (!toolsOpen) openUtility('HOME');
+    setFocusMode(true);
   }
 
   function utilityMaximum(): number {
     const width = workAreaRef.current?.getBoundingClientRect().width ?? window.innerWidth;
-    return Math.max(utilityMin, width - 360 - 48 - 6);
+    return Math.max(utilityMin, width - 360 - 4);
   }
 
   function resizeUtility(clientX: number) {
     const rect = workAreaRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const next = clamp(rect.right - 48 - clientX, utilityMin, utilityMaximum());
+    const next = clamp(rect.right - clientX, utilityMin, utilityMaximum());
     setUtilityWidth(next);
     window.localStorage.setItem(utilityWidthKey, String(Math.round(next)));
   }
@@ -99,8 +136,21 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.body.dataset.utilityView = toolsOpen ? utilityView : 'CLOSED';
-    return () => { delete document.body.dataset.utilityView; };
+    document.body.dataset.utilityOpen = String(toolsOpen);
+    emit('fielora:utility-state', { open: toolsOpen, view: utilityView });
+    return () => { delete document.body.dataset.utilityView; delete document.body.dataset.utilityOpen; };
   }, [toolsOpen, utilityView]);
+
+  useEffect(() => {
+    if (toolsOpen) { setRenderTools(true); return; }
+    setFocusMode(false);
+    const timer = window.setTimeout(() => setRenderTools(false), 300);
+    return () => window.clearTimeout(timer);
+  }, [toolsOpen]);
+
+  useEffect(() => () => {
+    if (utilityOpenFrameRef.current !== null) window.cancelAnimationFrame(utilityOpenFrameRef.current);
+  }, []);
 
   useEffect(() => {
     const area = workAreaRef.current;
@@ -112,7 +162,7 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const routeChanged = previousRouteRef.current !== route.route;
-    if (settingsRoute || (routeChanged && toolsOpen && utilityView === 'BROWSER')) setToolsOpen(false);
+    if (settingsRoute || (routeChanged && toolsOpen && utilityView === 'BROWSER')) closeUtility();
     previousRouteRef.current = route.route;
   }, [route.route, settingsRoute, toolsOpen, utilityView]);
 
@@ -122,15 +172,24 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
       const view = (event as CustomEvent<UtilityView>).detail;
       if (view === 'HOME' || view === 'BROWSER') openUtility(view);
     };
+    const closeRequestedUtility = () => closeUtility();
+    const updateTerminal = (event: Event) => {
+      const detail = (event as CustomEvent<TerminalLayoutState>).detail;
+      if (detail && typeof detail.open === 'boolean' && Number.isFinite(detail.height)) setTerminalLayout(detail);
+    };
     const closeMenus = (event: PointerEvent) => {
       if (chromeRef.current && !chromeRef.current.contains(event.target as Node)) setMenu(null);
     };
     window.addEventListener('fielora:route-state', updateRoute);
     window.addEventListener('fielora:open-utility', openRequestedUtility);
+    window.addEventListener('fielora:close-utility', closeRequestedUtility);
+    window.addEventListener('fielora:terminal-state', updateTerminal);
     window.addEventListener('pointerdown', closeMenus);
     return () => {
       window.removeEventListener('fielora:route-state', updateRoute);
       window.removeEventListener('fielora:open-utility', openRequestedUtility);
+      window.removeEventListener('fielora:close-utility', closeRequestedUtility);
+      window.removeEventListener('fielora:terminal-state', updateTerminal);
       window.removeEventListener('pointerdown', closeMenus);
     };
   });
@@ -158,7 +217,10 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
     {menu === id && <div className="chrome-menu" role="menu" onClick={() => setMenu(null)}>{content}</div>}
   </div>;
 
-  const layoutStyle = { '--utility-panel-width': `${utilityWidth}px` } as CSSProperties;
+  const layoutStyle = {
+    '--utility-panel-width': `${utilityWidth}px`,
+    '--desktop-terminal-height': terminalLayout.open ? `${terminalLayout.height}px` : '0px',
+  } as CSSProperties;
 
   return <div className="desktop-frame" data-testid="desktop-frame">
     <header className="desktop-chrome" ref={chromeRef} data-testid="desktop-chrome">
@@ -175,15 +237,15 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
       </nav>
       <div className="chrome-drag-region" />
     </header>
-    <div ref={workAreaRef} className={`desktop-work-area ${toolsOpen ? 'utility-open' : ''} ${settingsRoute ? 'settings-route' : ''}`} style={layoutStyle} data-testid="desktop-work-area">
+    <div ref={workAreaRef} className={`desktop-work-area ${toolsOpen ? 'utility-open' : renderTools ? 'utility-closing' : ''} ${focusMode && toolsOpen ? 'utility-focus' : ''} ${terminalLayout.open ? 'terminal-open' : ''} ${settingsRoute ? 'settings-route' : ''}`} style={layoutStyle} data-testid="desktop-work-area">
       <div className="desktop-content">{children}</div>
-      {toolsOpen && !settingsRoute && <ResizableDivider label="调整右侧工具区宽度" value={utilityWidth} min={utilityMin} max={utilityMaximum()} onResize={resizeUtility} onKeyboardResize={resizeUtilityBy} testId="utility-resizer" className="utility-resizer" />}
-      {toolsOpen && !settingsRoute && <aside className={`utility-launcher view-${utilityView.toLowerCase()}`} data-testid="utility-launcher">
-        <header><div>{utilityView !== 'HOME' && <button className="utility-back" aria-label="返回工具列表" onClick={() => setUtilityView('HOME')}>←</button>}<strong>{utilityView === 'BROWSER' ? '浏览器' : '工作区工具'}</strong></div><button aria-label="关闭工具区" onClick={() => setToolsOpen(false)}>×</button></header>
+      {renderTools && !settingsRoute && <ResizableDivider label="调整右侧工具区宽度" value={utilityWidth} min={utilityMin} max={utilityMaximum()} onResize={resizeUtility} onKeyboardResize={resizeUtilityBy} testId="utility-resizer" className="utility-resizer" />}
+      {renderTools && !settingsRoute && <aside className={`utility-launcher view-${utilityView.toLowerCase()}`} aria-hidden={!toolsOpen} data-testid="utility-launcher">
+        <header><div>{utilityView !== 'HOME' && <button className="utility-back" aria-label="返回工具列表" onClick={() => setUtilityView('HOME')}>←</button>}<strong>{utilityView === 'BROWSER' ? '浏览器' : '工作区工具'}</strong></div></header>
         {utilityView === 'BROWSER' ? <BrowsePanel browser={window.fielora.browser} /> : <>
           <nav>
             <button onClick={() => openWorkspace('DIFF')} data-testid="utility-review"><ShellIcon name="diff"/><span>审阅</span><kbd>Ctrl+Shift+G</kbd></button>
-            <button onClick={() => openWorkspace('TERMINAL')} data-testid="utility-terminal"><ShellIcon name="terminal"/><span>终端</span><kbd>Ctrl+`</kbd></button>
+            {route.route === 'PROJECTS' && <button onClick={() => openWorkspace('TERMINAL')} data-testid="utility-terminal"><ShellIcon name="terminal"/><span>终端</span><kbd>Ctrl+`</kbd></button>}
             <button onClick={() => setUtilityView('BROWSER')} data-testid="utility-browser"><ShellIcon name="browse"/><span>浏览器</span><kbd>Ctrl+T</kbd></button>
             <button onClick={() => openWorkspace('FILES')} data-testid="utility-files"><ShellIcon name="folder"/><span>文件</span><kbd>Ctrl+P</kbd></button>
             <button onClick={() => { setToolsOpen(false); emit('fielora:open-summon'); }} data-testid="utility-chat"><ShellIcon name="compose"/><span>侧边聊天</span><kbd>Ctrl+Alt+S</kbd></button>
@@ -191,12 +253,13 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
           <p>拖动左侧分隔线调整工具区宽度。</p>
         </>}
       </aside>}
-      {!settingsRoute && <aside className="utility-rail" aria-label="右侧工具栏" data-testid="utility-rail">
-        <button className={focusMode ? 'active' : ''} title="专注布局" onClick={toggleFocus} data-testid="rail-focus"><ChromeGlyph name="focus"/></button>
-        <button title="打开终端" onClick={() => openWorkspace('TERMINAL')} data-testid="rail-terminal"><ShellIcon name="terminal"/></button>
-        <button className={toolsOpen && utilityView === 'BROWSER' ? 'active' : ''} title="浏览器" onClick={() => toolsOpen && utilityView === 'BROWSER' ? setToolsOpen(false) : openUtility('BROWSER')} data-testid="rail-browser"><ShellIcon name="browse"/></button>
-        <button className={toolsOpen && utilityView === 'HOME' ? 'active' : ''} title="工作区工具" onClick={() => toolsOpen && utilityView === 'HOME' ? setToolsOpen(false) : openUtility('HOME')} data-testid="chrome-tools"><ChromeGlyph name="tools"/></button>
+      {!settingsRoute && <aside className={`utility-control-dock ${toolsOpen ? 'in-utility' : 'floating'}`} aria-label="工作区控制" data-testid="utility-rail">
+        {route.route === 'PROJECTS' && <div id="desktop-project-actions-layer" className="desktop-project-actions-layer" data-testid="desktop-project-actions-layer" />}
+        {toolsOpen && <ToolbarAction active={focusMode} label={focusMode ? '恢复左右工作区' : '扩展右侧工具区'} icon={<ChromeGlyph name="focus"/>} onClick={toggleFocus} testId="rail-focus" />}
+        {route.route === 'PROJECTS' && <ToolbarAction label="打开当前 Project 终端" icon={<ShellIcon name="terminal"/>} onClick={() => openWorkspace('TERMINAL')} testId="rail-terminal" />}
+        <ToolbarAction active={toolsOpen} label={toolsOpen ? '收起右侧工具区' : '展开右侧工具区'} icon={<ChromeGlyph name="tools"/>} onClick={() => toolsOpen ? closeUtility() : openUtility('HOME')} testId="chrome-tools" />
       </aside>}
+      <div id="desktop-terminal-layer" className="desktop-terminal-layer" data-testid="desktop-terminal-layer" />
     </div>
   </div>;
 }

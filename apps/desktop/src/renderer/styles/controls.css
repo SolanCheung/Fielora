@@ -1,0 +1,92 @@
+/* Shared product primitives. All visual values come from semantic tokens. */
+.ui-button {
+  min-height: var(--fl-control-md);
+  padding: 7px 13px;
+  border: 0;
+  border-radius: var(--fl-radius-control);
+  color: var(--fl-color-text);
+  background: var(--fl-color-surface-hover);
+  font-weight: 600;
+}
+.ui-button:hover:not(:disabled) { color: var(--fl-color-text-strong); background: var(--fl-color-surface-active); }
+.ui-button--primary { color: var(--fl-color-text-on-accent); background: var(--fl-color-brand-ink); }
+.ui-button--primary:hover:not(:disabled) { color: var(--fl-color-text-on-accent); background: var(--fl-color-brand-ink-hover); }
+.ui-button--danger { color: var(--fl-color-text-on-accent); background: var(--fl-color-danger); }
+.ui-button--ghost { color: var(--fl-color-text-muted); background: transparent; }
+.ui-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ui-icon-button,
+.ui-toolbar-action {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fl-radius-control);
+  color: var(--fl-color-text-muted);
+  background: transparent;
+  box-shadow: none;
+}
+.ui-icon-button--sm { width: var(--fl-control-sm); height: var(--fl-control-sm); }
+.ui-icon-button--md,
+.ui-toolbar-action { width: var(--fl-control-md); height: var(--fl-control-md); }
+.ui-toolbar-action--labeled {
+  width: auto;
+  min-width: 72px;
+  grid-auto-flow: column;
+  grid-template-columns: var(--fl-icon-md) auto;
+  gap: var(--fl-space-2);
+  padding: 0 9px;
+  font-size: var(--fl-font-size-meta);
+}
+.ui-icon-button:hover:not(:disabled),
+.ui-toolbar-action:hover:not(:disabled) {
+  color: var(--fl-color-text-strong);
+  background: var(--fl-color-control-hover);
+  box-shadow: var(--fl-shadow-control-hover);
+  transform: translateY(-1px);
+}
+.ui-icon-button.is-active,
+.ui-toolbar-action.is-active { color: var(--fl-color-text-strong); background: var(--fl-color-control-active); }
+.ui-icon-button:disabled,
+.ui-toolbar-action:disabled { opacity: 0.42; cursor: default; transform: none; }
+.ui-icon-button > svg,
+.ui-toolbar-action > svg { width: var(--fl-icon-md); height: var(--fl-icon-md); }
+
+.ui-select { position: relative; min-width: 0; }
+.ui-select > button { width: 100%; min-height: var(--fl-control-lg); display: flex; align-items: center; gap: var(--fl-space-3); padding: 7px 10px 7px 12px; overflow: hidden; border: 1px solid var(--fl-color-border); border-radius: var(--fl-radius-input); color: var(--fl-color-text); background: var(--fl-color-surface-subtle); text-align: left; }
+.ui-select > button:hover,
+.ui-select.open > button { border-color: color-mix(in srgb, var(--fl-color-border) 76%, var(--fl-color-text)); background: var(--fl-color-surface-hover); }
+.ui-select-value { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-chevron { width: var(--fl-icon-sm); height: var(--fl-icon-sm); flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; transition: transform var(--fl-duration-control) var(--fl-ease-standard); }
+.ui-chevron.open { transform: rotate(180deg); }
+.ui-select-popover { position: absolute; z-index: var(--fl-layer-popover); top: calc(100% + 6px); right: 0; min-width: max(100%, 190px); max-width: min(380px, calc(100vw - 32px)); max-height: 280px; display: grid; gap: 2px; padding: 5px; overflow: auto; border: 1px solid var(--fl-color-border-soft); border-radius: calc(var(--fl-radius-input) + 1px); background: var(--fl-color-surface-raised); box-shadow: var(--fl-shadow-popover); backdrop-filter: blur(16px); }
+.ui-select.place-top .ui-select-popover { top: auto; bottom: calc(100% + 7px); }
+.ui-select-popover > button { min-height: 36px; display: grid; grid-template-columns: minmax(0, 1fr) 16px; align-items: center; gap: var(--fl-space-5); padding: 7px 9px; border: 0; border-radius: var(--fl-radius-control); color: var(--fl-color-text); background: transparent; text-align: left; }
+.ui-select-popover > button:hover:not(:disabled),
+.ui-select-popover > button[aria-selected="true"] { background: var(--fl-color-surface-hover); }
+.ui-select-popover > button:disabled { color: var(--fl-color-text-subtle); cursor: default; }
+.ui-select-popover > button > span { min-width: 0; display: grid; gap: 2px; }
+.ui-select-popover strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fl-font-size-label); font-weight: 600; }
+.ui-select-popover small { overflow: hidden; color: var(--fl-color-text-subtle); text-overflow: ellipsis; white-space: nowrap; font-size: var(--fl-font-size-caption); }
+.ui-select-popover svg { width: 15px; height: 15px; fill: none; stroke: var(--fl-color-brand-ink); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+.ui-dialog-backdrop { position: fixed; z-index: var(--fl-layer-dialog); inset: 0; display: grid; place-items: center; padding: var(--fl-space-7); background: var(--fl-color-overlay); backdrop-filter: blur(5px); }
+.ui-dialog { width: min(430px, calc(100vw - 32px)); padding: 18px; border: 1px solid color-mix(in srgb, var(--fl-color-text-muted) 17%, transparent); border-radius: var(--fl-radius-dialog); color: var(--fl-color-text-strong); background: var(--fl-color-surface-raised); box-shadow: var(--fl-shadow-dialog); }
+.ui-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.ui-dialog h2 { margin: 0; font-size: 17px; letter-spacing: -0.015em; }
+.ui-dialog > header .ui-icon-button { font-size: 18px; }
+.ui-dialog > p { margin: 11px 0 14px; color: var(--fl-color-text-muted); font-size: var(--fl-font-size-navigation); line-height: var(--fl-line-height-body); }
+.ui-dialog > input,
+.ui-dialog > textarea { background: var(--fl-color-surface-subtle); }
+.ui-dialog > textarea { min-height: 126px; resize: vertical; }
+.ui-dialog > footer { display: flex; justify-content: flex-end; gap: var(--fl-space-3); margin-top: var(--fl-space-6); }
+.ui-dialog > footer .ui-button { min-height: 36px; border-radius: 9px; }
+
+/* The shared window-right dock is one primitive, including project-scoped portals. */
+.utility-control-dock { z-index: var(--fl-layer-dock); height: var(--fl-control-md); gap: var(--fl-space-1); }
+.utility-control-dock .environment-menu { position: relative; height: var(--fl-control-md); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-icon-button:hover:not(:disabled),
+  .ui-toolbar-action:hover:not(:disabled) { transform: none; }
+}

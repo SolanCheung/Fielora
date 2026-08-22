@@ -4,8 +4,8 @@ use fielora_contracts::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
-use std::ffi::OsStr;
+use std::collections::{HashMap, HashSet};
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -13,7 +13,7 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -22,6 +22,7 @@ const MAX_READ_BYTES: usize = 256 * 1024;
 const MAX_OBSERVATION_BYTES: usize = 256 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_REPO_FILES: usize = 20_000;
+const MAX_CONTEXT_SCORE_BYTES: u64 = 32 * 1024;
 const BUILTIN_SKILLS: &[(&str, &str, &str)] = &[
     (
         "understand_project",
@@ -75,6 +76,16 @@ pub enum AgentError {
     BinaryFileUnsupported,
     #[error("AGENT_FILE_CHANGED")]
     FileChanged,
+    #[error("AGENT_TEXT_MATCH_FAILED")]
+    TextMatchFailed,
+    #[error("AGENT_FILE_CHANGED")]
+    PatchConflict {
+        path: String,
+        reason: String,
+        operation: usize,
+        match_count: usize,
+        current_sha256: String,
+    },
     #[error("AGENT_COMMAND_DENIED")]
     CommandDenied,
     #[error("AGENT_COMMAND_TIMEOUT")]
@@ -97,10 +108,33 @@ impl AgentError {
             Self::FileTooLarge => "AGENT_FILE_TOO_LARGE",
             Self::BinaryFileUnsupported => "AGENT_BINARY_FILE_UNSUPPORTED",
             Self::FileChanged => "AGENT_FILE_CHANGED",
+            Self::TextMatchFailed => "AGENT_TEXT_MATCH_FAILED",
+            Self::PatchConflict { reason, .. } if reason == "SHA_MISMATCH" => "AGENT_FILE_CHANGED",
+            Self::PatchConflict { .. } => "AGENT_PATCH_CONFLICT",
             Self::CommandDenied => "AGENT_COMMAND_DENIED",
             Self::CommandTimeout => "AGENT_COMMAND_TIMEOUT",
             Self::Cancelled => "AGENT_CANCELLED",
             Self::IoFailed => "AGENT_IO_FAILED",
+        }
+    }
+
+    pub fn model_recovery_message(&self) -> String {
+        match self {
+            Self::PatchConflict {
+                path,
+                reason,
+                operation,
+                match_count,
+                current_sha256,
+            } => {
+                let code = if reason == "SHA_MISMATCH" { "AGENT_FILE_CHANGED" } else { "AGENT_PATCH_CONFLICT" };
+                format!(
+                    "{code}: path={path}; operation={operation}; reason={reason}; match_count={match_count}; current_sha256={current_sha256}. Re-read only this file if its hash changed. If exact text matched zero times, use the line numbers from read_file with line_edits. If it matched multiple intended occurrences, use one replacement with replace_all=true. Do not run verification or git diff until the write succeeds."
+                )
+            }
+            Self::FileChanged => "AGENT_FILE_CHANGED: the file hash changed or the exact edit was ambiguous. Re-read the affected file and retry the write before verification.".into(),
+            Self::TextMatchFailed => "AGENT_TEXT_MATCH_FAILED: the guarded file hash is current, but the proposed exact text was missing or ambiguous. Use the current read_file line numbers with apply_patches line_edits, or provide a uniquely matching replacement. Do not reread solely to recalculate the same hash.".into(),
+            _ => self.code().into(),
         }
     }
 }
@@ -148,9 +182,9 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
         ),
         tool(
             "search_text",
-            "Search literal text in bounded UTF-8 project files.",
+            "Search one or more literal strings in one bounded repository scan. Use queries for related terms instead of repeating searches.",
             AgentToolEffect::Observe,
-            json!({"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string"},"max_results":{"type":"integer","minimum":1,"maximum":200}},"required":["query"],"additionalProperties":false}),
+            json!({"type":"object","properties":{"query":{"type":"string"},"queries":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":16,"uniqueItems":true},"path":{"type":"string"},"max_results":{"type":"integer","minimum":1,"maximum":200}},"additionalProperties":false}),
         ),
         tool(
             "stat_path",
@@ -163,6 +197,42 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
             "Run one read-only Git operation: status, diff, log, or show.",
             AgentToolEffect::Observe,
             json!({"type":"object","properties":{"operation":{"type":"string","enum":["status","diff","log","show"]},"args":{"type":"array","items":{"type":"string"},"maxItems":32}},"required":["operation"],"additionalProperties":false}),
+        ),
+        tool(
+            "git_stage",
+            "Stage explicit project-relative paths. Wildcards and stage-all are not accepted.",
+            AgentToolEffect::WorkspaceWrite,
+            json!({"type":"object","properties":{"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"uniqueItems":true}},"required":["paths"],"additionalProperties":false}),
+        ),
+        tool(
+            "git_unstage",
+            "Unstage explicit project-relative paths without changing working-tree files.",
+            AgentToolEffect::WorkspaceWrite,
+            json!({"type":"object","properties":{"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"uniqueItems":true}},"required":["paths"],"additionalProperties":false}),
+        ),
+        tool(
+            "git_create_branch",
+            "Create one validated local branch without switching to it.",
+            AgentToolEffect::WorkspaceWrite,
+            json!({"type":"object","properties":{"branch":{"type":"string","minLength":1,"maxLength":128}},"required":["branch"],"additionalProperties":false}),
+        ),
+        tool(
+            "git_switch_branch",
+            "Switch to one existing validated local branch.",
+            AgentToolEffect::WorkspaceWrite,
+            json!({"type":"object","properties":{"branch":{"type":"string","minLength":1,"maxLength":128}},"required":["branch"],"additionalProperties":false}),
+        ),
+        tool(
+            "git_commit",
+            "Create one normal local commit from the staged index. Amend and signing overrides are not accepted.",
+            AgentToolEffect::WorkspaceWrite,
+            json!({"type":"object","properties":{"message":{"type":"string","minLength":1,"maxLength":4096}},"required":["message"],"additionalProperties":false}),
+        ),
+        tool(
+            "git_push",
+            "Push one local branch to a named remote without force. Interactive credential prompts are disabled.",
+            AgentToolEffect::Network,
+            json!({"type":"object","properties":{"remote":{"type":"string","minLength":1,"maxLength":64},"branch":{"type":"string","minLength":1,"maxLength":128},"set_upstream":{"type":"boolean"}},"required":["remote","branch"],"additionalProperties":false}),
         ),
         tool(
             "list_skills",
@@ -196,9 +266,47 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
         ),
         tool(
             "replace_text",
-            "Apply an exact, hash-guarded text replacement without sending the entire file.",
+            "Apply one or more exact replacements to one file in a single hash-guarded atomic write. Prefer replacements[] when the same file needs multiple edits.",
             AgentToolEffect::WorkspaceWrite,
-            json!({"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"expected_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"replace_all":{"type":"boolean"}},"required":["path","old_text","new_text","expected_sha256"],"additionalProperties":false}),
+            json!({"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"replacements":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"object","properties":{"old_text":{"type":"string"},"new_text":{"type":"string"},"replace_all":{"type":"boolean"}},"required":["old_text","new_text"],"additionalProperties":false}},"expected_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"replace_all":{"type":"boolean"}},"required":["path","expected_sha256"],"additionalProperties":false}),
+        ),
+        tool(
+            "apply_patches",
+            "Apply exact replacements or 1-based inclusive line edits across multiple files as one reviewed, hash-guarded operation. Prefer line_edits for whitespace-heavy HTML or repeated snippets. Each patch must use exactly one edit mode.",
+            AgentToolEffect::WorkspaceWrite,
+            json!({
+                "type":"object",
+                "properties":{
+                    "patches":{
+                        "type":"array","minItems":1,"maxItems":16,
+                        "items":{
+                            "type":"object",
+                            "properties":{
+                                "path":{"type":"string"},
+                                "expected_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+                                "replacements":{
+                                    "type":"array","minItems":1,"maxItems":32,
+                                    "items":{
+                                        "type":"object",
+                                        "properties":{"old_text":{"type":"string"},"new_text":{"type":"string"},"replace_all":{"type":"boolean"}},
+                                        "required":["old_text","new_text"],"additionalProperties":false
+                                    }
+                                },
+                                "line_edits":{
+                                    "type":"array","minItems":1,"maxItems":32,
+                                    "items":{
+                                        "type":"object",
+                                        "properties":{"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1},"new_text":{"type":"string"}},
+                                        "required":["start_line","end_line","new_text"],"additionalProperties":false
+                                    }
+                                }
+                            },
+                            "required":["path","expected_sha256"],"additionalProperties":false
+                        }
+                    }
+                },
+                "required":["patches"],"additionalProperties":false
+            }),
         ),
         tool(
             "move_file",
@@ -257,20 +365,30 @@ impl PolicyEngine {
         use AgentPermission::*;
         use AgentPolicyDecision::*;
         use AgentToolEffect::*;
+        if spec.definition.name.starts_with("git_") && spec.definition.name != "git_read" {
+            return if permission == FullControl {
+                Allow
+            } else {
+                Ask
+            };
+        }
         match (permission, spec.effect) {
             (_, Observe) => Allow,
-            (ReadOnly, _) => Deny,
-            (ReviewChanges, WorkspaceWrite | Process) => Ask,
-            (ReviewChanges, Network | Destructive) => Ask,
-            (FullControl, WorkspaceWrite) => Allow,
-            (FullControl, Process) => {
+            // READ_ONLY remains the stable wire/storage value for the user-facing
+            // "Request approval" preset. Isolated child agents stay read-only because
+            // Core gives them an observe-only tool catalog.
+            (ReadOnly, WorkspaceWrite | Process | Network | Destructive) => Ask,
+            (ReviewChanges, WorkspaceWrite) => Allow,
+            (ReviewChanges, Process) => {
                 if dangerous_command(arguments) {
                     Ask
                 } else {
                     Allow
                 }
             }
-            (FullControl, Network | Destructive) => Ask,
+            (ReviewChanges, Network | Destructive) => Ask,
+            (FullControl, WorkspaceWrite) => Allow,
+            (FullControl, Process | Network | Destructive) => Allow,
         }
     }
 }
@@ -308,14 +426,43 @@ fn dangerous_command(arguments: &Value) -> bool {
         return true;
     }
     if name == "git" {
-        return args.iter().any(|arg| {
-            matches!(
-                arg.as_str(),
-                "push" | "clean" | "reset" | "rebase" | "checkout" | "switch" | "commit" | "tag"
-            )
-        });
+        return git_command_mutates(&args);
     }
     false
+}
+
+fn git_command_mutates(args: &[String]) -> bool {
+    let Some(operation) = args.iter().find(|arg| !arg.starts_with('-')) else {
+        return true;
+    };
+    !matches!(
+        operation.as_str(),
+        "status" | "diff" | "log" | "show" | "rev-parse" | "ls-files" | "name-rev" | "describe"
+    )
+}
+
+fn git_mutation_arguments(arguments: &Value) -> bool {
+    let program = arguments
+        .get("program")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let name = Path::new(program)
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    if name != "git" {
+        return false;
+    }
+    let args = arguments
+        .get("argv")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    git_command_mutates(&args)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -325,6 +472,7 @@ pub struct ContextFile {
     pub bytes: u64,
     pub score: i64,
     pub excerpt: String,
+    pub complete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -335,6 +483,35 @@ pub struct CompiledContext {
     pub files_scanned: u32,
     pub files: Vec<ContextFile>,
     pub rendered: String,
+    pub repository_index_cache_hit: bool,
+    pub repository_index_duration_ms: u64,
+    pub repository_index_invalidated_files: u32,
+    pub stable_context_sha256: String,
+    pub dynamic_context_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RepositoryIndexEntry {
+    path: String,
+    bytes: u64,
+    modified_ms: u64,
+    sha256: String,
+    language: String,
+    terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RepositoryContextIndex {
+    schema_version: u16,
+    project_root_hash: String,
+    git_head: Option<String>,
+    entries: Vec<RepositoryIndexEntry>,
+}
+
+struct PreparedRepositoryIndex {
+    index: RepositoryContextIndex,
+    cache_hit: bool,
+    invalidated_files: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -359,93 +536,331 @@ impl ContextCompiler {
         task: &str,
         explicit_paths: &[String],
     ) -> Result<CompiledContext, AgentError> {
+        self.compile_internal(project_root, task, explicit_paths, None)
+    }
+
+    pub fn compile_indexed(
+        &self,
+        project_root: &Path,
+        task: &str,
+        explicit_paths: &[String],
+        index_directory: &Path,
+    ) -> Result<CompiledContext, AgentError> {
+        self.compile_internal(project_root, task, explicit_paths, Some(index_directory))
+    }
+
+    fn compile_internal(
+        &self,
+        project_root: &Path,
+        task: &str,
+        explicit_paths: &[String],
+        index_directory: Option<&Path>,
+    ) -> Result<CompiledContext, AgentError> {
         let root = project_root
             .canonicalize()
             .map_err(|_| AgentError::IoFailed)?;
-        let paths = repository_files(&root)?;
+        let index_started = Instant::now();
+        let prepared_index = prepare_repository_index(&root, index_directory)?;
+        let repository_index_duration_ms =
+            index_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         let task_terms = terms(task);
         let explicit = explicit_paths
             .iter()
             .map(|path| normalize_relative(path).map(|value| relative_text(&value)))
             .collect::<Result<HashSet<_>, _>>()?;
         let mut candidates = Vec::new();
-        for relative in paths.iter().take(MAX_REPO_FILES) {
-            if sensitive_relative(relative) {
-                continue;
-            }
-            let absolute = resolve_existing(&root, relative)?;
-            let metadata = fs::metadata(&absolute).map_err(|_| AgentError::IoFailed)?;
-            if !metadata.is_file() || metadata.len() as usize > MAX_READ_BYTES {
-                continue;
-            }
-            let bytes = fs::read(&absolute).map_err(|_| AgentError::IoFailed)?;
-            let Ok(text) = String::from_utf8(bytes.clone()) else {
-                continue;
-            };
-            let path_text = relative.to_string_lossy().replace('\\', "/");
-            let mut score = score_path(&path_text, &task_terms);
-            if explicit.contains(&path_text) {
+        for entry in prepared_index.index.entries.iter().take(MAX_REPO_FILES) {
+            let mut score = score_path(&entry.path, &task_terms);
+            if explicit.contains(&entry.path) {
                 score += 100_000;
             }
-            let lower_excerpt = text
-                .chars()
-                .take(16_000)
-                .collect::<String>()
-                .to_ascii_lowercase();
             score += task_terms
                 .iter()
-                .filter(|term| lower_excerpt.contains(term.as_str()))
+                .filter(|term| entry.terms.iter().any(|candidate| candidate == *term))
                 .count() as i64
                 * 25;
-            candidates.push((score, path_text, metadata.len(), bytes, text));
+            candidates.push((score, entry.path.clone(), entry.bytes));
         }
         candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
         let mut remaining = self.max_bytes;
         let mut files = Vec::new();
         let mut rendered = String::new();
-        for (score, path, bytes_len, bytes, text) in candidates.into_iter().take(self.max_files) {
+        for (score, path, bytes_len) in candidates.into_iter().take(self.max_files) {
             if remaining < 256 {
                 break;
             }
+            let relative = normalize_relative(&path)?;
+            let absolute = resolve_existing(&root, &relative)?;
+            let bytes = fs::read(&absolute).map_err(|_| AgentError::IoFailed)?;
+            let Ok(text) = String::from_utf8(bytes.clone()) else {
+                continue;
+            };
             let excerpt = truncate_utf8(&text, remaining.min(16 * 1024));
             if excerpt.is_empty() {
                 continue;
             }
+            let file_sha256 = sha256(&bytes);
+            let excerpt_complete = excerpt.len() == text.len();
             remaining = remaining.saturating_sub(excerpt.len());
             rendered.push_str("\n<project_file path=\"");
             rendered.push_str(&path);
+            rendered.push_str("\" sha256=\"");
+            rendered.push_str(&file_sha256);
+            rendered.push_str("\" complete=\"");
+            rendered.push_str(if excerpt_complete { "true" } else { "false" });
             rendered.push_str("\">\n");
             rendered.push_str(&excerpt);
             rendered.push_str("\n</project_file>\n");
             files.push(ContextFile {
                 path,
-                sha256: sha256(&bytes),
+                sha256: file_sha256,
                 bytes: bytes_len,
                 score,
                 excerpt,
+                complete: excerpt_complete,
             });
         }
         let content_sha256 = sha256(rendered.as_bytes());
+        let stable_context_sha256 = sha256(
+            serde_json::to_string(
+                &prepared_index
+                    .index
+                    .entries
+                    .iter()
+                    .map(|entry| (&entry.path, entry.bytes, &entry.language))
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(|_| AgentError::IoFailed)?
+            .as_bytes(),
+        );
+        let dynamic_context_sha256 = sha256(
+            serde_json::to_string(
+                &prepared_index
+                    .index
+                    .entries
+                    .iter()
+                    .map(|entry| (&entry.path, entry.modified_ms, &entry.sha256))
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(|_| AgentError::IoFailed)?
+            .as_bytes(),
+        );
         Ok(CompiledContext {
             project_root_hash: sha256(root.to_string_lossy().as_bytes()),
             content_sha256,
             estimated_tokens: (rendered.chars().count() / 4).max(1) as u32,
-            files_scanned: paths.len().min(u32::MAX as usize) as u32,
+            files_scanned: prepared_index.index.entries.len().min(u32::MAX as usize) as u32,
             files,
             rendered,
+            repository_index_cache_hit: prepared_index.cache_hit,
+            repository_index_duration_ms,
+            repository_index_invalidated_files: prepared_index.invalidated_files,
+            stable_context_sha256,
+            dynamic_context_sha256,
         })
     }
 }
 
+fn prepare_repository_index(
+    root: &Path,
+    index_directory: Option<&Path>,
+) -> Result<PreparedRepositoryIndex, AgentError> {
+    let project_root_hash = sha256(root.to_string_lossy().as_bytes());
+    let cache_path =
+        index_directory.map(|directory| directory.join(format!("{project_root_hash}.json")));
+    let previous = cache_path
+        .as_ref()
+        .and_then(|path| fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice::<RepositoryContextIndex>(&bytes).ok())
+        .filter(|index| index.schema_version == 1 && index.project_root_hash == project_root_hash);
+    let previous_entries = previous
+        .as_ref()
+        .map(|index| {
+            index
+                .entries
+                .iter()
+                .map(|entry| (entry.path.clone(), entry.clone()))
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let paths = repository_files(root)?;
+    let mut invalidated_files = previous_entries.len().saturating_sub(paths.len()) as u32;
+    let mut entries = Vec::new();
+    for relative in paths.into_iter().take(MAX_REPO_FILES) {
+        if sensitive_relative(&relative) {
+            continue;
+        }
+        let absolute = resolve_existing(root, &relative)?;
+        let metadata = fs::metadata(&absolute).map_err(|_| AgentError::IoFailed)?;
+        if !metadata.is_file() || metadata.len() as usize > MAX_READ_BYTES {
+            continue;
+        }
+        let path = relative_text(&relative);
+        let modified_ms = modified_ms(&metadata);
+        if let Some(entry) = previous_entries.get(&path)
+            && entry.bytes == metadata.len()
+            && entry.modified_ms == modified_ms
+        {
+            entries.push(entry.clone());
+            continue;
+        }
+        invalidated_files = invalidated_files.saturating_add(1);
+        if let Some(entry) = index_repository_file(&absolute, path, metadata.len(), modified_ms)? {
+            entries.push(entry);
+        }
+    }
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    let cache_hit = previous.is_some()
+        && invalidated_files == 0
+        && previous
+            .as_ref()
+            .is_some_and(|index| index.entries.len() == entries.len());
+    let index = RepositoryContextIndex {
+        schema_version: 1,
+        project_root_hash,
+        git_head: repository_git_head(root),
+        entries,
+    };
+    if let Some(path) = cache_path {
+        let directory = path.parent().ok_or(AgentError::IoFailed)?;
+        fs::create_dir_all(directory).map_err(|_| AgentError::IoFailed)?;
+        let encoded = serde_json::to_vec(&index).map_err(|_| AgentError::IoFailed)?;
+        fs::write(&path, encoded).map_err(|_| AgentError::IoFailed)?;
+    }
+    Ok(PreparedRepositoryIndex {
+        index,
+        cache_hit,
+        invalidated_files,
+    })
+}
+
+fn index_repository_file(
+    absolute: &Path,
+    path: String,
+    bytes_len: u64,
+    modified_ms: u64,
+) -> Result<Option<RepositoryIndexEntry>, AgentError> {
+    let bytes = fs::read(absolute).map_err(|_| AgentError::IoFailed)?;
+    if bytes.contains(&0) {
+        return Ok(None);
+    }
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        return Ok(None);
+    };
+    let searchable = truncate_utf8(text, MAX_CONTEXT_SCORE_BYTES as usize).to_ascii_lowercase();
+    Ok(Some(RepositoryIndexEntry {
+        path: path.clone(),
+        bytes: bytes_len,
+        modified_ms,
+        sha256: sha256(&bytes),
+        language: repository_language(&path),
+        terms: terms(&searchable),
+    }))
+}
+
+fn modified_ms(metadata: &fs::Metadata) -> u64 {
+    metadata
+        .modified()
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64
+}
+
+fn repository_language(path: &str) -> String {
+    Path::new(path)
+        .extension()
+        .and_then(OsStr::to_str)
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_else(|| "text".into())
+}
+
+fn repository_git_head(root: &Path) -> Option<String> {
+    let output = sanitized_command("git")
+        .args(["-C", &root.to_string_lossy(), "rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
 fn terms(task: &str) -> Vec<String> {
     let mut seen = HashSet::new();
-    task.split(|character: char| {
-        !character.is_alphanumeric() && character != '_' && character != '-'
-    })
-    .map(str::to_ascii_lowercase)
-    .filter(|term| term.chars().count() >= 2 && seen.insert(term.clone()))
-    .take(64)
-    .collect()
+    let mut result = Vec::new();
+    let mut segment = String::new();
+    let mut segment_is_cjk = None;
+    for character in task.chars() {
+        let kind = if is_cjk(character) {
+            Some(true)
+        } else if character.is_alphanumeric() || character == '_' || character == '-' {
+            Some(false)
+        } else {
+            None
+        };
+        if kind != segment_is_cjk {
+            push_term_segment(&segment, segment_is_cjk, &mut seen, &mut result);
+            segment.clear();
+            segment_is_cjk = kind;
+        }
+        if kind.is_some() {
+            segment.push(character);
+        }
+    }
+    push_term_segment(&segment, segment_is_cjk, &mut seen, &mut result);
+    result.truncate(256);
+    result
+}
+
+fn push_term_segment(
+    segment: &str,
+    is_cjk_segment: Option<bool>,
+    seen: &mut HashSet<String>,
+    result: &mut Vec<String>,
+) {
+    if segment.is_empty() || result.len() >= 256 {
+        return;
+    }
+    if is_cjk_segment == Some(true) {
+        let characters = segment.chars().collect::<Vec<_>>();
+        if (2..=12).contains(&characters.len()) {
+            let whole = characters.iter().collect::<String>();
+            if seen.insert(whole.clone()) {
+                result.push(whole);
+            }
+        }
+        for width in [4, 3, 2] {
+            if characters.len() < width {
+                continue;
+            }
+            for window in characters.windows(width) {
+                let term = window.iter().collect::<String>();
+                if seen.insert(term.clone()) {
+                    result.push(term);
+                    if result.len() >= 256 {
+                        return;
+                    }
+                }
+            }
+        }
+    } else {
+        let term = segment.to_ascii_lowercase();
+        if term.chars().count() >= 2 && seen.insert(term.clone()) {
+            result.push(term);
+        }
+    }
+}
+
+fn is_cjk(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0x20000..=0x2FA1F
+    )
 }
 
 fn score_path(path: &str, terms: &[String]) -> i64 {
@@ -608,12 +1023,23 @@ impl ToolRuntime {
             "search_text" => self.search_text(arguments),
             "stat_path" => self.stat_path(arguments),
             "git_read" => self.git_read(arguments, cancellation),
+            "git_stage" => self.git_stage(arguments, approved_unsandboxed, cancellation),
+            "git_unstage" => self.git_unstage(arguments, approved_unsandboxed, cancellation),
+            "git_create_branch" => {
+                self.git_create_branch(arguments, approved_unsandboxed, cancellation)
+            }
+            "git_switch_branch" => {
+                self.git_switch_branch(arguments, approved_unsandboxed, cancellation)
+            }
+            "git_commit" => self.git_commit(arguments, approved_unsandboxed, cancellation),
+            "git_push" => self.git_push(arguments, approved_unsandboxed, cancellation),
             "list_skills" => self.list_skills(arguments),
             "load_skill" => self.load_skill(arguments),
             "capability_status" => self.capability_status(arguments),
             "write_file" => self.write_file(arguments, false),
             "create_file" => self.write_file(arguments, true),
             "replace_text" => self.replace_text(arguments),
+            "apply_patches" => self.apply_patches(arguments),
             "move_file" => self.move_file(arguments),
             "delete_file" => self.delete_file(arguments, approved_unsandboxed),
             "restore_file" => self.restore_file(arguments),
@@ -703,19 +1129,36 @@ impl ToolRuntime {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Args {
-            query: String,
+            query: Option<String>,
+            #[serde(default)]
+            queries: Vec<String>,
             path: Option<String>,
             max_results: Option<usize>,
         }
         let args: Args = parse_args(arguments)?;
-        if args.query.is_empty() || args.query.len() > 1024 || args.query.contains('\0') {
+        let mut queries = args
+            .query
+            .into_iter()
+            .chain(args.queries)
+            .collect::<Vec<_>>();
+        queries.dedup();
+        if queries.is_empty()
+            || queries.len() > 16
+            || queries
+                .iter()
+                .any(|query| query.is_empty() || query.len() > 1024 || query.contains('\0'))
+        {
             return Err(AgentError::ToolArgumentsInvalid);
         }
-        let base = normalize_relative(args.path.as_deref().unwrap_or("."))?;
+        let base = args.path.as_deref().map(normalize_relative).transpose()?;
         let max = args.max_results.unwrap_or(100).clamp(1, 200);
         let mut results = Vec::new();
         for relative in repository_files(&self.root)? {
-            if results.len() >= max || sensitive_relative(&relative) || !relative.starts_with(&base)
+            if results.len() >= max
+                || sensitive_relative(&relative)
+                || base
+                    .as_ref()
+                    .is_some_and(|base| base.as_os_str() != "." && !relative.starts_with(base))
             {
                 continue;
             }
@@ -730,21 +1173,29 @@ impl ToolRuntime {
                 continue;
             };
             for (index, line) in text.lines().enumerate() {
-                if line.contains(&args.query) {
+                for query in queries.iter().filter(|query| line.contains(query.as_str())) {
                     results.push(format!(
-                        "{}:{}:{}",
+                        "{}:{}:[{}] {}",
                         relative_text(&relative),
                         index + 1,
+                        truncate_utf8(query, 80),
                         truncate_utf8(line, 500)
                     ));
                     if results.len() >= max {
                         break;
                     }
                 }
+                if results.len() >= max {
+                    break;
+                }
             }
         }
+        let digests = queries
+            .iter()
+            .map(|query| sha256(query.as_bytes()))
+            .collect::<Vec<_>>();
         Ok(ToolExecution {
-            receipt: json!({"kind":"TEXT_SEARCH","query_sha256":sha256(args.query.as_bytes()),"matches":results.len(),"truncated":results.len()>=max}),
+            receipt: json!({"kind":"TEXT_SEARCH","query_sha256":digests.first(),"query_sha256s":digests,"query_count":queries.len(),"matches":results.len(),"truncated":results.len()>=max}),
             observation: bounded_observation(results.join("\n")),
         })
     }
@@ -821,6 +1272,198 @@ impl ToolRuntime {
         Ok(result)
     }
 
+    fn git_stage(
+        &self,
+        arguments: &Value,
+        approved: bool,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, AgentError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Args {
+            paths: Vec<String>,
+        }
+        let args: Args = parse_args(arguments)?;
+        let paths = self.validated_git_paths(args.paths)?;
+        let mut argv = vec!["add".to_owned(), "--".to_owned()];
+        argv.extend(paths.iter().cloned());
+        self.run_typed_git("GIT_STAGE", argv, approved, cancellation, |receipt| {
+            receipt.insert("path_count".into(), json!(paths.len()));
+        })
+    }
+
+    fn git_unstage(
+        &self,
+        arguments: &Value,
+        approved: bool,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, AgentError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Args {
+            paths: Vec<String>,
+        }
+        let args: Args = parse_args(arguments)?;
+        let paths = self.validated_git_paths(args.paths)?;
+        let mut argv = vec!["restore".to_owned(), "--staged".to_owned(), "--".to_owned()];
+        argv.extend(paths.iter().cloned());
+        self.run_typed_git("GIT_UNSTAGE", argv, approved, cancellation, |receipt| {
+            receipt.insert("path_count".into(), json!(paths.len()));
+        })
+    }
+
+    fn git_create_branch(
+        &self,
+        arguments: &Value,
+        approved: bool,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, AgentError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Args {
+            branch: String,
+        }
+        let args: Args = parse_args(arguments)?;
+        validate_git_ref_name(&args.branch)?;
+        self.run_typed_git(
+            "GIT_BRANCH_CREATED",
+            vec!["branch".into(), "--".into(), args.branch],
+            approved,
+            cancellation,
+            |_| {},
+        )
+    }
+
+    fn git_switch_branch(
+        &self,
+        arguments: &Value,
+        approved: bool,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, AgentError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Args {
+            branch: String,
+        }
+        let args: Args = parse_args(arguments)?;
+        validate_git_ref_name(&args.branch)?;
+        self.run_typed_git(
+            "GIT_BRANCH_SWITCHED",
+            vec!["switch".into(), "--".into(), args.branch],
+            approved,
+            cancellation,
+            |_| {},
+        )
+    }
+
+    fn git_commit(
+        &self,
+        arguments: &Value,
+        approved: bool,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, AgentError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Args {
+            message: String,
+        }
+        let args: Args = parse_args(arguments)?;
+        let message = args.message.trim();
+        if message.is_empty() || message.len() > 4_096 || message.contains('\0') {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        self.run_typed_git(
+            "GIT_COMMIT",
+            vec![
+                "commit".into(),
+                "--no-gpg-sign".into(),
+                "-m".into(),
+                message.into(),
+            ],
+            approved,
+            cancellation,
+            |receipt| {
+                receipt.insert("message_sha256".into(), json!(sha256(message.as_bytes())));
+            },
+        )
+    }
+
+    fn git_push(
+        &self,
+        arguments: &Value,
+        approved: bool,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, AgentError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Args {
+            remote: String,
+            branch: String,
+            #[serde(default)]
+            set_upstream: bool,
+        }
+        let args: Args = parse_args(arguments)?;
+        validate_git_remote_name(&args.remote)?;
+        validate_git_ref_name(&args.branch)?;
+        let mut argv = vec!["push".into(), "--porcelain".into()];
+        if args.set_upstream {
+            argv.push("--set-upstream".into());
+        }
+        argv.extend(["--".into(), args.remote, args.branch]);
+        self.run_typed_git("GIT_PUSH", argv, approved, cancellation, |receipt| {
+            receipt.insert("set_upstream".into(), json!(args.set_upstream));
+        })
+    }
+
+    fn validated_git_paths(&self, paths: Vec<String>) -> Result<Vec<String>, AgentError> {
+        if paths.is_empty() || paths.len() > 128 {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        let mut unique = HashSet::new();
+        let mut validated = Vec::with_capacity(paths.len());
+        for path in paths {
+            let relative = normalize_relative(&path)?;
+            if relative.as_os_str() == "." || path.contains('*') || path.contains('?') {
+                return Err(AgentError::ToolArgumentsInvalid);
+            }
+            deny_sensitive(&relative)?;
+            let _ = resolve_for_write(&self.root, &relative)?;
+            let text = relative_text(&relative);
+            if !unique.insert(text.clone()) {
+                return Err(AgentError::ToolArgumentsInvalid);
+            }
+            validated.push(text);
+        }
+        Ok(validated)
+    }
+
+    fn run_typed_git<F>(
+        &self,
+        kind: &str,
+        argv: Vec<String>,
+        approved: bool,
+        cancellation: &CommandCancellation,
+        enrich: F,
+    ) -> Result<ToolExecution, AgentError>
+    where
+        F: FnOnce(&mut serde_json::Map<String, Value>),
+    {
+        if !approved {
+            return Err(AgentError::CommandDenied);
+        }
+        let mut result = self.run_command_internal(
+            &json!({"program":"git","argv":argv,"timeout_ms":120_000}),
+            true,
+            cancellation,
+        )?;
+        if let Some(receipt) = result.receipt.as_object_mut() {
+            receipt.insert("kind".into(), json!(kind));
+            receipt.insert("typed_git".into(), json!(true));
+            enrich(receipt);
+        }
+        Ok(result)
+    }
+
     fn list_skills(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -886,18 +1529,44 @@ impl ToolRuntime {
     fn replace_text(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
-        struct Args {
-            path: String,
+        struct Replacement {
             old_text: String,
             new_text: String,
+            #[serde(default)]
+            replace_all: bool,
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Args {
+            path: String,
+            old_text: Option<String>,
+            new_text: Option<String>,
+            #[serde(default)]
+            replacements: Vec<Replacement>,
             expected_sha256: String,
             #[serde(default)]
             replace_all: bool,
         }
         let args: Args = parse_args(arguments)?;
-        if args.old_text.is_empty()
-            || args.old_text.len() > MAX_FILE_BYTES
-            || args.new_text.len() > MAX_FILE_BYTES
+        let mut replacements = args.replacements;
+        match (args.old_text, args.new_text) {
+            (Some(old_text), Some(new_text)) if replacements.is_empty() => {
+                replacements.push(Replacement {
+                    old_text,
+                    new_text,
+                    replace_all: args.replace_all,
+                })
+            }
+            (None, None) if !replacements.is_empty() => {}
+            _ => return Err(AgentError::ToolArgumentsInvalid),
+        }
+        if replacements.is_empty()
+            || replacements.len() > 32
+            || replacements.iter().any(|replacement| {
+                replacement.old_text.is_empty()
+                    || replacement.old_text.len() > MAX_FILE_BYTES
+                    || replacement.new_text.len() > MAX_FILE_BYTES
+            })
             || !valid_sha256(&args.expected_sha256)
         {
             return Err(AgentError::ToolArgumentsInvalid);
@@ -909,17 +1578,34 @@ impl ToolRuntime {
         if sha256(&before) != args.expected_sha256 {
             return Err(AgentError::FileChanged);
         }
-        let text =
+        let mut after =
             String::from_utf8(before.clone()).map_err(|_| AgentError::BinaryFileUnsupported)?;
-        let matches = text.matches(&args.old_text).count();
-        if matches == 0 || (!args.replace_all && matches != 1) {
-            return Err(AgentError::FileChanged);
+        let mut matches = 0;
+        for replacement in replacements.iter() {
+            let mut old_text = replacement.old_text.clone();
+            let mut new_text = replacement.new_text.clone();
+            let mut count = after.matches(&old_text).count();
+            // JSON tool arguments use LF. A guarded Windows file can legitimately
+            // contain CRLF even though read_file presents its lines with LF.
+            if count == 0
+                && after.contains("\r\n")
+                && old_text.contains('\n')
+                && !old_text.contains("\r\n")
+            {
+                old_text = old_text.replace('\n', "\r\n");
+                new_text = new_text.replace('\n', "\r\n");
+                count = after.matches(&old_text).count();
+            }
+            if count == 0 || (!replacement.replace_all && count != 1) {
+                return Err(AgentError::TextMatchFailed);
+            }
+            after = if replacement.replace_all {
+                after.replace(&old_text, &new_text)
+            } else {
+                after.replacen(&old_text, &new_text, 1)
+            };
+            matches += count;
         }
-        let after = if args.replace_all {
-            text.replace(&args.old_text, &args.new_text)
-        } else {
-            text.replacen(&args.old_text, &args.new_text, 1)
-        };
         if after.len() > MAX_FILE_BYTES {
             return Err(AgentError::FileTooLarge);
         }
@@ -927,11 +1613,230 @@ impl ToolRuntime {
         atomic_write(&target, after.as_bytes(), false)?;
         let after_sha256 = sha256(after.as_bytes());
         Ok(ToolExecution {
-            receipt: json!({"kind":"TEXT_REPLACED","path":relative_text(&relative),"matches":matches,"before_sha256":args.expected_sha256,"after_sha256":after_sha256,"backup_sha256":backup_sha256,"bytes":after.len()}),
+            receipt: json!({"kind":"TEXT_REPLACED","path":relative_text(&relative),"replacements":replacements.len(),"matches":matches,"before_sha256":args.expected_sha256,"after_sha256":after_sha256,"backup_sha256":backup_sha256,"bytes":after.len()}),
             observation: format!(
                 "Applied {matches} exact replacement(s) to {}; SHA-256 is {after_sha256}",
                 relative_text(&relative)
             ),
+        })
+    }
+
+    fn apply_patches(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Replacement {
+            old_text: String,
+            new_text: String,
+            #[serde(default)]
+            replace_all: bool,
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct LineEdit {
+            start_line: usize,
+            end_line: usize,
+            new_text: String,
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Patch {
+            path: String,
+            expected_sha256: String,
+            #[serde(default)]
+            replacements: Vec<Replacement>,
+            #[serde(default)]
+            line_edits: Vec<LineEdit>,
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Args {
+            patches: Vec<Patch>,
+        }
+        struct PreparedPatch {
+            relative: PathBuf,
+            target: PathBuf,
+            before: Vec<u8>,
+            after: String,
+            matches: usize,
+            line_edits: usize,
+            expected_sha256: String,
+        }
+        let args: Args = parse_args(arguments)?;
+        if args.patches.is_empty() || args.patches.len() > 16 {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        let mut seen = HashSet::new();
+        let mut prepared = Vec::new();
+        for patch in args.patches {
+            let uses_replacements = !patch.replacements.is_empty();
+            let uses_line_edits = !patch.line_edits.is_empty();
+            if uses_replacements == uses_line_edits
+                || patch.replacements.len() > 32
+                || patch.line_edits.len() > 32
+                || !valid_sha256(&patch.expected_sha256)
+                || patch.replacements.iter().any(|replacement| {
+                    replacement.old_text.is_empty()
+                        || replacement.old_text.len() > MAX_FILE_BYTES
+                        || replacement.new_text.len() > MAX_FILE_BYTES
+                })
+                || patch.line_edits.iter().any(|edit| {
+                    edit.start_line == 0
+                        || edit.end_line < edit.start_line
+                        || edit.new_text.len() > MAX_FILE_BYTES
+                })
+            {
+                return Err(AgentError::ToolArgumentsInvalid);
+            }
+            let relative = normalize_relative(&patch.path)?;
+            deny_sensitive(&relative)?;
+            if !seen.insert(relative.clone()) {
+                return Err(AgentError::ToolArgumentsInvalid);
+            }
+            let target = resolve_existing(&self.root, &relative)?;
+            let before = fs::read(&target).map_err(|_| AgentError::FileNotFound)?;
+            let current_sha256 = sha256(&before);
+            if current_sha256 != patch.expected_sha256 {
+                return Err(AgentError::PatchConflict {
+                    path: relative_text(&relative),
+                    reason: "SHA_MISMATCH".into(),
+                    operation: 0,
+                    match_count: 0,
+                    current_sha256,
+                });
+            }
+            let mut after =
+                String::from_utf8(before.clone()).map_err(|_| AgentError::BinaryFileUnsupported)?;
+            let mut matches = 0;
+            let mut line_edit_count = 0;
+            if uses_replacements {
+                let replacements = patch
+                    .replacements
+                    .into_iter()
+                    .filter(|replacement| replacement.old_text != replacement.new_text)
+                    .collect::<Vec<_>>();
+                if replacements.is_empty() {
+                    continue;
+                }
+                for (index, replacement) in replacements.into_iter().enumerate() {
+                    let mut old_text = replacement.old_text;
+                    let mut new_text = replacement.new_text;
+                    let mut count = after.matches(&old_text).count();
+                    if count == 0
+                        && after.contains("\r\n")
+                        && old_text.contains('\n')
+                        && !old_text.contains("\r\n")
+                    {
+                        old_text = old_text.replace('\n', "\r\n");
+                        new_text = new_text.replace('\n', "\r\n");
+                        count = after.matches(&old_text).count();
+                    }
+                    if count == 0 || (!replacement.replace_all && count != 1) {
+                        return Err(AgentError::PatchConflict {
+                            path: relative_text(&relative),
+                            reason: "TEXT_MATCH_COUNT".into(),
+                            operation: index + 1,
+                            match_count: count,
+                            current_sha256: patch.expected_sha256,
+                        });
+                    }
+                    after = if replacement.replace_all {
+                        after.replace(&old_text, &new_text)
+                    } else {
+                        after.replacen(&old_text, &new_text, 1)
+                    };
+                    matches += count;
+                }
+            } else {
+                let mut line_starts = vec![0usize];
+                for (index, byte) in after.as_bytes().iter().enumerate() {
+                    if *byte == b'\n' && index + 1 < after.len() {
+                        line_starts.push(index + 1);
+                    }
+                }
+                let mut edits = patch.line_edits;
+                edits.sort_by_key(|edit| (edit.start_line, edit.end_line));
+                for (index, edit) in edits.iter().enumerate() {
+                    if edit.end_line > line_starts.len()
+                        || index > 0 && edits[index - 1].end_line >= edit.start_line
+                    {
+                        return Err(AgentError::PatchConflict {
+                            path: relative_text(&relative),
+                            reason: "LINE_RANGE_INVALID_OR_OVERLAPPING".into(),
+                            operation: index + 1,
+                            match_count: line_starts.len(),
+                            current_sha256: patch.expected_sha256,
+                        });
+                    }
+                }
+                line_edit_count = edits.len();
+                for edit in edits.into_iter().rev() {
+                    let start = line_starts[edit.start_line - 1];
+                    let end = if edit.end_line < line_starts.len() {
+                        line_starts[edit.end_line]
+                    } else {
+                        after.len()
+                    };
+                    let replaced_ending = if after.as_bytes()[start..end].ends_with(b"\r\n") {
+                        Some("\r\n")
+                    } else if after.as_bytes()[start..end].ends_with(b"\n") {
+                        Some("\n")
+                    } else {
+                        None
+                    };
+                    let mut new_text = edit.new_text;
+                    if !new_text.is_empty()
+                        && !new_text.ends_with('\n')
+                        && let Some(line_ending) = replaced_ending
+                    {
+                        new_text.push_str(line_ending);
+                    }
+                    after.replace_range(start..end, &new_text);
+                }
+            }
+            if after.len() > MAX_FILE_BYTES {
+                return Err(AgentError::FileTooLarge);
+            }
+            if after.as_bytes() == before {
+                return Err(AgentError::ToolArgumentsInvalid);
+            }
+            prepared.push(PreparedPatch {
+                relative,
+                target,
+                before,
+                after,
+                matches,
+                line_edits: line_edit_count,
+                expected_sha256: patch.expected_sha256,
+            });
+        }
+        if prepared.is_empty() {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        let mut receipts = Vec::new();
+        let mut written = Vec::new();
+        for patch in &prepared {
+            let backup_sha256 = self.checkpoint(&patch.before)?;
+            if let Err(error) = atomic_write(&patch.target, patch.after.as_bytes(), false) {
+                for index in written {
+                    let rollback: &PreparedPatch = &prepared[index];
+                    let _ = atomic_write(&rollback.target, &rollback.before, false);
+                }
+                return Err(error);
+            }
+            written.push(receipts.len());
+            receipts.push(json!({
+                "path":relative_text(&patch.relative),
+                "matches":patch.matches,
+                "line_edits":patch.line_edits,
+                "before_sha256":patch.expected_sha256,
+                "after_sha256":sha256(patch.after.as_bytes()),
+                "backup_sha256":backup_sha256,
+                "bytes":patch.after.len(),
+            }));
+        }
+        Ok(ToolExecution {
+            receipt: json!({"kind":"PATCH_SET_APPLIED","files":receipts.len(),"patches":receipts}),
+            observation: format!("Applied exact guarded edits to {} file(s).", receipts.len()),
         })
     }
 
@@ -1103,6 +2008,20 @@ impl ToolRuntime {
         approved_unsandboxed: bool,
         cancellation: &CommandCancellation,
     ) -> Result<ToolExecution, AgentError> {
+        // Model-controlled Git mutations must use the typed Git tools above. An approval for a
+        // generic process is not permission to smuggle an unbounded Git operation through argv.
+        if git_mutation_arguments(arguments) {
+            return Err(AgentError::CommandDenied);
+        }
+        self.run_command_internal(arguments, approved_unsandboxed, cancellation)
+    }
+
+    fn run_command_internal(
+        &self,
+        arguments: &Value,
+        approved_unsandboxed: bool,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, AgentError> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Args {
@@ -1136,7 +2055,8 @@ impl ToolRuntime {
             return Err(AgentError::FileNotFound);
         }
         let started = Instant::now();
-        let mut command = sanitized_command(&args.program);
+        let resolved_program = resolve_command_program(&args.program);
+        let mut command = sanitized_command(&resolved_program);
         command
             .args(&args.argv)
             .current_dir(&cwd)
@@ -1226,6 +2146,41 @@ fn normalize_relative(value: &str) -> Result<PathBuf, AgentError> {
         return Err(AgentError::WorkspaceEscape);
     }
     Ok(path.to_path_buf())
+}
+
+fn validate_git_ref_name(value: &str) -> Result<(), AgentError> {
+    if value.is_empty()
+        || value.len() > 128
+        || value.starts_with('-')
+        || value.starts_with('/')
+        || value.ends_with('/')
+        || value.ends_with('.')
+        || value.contains("..")
+        || value.contains("//")
+        || value.contains("@{")
+        || value
+            .chars()
+            .any(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '/' | '-' | '_' | '.')))
+        || value
+            .split('/')
+            .any(|segment| segment.is_empty() || segment.ends_with(".lock"))
+    {
+        return Err(AgentError::ToolArgumentsInvalid);
+    }
+    Ok(())
+}
+
+fn validate_git_remote_name(value: &str) -> Result<(), AgentError> {
+    if value.is_empty()
+        || value.len() > 64
+        || value.starts_with('-')
+        || value
+            .chars()
+            .any(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')))
+    {
+        return Err(AgentError::ToolArgumentsInvalid);
+    }
+    Ok(())
 }
 
 fn resolve_existing(root: &Path, relative: &Path) -> Result<PathBuf, AgentError> {
@@ -1412,8 +2367,29 @@ fn sanitized_command(program: impl AsRef<OsStr>) -> Command {
             command.env(key, value);
         }
     }
-    command.env("CI", "1").env("NO_COLOR", "1");
     command
+        .env("CI", "1")
+        .env("NO_COLOR", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "Never");
+    command
+}
+
+fn resolve_command_program(program: &str) -> OsString {
+    #[cfg(windows)]
+    {
+        let path = Path::new(program);
+        if path.components().count() == 1
+            && path.extension().is_none()
+            && matches!(
+                program.to_ascii_lowercase().as_str(),
+                "npm" | "npx" | "pnpm" | "yarn"
+            )
+        {
+            return OsString::from(format!("{program}.cmd"));
+        }
+    }
+    OsString::from(program)
 }
 
 #[cfg(windows)]
@@ -1528,6 +2504,14 @@ mod tests {
             .iter()
             .find(|tool| tool.definition.name == "run_command")
             .unwrap();
+        let commit = tools
+            .iter()
+            .find(|tool| tool.definition.name == "git_commit")
+            .unwrap();
+        let push = tools
+            .iter()
+            .find(|tool| tool.definition.name == "git_push")
+            .unwrap();
         let policy = PolicyEngine;
         assert_eq!(
             policy.decide(AgentPermission::ReadOnly, read, &json!({})),
@@ -1535,11 +2519,11 @@ mod tests {
         );
         assert_eq!(
             policy.decide(AgentPermission::ReadOnly, write, &json!({})),
-            AgentPolicyDecision::Deny
+            AgentPolicyDecision::Ask
         );
         assert_eq!(
             policy.decide(AgentPermission::ReviewChanges, write, &json!({})),
-            AgentPolicyDecision::Ask
+            AgentPolicyDecision::Allow
         );
         assert_eq!(
             policy.decide(AgentPermission::FullControl, write, &json!({})),
@@ -1559,6 +2543,30 @@ mod tests {
                 command,
                 &json!({"program":"powershell","argv":["-Command","Remove-Item"]})
             ),
+            AgentPolicyDecision::Allow
+        );
+        assert_eq!(
+            policy.decide(
+                AgentPermission::FullControl,
+                commit,
+                &json!({"message":"verified change"})
+            ),
+            AgentPolicyDecision::Allow
+        );
+        assert_eq!(
+            policy.decide(
+                AgentPermission::ReviewChanges,
+                push,
+                &json!({"remote":"origin","branch":"main"})
+            ),
+            AgentPolicyDecision::Ask
+        );
+        assert_eq!(
+            policy.decide(
+                AgentPermission::ReadOnly,
+                commit,
+                &json!({"message":"must fail"})
+            ),
             AgentPolicyDecision::Ask
         );
     }
@@ -1573,7 +2581,137 @@ mod tests {
         assert!(context.files.iter().any(|file| file.path == "src/lib.rs"));
         assert!(!context.files.iter().any(|file| file.path == ".env"));
         assert!(context.rendered.contains("answer"));
+        let selected = context
+            .files
+            .iter()
+            .find(|file| file.path == "src/lib.rs")
+            .unwrap();
+        assert!(
+            context
+                .rendered
+                .contains(&format!("sha256=\"{}\" complete=\"true\"", selected.sha256))
+        );
         assert!(context.rendered.len() <= 128 * 1024 + 4096);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).ok();
+    }
+
+    #[test]
+    fn context_compiler_ranks_chinese_requirements_without_translating_identifiers() {
+        let (root, artifacts) = fixture();
+        fs::create_dir_all(root.join("src/组件")).unwrap();
+        fs::write(
+            root.join("src/组件/导出按钮.tsx"),
+            "export function ExportButton() { return '首次点击'; }\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/unrelated.ts"), "export const value = 1;\n").unwrap();
+        let extracted = terms("修复用户点击导出按钮后第一次没有反应的问题，保留 API 字段 user_id");
+        assert!(extracted.iter().any(|term| term == "导出"));
+        assert!(extracted.iter().any(|term| term == "user_id"));
+        let context = ContextCompiler {
+            max_files: 1,
+            max_bytes: 16 * 1024,
+        }
+        .compile(
+            &root,
+            "修复用户点击导出按钮后第一次没有反应的问题，不要修改 user_id",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(context.files[0].path, "src/组件/导出按钮.tsx");
+        assert!(context.rendered.contains("ExportButton"));
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).ok();
+    }
+
+    #[test]
+    fn repository_context_index_reuses_and_incrementally_invalidates_entries() {
+        let (root, artifacts) = fixture();
+        let index = artifacts.join("repository-index");
+        let compiler = ContextCompiler::default();
+        let first = compiler
+            .compile_indexed(&root, "fix answer", &[], &index)
+            .unwrap();
+        assert!(!first.repository_index_cache_hit);
+        assert!(first.repository_index_invalidated_files >= 2);
+        let second = compiler
+            .compile_indexed(&root, "fix answer", &[], &index)
+            .unwrap();
+        assert!(second.repository_index_cache_hit);
+        assert_eq!(second.repository_index_invalidated_files, 0);
+        assert_eq!(first.stable_context_sha256, second.stable_context_sha256);
+        assert_eq!(first.dynamic_context_sha256, second.dynamic_context_sha256);
+
+        fs::write(root.join("src/lib.rs"), "pub fn answer() -> i32 { 420 }\n").unwrap();
+        let third = compiler
+            .compile_indexed(&root, "fix answer", &[], &index)
+            .unwrap();
+        assert!(!third.repository_index_cache_hit);
+        assert_eq!(third.repository_index_invalidated_files, 1);
+        assert_ne!(second.dynamic_context_sha256, third.dynamic_context_sha256);
+        assert!(third.rendered.contains("420"));
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).ok();
+    }
+
+    #[test]
+    fn file_tools_preserve_unicode_space_paths_and_utf8_observations() {
+        let (root, artifacts) = fixture();
+        fs::create_dir_all(root.join("src/组件")).unwrap();
+        fs::write(
+            root.join("src/组件/用户 详情.tsx"),
+            "export const 状态 = '显示正常';\n",
+        )
+        .unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let cancel = CommandCancellation::default();
+        #[cfg(windows)]
+        let argument = "src\\组件\\用户 详情.tsx";
+        #[cfg(not(windows))]
+        let argument = "src/组件/用户 详情.tsx";
+        let read = runtime
+            .execute("read_file", &json!({"path":argument}), false, &cancel)
+            .unwrap();
+        assert!(read.observation.contains("显示正常"));
+        assert_eq!(
+            read.receipt.get("path"),
+            Some(&json!("src/组件/用户 详情.tsx"))
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).ok();
+    }
+
+    #[test]
+    fn search_text_batches_related_queries_in_one_repository_scan() {
+        let (root, artifacts) = fixture();
+        fs::write(
+            root.join("src/lib.rs"),
+            "const showFormData = { stage: true };\nconst ctlFormData = { stage: false };\n",
+        )
+        .unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let result = runtime
+            .execute(
+                "search_text",
+                &json!({"queries":["showFormData","ctlFormData","stage"],"path":"src"}),
+                false,
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        assert!(result.observation.contains("[showFormData]"));
+        assert!(result.observation.contains("[ctlFormData]"));
+        assert_eq!(result.receipt.get("query_count"), Some(&json!(3)));
+        let root_result = runtime
+            .execute(
+                "search_text",
+                &json!({"queries":["showFormData","stage"]}),
+                false,
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        assert!(root_result.observation.contains("src/lib.rs"));
+        assert_ne!(root_result.receipt.get("matches"), Some(&json!(0)));
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(artifacts).ok();
     }
@@ -1588,12 +2726,7 @@ mod tests {
             .unwrap();
         let before = read.receipt.get("sha256").unwrap().as_str().unwrap();
         let written = runtime.execute("write_file", &json!({"path":"src/lib.rs","content":"pub fn answer() -> i32 { 42 }\n","expected_sha256":before}), true, &cancel).unwrap();
-        let after = written
-            .receipt
-            .get("after_sha256")
-            .unwrap()
-            .as_str()
-            .unwrap();
+        assert!(written.receipt.get("after_sha256").is_some());
         let backup = written
             .receipt
             .get("backup_sha256")
@@ -1615,10 +2748,135 @@ mod tests {
                 .unwrap_err(),
             AgentError::FileChanged
         );
+        let current = sha256(&fs::read(root.join("src/lib.rs")).unwrap());
+        let batched = runtime
+            .execute(
+                "replace_text",
+                &json!({
+                    "path":"src/lib.rs",
+                    "expected_sha256":current,
+                    "replacements":[
+                        {"old_text":"42","new_text":"43"},
+                        {"old_text":"answer","new_text":"result"}
+                    ]
+                }),
+                true,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(batched.receipt.get("replacements"), Some(&json!(2)));
+        let batched_text = fs::read_to_string(root.join("src/lib.rs")).unwrap();
+        assert!(batched_text.contains("43"));
+        assert!(batched_text.contains("result"));
+        fs::write(
+            root.join("src/extra.rs"),
+            "pub const STAGE: &str = \"stage\";\n",
+        )
+        .unwrap();
+        let lib_hash = sha256(&fs::read(root.join("src/lib.rs")).unwrap());
+        let extra_hash = sha256(&fs::read(root.join("src/extra.rs")).unwrap());
+        let patch_set = runtime
+            .execute(
+                "apply_patches",
+                &json!({"patches":[
+                    {"path":"src/lib.rs","expected_sha256":lib_hash,"replacements":[{"old_text":"43","new_text":"44"}]},
+                    {"path":"src/extra.rs","expected_sha256":extra_hash,"replacements":[{"old_text":"stage","new_text":"phase"}]}
+                ]}),
+                true,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(
+            patch_set.receipt.get("kind"),
+            Some(&json!("PATCH_SET_APPLIED"))
+        );
+        assert_eq!(patch_set.receipt.get("files"), Some(&json!(2)));
+        fs::write(
+            root.join("src/template.html"),
+            "<ul>\r\n  <li>remove</li>\r\n  <li>keep</li>\r\n</ul>\r\n",
+        )
+        .unwrap();
+        let template_hash = sha256(&fs::read(root.join("src/template.html")).unwrap());
+        let normalized_patch = runtime
+            .execute(
+                "apply_patches",
+                &json!({"patches":[{
+                    "path":"src/template.html",
+                    "expected_sha256":template_hash,
+                    "replacements":[{"old_text":"  <li>remove</li>\n  <li>keep</li>","new_text":"  <li>keep</li>"}]
+                }]}),
+                true,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(normalized_patch.receipt["patches"][0]["matches"], json!(1));
+        assert_eq!(
+            fs::read_to_string(root.join("src/template.html")).unwrap(),
+            "<ul>\r\n  <li>keep</li>\r\n</ul>\r\n"
+        );
+        fs::write(
+            root.join("src/template.html"),
+            "<ul>\r\n  <li>remove</li>\r\n  <li>keep</li>\r\n</ul>\r\n",
+        )
+        .unwrap();
+        let template_hash = sha256(&fs::read(root.join("src/template.html")).unwrap());
+        let line_patch = runtime
+            .execute(
+                "apply_patches",
+                &json!({"patches":[{
+                    "path":"src/template.html",
+                    "expected_sha256":template_hash,
+                    "line_edits":[{"start_line":2,"end_line":2,"new_text":""}]
+                }]}),
+                true,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(
+            line_patch.receipt["patches"][0].get("line_edits"),
+            Some(&json!(1))
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("src/template.html")).unwrap(),
+            "<ul>\r\n  <li>keep</li>\r\n</ul>\r\n"
+        );
+        let template_hash = sha256(&fs::read(root.join("src/template.html")).unwrap());
+        runtime
+            .execute(
+                "apply_patches",
+                &json!({"patches":[{
+                    "path":"src/template.html",
+                    "expected_sha256":template_hash,
+                    "line_edits":[{"start_line":2,"end_line":2,"new_text":"  <li>changed</li>"}]
+                }]}),
+                true,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("src/template.html")).unwrap(),
+            "<ul>\r\n  <li>changed</li>\r\n</ul>\r\n"
+        );
+        let current_template_hash = sha256(&fs::read(root.join("src/template.html")).unwrap());
+        let conflict = runtime
+            .execute(
+                "apply_patches",
+                &json!({"patches":[{
+                    "path":"src/template.html",
+                    "expected_sha256":current_template_hash,
+                    "replacements":[{"old_text":"<","new_text":"["}]
+                }]}),
+                true,
+                &cancel,
+            )
+            .unwrap_err();
+        assert_eq!(conflict.code(), "AGENT_PATCH_CONFLICT");
+        assert!(conflict.model_recovery_message().contains("match_count=4"));
+        let current_after_patch_set = sha256(&fs::read(root.join("src/lib.rs")).unwrap());
         runtime
             .execute(
                 "restore_file",
-                &json!({"path":"src/lib.rs","backup_sha256":backup,"expected_sha256":after}),
+                &json!({"path":"src/lib.rs","backup_sha256":backup,"expected_sha256":current_after_patch_set}),
                 true,
                 &cancel,
             )
@@ -1668,6 +2926,132 @@ mod tests {
     }
 
     #[test]
+    fn typed_git_requires_approval_and_covers_the_local_version_loop() {
+        fn git(root: &Path, args: &[&str]) {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let (root, artifacts) = fixture();
+        let bare =
+            std::env::temp_dir().join(format!("fielora-agent-remote-{}.git", Uuid::now_v7()));
+        git(&root, &["init"]);
+        git(&root, &["config", "user.name", "Fielora Test"]);
+        git(&root, &["config", "user.email", "fielora@example.invalid"]);
+        git(&root, &["add", "README.md", "src/lib.rs"]);
+        git(&root, &["commit", "-m", "initial"]);
+        git(&root, &["init", "--bare", bare.to_string_lossy().as_ref()]);
+        git(
+            &root,
+            &["remote", "add", "origin", bare.to_string_lossy().as_ref()],
+        );
+
+        fs::write(root.join("src/lib.rs"), "pub fn answer() -> i32 { 42 }\n").unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let cancel = CommandCancellation::default();
+        assert_eq!(
+            runtime
+                .execute(
+                    "git_stage",
+                    &json!({"paths":["src/lib.rs"]}),
+                    false,
+                    &cancel,
+                )
+                .unwrap_err(),
+            AgentError::CommandDenied
+        );
+        assert_eq!(
+            runtime
+                .execute(
+                    "run_command",
+                    &json!({"program":"git","argv":["add","src/lib.rs"]}),
+                    true,
+                    &cancel,
+                )
+                .unwrap_err(),
+            AgentError::CommandDenied
+        );
+        let staged = runtime
+            .execute("git_stage", &json!({"paths":["src/lib.rs"]}), true, &cancel)
+            .unwrap();
+        assert_eq!(staged.receipt.get("kind"), Some(&json!("GIT_STAGE")));
+        assert_eq!(staged.receipt.get("success"), Some(&json!(true)));
+        let unstaged = runtime
+            .execute(
+                "git_unstage",
+                &json!({"paths":["src/lib.rs"]}),
+                true,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(unstaged.receipt.get("success"), Some(&json!(true)));
+        runtime
+            .execute("git_stage", &json!({"paths":["src/lib.rs"]}), true, &cancel)
+            .unwrap();
+        let committed = runtime
+            .execute(
+                "git_commit",
+                &json!({"message":"fix: return the verified answer"}),
+                true,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(committed.receipt.get("kind"), Some(&json!("GIT_COMMIT")));
+        assert_eq!(committed.receipt.get("success"), Some(&json!(true)));
+        assert!(committed.receipt.get("message_sha256").is_some());
+
+        let created = runtime
+            .execute(
+                "git_create_branch",
+                &json!({"branch":"feature/typed-git"}),
+                true,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(created.receipt.get("success"), Some(&json!(true)));
+        let switched = runtime
+            .execute(
+                "git_switch_branch",
+                &json!({"branch":"feature/typed-git"}),
+                true,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(switched.receipt.get("success"), Some(&json!(true)));
+        let pushed = runtime
+            .execute(
+                "git_push",
+                &json!({"remote":"origin","branch":"feature/typed-git","set_upstream":true}),
+                true,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(pushed.receipt.get("kind"), Some(&json!("GIT_PUSH")));
+        assert_eq!(pushed.receipt.get("success"), Some(&json!(true)));
+        assert_eq!(pushed.receipt.get("typed_git"), Some(&json!(true)));
+
+        fs::write(root.join(".env"), "TOKEN=secret\n").unwrap();
+        assert_eq!(
+            runtime
+                .execute("git_stage", &json!({"paths":[".env"]}), true, &cancel,)
+                .unwrap_err(),
+            AgentError::SensitivePathDenied
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).unwrap();
+        fs::remove_dir_all(bare).unwrap();
+    }
+
+    #[test]
     fn exact_patch_skills_and_unsupported_capabilities_are_inspectable() {
         let (root, artifacts) = fixture();
         let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
@@ -1686,6 +3070,18 @@ mod tests {
             fs::read_to_string(root.join("src/lib.rs"))
                 .unwrap()
                 .contains("42")
+        );
+        let current = sha256(&fs::read(root.join("src/lib.rs")).unwrap());
+        assert_eq!(
+            runtime
+                .execute(
+                    "replace_text",
+                    &json!({"path":"src/lib.rs","old_text":"not present","new_text":"43","expected_sha256":current}),
+                    true,
+                    &cancel,
+                )
+                .unwrap_err(),
+            AgentError::TextMatchFailed
         );
         assert_eq!(
             runtime
@@ -1708,6 +3104,50 @@ mod tests {
         assert!(capabilities.observation.contains("UNSUPPORTED_CAPABILITY"));
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(artifacts).unwrap();
+    }
+
+    #[test]
+    fn exact_replacement_accepts_lf_model_text_for_guarded_crlf_files() {
+        let (root, artifacts) = fixture();
+        let path = root.join("src/crlf.js");
+        fs::write(&path, "const form = {\r\n    required: true,\r\n};\r\n").unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let cancel = CommandCancellation::default();
+        let before = sha256(&fs::read(&path).unwrap());
+        let patched = runtime
+            .execute(
+                "replace_text",
+                &json!({
+                    "path":"src/crlf.js",
+                    "old_text":"const form = {\n    required: true,\n};",
+                    "new_text":"const form = {\n    required: false,\n};",
+                    "expected_sha256":before
+                }),
+                false,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(patched.receipt.get("kind"), Some(&json!("TEXT_REPLACED")));
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "const form = {\r\n    required: false,\r\n};\r\n"
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_package_manager_commands_resolve_to_cmd_shims() {
+        assert_eq!(resolve_command_program("npm"), OsString::from("npm.cmd"));
+        assert_eq!(resolve_command_program("npx"), OsString::from("npx.cmd"));
+        assert_eq!(resolve_command_program("pnpm"), OsString::from("pnpm.cmd"));
+        assert_eq!(resolve_command_program("yarn"), OsString::from("yarn.cmd"));
+        assert_eq!(resolve_command_program("git"), OsString::from("git"));
+        assert_eq!(
+            resolve_command_program("tools/npm"),
+            OsString::from("tools/npm")
+        );
     }
 
     #[cfg(windows)]

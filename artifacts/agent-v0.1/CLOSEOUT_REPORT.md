@@ -7,10 +7,13 @@
 - General Tools/Skills: coding, Markdown/CSV project-file work and focused skills implemented; Web/Archive/Office/Image explicitly unsupported.
 - Security/Governance: PASS in deterministic matrix.
 - Recovery: PASS in storage, abrupt Core restart, Desktop restart, and portable E2E.
-- Live Provider Probe: NOT_RUN — no explicitly authorized eligible credential/model.
+- Live Provider Probe: RAN / FAIL — saved `OPENAI + Qwen3.7-plus` configuration returned redacted `PROVIDER_UNAVAILABLE`; protocol/Base URL must be corrected before model-quality acceptance.
 - Packaged Desktop: PASS.
 - Human Experience: CHECKLIST READY / NOT_RUN.
-- Full premerge: FAIL at historical Chromium native clipboard round trip; assertion retained.
+- Desktop shell remediation: PASS in dev, packaged and fresh portable; Project and Settings share the same resizable `WorkspaceSurface` and navigation width, Terminal remains a desktop-level bottom dock outside Conversation/left navigation while the navigation spans the full work-area height, Settings cannot be routed into “新对话” by the Terminal shortcut, and Environment/Terminal/sidebar share one 34px window-right dock with the same baseline and hover treatment.
+- Quiet Workbench design system: PASS. A current maintenance contract, semantic tokens, global foundation, canonical control layer and shared React primitives now replace page-by-page styling as the forward path. Five static tests prevent layer-order drift, raw colors in shared CSS, missing primitives and growth of the legacy raw-color budget.
+- Windows icon fit: PASS; transparent alpha bounds fill 228×226 of the 256px source frame and the icon is embedded in the packaged EXE.
+- Full premerge aggregation: PASS across Context/Contracts, 51 TypeScript, 42 Rust, Clippy, 8 Core integration, Phase 02, complete Phase 03 Browse including native Clipboard, and Desktop Foundation.
 
 ## Implemented Architecture
 
@@ -41,8 +44,15 @@ See `AUTOMATED_TEST_REPORT.md/json`, `SECURITY_FAULT_MATRIX.md`, and the three D
 ## Packaged artifact
 
 - ZIP: `artifacts/agent-v0.1/Fielora-Complete-Agent-V0.1-win-x64.zip`
-- Bytes: `148550659`
-- SHA-256: `fdd15124ee89103e10b60c974352677e1ce2be3692c9fd94171a11e36cc4acea`
+- Bytes: `148579792`
+- SHA-256: `e721fe317da2326cdc08126abcd55ae17b5704eabbc8357e759c8206d9654ecd`
+
+Supplemental Quiet Workbench artifact:
+
+- ZIP: `artifacts/design-system-v0.1/Fielora-Quiet-Workbench-V0.1-win-x64.zip`
+- Bytes: `153198902`
+- SHA-256: `ae077c0859cd2571d5ff1843934f03d0fed4c358e087632cfb8c0ce61a9d7251`
+- Desktop Foundation and complete Browse: release packaged PASS, fresh-extracted portable PASS.
 
 ## Git
 
@@ -55,7 +65,9 @@ See `AUTOMATED_TEST_REPORT.md/json`, `SECURITY_FAULT_MATRIX.md`, and the three D
 - A strong/leading coding-quality claim requires authorized live-provider golden tasks and comparative model/harness evaluation; those have not run.
 - Semantic context compaction-and-continue and proposal-only execution for models without native tool calling are not implemented.
 - Web research, archive extraction, DOCX/PDF, XLSX/chart, PPTX, and image adapters are honest unsupported capabilities.
-- The current Windows session repeatedly fails the historical Chromium native clipboard automated round trip, so `pnpm verify:premerge` is not green.
+- The saved Provider is not reachable in its current protocol/model/Base URL combination. The desktop now exposes a direct redacted connectivity probe and a configuration-specific hint.
+- The complete Browse suite now passes in full premerge, dev, packaged, and fresh portable hosts; no native Clipboard assertion was weakened.
+- Historical Feature/Surface styling remains in `styles.css` as an explicit compatibility layer. Its raw-color budget is locked at 408 and must only decline as touched components migrate; a risky all-at-once visual rewrite was intentionally avoided.
 
 ## Human checklist
 

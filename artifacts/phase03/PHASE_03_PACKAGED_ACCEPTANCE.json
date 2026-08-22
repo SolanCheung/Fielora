@@ -1,7 +1,7 @@
 {
   "status": "PASS",
   "mode": "packaged",
-  "application": "F:\\项目\\Fielora\\apps\\desktop\\out\\desktop-foundation-resizable-sidebar-v4\\Fielora-win32-x64\\Fielora.exe",
+  "application": "C:\\Users\\giants\\AppData\\Local\\Temp\\fielora-quiet-workbench-051471281b6149908dc04d8962c03698\\Fielora.exe",
   "trusted_origin": "fielora://app",
   "checks": [
     "packaged-runtime-selected",
@@ -33,5 +33,5 @@
     "zero-page-lifecycle",
     "zero-page-omnibox"
   ],
-  "captured_at": "2026-08-17T15:31:30.262Z"
+  "captured_at": "2026-08-18T09:51:06.153Z"
 }

@@ -1,4 +1,5 @@
 mod agent_runtime;
+mod build_provenance;
 
 use agent_runtime::AgentCoordinator;
 use fielora_contracts::*;
@@ -27,9 +28,10 @@ use tracing::{error, info, warn};
 use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
-const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
+const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 const PROTOCOL: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
-const CAPABILITIES: [&str; 63] = [
+const CAPABILITIES: [&str; 66] = [
+    "system.build_provenance",
     "field.create",
     "field.list",
     "field.get",
@@ -77,6 +79,8 @@ const CAPABILITIES: [&str; 63] = [
     "project.create",
     "project.list",
     "project.get",
+    "project.update",
+    "project.archive",
     "conversation.create",
     "conversation.list",
     "conversation.get",
@@ -456,6 +460,7 @@ fn dispatch_request(
             })
         }
         "system.health" => serialize(runtime.health.clone()),
+        "query.system.build_provenance" => serialize(build_provenance::current()),
         "system.shutdown" | "system.cancel" => Ok((Value::Null, None)),
         "command.project.create" => {
             let params: CreateProjectRequest = parse_params(&request.params)?;
@@ -466,6 +471,15 @@ fn dispatch_request(
         "query.project.get" => {
             let params: ProjectRequest = parse_params(&request.params)?;
             serialize(runtime.storage.get_project(params.field_id)?)
+        }
+        "command.project.update" => {
+            let params: UpdateProjectRequest = parse_params(&request.params)?;
+            validate_update_project(&params)?;
+            serialize(runtime.storage.update_project(params, now_ms())?)
+        }
+        "command.project.archive" => {
+            let params: ArchiveProjectRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.archive_project(params, now_ms())?)
         }
         "command.conversation.create" => {
             let params: CreateConversationRequest = parse_params(&request.params)?;
@@ -936,6 +950,10 @@ fn validate_create_project(request: &CreateProjectRequest) -> Result<(), DomainE
     Ok(())
 }
 
+fn validate_update_project(request: &UpdateProjectRequest) -> Result<(), DomainError> {
+    validate_unicode_text("title", &request.title, 120, 480, false)
+}
+
 fn validate_conversation_fields(title: &str, model_id: Option<&str>) -> Result<(), DomainError> {
     validate_unicode_text("title", title, 120, 480, false)?;
     if let Some(model_id) = model_id {
@@ -1289,7 +1307,11 @@ fn start_model(
     let sender = runtime.event_sender.clone();
     let id = invocation_id.0.clone();
     let fixture_enabled = std::env::var("FIELORA_E2E").as_deref() == Ok("1");
-    let fixture_complete = fixture_enabled && request.model_id == "__fielora_fixture__";
+    let fixture_complete = fixture_enabled
+        && matches!(
+            request.model_id.as_str(),
+            "__fielora_fixture__" | "__fielora_agent_fixture__"
+        );
     let fixture_failure = fixture_enabled && request.model_id == "__fielora_fixture_failure__";
     let terminal_storage = runtime.storage.clone();
     let field_scope = request

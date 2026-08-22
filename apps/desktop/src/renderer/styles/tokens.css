@@ -1,0 +1,254 @@
+/*
+ * Fielora Appearance System — one semantic token layer for every built-in theme.
+ * Components consume --fl-* roles and never branch on Light, Dark, or System.
+ */
+:root {
+  color-scheme: light;
+  --fl-ui-font-scale: 1;
+  --fl-color-accent: #6546c7;
+  --fl-color-accent-hover: color-mix(in srgb, var(--fl-color-accent) 86%, var(--fl-color-text-strong));
+  --fl-color-accent-active: color-mix(in srgb, var(--fl-color-accent) 76%, var(--fl-color-text-strong));
+  --fl-color-accent-soft: color-mix(in srgb, var(--fl-color-accent) 11%, var(--fl-color-canvas));
+  --fl-color-accent-foreground: #ffffff;
+
+  /* Forced specimens used only by Appearance previews. */
+  --fl-preview-light-canvas: #ffffff;
+  --fl-preview-light-sidebar: #f1f2f6;
+  --fl-preview-light-text: #646a74;
+  --fl-preview-dark-canvas: #191b20;
+  --fl-preview-dark-sidebar: #22252b;
+  --fl-preview-dark-text: #d5d9df;
+  --fl-preview-system-text: #555b64;
+  --fl-preview-accent: #6546c7;
+  --fl-preview-border-light: rgba(55, 59, 68, 0.1);
+  --fl-preview-border-dark: rgba(255, 255, 255, 0.09);
+
+  /* Brand aliases remain stable while the active accent completes the visual language. */
+  --fl-color-brand-ink: var(--fl-color-accent);
+  --fl-color-brand-ink-hover: var(--fl-color-accent-hover);
+  --fl-color-brand-accent: var(--fl-color-accent);
+  --fl-color-brand-paper: var(--fl-color-surface-subtle);
+
+  /* Typography */
+  --fl-font-sans: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --fl-font-mono: "Cascadia Code", Consolas, monospace;
+  --fl-font-agent-sans: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --fl-font-agent-mono: "Cascadia Code", Consolas, monospace;
+  --fl-font-size-caption: calc(9px * var(--fl-ui-font-scale));
+  --fl-font-size-meta: calc(10px * var(--fl-ui-font-scale));
+  --fl-font-size-label: calc(11px * var(--fl-ui-font-scale));
+  --fl-font-size-navigation: calc(12px * var(--fl-ui-font-scale));
+  --fl-font-size-sidebar: calc(14px * var(--fl-ui-font-scale));
+  --fl-font-size-project: calc(14px * var(--fl-ui-font-scale));
+  --fl-font-size-conversation: calc(13.5px * var(--fl-ui-font-scale));
+  --fl-font-size-path: calc(12px * var(--fl-ui-font-scale));
+  --fl-font-size-section: calc(12.5px * var(--fl-ui-font-scale));
+  --fl-font-size-body: calc(13px * var(--fl-ui-font-scale));
+  --fl-font-size-title: calc(16px * var(--fl-ui-font-scale));
+  --fl-font-size-agent-meta: calc(12.5px * var(--fl-ui-font-scale));
+  --fl-font-size-agent-body: calc(15px * var(--fl-ui-font-scale));
+  --fl-font-size-agent-title: calc(17px * var(--fl-ui-font-scale));
+  --fl-font-size-agent-result-evidence: calc(13px * var(--fl-ui-font-scale));
+  --fl-font-size-agent-result-action: calc(13px * var(--fl-ui-font-scale));
+  --fl-font-size-agent-button: calc(13.5px * var(--fl-ui-font-scale));
+  --fl-font-weight-regular: 400;
+  --fl-font-weight-navigation: 500;
+  --fl-font-weight-medium: 550;
+  --fl-font-weight-semibold: 650;
+  --fl-font-weight-result-title: 600;
+  --fl-font-weight-result-action: 500;
+  --fl-line-height-tight: 1.2;
+  --fl-line-height-body: 1.55;
+  --fl-line-height-agent-body: 1.7;
+
+  /* Spacing and density */
+  --fl-space-1: 4px;
+  --fl-space-2: 6px;
+  --fl-space-3: 8px;
+  --fl-space-4: 10px;
+  --fl-space-5: 12px;
+  --fl-space-6: 16px;
+  --fl-space-7: 20px;
+  --fl-space-8: 24px;
+  --fl-density-row-y: 8px;
+  --fl-density-control: 34px;
+  --fl-density-composer-y: 9px;
+  --fl-density-section-gap: 16px;
+
+  /* Shape */
+  --fl-radius-control: 8px;
+  --fl-radius-input: 10px;
+  --fl-radius-card: 15px;
+  --fl-radius-surface: 20px;
+  --fl-radius-composer: 23px;
+  --fl-radius-dialog: 18px;
+  --fl-radius-pill: 999px;
+  --fl-control-sm: 30px;
+  --fl-control-md: var(--fl-density-control);
+  --fl-control-lg: 38px;
+  --fl-icon-sm: 14px;
+  --fl-icon-md: 17px;
+
+  /* Motion */
+  --fl-ease-standard: cubic-bezier(0.2, 0.72, 0.2, 1);
+  --fl-ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
+  --fl-duration-instant: 100ms;
+  --fl-duration-control: 140ms;
+  --fl-duration-surface: 220ms;
+  --fl-duration-panel: 280ms;
+
+  /* Layering */
+  --fl-layer-content: 1;
+  --fl-layer-dock: 40;
+  --fl-layer-popover: 160;
+  --fl-layer-dialog: 240;
+
+  /* Compatibility aliases while legacy surfaces migrate. */
+  --fielora-ink: var(--fl-color-brand-ink);
+  --fielora-accent: var(--fl-color-accent);
+  --fielora-paper: var(--fl-color-brand-paper);
+  --panel-border: var(--fl-color-border-soft);
+  --ui-font: var(--fl-font-sans);
+  --ui-nav-size: var(--fl-font-size-navigation);
+  --motion-standard: var(--fl-ease-standard);
+}
+
+:root,
+:root[data-resolved-theme="light"] {
+  /* Backgrounds */
+  --fl-color-app: #f9fafc;
+  --fl-color-canvas: #ffffff;
+  --fl-color-navigation: #f9fafc;
+  --fl-color-workbench: #fafbfd;
+  --fl-color-surface: #ffffff;
+  --fl-color-surface-raised: rgba(255, 255, 255, 0.98);
+  --fl-color-surface-subtle: #f7f8fa;
+  --fl-color-surface-hover: #f4f3fa;
+  --fl-color-surface-hover-strong: #eeebf7;
+  --fl-color-surface-active: #ebe7f7;
+  --fl-color-surface-selected: color-mix(in srgb, var(--fl-color-accent) 10%, #ffffff);
+  --fl-color-overlay: rgba(24, 26, 31, 0.24);
+
+  /* Text */
+  --fl-color-text-strong: #181a1f;
+  --fl-color-text: #343a43;
+  --fl-color-text-muted: #5e646d;
+  --fl-color-text-subtle: #858c96;
+  --fl-color-text-faint: #9298a1;
+  --fl-color-text-disabled: #b9bdc4;
+  --fl-color-text-on-accent: #ffffff;
+  --fl-color-icon: #505660;
+  --fl-color-icon-muted: #8c929b;
+  --fl-color-link: color-mix(in srgb, var(--fl-color-accent) 82%, #173e89);
+
+  /* Borders and focus */
+  --fl-color-border-subtle: #eceef1;
+  --fl-color-border: #e2e5e9;
+  --fl-color-border-soft: #eceef1;
+  --fl-color-border-strong: #d7dbe1;
+  --fl-color-divider: rgba(75, 82, 94, 0.055);
+  --fl-color-divider-hover: rgba(75, 82, 94, 0.16);
+  --fl-color-focus: color-mix(in srgb, var(--fl-color-accent) 42%, transparent);
+
+  /* Semantic states */
+  --fl-color-danger: #b34558;
+  --fl-color-warning: #b06a2b;
+  --fl-color-success: #26704e;
+  --fl-color-info: #356dcc;
+  --fl-color-text-danger: #9f3e51;
+  --fl-color-text-warning: #94561f;
+  --fl-color-text-warning-strong: #673c17;
+  --fl-color-text-success: #26704e;
+  --fl-color-status-info: #356dcc;
+  --fl-color-surface-danger: #fff3f5;
+  --fl-color-surface-warning: #fff8ee;
+  --fl-color-surface-success: #edf8f2;
+  --fl-color-surface-info: #eff5ff;
+  --fl-color-border-warning: #ecc99d;
+  --fl-color-message-user: color-mix(in srgb, var(--fl-color-accent) 6%, #ffffff);
+
+  /* Elevation */
+  --fl-color-control-hover: color-mix(in srgb, var(--fl-color-accent) 6%, transparent);
+  --fl-color-control-active: color-mix(in srgb, var(--fl-color-accent) 10%, transparent);
+  --fl-color-control-disabled: #e4e6eb;
+  --fl-shadow-subtle: 0 1px 2px rgba(24, 27, 33, 0.035);
+  --fl-shadow-surface: 0 7px 22px rgba(24, 27, 33, 0.055);
+  --fl-shadow-floating: 0 18px 52px rgba(24, 27, 33, 0.15);
+  --fl-shadow-control-hover: 0 4px 13px rgba(36, 42, 50, 0.09);
+  --fl-shadow-popover: var(--fl-shadow-floating);
+  --fl-shadow-dialog: 0 24px 72px rgba(24, 29, 36, 0.2);
+  --terminal-surface: #f7f8fa;
+  --terminal-ink: #272b31;
+}
+
+:root[data-resolved-theme="dark"] {
+  --fl-color-app: #17191e;
+  --fl-color-canvas: #191b20;
+  --fl-color-navigation: #17191e;
+  --fl-color-workbench: #15171b;
+  --fl-color-surface: #191b20;
+  --fl-color-surface-raised: rgba(35, 38, 44, 0.98);
+  --fl-color-surface-subtle: #22252b;
+  --fl-color-surface-hover: #272a31;
+  --fl-color-surface-hover-strong: #2d3038;
+  --fl-color-surface-active: #31343d;
+  --fl-color-surface-selected: color-mix(in srgb, var(--fl-color-accent) 23%, #202329);
+  --fl-color-overlay: rgba(2, 3, 5, 0.62);
+  --fl-color-text-strong: #f1f2f5;
+  --fl-color-text: #d8dbe1;
+  --fl-color-text-muted: #adb3bd;
+  --fl-color-text-subtle: #8e95a1;
+  --fl-color-text-faint: #757d89;
+  --fl-color-text-disabled: #626976;
+  --fl-color-text-on-accent: #ffffff;
+  --fl-color-icon: #c4c9d1;
+  --fl-color-icon-muted: #818995;
+  --fl-color-link: color-mix(in srgb, var(--fl-color-accent) 65%, #b8ceff);
+  --fl-color-border-subtle: #24272d;
+  --fl-color-border: #30343c;
+  --fl-color-border-soft: #2c3037;
+  --fl-color-border-strong: #424751;
+  --fl-color-divider: rgba(205, 211, 221, 0.065);
+  --fl-color-divider-hover: rgba(205, 211, 221, 0.18);
+  --fl-color-focus: color-mix(in srgb, var(--fl-color-accent) 62%, transparent);
+  --fl-color-danger: #d46a7c;
+  --fl-color-warning: #d49853;
+  --fl-color-success: #55a77d;
+  --fl-color-info: #6e96e6;
+  --fl-color-text-danger: #e28a99;
+  --fl-color-text-warning: #deb17c;
+  --fl-color-text-warning-strong: #f0c99a;
+  --fl-color-text-success: #75bf98;
+  --fl-color-status-info: #77a0f0;
+  --fl-color-surface-danger: #351f26;
+  --fl-color-surface-warning: #34281d;
+  --fl-color-surface-success: #1d3027;
+  --fl-color-surface-info: #1d293d;
+  --fl-color-border-warning: #685035;
+  --fl-color-message-user: color-mix(in srgb, var(--fl-color-accent) 20%, #202228);
+  --fl-color-control-hover: rgba(255, 255, 255, 0.06);
+  --fl-color-control-active: rgba(255, 255, 255, 0.1);
+  --fl-color-control-disabled: #353941;
+  --fl-shadow-subtle: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --fl-shadow-surface: 0 8px 28px rgba(0, 0, 0, 0.25);
+  --fl-shadow-floating: 0 20px 58px rgba(0, 0, 0, 0.46);
+  --fl-shadow-control-hover: 0 4px 14px rgba(0, 0, 0, 0.28);
+  --fl-shadow-popover: var(--fl-shadow-floating);
+  --fl-shadow-dialog: 0 26px 78px rgba(0, 0, 0, 0.56);
+  --terminal-surface: #111318;
+  --terminal-ink: #e3e6ea;
+}
+
+:root[data-ui-density="comfortable"] { --fl-density-row-y: 10px; --fl-density-control: 38px; --fl-density-composer-y: 12px; --fl-density-section-gap: 20px; }
+:root[data-ui-density="standard"] { --fl-density-row-y: 8px; --fl-density-control: 34px; --fl-density-composer-y: 9px; --fl-density-section-gap: 16px; }
+:root[data-ui-density="compact"] { --fl-density-row-y: 6px; --fl-density-control: 30px; --fl-density-composer-y: 6px; --fl-density-section-gap: 12px; }
+
+:root[data-ui-radius="small"] { --fl-radius-control: 6px; --fl-radius-input: 8px; --fl-radius-card: 11px; --fl-radius-surface: 14px; --fl-radius-composer: 16px; --fl-radius-dialog: 14px; }
+:root[data-ui-radius="standard"] { --fl-radius-control: 8px; --fl-radius-input: 10px; --fl-radius-card: 15px; --fl-radius-surface: 20px; --fl-radius-composer: 23px; --fl-radius-dialog: 18px; }
+:root[data-ui-radius="large"] { --fl-radius-control: 11px; --fl-radius-input: 13px; --fl-radius-card: 19px; --fl-radius-surface: 24px; --fl-radius-composer: 28px; --fl-radius-dialog: 22px; }
+
+:root[data-ui-contrast="soft"] { --fl-color-text-muted: color-mix(in srgb, var(--fl-color-text-strong) 57%, var(--fl-color-canvas)); --fl-color-text-subtle: color-mix(in srgb, var(--fl-color-text-strong) 43%, var(--fl-color-canvas)); --fl-color-border: color-mix(in srgb, var(--fl-color-text-strong) 8%, var(--fl-color-canvas)); }
+:root[data-ui-contrast="high"],
+:root[data-high-contrast="true"] { --fl-color-text-muted: color-mix(in srgb, var(--fl-color-text-strong) 78%, var(--fl-color-canvas)); --fl-color-text-subtle: color-mix(in srgb, var(--fl-color-text-strong) 64%, var(--fl-color-canvas)); --fl-color-border: color-mix(in srgb, var(--fl-color-text-strong) 24%, var(--fl-color-canvas)); --fl-color-border-strong: color-mix(in srgb, var(--fl-color-text-strong) 38%, var(--fl-color-canvas)); --fl-color-focus: color-mix(in srgb, var(--fl-color-accent) 82%, transparent); --fl-color-surface-selected: color-mix(in srgb, var(--fl-color-accent) 22%, var(--fl-color-canvas)); }
+
+:root[data-soft-elevation="false"] { --fl-shadow-subtle: none; --fl-shadow-surface: none; --fl-shadow-floating: 0 0 0 1px var(--fl-color-border); --fl-shadow-control-hover: none; --fl-shadow-popover: 0 0 0 1px var(--fl-color-border-strong); --fl-shadow-dialog: 0 0 0 1px var(--fl-color-border-strong); }

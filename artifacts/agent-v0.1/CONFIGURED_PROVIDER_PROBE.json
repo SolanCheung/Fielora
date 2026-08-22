@@ -1,0 +1,17 @@
+{
+  "captured_at": "2026-08-18T13:22:08+08:00",
+  "probe": "command.provider.probe",
+  "credential_handling": "Windows Credential Manager was accessed only inside Fielora Core; credential bytes, Authorization headers, prompt bodies, and response bodies were not emitted.",
+  "status": "FAIL",
+  "results": [
+    {
+      "display_name": "测试模型",
+      "provider_kind": "OPENAI",
+      "model_id": "Qwen3.7-plus",
+      "custom_base_url_present": false,
+      "status": "FAIL",
+      "error_code": "PROVIDER_UNAVAILABLE",
+      "configuration_hint": "Select OpenAI-compatible and provide the actual HTTPS Base URL when this model is hosted by a Qwen-compatible service."
+    }
+  ]
+}

@@ -21,21 +21,63 @@ export interface WorkspaceFileView extends WorkspaceFileEntry {
   sha256: string;
 }
 
+export interface WorkspaceImagePreview extends WorkspaceFileEntry {
+  kind: 'IMAGE';
+  mime_type: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+  data_url: string;
+}
+
 export type WorkspaceAttachmentStatus = 'READY' | 'UNSUPPORTED' | 'TOO_LARGE';
+export type WorkspaceAttachmentSource = 'clipboard' | 'file_picker' | 'drag_drop';
 
 export interface WorkspaceAttachmentView {
   id: string;
   name: string;
   size: number;
+  kind: 'TEXT' | 'IMAGE';
+  mime_type: string;
   status: WorkspaceAttachmentStatus;
   content: string | null;
+  data_url: string | null;
   sha256: string | null;
   reason: string | null;
+  width: number | null;
+  height: number | null;
+  source: WorkspaceAttachmentSource;
+  content_ref: string | null;
 }
 
 export interface WorkspaceAttachmentSelection {
   attachments: WorkspaceAttachmentView[];
   truncated_count: number;
+}
+
+export interface StoreWorkspaceAttachmentRequest {
+  id: string;
+  name: string;
+  size: number;
+  mime_type: string;
+  data_url: string;
+  width: number;
+  height: number;
+  source: WorkspaceAttachmentSource;
+}
+
+export interface ReadWorkspaceAttachmentRequest { content_ref: string; }
+
+export interface CopyWorkspaceAttachmentResult { copied: boolean; width: number; height: number; }
+
+export interface SaveWorkspaceAttachmentRequest { content_ref: string; filename: string; }
+
+export interface SaveWorkspaceAttachmentResult { saved: boolean; canceled: boolean; }
+
+export interface WorkspaceEnvironmentView {
+  is_git_repository: boolean;
+  branch: string | null;
+  upstream: string | null;
+  changed_files: number;
+  ahead: number;
+  behind: number;
 }
 
 export interface ApplyWorkspaceFileRequest extends WorkspaceFileRequest {

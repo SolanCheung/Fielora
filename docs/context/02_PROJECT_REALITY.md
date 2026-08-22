@@ -1120,3 +1120,354 @@ COMPLETE_AGENT_PREMERGE: FAIL_BROWSER_NATIVE_CLIPBOARD
 FIELORA_COMPLETE_AGENT_V0.1_ENGINEERING_PASS: NOT_ASSERTED
 COMPLETE_AGENT_HUMAN_ACCEPTANCE: READY_NOT_RUN
 ```
+
+## 63. Codex-like Desktop Cohesion Remediation and Saved-provider Probe
+
+用户在 Complete Agent 包上继续指出可见桌面问题：Composer 仍有文字箭头和不一致字号，Terminal 错放右侧且强制深色，右侧控制轨永久占宽，三栏窄化时标题重叠，重命名无效、删除与设置仍出现 Windows 原生控件，Provider 保存后状态不刷新，长 Conversation 缺少快速定位。该轮是可逆 Desktop/UI + bounded Git environment capability，不改变 schema 6、credential storage、Agent policy 或 Browser security boundary。
+
+桌面关闭 utility 时现在只有导航 + 单一工作区，右上控制组作为紧凑浮动组存在；打开 utility 时同一组进入 44px 右轨。Files/Review 仍为可拖动右 Project workspace，Terminal 改为 Conversation 底部可拖动 dock 并跟随系统明暗主题。容器查询在中间区窄化时把工具栏收成图标，标题单行省略；四类分隔线使用 requestAnimationFrame 节流并在鼠标释放后恢复中性样式。Browser utility 不再执行会与原生 WebContentsView 脱节的 translate 动画，只做透明度过渡，targeted Phase 03 完整 E2E 再次 PASS。
+
+Renderer 中 `window.prompt/confirm/alert` 和原生 `<select>` 已清零并增加静态测试；重命名/删除连接真实 Conversation update/archive，自定义 Select/Dialog 统一 Provider、设置、Field 与 Composer。Provider 保存/删除通过显式事件立即刷新 Settings/Composer；Settings 增加直接连接测试与稳定中文错误映射，凭据存在只显示“凭据已保存 · 未测试”，不再假称联网就绪。Project header 新增 bounded Git 环境摘要和真实 status/branch/diff actions；多于 5 条消息时显示点状导航、悬停摘要和点击跳转。Desktop Foundation dev、release packaged、fresh ZIP portable 全部 PASS，TypeScript 为 46/46，ZIP SHA-256 为 `dedce72b075d56f77dd5a9d81bda74f9f25e7f80850903628b0f695751b86c61`。
+
+用户授权的 saved-provider 最小真实 probe 已运行，脚本只通过 Core/WinCred 发起 bounded `provider.probe`，不读取或打印 credential、prompt/response body。当前唯一 active record 为 `provider_kind=OPENAI`、`model_id=Qwen3.7-plus`、无 custom Base URL，结果为 redacted `PROVIDER_UNAVAILABLE`。这证明旧 UI 的“已配置/已就绪”只代表凭据存在，不能代表联网成功；该记录必须改为与实际服务匹配的协议和 HTTPS Base URL 后重新 probe，不能据此声明 live coding quality。
+
+```text
+DESKTOP_COHESION_REMEDIATION: IMPLEMENTED
+DESKTOP_NATIVE_PROMPT_SELECT_COUNT: ZERO_VERIFIED
+DESKTOP_BOTTOM_TERMINAL_SYSTEM_THEME: VERIFIED
+DESKTOP_RESPONSIVE_SPLITS_AND_MESSAGE_NAVIGATION: VERIFIED
+DESKTOP_PROVIDER_STATE_REFRESH_AND_PROBE_UI: VERIFIED
+DESKTOP_DEV_PACKAGED_FRESH_ZIP: PASS
+SAVED_PROVIDER_PROBE: FAIL_PROVIDER_UNAVAILABLE
+LIVE_AGENT_MODEL_QUALITY: NOT_ESTABLISHED
+DESKTOP_HUMAN_REGATE: READY_NOT_RUN
+```
+
+## 64. Unified Three-surface Shell and Motion Remediation
+
+用户继续指出导航/右栏分隔线过重、工作区圆角不足、Conversation 菜单位置与关闭行为错误、Terminal 只覆盖中间列、utility 控制重复、可见横向区域超过三块、设置与工作壳割裂、滚动条生硬，以及手动“减少动画”设置没有产品价值。该轮继续是可逆桌面表现层修正，不改变 schema 6、Agent runtime、Provider/Credential 或 Browser security boundary。
+
+当前壳层严格收敛为左侧导航、主工作区、可选右侧工具三块；Files/Review 与 Browser utility 互斥，不能同时制造第四列。右上控制组只有一个 DOM 实例：utility 关闭时位于主区右上，打开时落在右栏 header 内。Terminal 通过 desktop-level portal 位于整个主区与右工具区下方，左边界从 Project 导航之后开始，并保持可拖动高度和 system theme。Conversation 的受控三点菜单移到标题后，点击外部或 Escape 会关闭；设置使用与工作区相同的白色圆角 Surface、字号与导航节奏。
+
+视觉层使用低对比分隔线、柔和 trusted-scrollbar、grid row/column transition、popover/dialog/surface transition，并由 `prefers-reduced-motion` 自动服从系统辅助功能。专门的“外观/减少动画/密度”产品设置已移除；旧持久值只为兼容读取，不再覆盖统一产品视觉。Desktop Foundation dev、release packaged、fresh ZIP portable 与 Phase 03 Browser dev/packaged/fresh portable 全部 PASS；ZIP SHA-256 为 `5c393712c01f0980daaa48b953b20119ccbc5cdef869280caaf5a91ac1d6d6ba`。真实 Provider 仍保持 D-230 的配置阻塞事实，Human Re-Gate 尚未执行。
+
+```text
+DESKTOP_MAX_VISIBLE_SURFACES: THREE_VERIFIED
+DESKTOP_SINGLE_MOVING_UTILITY_CONTROLS: VERIFIED
+DESKTOP_TERMINAL_SPANS_MAIN_AND_UTILITY: VERIFIED
+DESKTOP_SETTINGS_SHARED_SURFACE_LANGUAGE: VERIFIED
+DESKTOP_SYSTEM_MOTION_AND_SOFT_SCROLLBARS: IMPLEMENTED
+DESKTOP_DEV_PACKAGED_FRESH_PORTABLE_BROWSER: PASS
+DESKTOP_HUMAN_REGATE: READY_NOT_RUN
+```
+
+## 65. Divider-free Desktop Chrome, Correct Focus Semantics and Windows Icon Fit
+
+用户在统一三 Surface 壳层上继续逐图指出：Project 导航与顶栏仍有硬分割线，文件编辑/审阅内部横线过多；主导航与设置导航字体尺度不一致；透明 Windows 图标因 SVG 自带留白在任务栏中过小；Conversation header 仍重复放置 Files/Review；右上常驻 Browser 图标重复；“专注”错误隐藏左栏，而左上侧栏按钮与右栏开关缺少连贯过渡。该轮仍是可逆 Desktop presentation 修正，不改变 schema 6、Agent runtime、Provider/Credential、Workspace containment 或 Browser security boundary。
+
+当前 Project 左边界与应用菜单下横线完全移除，拖拽热区仍保留但默认不可见。主区与右工具区只由一个 1 CSS px 低对比边界表达，面板阴影不再叠出双线；文件 header/footer、workspace header/tab 与 review 内部装饰线同步收敛。Project 与 Settings navigation 共享 `Segoe UI Variable/Segoe UI` 字体栈和 12px 导航尺度，白色工作 Surface 保持 20px 左上圆角。
+
+右上控制组现在只有扩展右工具区、Terminal、右栏开关三个真实动作；Browser 只存在于右栏工具列表，Files/Review 也不再重复占用 Conversation header。“扩展右工具区”会保留左侧 Project 导航，并让右工具区占据中间与右侧；左上侧栏按钮才通过 220ms grid/opacity/transform 过渡收起导航。Terminal 仍从导航之后横跨主区和右区底部，不会覆盖左侧导航。
+
+Windows ICO 生成器现在先计算透明渲染的实际 alpha bounds，再以约 5.5% 安全边距重新适配全部 16/24/32/48/64/128/256 frame；256px frame 的实际标志为 228×226px，打包后 EXE associated icon 已从真实二进制提取并视觉确认。完整 `pnpm verify:premerge` PASS：Context/Contracts、46 项 TypeScript、42 项 Rust、Clippy、8 项 Core integration、Phase 02、完整 Browse（含 native Clipboard）和 Desktop Foundation 全绿；Desktop Foundation 与 Browse 在 release packaged、全新 ZIP portable 也全部 PASS。最新 ZIP SHA-256 为 `0c10fbee6b6818dc8289437a287c7ffc2e4097cba539bf2a8d3e3b3e33b16147`；Saved Provider 仍保持 D-230 的配置阻塞，Human Re-Gate 尚未执行。
+
+```text
+DESKTOP_PROJECT_AND_CHROME_HARD_DIVIDERS: REMOVED
+DESKTOP_RIGHT_UTILITY_DIVIDER: SINGLE_FAINT_PIXEL_VERIFIED
+DESKTOP_NAVIGATION_TYPOGRAPHY: UNIFIED
+DESKTOP_CONVERSATION_HEADER_DUPLICATE_TOOLS: REMOVED
+DESKTOP_FOCUS_PRESERVES_LEFT_NAVIGATION: VERIFIED
+DESKTOP_LEFT_AND_RIGHT_TRANSITIONS: IMPLEMENTED
+DESKTOP_WINDOWS_ICON_ALPHA_FIT: 228x226_IN_256_VERIFIED
+DESKTOP_PREMERGE: PASS
+DESKTOP_DEV_PACKAGED_FRESH_PORTABLE_BROWSER: PASS
+DESKTOP_HUMAN_REGATE: READY_NOT_RUN
+```
+
+## 66. Window-right Utility Controls and Sampled Panel Motion
+
+用户进一步澄清 Codex 的右上控制并不是在主区与右栏之间移动，而是始终锚定窗口右上；右栏从其下方展开后，控制才自然成为右栏 header 的一部分。当前 Fielora 保留单一控制 DOM，开关前后右边缘实测偏差不超过 0.5 CSS px。控制组外框、底板、group shadow 与 blur 全部移除，只有单个按钮 hover 时出现轻阴影；扩展/专注按钮仅在右栏已打开时存在，关闭状态只保留 Terminal 与右栏开关。
+
+右栏开启动画的旧实现同帧完成 DOM mount 与 `utility-open`，因此 CSS 虽有 transition 但真实视觉会跳过起始状态。现在先以 0 宽挂载，下一 animation frame 再切换为打开状态，关闭时等待 250ms 过渡结束后卸载。Desktop Foundation 连续采样 10 帧，主区宽度渐变超过 80 CSS px；同一测试还验证控制锚点、无框样式、hover shadow、条件 focus、菜单/导航同背景与 alpha 0.055 的单像素右分隔线。
+
+完整 `pnpm verify:premerge` PASS；Desktop Foundation 与完整 Browse Slices 01–05 在 dev、release packaged、fresh extracted portable 三宿主全部 PASS。最新 ZIP 为 `148578963` bytes，SHA-256 `069afd0f4ae5b3f185e0e8a46944a115c550fa05b6f6cd5da110f0725aed2bf9`。Saved Provider 仍保持 D-230 的配置阻塞，Human Re-Gate 尚未执行。
+
+```text
+DESKTOP_UTILITY_CONTROLS_WINDOW_RIGHT_ANCHORED: VERIFIED
+DESKTOP_UTILITY_CONTROL_GROUP_FRAME: REMOVED
+DESKTOP_UTILITY_FOCUS_VISIBILITY: OPEN_ONLY_VERIFIED
+DESKTOP_UTILITY_OPEN_MOTION: 10_FRAME_SAMPLED_PASS
+DESKTOP_CHROME_NAVIGATION_BACKGROUND: UNIFIED
+DESKTOP_UTILITY_DIVIDER_ALPHA: 0.055_VERIFIED
+DESKTOP_PREMERGE_DEV_PACKAGED_PORTABLE: PASS
+DESKTOP_HUMAN_REGATE: READY_NOT_RUN
+```
+
+## 69. Quiet Workbench Design Language and Maintainable Renderer System
+
+用户要求把连续 UI 修正沉淀为一套可描述、可维护、可继续优化的统一语言，而不是继续依靠截图逐处覆盖。只读审计确认现有产品已经形成低对比 Chrome、白色工作 Surface、最多三块可见区域、按需工具和系统动效等稳定方向，但代码层仍主要依赖一个约 78 KiB 的历史 `styles.css`：根级变量不足以表达颜色、字体、几何、阴影和动效，跨页面控件也缺少共同契约。该问题属于可逆 Renderer 架构修正，不改变 schema 6、Agent runtime、Provider/Credential、Workspace 或 Browser security boundary。
+
+当前设计语言正式命名为 **Fielora Quiet Workbench / 静默工作台**，并以 `docs/product/FIELORA_DESIGN_LANGUAGE_V0.1.md` 作为维护契约。Renderer 样式固定分为 semantic tokens、global foundation、历史 Feature/Surface 兼容层、canonical controls 四层；颜色、字体尺度、间距、圆角、控件高度、阴影、动效和 z-layer 均有 `--fl-*` 语义 token。`Button`、`IconButton`、`ToolbarAction`、`SelectMenu`、`TextActionDialog` 与既有 `WorkspaceSurface`、`ResizableDivider` 构成首批共享原语，Environment、Terminal、右栏开关和 Conversation menu 已使用这些原语。旧样式不做无验证价值的整文件重写，而按触达路径迁移；原始颜色字面量从审计时 479 个降至 408 个，并以只能下降、不能增长的静态预算锁定。
+
+新增 5 项设计系统静态测试，分别锁定样式加载顺序、Token 覆盖、foundation/controls 禁止 raw color、共享 React primitive 和 legacy raw-color budget。当前 51 项 TypeScript、完整 `pnpm verify:premerge`、Desktop Foundation 与完整 Browse 在 dev、独立 release package、全新 ZIP 解压目录均 PASS。补充便携包位于 `artifacts/design-system-v0.1/Fielora-Quiet-Workbench-V0.1-win-x64.zip`，大小 `153198902` bytes，SHA-256 `ae077c0859cd2571d5ff1843934f03d0fed4c358e087632cfb8c0ce61a9d7251`。历史 Surface 仍是明确的 compatibility debt；Human Re-Gate 与 D-230 的真实 Provider 配置阻塞不因本次设计系统工程 PASS 而关闭。
+
+```text
+FIELORA_DESIGN_LANGUAGE: QUIET_WORKBENCH_V0.1_CURRENT
+FIELORA_DESIGN_TOKENS_FOUNDATION_CONTROLS: IMPLEMENTED
+FIELORA_SHARED_UI_PRIMITIVES: IMPLEMENTED_AND_CORE_ACTIONS_MIGRATED
+FIELORA_LEGACY_RAW_COLOR_BUDGET: 408_MAX_AND_NONINCREASING
+FIELORA_DESIGN_SYSTEM_STATIC_TESTS: 5_PASS
+FIELORA_TYPESCRIPT_TESTS: 51_PASS
+FIELORA_PREMERGE_DEV_PACKAGED_FRESH: PASS
+FIELORA_DESIGN_SYSTEM_HUMAN_REGATE: READY_NOT_RUN
+```
+
+## 67. Shared Project/Settings Workspace Surface and Terminal Route Boundary
+
+用户确认 Terminal 在视觉上错误附着到“新对话”，并再次指出左侧导航不应出现 Terminal；设置工作区也仍不像应用工作区，不能左右拖动。只读定位发现 Terminal dock 本身已经位于 desktop-level portal，但全局 Terminal action 会无条件导航到 `PROJECTS`，因此从 Settings/Now 等页面触发时会先进入 Project/“新对话”；Settings 则只有相似样式，没有复用 Project 的可拖动布局结构。既有 E2E 只检查了设置的静态类名，没有验证 divider geometry 或真实 drag，属于测试缺口。
+
+当前新增共享 `WorkspaceSurface`，Project 与 Settings 使用同一三列 grid、同一 `ResizableDivider`、190–360px 边界和同一持久化 navigation width；设置拖动后回到 Project 会复用最终宽度。设置仍保留设置分类导航和内容，但不渲染工作态右栏 controls。Terminal 全局动作不再跨 route 导航，rail/utility 的 Terminal 入口只在 Project route 存在；Project 未打开时也不会创建虚假终端。Terminal DOM 明确属于 `desktop-terminal-layer`，不在 Conversation column 或左侧导航中，并从导航之后横跨主区与可选右工具区。
+
+Desktop Foundation E2E 新增真实设置 divider drag、过渡完成后的 geometry、Settings→Project width reuse、Settings Ctrl+backtick route stability，以及 Terminal portal/Conversation/sidebar ownership 断言。完整 `pnpm verify:premerge` PASS；Desktop Foundation 与完整 Browse Slices 01–05 在 dev、release packaged、fresh extracted portable 三宿主全部 PASS。最新 ZIP 为 `148579397` bytes，SHA-256 `92f658c1e24448c70538661a31cd5bdf8df02900b20cdeb56455438b81e0ce91`。Saved Provider 仍保持 D-230 的配置阻塞，Human Re-Gate 尚未执行。
+
+```text
+DESKTOP_PROJECT_SETTINGS_SHARED_WORKSPACE_SURFACE: VERIFIED
+DESKTOP_SETTINGS_NAVIGATION_DRAG: VERIFIED
+DESKTOP_SETTINGS_PROJECT_WIDTH_CONTINUITY: VERIFIED
+DESKTOP_TERMINAL_ROUTE_SCOPE: PROJECT_ONLY_VERIFIED
+DESKTOP_TERMINAL_LAYER: OUTSIDE_CONVERSATION_AND_LEFT_NAV_VERIFIED
+DESKTOP_PREMERGE_DEV_PACKAGED_PORTABLE: PASS
+DESKTOP_HUMAN_REGATE: READY_NOT_RUN
+```
+
+## 68. Terminal Navigation Exclusion and Unified Window-right Actions
+
+用户继续指出：Terminal 虽然逻辑上不属于左侧导航，但 desktop work area 的全宽底行让终端背景仍绘制在导航下方，同时 Environment 与 Terminal/右栏开关分属 Conversation header 和 window-right dock，造成中心线与 hover 阴影不一致。该轮是纯 Renderer 布局和样式修正，不改变 Workspace/Terminal 执行、Agent、Provider、credential、schema 或 Browser boundary。
+
+当前左侧导航保持覆盖完整 work area 高度；Terminal 改为只从共享导航宽度之后开始的 desktop-level absolute bottom layer，其左边缘与 Conversation 左边缘一致，背景不会进入导航下方。Environment 保留全部 Git status/branch/diff/source 功能，但通过 Project-scoped portal 进入与 Terminal、右栏开关相同的 window-right control dock。三个 action 共享 34px 高度、中心线、颜色、背景、阴影和位移过渡，popover 内部按钮不继承 dock 样式。
+
+Desktop Foundation E2E 新增 DOM ownership、Terminal geometry、navigation full-height、三按钮 center-Y/height 与 computed hover style 等值断言。完整 `pnpm verify:premerge` PASS；Desktop Foundation 与完整 Browse Slices 01–05 在 dev、release packaged、fresh extracted portable 三宿主全部 PASS。最新 ZIP 为 `148579792` bytes，SHA-256 `e721fe317da2326cdc08126abcd55ae17b5704eabbc8357e759c8206d9654ecd`。Saved Provider 仍保持 D-230 的配置阻塞，Human Re-Gate 尚未执行。
+
+```text
+DESKTOP_LEFT_NAVIGATION_SPANS_TERMINAL_HEIGHT: VERIFIED
+DESKTOP_TERMINAL_EXCLUDES_LEFT_NAVIGATION: VERIFIED
+DESKTOP_PROJECT_ACTIONS_SHARED_CONTROL_DOCK: VERIFIED
+DESKTOP_TOP_CONTROLS_BASELINE: MAX_0.5_CSS_PX_VERIFIED
+DESKTOP_TOP_CONTROLS_HOVER_STYLE: COMPUTED_EQUAL_VERIFIED
+DESKTOP_PREMERGE_DEV_PACKAGED_PORTABLE: PASS
+DESKTOP_HUMAN_REGATE: READY_NOT_RUN
+```
+
+## 70. China Model Baseline-first Eval Foundation
+
+用户要求在 Complete Agent 已存在的基础上实测 `qwen3.7-plus` 并建立国产模型优化路线。审核裁决该工作不得重新实现 Agent、不得在 Kernel 写 Qwen 分支，也不得在没有 bounded live-call 授权时把“已保存凭据”当成付费调用授权。当前路线固定为 generic baseline → zero-request preflight → corrected Provider config → bounded live smoke → Golden/CN baseline → failure classification → single-variable candidate → identical-case A/B → holdout/provider-neutral regression。
+
+仓库现有 Provider 记录已通过只读 metadata preflight 核验：`Qwen3.7-plus` 凭据存在，但配置仍是 `OPENAI` 且没有 custom Base URL；它会走 OpenAI 官方协议而不是 Qwen-compatible chat-completions，因此当前为 configuration blocker。当前环境也不存在 `LIVE_PROVIDER_CALLS`、Provider/model、request/cost/wall-time 六项完整授权；本轮 external model requests 为 0。
+
+新增 `pnpm eval:agent:qwen:preflight`，复用既有 Core/Model/Agent runtime，运行 adapter/tool deterministic tests，校验 8 个固定中文 case、3 个 holdout、`generic-current` source hashes 与未激活的 `qwen3.7-plus-candidate-v1`。Capability 与 Behavior 在 eval data 中分离，未知项保持 `UNVERIFIED`，没有扩展 FIPC/schema 或伪造支持。唯一生产改动是 Provider-neutral Context Compiler 的 bounded CJK n-gram term extraction，修复整段中文被当作单词导致中文文件定位失效的问题；中文/空格/反斜杠路径与 UTF-8 observation 也有确定性回归。
+
+```text
+CHINA_MODEL_EVAL_ROUTE: BASELINE_FIRST_CURRENT
+QWEN_CONFIG: BLOCKED_OPENAI_PROTOCOL_AND_MISSING_BASE_URL
+QWEN_CREDENTIAL_METADATA: PRESENT_SECRET_NOT_READ
+LIVE_PROVIDER_CALLS: NOT_AUTHORIZED
+EXTERNAL_MODEL_REQUESTS_THIS_SLICE: 0
+QWEN_SUPPORT_LEVEL: UNVERIFIED_NOT_L0
+QWEN_BEHAVIOR_PROFILE: CANDIDATE_NOT_ACTIVE
+CN_AGENT_CASES: 8_FIXED_3_HOLDOUT_NOT_RUN
+CHINESE_CONTEXT_AND_WINDOWS_UNICODE_PATH_REGRESSION: PASS
+```
+
+## 71. Qwen3.7-plus Phase A Smoke Authorization Stopped at Configuration Gate
+
+用户正式授权 Qwen Phase A smoke-only：最多 7 个真实请求、总费用不超过 3 CNY、总墙钟 900 秒，并增加每请求保守输入估算 120000 token、输出 12000 token 上限；不得自动进入 Golden、不得激活 Qwen optimization。该授权与 Provider 配置 Gate 正交。
+
+按要求重新运行 zero-request preflight 后，授权六项与 bound 全部有效，但 canonical Core metadata 仍只返回一个 active `Qwen3.7-plus` 配置：model ID 大小写不等于授权的精确 `qwen3.7-plus`、credential present、`provider_kind=OPENAI`、`base_url_present=false`、endpoint class missing。它不满足 exact model ID + `OPENAI_COMPATIBLE + Alibaba Model Studio compatible-mode/v1 HTTPS endpoint`，因此严格执行 `STOP_BEFORE_LIVE_REQUEST`。S01–S07 均未运行，请求使用 0/7、费用 0/3 CNY；Qwen production profile 保持 inactive，support level 仍为 UNVERIFIED/not L0。
+
+Preflight 同时收紧为验证 DashScope/Alibaba endpoint class，并使用本轮精确变量 `MAX_TOTAL_COST_CNY`、`MAX_WALL_TIME_SECONDS`；4 项 runner test、10 项 model adapter test、9 项 Agent tool/context test PASS。脱敏 Evidence 位于 `artifacts/agent-v0.1/qwen/preflight/PHASE_A_PREFLIGHT_RESULT.json`。
+
+```text
+QWEN_PHASE_A_AUTHORIZATION: VALID_UNUSED
+QWEN_PHASE_A_BOUND: 7_REQUESTS_3_CNY_900_SECONDS
+QWEN_PHASE_A_PREFLIGHT: CONFIGURATION_BLOCKED
+QWEN_PHASE_A_LIVE_REQUESTS_USED: 0
+QWEN_PHASE_A_COST_CNY: 0
+QWEN_PHASE_A_S01_S07: NOT_RUN
+QWEN_PRODUCTION_PROFILE: INACTIVE
+QWEN_SUPPORT_LEVEL: UNVERIFIED_NOT_L0
+```
+
+## 72. Programming, Testing, Typed Git and Six-family China Model Foundation
+
+用户将近期范围明确收敛为：先把 Fielora 做成可长期使用的编程、测试与代码版本管理桌面；设计和其他能力以后再接。首批国产模型为 Qwen、DeepSeek、Kimi、GLM、MiniMax、Doubao，未来 Provider 必须可以继续接入。实施前的短 Change Impact 位于 `docs/architecture/PROGRAMMING_AND_CHINA_MODELS_CHANGE_IMPACT_V0.1.md`；本轮不改 schema、migration、credential storage 或 Project/Conversation identity。
+
+Agent 现在具备窄化的 `git_stage / git_unstage / git_create_branch / git_switch_branch / git_commit / git_push`。这些工具拒绝 stage-all、敏感路径、非法 ref/remote、force/amend/reset/clean/rebase/checkout/tag；所有 Git 写操作即使在 Full Control 也逐次 Ask，push 禁用交互 credential prompt。通用 `run_command` 不能绕过 typed Git 执行 mutation。Git metadata 不再错误地使已经通过的代码测试失效，但 commit/push 也绝不算 verification。
+
+Verification 从“任意 process exit 0”收紧为真实 test/check/build/lint/typecheck 命令；文件写入后、verification 前，Git finalize tools 不向模型暴露。六家模型复用同一个 `china-coding-v1` 行为层和稳定英文 tool schema，只增加中文沟通、严格 JSON、证据→小改→测试→Diff 的执行纪律，不授予新权限。MiniMax conservative OpenAI-compatible wire 使用 `max_completion_tokens`；设置页提供六个可编辑 Provider preset，Environment 的“准备提交”进入 Agent 测试→Diff→批准→提交路径，不再预填 shell 拼接命令。
+
+当前完整 `pnpm verify:premerge` 已以退出码 0 PASS，覆盖 context/contracts、53 项 TypeScript、全部 Rust workspace unit、Clippy、8 项 Core integration，以及 Phase 02、Phase 03 Browse 和 Desktop Foundation dev E2E。release Core 与 Electron package 构建成功，最终 packaged Desktop Foundation E2E PASS；可执行文件 SHA-256 为 `5534451f0fb3b00787a7cb5802a5aaa67fd4c799d5fb57c2692f7c028fcbc739`。真实六家模型质量仍未运行；最终 zero-request preflight 为 external requests 0、credential bytes read false、Qwen 配置 blocker、其余五家未配置，不能把 deterministic PASS 写成 live support 或“已经好用”的最终 Human 结论。
+
+```text
+PROGRAMMING_LOOP: INSPECT_EDIT_TEST_DIFF_TYPED_GIT_IMPLEMENTED
+GIT_WRITE_APPROVAL: ALWAYS_ASK
+PROCESS_EXIT_ZERO_EQUALS_VERIFICATION: NO
+CHINA_MODEL_FAMILIES: QWEN_DEEPSEEK_KIMI_GLM_MINIMAX_DOUBAO
+CHINA_CODING_PROFILE: SHARED_ACTIVE_NO_NEW_AUTHORITY
+SIX_PROVIDER_PRESETS: IMPLEMENTED_EDITABLE
+PROGRAMMING_PREMERGE: PASS
+PROGRAMMING_PACKAGED_DESKTOP_FOUNDATION: PASS
+LIVE_MODEL_QUALITY: NOT_RUN_UNVERIFIED
+SCHEMA_MIGRATION_CREDENTIAL_CHANGE: NONE
+```
+
+## 73. Qwen Coding Plan Credential Classification and Interactive Route
+
+用户明确授权使用已保存千问 Key 直至套餐用量上限。首个隔离 S01 请求按 7 requests / 3 CNY / 900 seconds 小批次 Gate 发往标准 Model Studio 北京 compatible endpoint，真实返回 `CREDENTIAL_REJECTED`；runner 当即停止且未重试。该请求没有获得 usage、没有响应正文、没有修改 canonical Project/Conversation，Evidence 位于 `artifacts/agent-v0.1/qwen/live/qwen-live-2026-08-18T12-03-25-456Z.json`。
+
+随后通过只返回类型、不打印/哈希/保存密钥的 Windows Credential 本地诊断确认该 Key 是 `sk-sp-` 类 Coding Plan 专用凭据且没有首尾空格。官方要求 Coding Plan Key 使用 `https://coding.dashscope.aliyuncs.com/v1`，不能与标准 Model Studio endpoint 混用。项目既有规则禁止用 Coding Plan credential 做 automation/API acceptance，因此 live runner 新增 fail-closed guard；修复后的复跑在 request 1 前以 `CODING_PLAN_AUTOMATED_EVAL_PROHIBITED` 停止，requests=0。
+
+Canonical Provider 元数据在 SQLite 在线一致性备份后修正为 `OPENAI_COMPATIBLE + qwen3.7-plus + Coding Plan endpoint`，原 WinCred reference 保持不变，未读取 credential bytes。设置页新增独立 Qwen Coding Plan preset；通用 Qwen preset 保留。Model wire 仅对 Qwen Plan/Token Plan endpoint 使用官方 `enable_thinking:true`，并为所有 direct compatible invocation 增加 1024 output-token hard bound。该状态允许用户在 Fielora 中交互式编程，不构成自动化模型质量 PASS。
+
+```text
+QWEN_LIVE_S01_REQUESTS: 1
+QWEN_LIVE_S01_RESULT: CREDENTIAL_REJECTED_WRONG_ENDPOINT
+QWEN_CREDENTIAL_CLASS: CODING_PLAN_SECRET_NOT_PRINTED
+QWEN_CANONICAL_CONFIG: OPENAI_COMPATIBLE_CODING_PLAN_REPAIRED
+QWEN_INTERACTIVE_CODING: READY_FOR_USER_USE
+QWEN_AUTOMATED_ACCEPTANCE: BLOCKED_BY_CODING_PLAN_POLICY
+QWEN_PLAN_THINKING_WIRE: ENABLED_OFFICIAL_SETTING
+QWEN_DIRECT_OUTPUT_BOUND: 1024
+QWEN_LIVE_QUALITY: UNVERIFIED
+```
+
+## 74. Unified Appearance System and Settings
+
+用户明确要求将 Codex-like 外观能力接入 Fielora，并将 Light、Dark、System、强调色、对比度、密度、圆角、字体、动效、半透明侧栏与主题导入/重置作为真实设置，而不是静态展示。该决定重新打开 D-231 当时移除的手动密度与减少动画入口；D-231 的 Desktop Surface ownership 仍有效，但“只服从 OS、无手动入口”不再是当前事实。
+
+当前实现扩展既有 `--fl-*` token 与统一 `app-preferences`，没有新增第二套 theme runtime、schema、migration、credential 或 Provider 逻辑。偏好升级为 localStorage v2，兼容迁移 v1；System 使用 `matchMedia` 实时解析且不改写用户选择，首次 React render 前应用，降低主题闪烁。Theme Config v1 仅解析 bounded JSON data，拒绝未知字段、非法颜色与低于 4.5 的 canvas/foreground 对比；恢复默认只重置 appearance。
+
+设置页新增独立“外观”，关键 Desktop/Coding Surface 统一消费 Light/Dark semantic roles，外部 Browse WebContents 保持隔离。TypeScript typecheck、lint、62 项 desktop tests 与真实 Electron Appearance E2E PASS；E2E 覆盖切换、System 跟随、持久化、accent/density/radius/sidebar/motion、非法导入与局部 reset，并产出 Light/Dark 截图。完整 PreMerge、packaged 与 Human Gate 尚未运行，不能据此写为全产品最终验收。
+
+```text
+APPEARANCE_ARCHITECTURE: EXISTING_TOKENS_AND_PREFERENCES_EXTENDED
+THEMES: SYSTEM_LIGHT_DARK_IMPLEMENTED
+APPEARANCE_CONTROLS: ACCENT_CONTRAST_DENSITY_RADIUS_FONT_MOTION_IMPLEMENTED
+THEME_CONFIG: BOUNDED_DATA_ONLY_IMPORT_EXPORT
+PREFERENCE_MIGRATION: LOCALSTORAGE_V1_TO_V2
+DESKTOP_APPEARANCE_TARGETED_E2E: PASS
+PACKAGED_AND_HUMAN_GATE: NOT_RUN
+SCHEMA_MIGRATION_CREDENTIAL_PROVIDER_CHANGE: NONE
+```
+
+## 75. Agent Interaction Language V0.1
+
+用户对照 Codex 后确认当前差距已从配色转向 Agent UX：旧界面把 Run、Tool、Event、error code 平铺成状态机报告，用户无法自然理解“正在做什么、发生了什么、最终得到了什么”。当前产品 Contract 位于 `docs/product/AGENT_INTERACTION_LANGUAGE_V0.1.md`。
+
+Renderer 现将 Agent 输出分为 Conversation、Execution、Technical Trace 三层。默认层使用“正在检查项目 / 正在修改项目 / 正在运行并验证 / 这次没有完成 / 工作已完成”等人话；Execution 由真实 Tool effect/name 和 Receipt 确定性生成 Work Narrative，不显示模型私有 Chain-of-Thought；技术事件和 error code 二次折叠。Approval 使用具体效果按钮并说明一次性边界；Failure 根据 completed workspace mutation 区分“无项目变化”与“已有部分变化”；完成态提供真实“查看修改”和“查看运行记录”。
+
+同一轮收紧 User Bubble、Composer、Header 与 Sidebar：消息按内容收缩、Composer 移除常驻权限说明、单模型只显示静态标签、完整本地路径改为 hover、导航改为正文式层级和弱选中 indicator。该轮没有修改 Agent ledger、schema 6、permission、Provider wire、credential 或 Browser security。
+
+```text
+AGENT_INTERACTION_LANGUAGE: V0_1_IMPLEMENTED
+CONVERSATION_EXECUTION_TECHNICAL_LAYERS: SEPARATED
+CHAIN_OF_THOUGHT_DISPLAY: PROHIBITED
+WORK_NARRATIVE_SOURCE: RUN_EVENT_TOOL_RECEIPT_FACTS_ONLY
+APPROVAL_FAILURE_RESULT_LANGUAGE: IMPLEMENTED
+SCHEMA_PERMISSION_PROVIDER_CHANGE: NONE
+ENGINEERING_VERIFICATION: 68_TS_DEV_AND_PACKAGED_AGENT_UX_PASS
+PACKAGED_EXE_SHA256: 501891C3E86DC72B9943BD334F4C7D5A613CE33C2B9904D9AF168DD84BAA8D33
+EXTERNAL_PROVIDER_REQUESTS: 0
+FULL_PREMERGE_AND_HUMAN_GATE: NOT_RUN
+```
+
+## 76. Qwen Fast Edit Performance Remediation
+
+用户授权使用已配置 Qwen Coding Plan credential 对真实 Coding Agent 闭环执行 bounded Golden Task。整改前真实本地任务运行 521,995ms 后仍停在审批，产生 12 次模型调用、23 次工具调用、113 个 Durable Event、522,458 input tokens，并发生重复读取、Context 重建、原始 reasoning 展示与 Desktop projection timeout。
+
+当前 Provider-neutral Agent Harness 新增 `FAST_EDIT` 分类、task-scoped tools、stable context/transcript cache、并行 observe、batched search/replace、atomic guarded `apply_patches`、receipt feedback、Windows package-manager shim、轻量 durable event 与增量 Desktop projection。Provider intermediate planning 不进入 Conversation，最终文本通过 bounded state-machine 移除完整/残缺 `<think>` 段。Project 创建后立即生成并选中唯一 unsent Conversation。
+
+最终隔离真实 Qwen Golden Task 以 5 次模型调用、6 次工具调用、20,460 input tokens 在 23,941ms 内 PASS；模型耗时 22,318ms、工具 1,243ms、Context 71ms、验证 1,131ms，0 duplicate observe，三份目标文件精确修改且非目标文件未变。60 项 Rust workspace、71 项 Desktop TS、Clippy、8 项 Core integration、Phase 02 Desktop、dev/packaged Project Navigation 与 Agent UX E2E PASS。完整 PreMerge 已运行并在 Browse 真实 navigation/security/input/scroll 后被既有 Windows Chromium 原生 Ctrl+C/Ctrl+V 环境硬断言阻断；断言未跳过或放宽。其他五家国产 Provider live quality 仍未验证。
+
+```text
+QWEN_FAST_EDIT_GOLDEN: PASS
+TOTAL_DURATION_MS: 23941
+MODEL_CALLS: 5
+TOOL_CALLS: 6
+DUPLICATE_OBSERVE_CALLS: 0
+DURABLE_EVENTS: 39
+RAW_REASONING_LEAK: FALSE
+PROJECT_CREATE_AUTO_CONVERSATION: DEV_AND_PACKAGED_PASS
+PACKAGED_EXE_SHA256: D09ABB3938AD8C9AC049B159A32D5B437569AB4922063E6849CC8E5C655118ED
+PACKAGED_CORE_SHA256: 0C0911480BFDD6ADB968192756967485D3A5E74BB219CFDB21F4A5F76CBD5C53
+OTHER_CHINA_PROVIDER_LIVE_QUALITY: UNVERIFIED
+FULL_PREMERGE: BLOCKED_AT_WINDOWS_NATIVE_CLIPBOARD_AFTER_PRIOR_GATES_PASS
+```
+
+修复后的完整 `pnpm verify:premerge` 以退出码 0 PASS，覆盖 53 项 TypeScript、50 项 Rust workspace unit、Clippy、8 项 Core integration 与 Phase 02/Phase 03 Browse/Desktop Foundation dev E2E；release build、Electron package 和 packaged Desktop Foundation E2E 同时 PASS。最新 unpacked `Fielora.exe` 为 `225533440` bytes，SHA-256 `acdd2387b78cd994eb705abfa4e86f4d9e95bcfe05b3d2b50df24be148f9fb12`。这些 Gate 没有发起 Provider 请求。
+
+## 77. Agent Desktop Convergence V0.1
+
+用户固定同一 Qwen Coding Plan 任务，要求先测量 Golden/Core 与真实 Dev/Packaged Desktop，再把 Simple Edit 从开放式循环收敛为 deterministic FAST_EDIT。Baseline 证明四个宿主都识别为 FAST_EDIT，但仍需要 8–16 次模型调用、7–15 次工具调用、3–4 次 Patch，并出现 1–3 次 conflict；Desktop 单次 UI submit 只持久化一条用户消息，因此截图中的重复消息没有复现为 transport/persistence retry，本轮没有无依据新增 `client_request_id` schema。
+
+当前 `FAST_EDIT_BOUNDED_V1` 使用持久 lexical Repository Context Index、Stable/Dynamic/Task-local context hash、完整可信文件正文、一次 bounded multi-file change set、最多一次全量相关文件 conflict recovery、targeted verification、git diff invariant 与最终语义说明。Runtime 以 `LOCATE / EDIT / VERIFY / FINALIZE` canonical phase 作为唯一主状态；Renderer 只投影该状态，工作叙述由 runtime facts/template 生成，raw tools 留在技术信息。Build Provenance 可通过 Core 查询，并自动进入 Run/Evidence。
+
+同一固定任务的最终 AFTER 结果：Debug Core 13,486ms、Packaged Core 22,170ms、Dev Desktop 17,382ms、Packaged Desktop 19,963ms；四者均为 2 次模型调用、3 次工具调用、0 search/read/duplicate observe、1 次 Patch、0 conflict、1 次 targeted verification、29 events，并精确修改四个目标文件。Packaged Desktop 的 FIPC event query 总耗时 9ms、projection 1ms，模型请求耗时 19,068ms，占总时长约 95.5%，证明剩余主要瓶颈在 Provider，而非 Desktop projection/FIPC。Rust 25 项、Desktop 74 项与 Core integration 10 项 PASS；真实 Dev/Packaged Desktop 还验证了四阶段 DOM、一条用户消息与复制成功反馈。
+
+```text
+FIELORA_AGENT_DESKTOP_CONVERGENCE_V0.1: PASS
+DESKTOP_CONVERGENCE: PASS
+FAST_EDIT_PERFORMANCE: PASS
+PRESENTATION_CONSISTENCY: PASS
+PACKAGED_EXE_SHA256: D09ABB3938AD8C9AC049B159A32D5B437569AB4922063E6849CC8E5C655118ED
+PACKAGED_APP_ASAR_SHA256: 93ACC7344DC51346B020CEE3EEE99990C4BC2045EE49B2AD743D7342D80985C0
+PACKAGED_CORE_SHA256: F42FA2985798FE402B54497DB0973C244C529D9BDE061B720033060560BD5788
+OTHER_CHINA_PROVIDER_LIVE_QUALITY: UNVERIFIED
+```
+
+## 78. FAST_EDIT Robustness and Agent UX V0.1
+
+真实用户措辞“把项目列表页面的显示/隐藏列里面的进行阶段勾选项去掉”证明 `FAST_EDIT_BOUNDED_V1` 虽然快，但在全截断候选、目标实体缺失和首次工具调用不完整时会 one-shot fail；历史开放循环还曾把目标复选框与相邻“开发顾问”一起删除。当前实现升级为 Provider-neutral `FAST_EDIT_ADAPTIVE_V1`：先记录 Context Confidence；LOW 时允许正式 `NEED_MORE_EVIDENCE`，由 Harness 只执行一次 batched search + parallel bounded reads；模型随后以 `apply_patches` 或 `no_change_needed` 返回 READY_TO_EDIT。ChangeSet 在持久化/执行前进行 typed validation，证据完成后最多纠正一次，Patch conflict 最多重读并重试一次，总模型调用上限 4。
+
+Minimum Necessary Change 已变成执行约束：界面控件任务只允许证据支持的模板路径，controller/service/表格业务逻辑/相邻控件默认禁止；多 label 删除判为 ambiguous。旧全文件“目标词必须消失”验证被替换为 receipt-backed operation invariant，允许同名业务列正确保留。目标控件已不存在时以 no-change COMPLETED 收口，不写文件、不运行伪验证。
+
+Renderer 只展示 `定位 / 修改 / 验证` 三阶段，FINALIZE 不再作为“完成”步骤；Blocked/Skipped 使用中性未执行状态，Activity Detail 改为 Conversation inline expansion。最终真实 Qwen 隔离套件以 5 种真实措辞重复 10 次，10/10 PASS，P90 17,349ms、P95 18,351ms、平均 3.0 次模型调用、最大 4、不安全写入 0。其他五家国产模型 live quality 仍未验证。
+
+最终 packaged 回归又发现英文子串分类会把 `FIXTURE` 中的 `fix` 误判为 FAST_EDIT；英文动作词现改为真正的 ASCII word boundary，新建/生成文件任务保持 GENERAL，中文 FAST_EDIT 触发不变。Rust workspace 62/62、Core integration 10/10、Desktop TypeScript 75/75、typecheck、Clippy 与 packaged Agent UX PASS。完整 Desktop Foundation 后半段仍在 utility → Review 切换断言失败，该既有工作区信号不计入本专项 PASS。
+
+```text
+FAST_EDIT_PIPELINE: FAST_EDIT_ADAPTIVE_V1
+FORMAL_DECISIONS: READY_TO_EDIT_OR_NEED_MORE_EVIDENCE
+BOUNDED_EVIDENCE_RECOVERY: ONE_BATCH
+BOUNDED_CHANGESET_RETRY: ONE
+BOUNDED_PATCH_CONFLICT_RETRY: ONE
+MINIMUM_NECESSARY_CHANGE: ENFORCED_BEFORE_WRITE
+FAST_EDIT_VISIBLE_PHASES: LOCATE_EDIT_VERIFY
+ACTIVITY_DETAIL: INLINE_EXPANSION
+QWEN_REAL_PHRASING_ROBUSTNESS: 10_OF_10_PASS
+QWEN_P90_MS: 17349
+QWEN_AVERAGE_MODEL_CALLS: 3.0
+UNSAFE_WRITES: 0
+OTHER_CHINA_PROVIDER_LIVE_QUALITY: UNVERIFIED
+```
+
+## 79. Real CRLF Edit + Permission Presets Closure
+
+用户真实 Run 使用 Qwen 修改 `finance-add.controller.js` 时，read receipt 与 write proposal 均为 SHA-256 `43ff20dc...e40a`，但文件包含 2,513 个 CRLF 行尾；旧 `replace_text` 用 LF exact text 匹配失败后错误返回 `AGENT_FILE_CHANGED`。审批恢复又让模型重复读取和写入，最终在 16 步达到 `AGENT_MAX_STEPS_REACHED`。该失败不是用户操作错误，也不是模型未定位修改。
+
+当前 runtime 在 SHA guard 通过后按文件行尾归一化 exact replacement，并把真正的 hash change、text match failure 与 patch conflict 分开；Focused Edit 在真实 verification 和一次 `git_read diff` 后停止暴露工具，强制进入最终 Markdown 结果。三档 Composer 权限改为“请求批准 / 帮我批准 / 完全访问权限”，同时持久化 Conversation、Project、Global，新 Conversation 不再回退。Child subagent 仍由 observe-only catalog 真正隔离。
+
+最终使用原 97,401-byte 文件的隔离副本执行同一 Qwen 任务：33,754ms、11 model calls、Run `COMPLETED`、0 `AGENT_FILE_CHANGED`、0 approval；目标用户字段变为非必填，真实 command verification 与 diff 完成。81 TS、28 targeted Rust、10 Core integration、dev/packaged Agent UX E2E PASS。最终 package 在历史 Phase 04 PID 23244 仍存活时成功独立启动；旧进程未被本轮删除。
+
+```text
+REAL_QWEN_CRLF_EDIT: PASS
+RUN_DURATION_MS: 33754
+MODEL_CALLS: 11
+FILE_CHANGED_FALSE_POSITIVES: 0
+FULL_ACCESS_APPROVALS: 0
+PERMISSION_INHERITANCE: CONVERSATION_PROJECT_GLOBAL_PASS
+DEV_AGENT_UX_E2E: PASS
+PACKAGED_AGENT_UX_E2E: PASS
+EXE_SHA256: D09ABB3938AD8C9AC049B159A32D5B437569AB4922063E6849CC8E5C655118ED
+CORE_SHA256: C3AB157A875F9EAB0F86555489A13B5A238AAF3BD4784D05BD10F8CAFE191808
+ASAR_SHA256: 75222B2AFE9230A6A53782A426DB7BE5E3EFEDC373D47CA82ED15728409524B5
+```

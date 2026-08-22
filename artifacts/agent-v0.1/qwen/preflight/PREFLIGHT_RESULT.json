@@ -1,0 +1,66 @@
+{
+  "suite": "fielora-china-model-preflight-v0.1",
+  "generated_at": "2026-08-18T10:30:57.600Z",
+  "external_model_requests": 0,
+  "credential_bytes_read_by_preflight": false,
+  "repository": {
+    "branch": "phase/complete-agent-v0.1",
+    "head": "027214d9fd6f6eaee0a304f756e4b0291203477a",
+    "dirty": true
+  },
+  "documents": {
+    "status": "PASS",
+    "issues": [],
+    "manifest_sha256": "8a15c3032d32fe65058ac83f8ce1451b3bcd45c90191306571f475440fcc4654",
+    "generic_profile_sha256": "5a80c25aacecd6013cd1b5bc8992757b02807b9be8212b53a8dd66ec938262f3",
+    "qwen_candidate_sha256": "b77f6637b4b563f89ee6ad19891982aca11ead1c596a78d3a707007962b98390",
+    "baseline_source_sha256": {
+      "crates/fielora-model/src/lib.rs": "46b7580f3dc05a18a92fe02ffb65b6b1684b16b39bfe91c0da6868c5b2924861",
+      "crates/fielora-agent/src/lib.rs": "516dc2f90d7f9f5f121877fcf4397595942b1053a9b609cc829bb096285ac69f",
+      "crates/fielora-core/src/agent_runtime.rs": "31f57beaa65b18c7534663696b8539077220b089e0cbabe73313997ba95b5925"
+    },
+    "unevaluated_cases": 8,
+    "holdout_cases": 3
+  },
+  "qwen_configuration": {
+    "matching_configs": 1,
+    "ready_configs": 0,
+    "configs": [
+      {
+        "display_name": "测试模型",
+        "provider_kind": "OPENAI",
+        "model_id": "Qwen3.7-plus",
+        "lifecycle_status": "ACTIVE",
+        "credential_present": true,
+        "base_url_present": false,
+        "status": "CONFIGURATION_BLOCKED",
+        "issues": [
+          "QWEN_REQUIRES_OPENAI_COMPATIBLE_PROTOCOL",
+          "HTTPS_BASE_URL_REQUIRED"
+        ]
+      }
+    ]
+  },
+  "live_authorization": {
+    "status": "NOT_AUTHORIZED",
+    "required_presence": {
+      "LIVE_PROVIDER_CALLS": false,
+      "PROVIDER": false,
+      "MODEL": false,
+      "MAX_TOTAL_REQUESTS": false,
+      "MAX_TOTAL_COST": false,
+      "MAX_WALL_TIME": false
+    },
+    "values_valid": false
+  },
+  "verdict": "QWEN_CONFIGURATION_BLOCKED",
+  "proposed_first_live_bound": {
+    "sequence": "QW-S01 through QW-S07, stop immediately on any safety failure",
+    "max_total_requests": 24,
+    "max_input_tokens": 250000,
+    "max_output_tokens": 40000,
+    "max_wall_time_seconds": 1800,
+    "max_total_cost": "USER_MUST_SET_AFTER_CONFIRMING_PROVIDER_PRICING",
+    "repeats": "smoke=1; stability claims require a separately authorized 3-repeat gate"
+  }
+}

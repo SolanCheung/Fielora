@@ -1,6 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { app, BrowserWindow, Menu, dialog, ipcMain, protocol, shell } from 'electron';
+import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, nativeImage, nativeTheme, protocol, shell } from 'electron';
 import type { ContextMenuParams, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import type { ProjectView } from '@fielora/contracts';
 import { BrowserRuntime } from './browser-runtime';
@@ -15,20 +15,23 @@ import {
   validateReviseState, validateSetFocusV1, validateSnapshot, validateSnapshotV1,
   validateStateReference, validateSupersedeState, validateTransitionState, validateUpdateMode,
   validateBrowserBounds, validateBrowserNavigate, validateBrowserPageRequest,
+  validateClipboardText,
   validateCreateProvider, validateUpdateProvider, validateProviderReference, validateStoreCredential,
   validateStartModel, validateCancelModel, validateCreateCapture, validateCaptureReference,
   validateMutateCapture, validateAttachCapture, validatePromoteCapture, validateListCaptures,
-  validatePickProject, validateCreateProject, validateWorkspaceProject, validateCreateConversation,
+  validatePickProject, validateCreateProject, validateUpdateProject, validateArchiveProject, validateWorkspaceProject, validateCreateConversation,
   validateConversationReference, validateUpdateConversation, validateArchiveConversation,
   validateCreateConversationMessage, validateListConversationMessages, validateWorkspaceFile,
   validateApplyWorkspaceFile, validateRunTerminal, validateCancelTerminal,
   validateStartAgent, validateAgentRun, validateListAgentRuns, validateListAgentEvents,
   validateResolveAgentApproval,
+  validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment, validateStoreWorkspaceAttachment,
 } from './validation';
 import { WorkspaceRuntime } from './workspace-runtime';
-import { loadSelectedAttachments } from './attachment-runtime';
+import { loadSelectedAttachments, readStoredImage, storeImageAttachment } from './attachment-runtime';
 import { focusUsableWindow, usableWindow, withUsableWindow } from './window-lifecycle';
 import { desktopFoundationUserDataPath, hasExplicitUserDataDirectory } from './runtime-identity';
+import { windowSurfaceColors, type WindowSurfaceTheme } from './window-surface';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
@@ -112,19 +115,36 @@ async function projectRoot(fieldId: string): Promise<string> {
 }
 
 function registerBridgeHandlers(): void {
+  ipcMain.handle(channels.windowTitlebarTheme, (event, payload) => {
+    assertBridgeEvent(event);
+    if (payload !== 'LIGHT' && payload !== 'DARK') throw new Error('Invalid titlebar theme');
+    const surface = windowSurfaceColors(payload as WindowSurfaceTheme);
+    withUsableWindow(appWindow, (window) => {
+      window.setBackgroundColor(surface.background);
+      window.setTitleBarOverlay({ color: surface.background, symbolColor: surface.symbols, height: surface.height });
+    });
+    return null;
+  });
   ipcMain.handle(channels.projectPick, async (event, payload) => {
     assertBridgeEvent(event);
     const request = validatePickProject(payload);
     if (!appWindow || appWindow.isDestroyed()) throw new Error('App window is unavailable');
-    const selection = await dialog.showOpenDialog(appWindow, { title: '选择 Project 文件夹', properties: ['openDirectory', 'createDirectory'] });
-    if (selection.canceled || selection.filePaths.length !== 1) return null;
-    const rootPath = path.resolve(selection.filePaths[0]!);
+    let rootPath: string;
+    if (process.env.FIELORA_E2E === '1' && process.env.FIELORA_E2E_PROJECT_PATH) {
+      rootPath = path.resolve(process.env.FIELORA_E2E_PROJECT_PATH);
+    } else {
+      const selection = await dialog.showOpenDialog(appWindow, { title: '选择 Project 文件夹', properties: ['openDirectory', 'createDirectory'] });
+      if (selection.canceled || selection.filePaths.length !== 1) return null;
+      rootPath = path.resolve(selection.filePaths[0]!);
+    }
     return supervisor.request('command.project.create', {
       title: request.title.trim() || path.basename(rootPath), goal: request.goal, root_path: rootPath,
     });
   });
   ipcMain.handle(channels.projectList, (event) => { assertBridgeEvent(event); return supervisor.request('query.project.list'); });
   handle(channels.projectGet, validateReference, 'query.project.get');
+  handle(channels.projectUpdate, validateUpdateProject, 'command.project.update');
+  handle(channels.projectArchive, validateArchiveProject, 'command.project.archive');
   handle(channels.conversationCreate, validateCreateConversation, 'command.conversation.create');
   handle(channels.conversationList, validateReference, 'query.conversation.list');
   handle(channels.conversationGet, validateConversationReference, 'query.conversation.get');
@@ -139,6 +159,10 @@ function registerBridgeHandlers(): void {
   ipcMain.handle(channels.workspaceFileRead, async (event, payload) => {
     assertBridgeEvent(event); const request=validateWorkspaceFile(payload);
     return workspaceRuntime.readFile(await projectRoot(request.field_id), request.relative_path);
+  });
+  ipcMain.handle(channels.workspaceFilePreview, async (event, payload) => {
+    assertBridgeEvent(event); const request=validateWorkspaceFile(payload);
+    return workspaceRuntime.previewImage(await projectRoot(request.field_id), request.relative_path);
   });
   ipcMain.handle(channels.workspaceAttachmentPick, async (event) => {
     assertBridgeEvent(event);
@@ -155,9 +179,49 @@ function registerBridgeHandlers(): void {
     }
     return loadSelectedAttachments(filePaths);
   });
+  ipcMain.handle(channels.workspaceAttachmentStore, async (event, payload) => {
+    assertBridgeEvent(event);
+    return storeImageAttachment(path.join(app.getPath('userData'), 'conversation-attachments'), validateStoreWorkspaceAttachment(payload));
+  });
+  ipcMain.handle(channels.workspaceAttachmentRead, async (event, payload) => {
+    assertBridgeEvent(event);
+    const request = validateReadWorkspaceAttachment(payload);
+    const stored = await readStoredImage(path.join(app.getPath('userData'), 'conversation-attachments'), request.content_ref);
+    return { data_url: stored.data_url, mime_type: stored.mime_type };
+  });
+  ipcMain.handle(channels.workspaceAttachmentCopy, async (event, payload) => {
+    assertBridgeEvent(event);
+    const request = validateReadWorkspaceAttachment(payload);
+    const stored = await readStoredImage(path.join(app.getPath('userData'), 'conversation-attachments'), request.content_ref);
+    const image = nativeImage.createFromBuffer(Buffer.from(stored.bytes));
+    if (image.isEmpty()) throw new Error('Attachment image is unavailable');
+    clipboard.writeImage(image);
+    const copied = clipboard.readImage();
+    if (copied.isEmpty()) throw new Error('Attachment image was not copied');
+    const size = copied.getSize();
+    return { copied: true, width: size.width, height: size.height };
+  });
+  ipcMain.handle(channels.workspaceAttachmentSave, async (event, payload) => {
+    assertBridgeEvent(event);
+    const request = validateSaveWorkspaceAttachment(payload);
+    const stored = await readStoredImage(path.join(app.getPath('userData'), 'conversation-attachments'), request.content_ref);
+    let target = process.env.FIELORA_E2E_ATTACHMENT_SAVE_PATH ?? '';
+    if (!target) {
+      if (!appWindow || appWindow.isDestroyed()) throw new Error('App window is unavailable');
+      const selection = await dialog.showSaveDialog(appWindow, { title: '图片另存为', defaultPath: request.filename });
+      if (selection.canceled || !selection.filePath) return { saved: false, canceled: true };
+      target = selection.filePath;
+    }
+    await writeFile(target, stored.bytes);
+    return { saved: true, canceled: false };
+  });
   ipcMain.handle(channels.workspaceFileApply, async (event, payload) => {
     assertBridgeEvent(event); const request=validateApplyWorkspaceFile(payload);
     return workspaceRuntime.applyFile(await projectRoot(request.field_id), request);
+  });
+  ipcMain.handle(channels.workspaceEnvironment, async (event, payload) => {
+    assertBridgeEvent(event); const request=validateWorkspaceProject(payload);
+    return workspaceRuntime.getEnvironment(await projectRoot(request.field_id));
   });
   ipcMain.handle(channels.workspaceTerminalRun, async (event, payload) => {
     assertBridgeEvent(event); const request=validateRunTerminal(payload);
@@ -196,6 +260,10 @@ function registerBridgeHandlers(): void {
   handle(channels.surfaceSaveSnapshot, validateSnapshot, 'command.surface.save_snapshot');
   handle(channels.surfaceSaveSnapshotV1, validateSnapshotV1, 'command.surface.save_snapshot_v1');
   handle(channels.surfaceLatestSnapshot, validateReference, 'query.surface.latest_snapshot');
+  ipcMain.handle(channels.clipboardWriteText, (event, payload) => {
+    assertBridgeEvent(event);
+    clipboard.writeText(validateClipboardText(payload));
+  });
   handle(channels.providerCreate, validateCreateProvider, 'command.provider.create_config');
   handle(channels.providerUpdate, validateUpdateProvider, 'command.provider.update_config');
   handle(channels.providerStoreCredential, validateStoreCredential, 'command.provider.store_credential');
@@ -247,6 +315,7 @@ function registerBridgeHandlers(): void {
   ipcMain.handle(channels.browserState, (event) => { assertBridgeEvent(event); return browser().getState(); });
   ipcMain.handle(channels.browserContext, (event) => { assertBridgeEvent(event); return browser().getContextCandidate(); });
   ipcMain.handle(channels.coreHealth, (event) => { assertBridgeEvent(event); return supervisor.getHealth(); });
+  ipcMain.handle(channels.coreBuildProvenance, (event) => { assertBridgeEvent(event); return supervisor.request('query.system.build_provenance'); });
   ipcMain.handle(channels.coreRetry, async (event) => { assertBridgeEvent(event); await supervisor.retry(); });
   ipcMain.handle(channels.coreOpenLogs, async (event) => {
     assertBridgeEvent(event);
@@ -305,15 +374,16 @@ async function registerApplicationProtocol(): Promise<void> {
 
 async function createWindow(): Promise<void> {
   trustedOrigin = trustedOriginFor(app.isPackaged, MAIN_WINDOW_WEBPACK_ENTRY);
+  const initialSurface = windowSurfaceColors(nativeTheme.shouldUseDarkColors ? 'DARK' : 'LIGHT');
   const window = new BrowserWindow({
     width: 1180,
     height: 760,
     minWidth: 900,
     minHeight: 620,
-    backgroundColor: '#f5f7fb',
+    backgroundColor: initialSurface.background,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#f3f6fa', symbolColor: '#565d67', height: 40 },
+    titleBarOverlay: { color: initialSurface.background, symbolColor: initialSurface.symbols, height: initialSurface.height },
     show: false,
     webPreferences: {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,

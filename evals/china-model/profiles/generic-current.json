@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "profile_id": "generic-current",
+  "status": "BASELINE_FROZEN",
+  "activation": "PRODUCTION_CURRENT",
+  "source_head": "027214d9fd6f6eaee0a304f756e4b0291203477a",
+  "source_file_hashes": "RECORDED_BY_EACH_PREFLIGHT_RESULT",
+  "capability_profile": {
+    "source": "PROVIDER_KIND_CONTRACT",
+    "api_family": "RUNTIME_SELECTED",
+    "streaming": "DECLARED_PROVIDER_LEVEL",
+    "native_tool_calling": "DECLARED_PROVIDER_LEVEL",
+    "parallel_tool_calls": "REQUEST_DISABLED",
+    "structured_output": "UNVERIFIED",
+    "reasoning_control": "NOT_EXPOSED",
+    "context_cache": "NOT_OBSERVED",
+    "usage_reporting": "NORMALIZED_WHEN_PRESENT",
+    "cancel_semantics": "IMPLEMENTED",
+    "max_context": "RUNTIME_BOUNDED_NOT_MODEL_DISCOVERED",
+    "max_output": 4096
+  },
+  "behavior_profile": {
+    "evidence_status": "CURRENT_IMPLEMENTATION_FACT",
+    "preferred_reasoning_policy": "PROVIDER_DEFAULT_NO_EXPLICIT_CONTROL",
+    "preferred_tool_exposure": "ALL_CODING_TOOLS_EVERY_STEP",
+    "preferred_tool_description_style": "GENERIC_ENGLISH_V1",
+    "preferred_context_budget": {
+      "max_files": 32,
+      "max_bytes": 131072,
+      "term_extraction": "ASCII_WORDS_PLUS_BOUNDED_CJK_NGRAM_V1"
+    },
+    "preferred_compaction_policy": "BOUNDED_TRUNCATION_ONLY",
+    "preferred_parallel_tool_policy": "DISABLED",
+    "preferred_retry_policy": "ONE_TRANSIENT_RETRY",
+    "preferred_language_policy": "GENERIC_ENGLISH_SYSTEM_PROMPT",
+    "preferred_verification_reminder": "ONE_NUDGE_AFTER_WRITE",
+    "known_quirks": [],
+    "eval_evidence_version": null,
+    "confidence": "IMPLEMENTATION_OBSERVED_NOT_MODEL_QUALITY_EVALUATED"
+  }
+}

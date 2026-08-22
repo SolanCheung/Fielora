@@ -73,6 +73,7 @@ export const referenceLifecycleLabels: Record<ObjectLifecycle, string> = {
 
 const activityLabels: Record<ActivityAction, string> = {
   FIELD_CREATED: '创建了 Field',
+  FIELD_ARCHIVED: '从项目列表移除了 Field',
   FIELD_FOCUS_UPDATED: '更新了当前关注',
   FIELD_MODE_UPDATED: '切换了工作状态',
   STATE_CREATED: '记录了新内容',

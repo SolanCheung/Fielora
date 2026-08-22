@@ -55,6 +55,12 @@ artifacts/agent-v0.1/*
 !artifacts/agent-v0.1/*.md
 !artifacts/agent-v0.1/*.json
 !artifacts/agent-v0.1/*.png
+!artifacts/agent-v0.1/qwen/
+artifacts/agent-v0.1/qwen/*
+!artifacts/agent-v0.1/qwen/preflight/
+artifacts/agent-v0.1/qwen/preflight/*
+!artifacts/agent-v0.1/qwen/preflight/*.md
+!artifacts/agent-v0.1/qwen/preflight/*.json
 
 # Local configuration and secrets
 .env
@@ -73,6 +79,7 @@ Desktop.ini
 # Electron Forge local output
 apps/desktop/.webpack/
 apps/desktop/out/
+apps/desktop/out-*/
 
 # Temporary files
 .tmp-*/

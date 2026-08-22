@@ -234,6 +234,7 @@ dependencies = [
  "fielora-model",
  "fielora-platform",
  "fielora-storage",
+ "futures-util",
  "serde",
  "serde_json",
  "thiserror",

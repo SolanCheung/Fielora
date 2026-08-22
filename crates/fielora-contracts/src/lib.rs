@@ -70,6 +70,19 @@ pub struct HelloResponse {
     pub capabilities: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct BuildProvenanceView {
+    pub git_head: String,
+    pub git_dirty: bool,
+    pub build_timestamp: String,
+    pub source_fingerprint: String,
+    pub agent_core_fingerprint: String,
+    pub agent_behavior_profile_version: String,
+    pub fast_edit_implementation_version: String,
+    pub context_compiler_version: String,
+    pub desktop_renderer_version: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[ts(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -513,6 +526,7 @@ pub struct ListRelationsRequest {
 #[ts(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ActivityAction {
     FieldCreated,
+    FieldArchived,
     FieldFocusUpdated,
     FieldModeUpdated,
     StateCreated,
@@ -1216,6 +1230,23 @@ pub struct CreateProjectRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
+pub struct UpdateProjectRequest {
+    pub field_id: FieldId,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveProjectRequest {
+    pub field_id: FieldId,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectRequest {
     pub field_id: FieldId,
 }
@@ -1368,6 +1399,7 @@ pub enum AgentEventKind {
     RunCompleted,
     RunFailed,
     RunCancelled,
+    PhaseChanged,
     StepStarted,
     ContextCompiled,
     ModelStarted,
@@ -1477,14 +1509,32 @@ pub struct AgentRunView {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
+pub struct AgentInputAttachment {
+    pub id: String,
+    pub filename: String,
+    pub mime_type: String,
+    #[ts(type = "number")]
+    pub size: u32,
+    #[ts(type = "number")]
+    pub width: u32,
+    #[ts(type = "number")]
+    pub height: u32,
+    pub source: String,
+    pub data_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
 pub struct StartAgentRunRequest {
     pub field_id: FieldId,
     pub conversation_id: ConversationId,
+    pub user_message_id: Option<MessageId>,
     pub provider_config_id: ProviderConfigId,
     pub model_id: Option<String>,
     pub task: String,
     pub permission: AgentPermission,
     pub max_steps: Option<u32>,
+    pub attachments: Option<Vec<AgentInputAttachment>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

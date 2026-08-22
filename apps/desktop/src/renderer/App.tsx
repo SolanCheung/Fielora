@@ -7,7 +7,8 @@ import fieloraLogo from '../../assets/fielora-logo.svg';
 import { PrimaryNav } from './PrimaryNav';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { SettingsScreen, type SettingsCategory } from './SettingsScreen';
-import { applyAppPreferences, readAppPreferences, writeAppPreferences, type AppPreferences } from './app-preferences';
+import { SelectMenu, TextActionDialog } from './UiPrimitives';
+import { applyAppPreferences, readAppPreferences, resolveTheme, writeAppPreferences, type AppPreferences } from './app-preferences';
 import type { AppView } from './view-state';
 import {
   activityLabel,
@@ -48,12 +49,31 @@ export function App() {
   const [addProjectRequest, setAddProjectRequest] = useState(0);
   const [workspaceRequest, setWorkspaceRequest] = useState<{ id: number; tool: 'FILES' | 'DIFF' | 'TERMINAL' }>({ id: 0, tool: 'FILES' });
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>('GENERAL');
+  const [newStateKind, setNewStateKind] = useState<FieldStateKind>('TASK');
+  const [stateEdit, setStateEdit] = useState<{ mode: 'REVISE' | 'SUPERSEDE'; state: StateView; value: string } | null>(null);
   const selectedFieldRef = useRef<string | undefined>(undefined);
   const appViewRef = useRef<AppView>(appView);
   const navigationHistory = useRef<AppView[]>([appView]);
   const navigationIndex = useRef(0);
 
-  useEffect(() => { applyAppPreferences(document.body, preferences); }, [preferences]);
+  useEffect(() => {
+    const dark = window.matchMedia('(prefers-color-scheme: dark)');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const apply = () => {
+      applyAppPreferences(document.documentElement, preferences, {
+        prefersDark: dark.matches,
+        prefersReducedMotion: reducedMotion.matches,
+      });
+      void window.fielora.window.setTitlebarTheme(resolveTheme(preferences.appearance.themePreference, dark.matches));
+    };
+    apply();
+    dark.addEventListener('change', apply);
+    reducedMotion.addEventListener('change', apply);
+    return () => {
+      dark.removeEventListener('change', apply);
+      reducedMotion.removeEventListener('change', apply);
+    };
+  }, [preferences]);
 
   const refreshHealth = useCallback(async () => {
     try { const next = await window.fielora.core.getHealth(); setHealth(next); if (next.state === 'READY') setError(''); }
@@ -106,7 +126,7 @@ export function App() {
   async function openField(fieldId: string) { selectedFieldRef.current = fieldId; setAppView('FIELDS'); setBusy(true); try { await refreshReality(fieldId); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { setBusy(false); } }
   async function createState(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!resume) return; const form = new FormData(event.currentTarget); const target = event.currentTarget;
-    await run(async () => { await window.fielora.state.create({ field_id: resume.field.id, kind: String(form.get('kind')) as FieldStateKind, content: String(form.get('content') ?? ''), confidence: null }); target.reset(); }, resume.field.id);
+    await run(async () => { await window.fielora.state.create({ field_id: resume.field.id, kind: newStateKind, content: String(form.get('content') ?? ''), confidence: null }); target.reset(); }, resume.field.id);
   }
   async function createReference(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!resume) return; const form = new FormData(event.currentTarget); const target = event.currentTarget;
@@ -114,8 +134,16 @@ export function App() {
   }
   async function focusState(state: StateView) { if (!resume) return; await run(() => window.fielora.field.setFocusV1({ field_id: resume.field.id, expected_field_revision: resume.field_revision, focus: { kind: 'STATE', state_id: state.id } }), resume.field.id); }
   async function transitionState(state: StateView, target: 'ACTIVE' | 'RESOLVED' | 'RETRACTED') { if (!resume) return; await run(() => window.fielora.state.transition({ field_id: resume.field.id, state_id: state.id, expected_state_revision: state.revision, target }), resume.field.id); }
-  async function supersedeState(state: StateView) { if (!resume) return; const content = window.prompt('用新的内容替代这项记录', state.content); if (!content) return; await run(() => window.fielora.state.supersede({ field_id: resume.field.id, state_id: state.id, expected_state_revision: state.revision, replacement_content: content, replacement_confidence: state.confidence }), resume.field.id); }
-  async function reviseState(state: StateView) { if (!resume) return; const content = window.prompt('修订这项记录', state.content); if (!content) return; await run(() => window.fielora.state.revise({ field_id: resume.field.id, state_id: state.id, expected_state_revision: state.revision, content, confidence: state.confidence }), resume.field.id); }
+  function supersedeState(state: StateView) { setStateEdit({ mode: 'SUPERSEDE', state, value: state.content }); }
+  function reviseState(state: StateView) { setStateEdit({ mode: 'REVISE', state, value: state.content }); }
+  async function saveStateEdit() {
+    if (!resume || !stateEdit?.value.trim()) return;
+    const current = stateEdit;
+    await run(() => current.mode === 'REVISE'
+      ? window.fielora.state.revise({ field_id: resume.field.id, state_id: current.state.id, expected_state_revision: current.state.revision, content: current.value.trim(), confidence: current.state.confidence })
+      : window.fielora.state.supersede({ field_id: resume.field.id, state_id: current.state.id, expected_state_revision: current.state.revision, replacement_content: current.value.trim(), replacement_confidence: current.state.confidence }), resume.field.id);
+    setStateEdit(null);
+  }
   async function openReference(reference: ReferenceView) {
     if (!resume || reference.lifecycle !== 'ACTIVE') return;
     const layout: SurfaceLayoutV1 = { version: 1, template: 'PRIMARY_SUPPORT_RIGHT', primary: { pane_id: 'primary_task', primitive: 'TASK_PANE', binding: { kind: 'FIELD_TASKS' }, collapsed: false }, supporting: [{ pane_id: paneId(), primitive: 'REFERENCE_PANE', binding: { kind: 'REFERENCE', object_id: reference.id }, collapsed: false }], focused_pane_id: 'primary_task' };
@@ -155,8 +183,9 @@ export function App() {
   const goSettings = useCallback(() => { setSettingsCategory('GENERAL'); navigateTo('SETTINGS'); }, [navigateTo]);
   const goNewConversation = useCallback(() => { setNewConversationRequest((value) => value + 1); navigateTo('PROJECTS'); }, [navigateTo]);
   const openWorkspaceTool = useCallback((tool: 'FILES' | 'DIFF' | 'TERMINAL') => {
+    if (tool === 'TERMINAL' && appViewRef.current !== 'PROJECTS') return;
     setWorkspaceRequest((current) => ({ id: current.id + 1, tool }));
-    navigateTo('PROJECTS');
+    if (tool !== 'TERMINAL') navigateTo('PROJECTS');
   }, [navigateTo]);
   const requestAddProject = useCallback(() => { setAddProjectRequest((value) => value + 1); navigateTo('PROJECTS'); }, [navigateTo]);
   const updatePreferences = (next: AppPreferences) => { setPreferences(next); writeAppPreferences(window.localStorage, next); };
@@ -195,7 +224,7 @@ export function App() {
     };
     const openSettings = (event: Event) => {
       const category = (event as CustomEvent<SettingsCategory>).detail;
-      if (['GENERAL', 'MODELS', 'APPEARANCE', 'SHORTCUTS', 'ABOUT'].includes(category)) setSettingsCategory(category);
+      if (['GENERAL', 'APPEARANCE', 'MODELS', 'SHORTCUTS', 'ABOUT'].includes(category)) setSettingsCategory(category);
       navigateTo('SETTINGS');
     };
     window.addEventListener('fielora:navigate', navigate);
@@ -238,20 +267,20 @@ export function App() {
   }
 
   if (screen === 'field' && resume) {
-    return <div className="shell" data-testid="field-screen"><PrimaryNav active="FIELDS" onProjects={goProjects} onNow={goNow} onBrowse={goBrowse} onFields={goFields} onNewConversation={goNewConversation} onSettings={goSettings} /><main className="content field-content">
+    return <><div className="shell" data-testid="field-screen"><PrimaryNav active="FIELDS" onProjects={goProjects} onNow={goNow} onBrowse={goBrowse} onFields={goFields} onNewConversation={goNewConversation} onSettings={goSettings} /><main className="content field-content">
       <button className="back" onClick={goNow}>← 返回 Now</button>
-      <header className="field-header"><div><p className="eyebrow">FIELD</p><h1 data-testid="field-title">{resume.field.title}</h1><p>{resume.field.goal || '这个 Field 还没有目标说明。'}</p></div><div className="field-tools"><select aria-label="工作状态" value={resume.field.current_mode ?? ''} onChange={(event) => void run(() => window.fielora.field.updateMode({ field_id: resume.field.id, expected_field_revision: resume.field_revision, mode: event.target.value ? event.target.value as never : null }), resume.field.id)}><option value="">选择工作状态</option>{Object.entries(fieldModeLabels).map(([mode,label])=><option key={mode} value={mode}>{label}</option>)}</select><button className="secondary-button" onClick={() => setInspectorOpen((open) => !open)} data-testid="toggle-inspector">{inspectorOpen ? '收起上下文' : '查看上下文'}</button></div></header>
+      <header className="field-header"><div><p className="eyebrow">FIELD</p><h1 data-testid="field-title">{resume.field.title}</h1><p>{resume.field.goal || '这个 Field 还没有目标说明。'}</p></div><div className="field-tools"><SelectMenu value={resume.field.current_mode ?? ''} ariaLabel="工作状态" options={[{ value: '', label: '选择工作状态' }, ...Object.entries(fieldModeLabels).map(([value, label]) => ({ value, label }))]} onChange={(value) => void run(() => window.fielora.field.updateMode({ field_id: resume.field.id, expected_field_revision: resume.field_revision, mode: value ? value as never : null }), resume.field.id)} /><button className="secondary-button" onClick={() => setInspectorOpen((open) => !open)} data-testid="toggle-inspector">{inspectorOpen ? '收起上下文' : '查看上下文'}</button></div></header>
       <div className="resume-strip" data-resume-reason={resume.continuation.reason}><span>{continuation?.cue}</span><strong data-testid="current-focus">{continuation?.label}</strong></div>
       <div className={`surface ${resume.layout.template !== 'PRIMARY_ONLY' ? 'with-support' : ''}`} data-template={resume.layout.template}>
         <section className="task-pane" data-testid="task-pane"><div className="pane-heading"><h2>推进中的工作</h2><span>{tasks.filter((task) => task.status === 'ACTIVE').length} 项进行中</span></div>
           {tasks.length === 0 ? <div className="empty task-empty" data-testid="empty-task-pane"><h3>还没有进行中的工作</h3><p>从下面记录第一件需要推进的事情。</p></div> : <div className="state-list">{tasks.map((state)=><article className={`state-row ${state.status.toLowerCase()}`} key={state.id}><button className="state-main" onClick={() => void focusState(state)}><span>{state.content}</span><small>{stateStatusLabels[state.status]}</small></button><div className="row-actions">{state.status === 'ACTIVE' && <button onClick={() => void transitionState(state,'RESOLVED')}>完成</button>}{state.status === 'RESOLVED' && <button onClick={() => void transitionState(state,'ACTIVE')}>重开</button>}<button onClick={() => void reviseState(state)}>修订</button><button onClick={() => void supersedeState(state)}>替代</button></div></article>)}</div>}
-          <form className="quick-create" onSubmit={createState}><select name="kind" defaultValue="TASK" aria-label="记录类型">{Object.entries(stateKindLabels).map(([kind,label])=><option key={kind} value={kind}>{label}</option>)}</select><input name="content" required maxLength={4000} placeholder="记录下一步、问题或阻塞…" data-testid="create-state-content" /><button type="submit" disabled={busy} data-testid="create-state">记录</button></form>
+          <form className="quick-create" onSubmit={createState}><SelectMenu value={newStateKind} ariaLabel="记录类型" options={Object.entries(stateKindLabels).map(([value, label]) => ({ value: value as FieldStateKind, label }))} onChange={setNewStateKind} /><input name="content" required maxLength={4000} placeholder="记录下一步、问题或阻塞…" data-testid="create-state-content" /><button type="submit" disabled={busy} data-testid="create-state">记录</button></form>
         </section>
         {resume.layout.template !== 'PRIMARY_ONLY' && <section className="reference-pane" data-testid="reference-pane"><div className="pane-heading"><div><p className="eyebrow">参考资料</p><h2>{supportingReference?.title ?? '参考资料暂不可用'}</h2></div><button className="icon-button" aria-label="关闭参考资料" onClick={() => void closeReferencePane()}>×</button></div>{supportingReference?.lifecycle === 'ACTIVE' ? <><p className="inert-url">{supportingReference.canonical_url}</p><p className="muted">已保存来源地址；这里不会自动打开外部网页。</p><button className="danger-link" onClick={() => void archiveReference(supportingReference)}>归档</button></> : <div className="empty"><p>这项参考资料已归档或不可用。当前工作不会被旧记录覆盖。</p></div>}</section>}
       </div>
       {inspectorOpen && <section className="context-inspector" data-testid="context-inspector"><div className="inspector-head"><div><p className="eyebrow">按需查看</p><h2>当前上下文</h2></div><button className="icon-button" aria-label="收起上下文" onClick={() => setInspectorOpen(false)}>×</button></div><div className="inspector-grid"><div><h3>待确认与阻塞</h3>{states.filter((state)=>['QUESTION','BLOCKER'].includes(state.kind)&&state.status==='ACTIVE').map((state)=><article className="context-row" key={state.id}><button onClick={() => void focusState(state)}>{stateKindLabels[state.kind]}：{state.content}</button><div><button onClick={() => void transitionState(state,'RESOLVED')}>解决</button><button onClick={() => void supersedeState(state)}>替代</button></div></article>)}</div><div><h3>参考资料</h3>{references.map((reference)=><article className="context-row" key={reference.id}><div><strong>{reference.title}</strong><small>{referenceLifecycleLabels[reference.lifecycle]}</small></div><div>{reference.lifecycle==='ACTIVE'?<><button onClick={() => void openReference(reference)} data-testid={`open-reference-${reference.title}`}>打开工作面</button><button onClick={() => void archiveReference(reference)}>归档</button></>:<button onClick={() => void restoreReference(reference)}>恢复</button>}</div></article>)}<form className="reference-create" onSubmit={createReference}><input name="title" required maxLength={120} placeholder="参考资料名称" data-testid="reference-title" /><input name="url" required maxLength={2048} placeholder="https://…" data-testid="reference-url" /><button type="submit" disabled={busy} data-testid="create-reference">保存</button></form></div><div><h3>最近动态</h3>{activities.slice(0,8).map((activity)=><div className="activity-row" key={activity.id}><span>{activityLabel(activity.action)}</span><small>{new Date(activity.created_at).toLocaleTimeString()}</small></div>)}</div></div></section>}
       {error && <p className="error">{error}</p>}
-    </main></div>;
+    </main></div>{stateEdit && <TextActionDialog title={stateEdit.mode === 'REVISE' ? '修订记录' : '替代记录'} description={stateEdit.mode === 'REVISE' ? '保留同一条记录并更新内容。' : '创建替代记录，并保留原记录的历史。'} value={stateEdit.value} multiline confirmLabel={stateEdit.mode === 'REVISE' ? '保存修订' : '确认替代'} onChange={(value) => setStateEdit((current) => current ? { ...current, value } : null)} onCancel={() => setStateEdit(null)} onConfirm={() => void saveStateEdit()} testId="state-edit-dialog" />}</>;
   }
 
   return <div className="shell" data-testid="now-screen"><PrimaryNav active="NOW" onProjects={goProjects} onNow={() => undefined} onBrowse={goBrowse} onFields={goFields} onNewConversation={goNewConversation} onSettings={goSettings} /><main className="content"><header className="now-header"><div><p className="eyebrow">NOW</p><h1>继续真正重要的工作</h1><p>你的工作现场已从本地安全恢复。</p></div></header><div className="now-grid"><section className="continue"><h2>继续</h2>{fields.length === 0 ? <div className="empty"><h3>从第一个 Field 开始</h3><p>为一件需要持续推进的事情保存目标、进展、来源和工作现场。</p></div> : fields.slice(0,3).map((field)=><button className="field-row" key={field.id} onClick={() => void openField(field.id)} data-testid={`field-${field.title}`}><span><strong>{field.title}</strong><small>{field.goal || '未设置目标'}</small></span><em>{focusLabel(field.current_focus)} →</em></button>)}</section><section className="create"><h2>创建 Field</h2><form onSubmit={createField}><label>名称<input name="title" required maxLength={120} placeholder="例如：Fielora / Build V0.1" data-testid="create-title" /></label><label>目标（可选）<textarea name="goal" maxLength={4000} placeholder="这个 Field 要推进什么？" data-testid="create-goal" /></label><button className="primary-button" type="submit" disabled={busy} data-testid="create-field">创建 Field</button></form></section></div>{error && <p className="error">{error}</p>}</main></div>;

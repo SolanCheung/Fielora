@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "profile_id": "qwen3.7-plus-candidate-v1",
+  "status": "EVAL_CANDIDATE_NOT_ACTIVE",
+  "activation": "DISABLED_UNTIL_BASELINE_AB_HOLDOUT_PASS",
+  "match": {
+    "provider_family": "QWEN_DASHSCOPE_OR_EXPLICIT_COMPATIBLE_HOST",
+    "model_alias": "qwen3.7-plus",
+    "resolved_model_version": null
+  },
+  "capability_profile": {
+    "source": "CONFIG_AND_BOUNDED_PROBE_REQUIRED",
+    "api_family": "OPENAI_COMPATIBLE_CHAT_COMPLETIONS",
+    "streaming": "UNVERIFIED_LIVE",
+    "native_tool_calling": "UNVERIFIED_LIVE",
+    "parallel_tool_calls": "UNVERIFIED_LIVE_AND_REQUEST_DISABLED",
+    "structured_output": "UNVERIFIED_LIVE",
+    "reasoning_control": "UNVERIFIED_LIVE",
+    "context_cache": "UNVERIFIED_LIVE",
+    "usage_reporting": "UNVERIFIED_LIVE",
+    "cancel_semantics": "UNVERIFIED_LIVE",
+    "max_context": null,
+    "max_output": null
+  },
+  "behavior_profile": {
+    "evidence_status": "NO_LIVE_BASELINE",
+    "preferred_reasoning_policy": null,
+    "preferred_tool_exposure": null,
+    "preferred_tool_description_style": null,
+    "preferred_context_budget": null,
+    "preferred_compaction_policy": null,
+    "preferred_parallel_tool_policy": null,
+    "preferred_retry_policy": null,
+    "preferred_language_policy": null,
+    "preferred_verification_reminder": null,
+    "known_quirks": [],
+    "eval_evidence_version": null,
+    "confidence": "UNVERIFIED"
+  },
+  "support_level": "UNVERIFIED"
+}

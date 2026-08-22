@@ -52,6 +52,8 @@ export type HelloRequest = Record<symbol, never>;
 
 export type HelloResponse = { core_version: string, protocol: ProtocolVersion, schema_version: number, capabilities: Array<string>, };
 
+export type BuildProvenanceView = { git_head: string, git_dirty: boolean, build_timestamp: string, source_fingerprint: string, agent_core_fingerprint: string, agent_behavior_profile_version: string, fast_edit_implementation_version: string, context_compiler_version: string, desktop_renderer_version: string, };
+
 export type FieldLifecycle = "ACTIVE" | "COMPLETED" | "ARCHIVED";
 
 export type FieldMode = "EXPLORE" | "THINK" | "BUILD" | "OPERATE" | "VERIFY";
@@ -138,7 +140,7 @@ export type RelationCursor = { created_at: number, relation_id: RelationId, };
 
 export type ListRelationsRequest = { field_id: FieldId, relation_type: RelationType | null, lifecycle: RelationLifecycle | null, endpoint: LineageEndpointRef | null, cursor: RelationCursor | null, limit: number | null, };
 
-export type ActivityAction = "FIELD_CREATED" | "FIELD_FOCUS_UPDATED" | "FIELD_MODE_UPDATED" | "STATE_CREATED" | "STATE_REVISED" | "STATE_STATUS_CHANGED" | "STATE_SUPERSEDED" | "REFERENCE_CREATED" | "REFERENCE_REVISED" | "REFERENCE_ARCHIVED" | "REFERENCE_RESTORED" | "REFERENCE_SOURCE_ATTACHED" | "REFERENCE_SOURCE_RETRACTED" | "PROVIDER_CONFIG_CREATED" | "PROVIDER_CONFIG_UPDATED" | "PROVIDER_CONFIG_REMOVED" | "CAPTURE_CREATED" | "CAPTURE_ATTACHED" | "CAPTURE_PROMOTED" | "CAPTURE_ARCHIVED" | "CAPTURE_RESTORED" | "MODEL_INVOCATION_COMPLETED" | "MODEL_INVOCATION_FAILED";
+export type ActivityAction = "FIELD_CREATED" | "FIELD_ARCHIVED" | "FIELD_FOCUS_UPDATED" | "FIELD_MODE_UPDATED" | "STATE_CREATED" | "STATE_REVISED" | "STATE_STATUS_CHANGED" | "STATE_SUPERSEDED" | "REFERENCE_CREATED" | "REFERENCE_REVISED" | "REFERENCE_ARCHIVED" | "REFERENCE_RESTORED" | "REFERENCE_SOURCE_ATTACHED" | "REFERENCE_SOURCE_RETRACTED" | "PROVIDER_CONFIG_CREATED" | "PROVIDER_CONFIG_UPDATED" | "PROVIDER_CONFIG_REMOVED" | "CAPTURE_CREATED" | "CAPTURE_ATTACHED" | "CAPTURE_PROMOTED" | "CAPTURE_ARCHIVED" | "CAPTURE_RESTORED" | "MODEL_INVOCATION_COMPLETED" | "MODEL_INVOCATION_FAILED";
 
 export type ActivityView = { id: ActivityId, field_id: FieldId | null, actor_principal_id: PrincipalId, action: ActivityAction, target: ResourceRef | null, summary: string | null, trace_id: TraceId, created_at: number, };
 
@@ -272,6 +274,10 @@ export type ProjectView = { field_id: FieldId, title: string, goal: string | nul
 
 export type CreateProjectRequest = { title: string, goal: string | null, root_path: string, };
 
+export type UpdateProjectRequest = { field_id: FieldId, expected_revision: number, title: string, };
+
+export type ArchiveProjectRequest = { field_id: FieldId, expected_revision: number, };
+
 export type ProjectRequest = { field_id: FieldId, };
 
 export type ConversationLifecycle = "ACTIVE" | "ARCHIVED";
@@ -300,7 +306,7 @@ export type AgentRunStatus = "QUEUED" | "RUNNING" | "WAITING_APPROVAL" | "PAUSED
 
 export type AgentPermission = "READ_ONLY" | "REVIEW_CHANGES" | "FULL_CONTROL";
 
-export type AgentEventKind = "RUN_CREATED" | "RUN_STARTED" | "RUN_PAUSED" | "RUN_RESUMED" | "RUN_COMPLETED" | "RUN_FAILED" | "RUN_CANCELLED" | "STEP_STARTED" | "CONTEXT_COMPILED" | "MODEL_STARTED" | "MODEL_TEXT_DELTA" | "MODEL_COMPLETED" | "MODEL_FAILED" | "TOOL_PROPOSED" | "APPROVAL_REQUESTED" | "APPROVAL_RESOLVED" | "TOOL_STARTED" | "TOOL_PROGRESS" | "TOOL_COMPLETED" | "TOOL_FAILED" | "TOOL_DENIED" | "TOOL_CANCELLED" | "TOOL_UNKNOWN" | "VERIFICATION_RECORDED" | "CHECKPOINT_CREATED" | "RECOVERY_RECONCILED";
+export type AgentEventKind = "RUN_CREATED" | "RUN_STARTED" | "RUN_PAUSED" | "RUN_RESUMED" | "RUN_COMPLETED" | "RUN_FAILED" | "RUN_CANCELLED" | "PHASE_CHANGED" | "STEP_STARTED" | "CONTEXT_COMPILED" | "MODEL_STARTED" | "MODEL_TEXT_DELTA" | "MODEL_COMPLETED" | "MODEL_FAILED" | "TOOL_PROPOSED" | "APPROVAL_REQUESTED" | "APPROVAL_RESOLVED" | "TOOL_STARTED" | "TOOL_PROGRESS" | "TOOL_COMPLETED" | "TOOL_FAILED" | "TOOL_DENIED" | "TOOL_CANCELLED" | "TOOL_UNKNOWN" | "VERIFICATION_RECORDED" | "CHECKPOINT_CREATED" | "RECOVERY_RECONCILED";
 
 export type AgentToolEffect = "OBSERVE" | "WORKSPACE_WRITE" | "PROCESS" | "NETWORK" | "DESTRUCTIVE";
 
@@ -314,7 +320,9 @@ export type VerificationOutcome = "PASS" | "FAIL" | "BLOCKED" | "NOT_RUN";
 
 export type AgentRunView = { id: AgentRunId, field_id: FieldId, conversation_id: ConversationId, provider_config_id: ProviderConfigId, model_id: string, task: string, permission: AgentPermission, status: AgentRunStatus, current_step: number, max_steps: number, next_sequence: number, error_code: string | null, created_at: number, updated_at: number, finished_at: number | null, };
 
-export type StartAgentRunRequest = { field_id: FieldId, conversation_id: ConversationId, provider_config_id: ProviderConfigId, model_id: string | null, task: string, permission: AgentPermission, max_steps: number | null, };
+export type AgentInputAttachment = { id: string, filename: string, mime_type: string, size: number, width: number, height: number, source: string, data_url: string, };
+
+export type StartAgentRunRequest = { field_id: FieldId, conversation_id: ConversationId, user_message_id: MessageId | null, provider_config_id: ProviderConfigId, model_id: string | null, task: string, permission: AgentPermission, max_steps: number | null, attachments: Array<AgentInputAttachment> | null, };
 
 export type AgentRunRequest = { run_id: AgentRunId, };
 

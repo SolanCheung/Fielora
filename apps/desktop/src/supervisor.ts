@@ -35,6 +35,12 @@ export class CoreProcessSupervisor extends EventEmitter {
     const client = new FipcClient(child);
     this.client = client;
     client.on('notification', (message) => this.emit('notification', message));
+    client.on('request-completed', (metric) => {
+      this.emit('fipc-metric', metric);
+      if (process.env.FIELORA_AGENT_PERFORMANCE_TRACE === '1') {
+        console.info(`[agent-performance] ${JSON.stringify({ layer: 'FIPC', ...metric })}`);
+      }
+    });
     child.once('exit', (code, signal) => this.onExit(child, code, signal));
 
     try {

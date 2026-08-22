@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  validateBrowserBounds, validateBrowserNavigate, validateBrowserPageRequest, validateCreate, validateCreateState, validateFocus, validateSetFocusV1,
+  validateBrowserBounds, validateBrowserNavigate, validateBrowserPageRequest, validateClipboardText, validateCreate, validateCreateState, validateFocus, validateSetFocusV1,
   validateSnapshot, validateSnapshotV1,
   validateCreateProvider, validateStoreCredential, validateStartModel, validateCreateCapture,
-  validateCreateConversation, validateCreateConversationMessage, validateApplyWorkspaceFile,
+  validateCreateConversation, validateCreateConversationMessage, validateUpdateProject, validateApplyWorkspaceFile,
   validateRunTerminal,
   validateStartAgent, validateListAgentEvents, validateResolveAgentApproval,
+  validateStoreWorkspaceAttachment, validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment,
 } from './validation.ts';
 
 const fieldId = '018f84cb-7c4e-7a12-a6d4-3c441f80a227';
@@ -37,6 +38,13 @@ test('Browse bridge accepts only typed URL, Page ID, and view bounds payloads', 
   });
   assert.throws(() => validateBrowserBounds({ x: -1, y: 0, width: 100, height: 100 }));
   assert.throws(() => validateBrowserBounds({ x: 0, y: 0, width: 100, height: 100, preload: 'evil.js' }));
+});
+
+test('trusted clipboard bridge accepts bounded text only', () => {
+  assert.equal(validateClipboardText('复制这条消息'), '复制这条消息');
+  assert.equal(validateClipboardText(''), '');
+  assert.throws(() => validateClipboardText({ text: 'not a primitive' }));
+  assert.throws(() => validateClipboardText('界'.repeat(349_526)));
 });
 
 test('Phase 02 bridge accepts only typed focus, bounded DTOs, and typed layout', () => {
@@ -71,6 +79,8 @@ test('Phase 04 bridge rejects secret echo fields, unknown context, and malformed
 });
 
 test('Desktop Foundation bridge keeps Project, Conversation, file, and terminal payloads bounded', () => {
+  assert.equal(validateUpdateProject({ field_id: fieldId, expected_revision: 1, title: 'Renamed Project' }).title, 'Renamed Project');
+  assert.throws(() => validateUpdateProject({ field_id: fieldId, expected_revision: 1, title: '', root_path: 'C:\\escape' }));
   assert.equal(validateCreateConversation({ field_id: fieldId, title: 'Build', provider_config_id: null, model_id: null }).title, 'Build');
   assert.throws(() => validateCreateConversation({ field_id: fieldId, title: 'Build', provider_config_id: null, model_id: null, root_path: 'C:\\escape' }));
   assert.equal(validateCreateConversationMessage({ conversation_id: fieldId, role: 'USER', content: 'Inspect', status: 'COMPLETED', provider_config_id: null, model_id: null, invocation_id: null }).role, 'USER');
@@ -84,6 +94,8 @@ test('Desktop Foundation bridge keeps Project, Conversation, file, and terminal 
 test('Complete Agent bridge accepts only bounded typed execution and approval payloads', () => {
   const start={field_id:fieldId,conversation_id:fieldId,provider_config_id:fieldId,model_id:'gpt-test',task:'Fix the failing test',permission:'REVIEW_CHANGES',max_steps:24} as const;
   assert.equal(validateStartAgent(start).permission,'REVIEW_CHANGES');
+  assert.equal(validateStartAgent({...start,user_message_id:fieldId}).user_message_id,fieldId);
+  assert.throws(()=>validateStartAgent({...start,user_message_id:'not-an-id'}));
   assert.throws(()=>validateStartAgent({...start,permission:'UNRESTRICTED'}));
   assert.throws(()=>validateStartAgent({...start,max_steps:65}));
   assert.throws(()=>validateStartAgent({...start,tool:{name:'shell'}}));
@@ -91,4 +103,20 @@ test('Complete Agent bridge accepts only bounded typed execution and approval pa
   assert.throws(()=>validateListAgentEvents({run_id:fieldId,after_sequence:0,limit:501}));
   assert.equal(validateResolveAgentApproval({run_id:fieldId,approval_id:fieldId,nonce:'one-time-nonce',decision:'ALLOW_ONCE'}).decision,'ALLOW_ONCE');
   assert.throws(()=>validateResolveAgentApproval({run_id:fieldId,approval_id:fieldId,nonce:'one-time-nonce',decision:'ALWAYS_ALLOW'}));
+});
+
+test('multimodal Agent and attachment bridges accept only bounded native image parts', () => {
+  const image = { id: 'a'.repeat(64), filename: 'image.png', mime_type: 'image/png', size: 8, width: 32, height: 20, source: 'clipboard', data_url: 'data:image/png;base64,iVBORw0KGgo=' } as const;
+  const start = { field_id: fieldId, conversation_id: fieldId, user_message_id: fieldId, provider_config_id: fieldId, model_id: 'qwen3.7-plus', task: '说明图片内容', permission: 'REVIEW_CHANGES', max_steps: 24, attachments: [image] } as const;
+  assert.equal(validateStartAgent(start).attachments?.[0]?.source, 'clipboard');
+  assert.equal(validateStartAgent(start).attachments?.[0]?.mime_type, 'image/png');
+  assert.throws(() => validateStartAgent({ ...start, attachments: [{ ...image, source: 'remote_url' }] }));
+  assert.throws(() => validateStartAgent({ ...start, attachments: Array.from({ length: 5 }, () => image) }));
+
+  const stored = validateStoreWorkspaceAttachment({ id: image.id, name: image.filename, size: image.size, mime_type: image.mime_type, data_url: image.data_url, width: image.width, height: image.height, source: image.source });
+  assert.equal(stored.name, 'image.png');
+  assert.deepEqual(validateReadWorkspaceAttachment({ content_ref: `${'a'.repeat(64)}.png` }), { content_ref: `${'a'.repeat(64)}.png` });
+  assert.throws(() => validateReadWorkspaceAttachment({ content_ref: '../image.png' }));
+  assert.equal(validateSaveWorkspaceAttachment({ content_ref: `${'a'.repeat(64)}.png`, filename: 'saved.png' }).filename, 'saved.png');
+  assert.throws(() => validateSaveWorkspaceAttachment({ content_ref: `${'a'.repeat(64)}.png`, filename: '../saved.png' }));
 });

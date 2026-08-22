@@ -46,3 +46,23 @@ test('FIPC deadlines delete pending requests and late responses do not mutate re
   stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result: {} })}\n`);
   assert.equal(await late, id);
 });
+
+test('FIPC parses large fragmented frames without byte-at-a-time concatenation and reports duration', async () => {
+  const { process: child, stdin, stdout } = fakeChild();
+  const client = new FipcClient(child);
+  const writes: string[] = [];
+  stdin.on('data', (chunk) => writes.push(String(chunk)));
+  const request = client.request('query.agent.events');
+  await new Promise((resolve) => setImmediate(resolve));
+  const id = JSON.parse(writes.join('')).id;
+  const completed = new Promise<Record<string, unknown>>((resolve) => client.once('request-completed', resolve));
+  const payload = JSON.stringify({ jsonrpc: '2.0', id, result: [{ text: 'x'.repeat(256_000) }] });
+  for (let offset = 0; offset < payload.length; offset += 8192) stdout.write(payload.slice(offset, offset + 8192));
+  stdout.write('\n');
+  assert.equal(((await request) as Array<{ text: string }>)[0]?.text.length, 256_000);
+  const metric = await completed;
+  assert.equal(metric.method, 'query.agent.events');
+  assert.equal(metric.success, true);
+  assert.equal(metric.run_id, undefined);
+  assert.equal(typeof metric.duration_ms, 'number');
+});
