@@ -147,24 +147,7 @@ impl AgentError {
 }
 
 pub fn valid_run_transition(from: AgentRunStatus, to: AgentRunStatus) -> bool {
-    use AgentRunStatus::*;
-    matches!(
-        (from, to),
-        (Queued, Running)
-            | (Queued, Cancelled)
-            | (Running, WaitingApproval)
-            | (Running, Paused)
-            | (Running, Completed)
-            | (Running, Failed)
-            | (Running, Cancelled)
-            | (WaitingApproval, Running)
-            | (WaitingApproval, Paused)
-            | (WaitingApproval, Failed)
-            | (WaitingApproval, Cancelled)
-            | (Paused, Running)
-            | (Paused, Failed)
-            | (Paused, Cancelled)
-    )
+    from.can_transition_to(to)
 }
 
 #[derive(Debug, Clone)]
@@ -996,6 +979,35 @@ pub struct ToolExecution {
     pub observation: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolReconciliationStatus {
+    RetrySafe,
+    Applied,
+    NotApplied,
+    Diverged,
+    ProcessInterrupted,
+    ManualReview,
+}
+
+impl ToolReconciliationStatus {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::RetrySafe => "RETRY_SAFE",
+            Self::Applied => "APPLIED",
+            Self::NotApplied => "NOT_APPLIED",
+            Self::Diverged => "DIVERGED",
+            Self::ProcessInterrupted => "PROCESS_INTERRUPTED",
+            Self::ManualReview => "MANUAL_REVIEW",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolReconciliation {
+    pub status: ToolReconciliationStatus,
+    pub evidence: Value,
+}
+
 /// Tools-side execution boundary used by the Harness.
 ///
 /// Implementations execute an already-selected capability and return typed
@@ -1034,6 +1046,303 @@ impl ToolRuntime {
             root,
             checkpoint_root,
         })
+    }
+
+    /// Inspect durable arguments against current contained workspace state.
+    ///
+    /// This never executes the original capability. Harness.Continuity owns
+    /// the resulting lifecycle decision; the Tool backend only reports facts.
+    pub fn reconcile_unknown(
+        &self,
+        name: &str,
+        effect: AgentToolEffect,
+        arguments: &Value,
+    ) -> Result<ToolReconciliation, AgentError> {
+        if effect == AgentToolEffect::Observe {
+            return Ok(ToolReconciliation {
+                status: ToolReconciliationStatus::RetrySafe,
+                evidence: json!({"reason":"READ_ONLY_OPERATION"}),
+            });
+        }
+        if effect == AgentToolEffect::Process {
+            return Ok(ToolReconciliation {
+                status: ToolReconciliationStatus::ProcessInterrupted,
+                evidence: json!({"reason":"PROCESS_HAS_NO_FINAL_RECEIPT"}),
+            });
+        }
+        if name.starts_with("git_") || effect == AgentToolEffect::Network {
+            return Ok(ToolReconciliation {
+                status: ToolReconciliationStatus::ManualReview,
+                evidence: json!({"reason":"GIT_OR_NETWORK_SIDE_EFFECT_MUST_NOT_REPLAY"}),
+            });
+        }
+        if name == "delete_file" {
+            let mut result = self.reconcile_file_delete(arguments)?;
+            result.status = ToolReconciliationStatus::ManualReview;
+            return Ok(result);
+        }
+        if effect == AgentToolEffect::Destructive {
+            return Ok(ToolReconciliation {
+                status: ToolReconciliationStatus::ManualReview,
+                evidence: json!({"reason":"DESTRUCTIVE_SIDE_EFFECT_MUST_NOT_REPLAY"}),
+            });
+        }
+        self.reconcile_workspace_write(name, arguments)
+    }
+
+    /// Hash the live state of an already-bounded set of project-relative
+    /// paths. The caller combines this with its durable mutation generation.
+    pub fn fingerprint_paths(&self, paths: &[String]) -> Result<String, AgentError> {
+        let mut paths = paths.to_vec();
+        paths.sort();
+        paths.dedup();
+        let mut states = Vec::with_capacity(paths.len());
+        for path in paths {
+            let relative = normalize_relative(&path)?;
+            deny_sensitive(&relative)?;
+            let current = self.read_optional_contained(&relative)?;
+            states.push(json!({
+                "path":relative_text(&relative),
+                "sha256":current.as_deref().map(sha256),
+                "exists":current.is_some(),
+            }));
+        }
+        let encoded = serde_json::to_vec(&states).map_err(|_| AgentError::IoFailed)?;
+        Ok(sha256(&encoded))
+    }
+}
+
+impl ToolRuntime {
+    fn read_optional_contained(&self, relative: &Path) -> Result<Option<Vec<u8>>, AgentError> {
+        let target = self.root.join(relative);
+        if target.exists() {
+            let canonical = resolve_existing(&self.root, relative)?;
+            if !canonical.is_file() {
+                return Err(AgentError::IoFailed);
+            }
+            return fs::read(canonical)
+                .map(Some)
+                .map_err(|_| AgentError::IoFailed);
+        }
+        let _ = resolve_for_write(&self.root, relative)?;
+        Ok(None)
+    }
+
+    fn source_for_expected(
+        &self,
+        relative: &Path,
+        expected_sha256: &str,
+    ) -> Result<Vec<u8>, AgentError> {
+        if !valid_sha256(expected_sha256) {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        if let Some(current) = self.read_optional_contained(relative)?
+            && sha256(&current) == expected_sha256
+        {
+            return Ok(current);
+        }
+        let checkpoint = fs::read(self.checkpoint_root.join(expected_sha256))
+            .map_err(|_| AgentError::FileChanged)?;
+        if sha256(&checkpoint) != expected_sha256 {
+            return Err(AgentError::FileChanged);
+        }
+        Ok(checkpoint)
+    }
+
+    fn reconcile_workspace_write(
+        &self,
+        name: &str,
+        arguments: &Value,
+    ) -> Result<ToolReconciliation, AgentError> {
+        match name {
+            "create_file" | "write_file" => {
+                let path = arguments
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .ok_or(AgentError::ToolArgumentsInvalid)?;
+                let content = arguments
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .ok_or(AgentError::ToolArgumentsInvalid)?;
+                let before = if name == "create_file" {
+                    None
+                } else {
+                    Some(
+                        arguments
+                            .get("expected_sha256")
+                            .and_then(Value::as_str)
+                            .filter(|value| valid_sha256(value))
+                            .ok_or(AgentError::ToolArgumentsInvalid)?,
+                    )
+                };
+                self.reconcile_expected_paths(vec![(
+                    path.to_owned(),
+                    before.map(str::to_owned),
+                    Some(sha256(content.as_bytes())),
+                )])
+            }
+            "replace_text" => {
+                let path = arguments
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .ok_or(AgentError::ToolArgumentsInvalid)?;
+                let expected = arguments
+                    .get("expected_sha256")
+                    .and_then(Value::as_str)
+                    .ok_or(AgentError::ToolArgumentsInvalid)?;
+                let relative = normalize_relative(path)?;
+                deny_sensitive(&relative)?;
+                let before = self.source_for_expected(&relative, expected)?;
+                let after = reconcile_replacements(&before, arguments)?;
+                self.reconcile_expected_paths(vec![(
+                    path.to_owned(),
+                    Some(expected.to_owned()),
+                    Some(sha256(after.as_bytes())),
+                )])
+            }
+            "apply_patches" => {
+                let patches = arguments
+                    .get("patches")
+                    .and_then(Value::as_array)
+                    .filter(|patches| !patches.is_empty() && patches.len() <= 16)
+                    .ok_or(AgentError::ToolArgumentsInvalid)?;
+                let mut states = Vec::with_capacity(patches.len());
+                for patch in patches {
+                    let path = patch
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .ok_or(AgentError::ToolArgumentsInvalid)?;
+                    let expected = patch
+                        .get("expected_sha256")
+                        .and_then(Value::as_str)
+                        .ok_or(AgentError::ToolArgumentsInvalid)?;
+                    let relative = normalize_relative(path)?;
+                    deny_sensitive(&relative)?;
+                    let before = self.source_for_expected(&relative, expected)?;
+                    let after = reconcile_patch(&before, patch)?;
+                    states.push((
+                        path.to_owned(),
+                        Some(expected.to_owned()),
+                        Some(sha256(after.as_bytes())),
+                    ));
+                }
+                self.reconcile_expected_paths(states)
+            }
+            "move_file" => self.reconcile_move(arguments),
+            "restore_file" => {
+                let path = arguments
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .ok_or(AgentError::ToolArgumentsInvalid)?;
+                let before = arguments
+                    .get("expected_sha256")
+                    .and_then(Value::as_str)
+                    .filter(|value| valid_sha256(value))
+                    .ok_or(AgentError::ToolArgumentsInvalid)?;
+                let after = arguments
+                    .get("backup_sha256")
+                    .and_then(Value::as_str)
+                    .filter(|value| valid_sha256(value))
+                    .ok_or(AgentError::ToolArgumentsInvalid)?;
+                self.reconcile_expected_paths(vec![(
+                    path.to_owned(),
+                    Some(before.to_owned()),
+                    Some(after.to_owned()),
+                )])
+            }
+            _ => Ok(ToolReconciliation {
+                status: ToolReconciliationStatus::ManualReview,
+                evidence: json!({"reason":"UNSUPPORTED_WORKSPACE_RECONCILIATION","tool":name}),
+            }),
+        }
+    }
+
+    fn reconcile_expected_paths(
+        &self,
+        paths: Vec<(String, Option<String>, Option<String>)>,
+    ) -> Result<ToolReconciliation, AgentError> {
+        let mut evidence = Vec::with_capacity(paths.len());
+        let mut applied = true;
+        let mut not_applied = true;
+        for (path, before, after) in paths {
+            let relative = normalize_relative(&path)?;
+            deny_sensitive(&relative)?;
+            let current = self.read_optional_contained(&relative)?;
+            let current_sha256 = current.as_deref().map(sha256);
+            applied &= current_sha256 == after;
+            not_applied &= current_sha256 == before;
+            evidence.push(json!({
+                "path":relative_text(&relative),
+                "expected_before_sha256":before,
+                "expected_after_sha256":after,
+                "current_sha256":current_sha256,
+                "exists":current.is_some(),
+            }));
+        }
+        let status = if applied {
+            ToolReconciliationStatus::Applied
+        } else if not_applied {
+            ToolReconciliationStatus::NotApplied
+        } else {
+            ToolReconciliationStatus::Diverged
+        };
+        Ok(ToolReconciliation {
+            status,
+            evidence: json!({"paths":evidence}),
+        })
+    }
+
+    fn reconcile_move(&self, arguments: &Value) -> Result<ToolReconciliation, AgentError> {
+        let from = arguments
+            .get("from")
+            .and_then(Value::as_str)
+            .ok_or(AgentError::ToolArgumentsInvalid)?;
+        let to = arguments
+            .get("to")
+            .and_then(Value::as_str)
+            .ok_or(AgentError::ToolArgumentsInvalid)?;
+        let expected = arguments
+            .get("expected_sha256")
+            .and_then(Value::as_str)
+            .filter(|value| valid_sha256(value))
+            .ok_or(AgentError::ToolArgumentsInvalid)?;
+        let from_relative = normalize_relative(from)?;
+        let to_relative = normalize_relative(to)?;
+        deny_sensitive(&from_relative)?;
+        deny_sensitive(&to_relative)?;
+        let from_current = self.read_optional_contained(&from_relative)?;
+        let to_current = self.read_optional_contained(&to_relative)?;
+        let from_sha = from_current.as_deref().map(sha256);
+        let to_sha = to_current.as_deref().map(sha256);
+        let status = if from_current.is_none() && to_sha.as_deref() == Some(expected) {
+            ToolReconciliationStatus::Applied
+        } else if from_sha.as_deref() == Some(expected) && to_current.is_none() {
+            ToolReconciliationStatus::NotApplied
+        } else {
+            ToolReconciliationStatus::Diverged
+        };
+        Ok(ToolReconciliation {
+            status,
+            evidence: json!({
+                "paths":[
+                    {"path":relative_text(&from_relative),"expected_before_sha256":expected,"expected_after_sha256":Value::Null,"current_sha256":from_sha,"exists":from_current.is_some()},
+                    {"path":relative_text(&to_relative),"expected_before_sha256":Value::Null,"expected_after_sha256":expected,"current_sha256":to_sha,"exists":to_current.is_some()}
+                ]
+            }),
+        })
+    }
+
+    fn reconcile_file_delete(&self, arguments: &Value) -> Result<ToolReconciliation, AgentError> {
+        let path = arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or(AgentError::ToolArgumentsInvalid)?;
+        let expected = arguments
+            .get("expected_sha256")
+            .and_then(Value::as_str)
+            .filter(|value| valid_sha256(value))
+            .ok_or(AgentError::ToolArgumentsInvalid)?;
+        self.reconcile_expected_paths(vec![(path.to_owned(), Some(expected.to_owned()), None)])
     }
 }
 
@@ -2159,6 +2468,150 @@ impl ToolRuntime {
     }
 }
 
+fn reconcile_replacements(before: &[u8], arguments: &Value) -> Result<String, AgentError> {
+    let mut replacements = arguments
+        .get("replacements")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if replacements.is_empty()
+        && let (Some(old_text), Some(new_text)) = (
+            arguments.get("old_text").and_then(Value::as_str),
+            arguments.get("new_text").and_then(Value::as_str),
+        )
+    {
+        replacements.push(json!({
+            "old_text":old_text,
+            "new_text":new_text,
+            "replace_all":arguments.get("replace_all").and_then(Value::as_bool).unwrap_or(false),
+        }));
+    }
+    if replacements.is_empty() || replacements.len() > 32 {
+        return Err(AgentError::ToolArgumentsInvalid);
+    }
+    let mut after =
+        String::from_utf8(before.to_vec()).map_err(|_| AgentError::BinaryFileUnsupported)?;
+    for replacement in replacements {
+        let mut old_text = replacement
+            .get("old_text")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or(AgentError::ToolArgumentsInvalid)?
+            .to_owned();
+        let mut new_text = replacement
+            .get("new_text")
+            .and_then(Value::as_str)
+            .ok_or(AgentError::ToolArgumentsInvalid)?
+            .to_owned();
+        let replace_all = replacement
+            .get("replace_all")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mut count = after.matches(&old_text).count();
+        if count == 0
+            && after.contains("\r\n")
+            && old_text.contains('\n')
+            && !old_text.contains("\r\n")
+        {
+            old_text = old_text.replace('\n', "\r\n");
+            new_text = new_text.replace('\n', "\r\n");
+            count = after.matches(&old_text).count();
+        }
+        if count == 0 || (!replace_all && count != 1) {
+            return Err(AgentError::TextMatchFailed);
+        }
+        after = if replace_all {
+            after.replace(&old_text, &new_text)
+        } else {
+            after.replacen(&old_text, &new_text, 1)
+        };
+    }
+    Ok(after)
+}
+
+fn reconcile_patch(before: &[u8], patch: &Value) -> Result<String, AgentError> {
+    let replacements = patch
+        .get("replacements")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let line_edits = patch
+        .get("line_edits")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if replacements.is_empty() == line_edits.is_empty() {
+        return Err(AgentError::ToolArgumentsInvalid);
+    }
+    if !replacements.is_empty() {
+        return reconcile_replacements(before, &json!({"replacements":replacements}));
+    }
+    if line_edits.len() > 32 {
+        return Err(AgentError::ToolArgumentsInvalid);
+    }
+    let mut after =
+        String::from_utf8(before.to_vec()).map_err(|_| AgentError::BinaryFileUnsupported)?;
+    let mut edits = line_edits
+        .into_iter()
+        .map(|edit| {
+            let start = edit
+                .get("start_line")
+                .and_then(Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .ok_or(AgentError::ToolArgumentsInvalid)?;
+            let end = edit
+                .get("end_line")
+                .and_then(Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value >= start)
+                .ok_or(AgentError::ToolArgumentsInvalid)?;
+            let new_text = edit
+                .get("new_text")
+                .and_then(Value::as_str)
+                .ok_or(AgentError::ToolArgumentsInvalid)?
+                .to_owned();
+            Ok((start, end, new_text))
+        })
+        .collect::<Result<Vec<_>, AgentError>>()?;
+    edits.sort_by_key(|(start, end, _)| (*start, *end));
+    if edits.windows(2).any(|window| window[0].1 >= window[1].0) {
+        return Err(AgentError::ToolArgumentsInvalid);
+    }
+    let mut line_starts = vec![0usize];
+    for (index, byte) in after.as_bytes().iter().enumerate() {
+        if *byte == b'\n' && index + 1 < after.len() {
+            line_starts.push(index + 1);
+        }
+    }
+    for (start_line, end_line, mut new_text) in edits.into_iter().rev() {
+        if end_line > line_starts.len() {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        let start = line_starts[start_line - 1];
+        let end = if end_line < line_starts.len() {
+            line_starts[end_line]
+        } else {
+            after.len()
+        };
+        let ending = if after.as_bytes()[start..end].ends_with(b"\r\n") {
+            Some("\r\n")
+        } else if after.as_bytes()[start..end].ends_with(b"\n") {
+            Some("\n")
+        } else {
+            None
+        };
+        if !new_text.is_empty()
+            && !new_text.ends_with('\n')
+            && let Some(ending) = ending
+        {
+            new_text.push_str(ending);
+        }
+        after.replace_range(start..end, &new_text);
+    }
+    Ok(after)
+}
+
 fn parse_args<T: for<'de> Deserialize<'de>>(value: &Value) -> Result<T, AgentError> {
     serde_json::from_value(value.clone()).map_err(|_| AgentError::ToolArgumentsInvalid)
 }
@@ -2533,6 +2986,26 @@ mod tests {
             AgentRunStatus::Running,
             AgentRunStatus::WaitingApproval
         ));
+        assert!(valid_run_transition(
+            AgentRunStatus::Running,
+            AgentRunStatus::Paused
+        ));
+        assert!(valid_run_transition(
+            AgentRunStatus::Paused,
+            AgentRunStatus::Running
+        ));
+        assert!(valid_run_transition(
+            AgentRunStatus::Paused,
+            AgentRunStatus::WaitingApproval
+        ));
+        assert!(valid_run_transition(
+            AgentRunStatus::WaitingApproval,
+            AgentRunStatus::Cancelled
+        ));
+        assert!(valid_run_transition(
+            AgentRunStatus::Paused,
+            AgentRunStatus::Cancelled
+        ));
         assert!(!valid_run_transition(
             AgentRunStatus::Completed,
             AgentRunStatus::Running
@@ -2541,6 +3014,94 @@ mod tests {
             AgentRunStatus::Cancelled,
             AgentRunStatus::Failed
         ));
+    }
+
+    #[test]
+    fn unknown_file_mutation_reconciles_from_hashes_without_replay() {
+        let (root, artifacts) = fixture();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let before = sha256(&fs::read(root.join("src/lib.rs")).unwrap());
+        let arguments = json!({
+            "path":"src/lib.rs",
+            "expected_sha256":before,
+            "content":"pub fn answer() -> i32 { 42 }\n",
+        });
+
+        assert_eq!(
+            runtime
+                .reconcile_unknown("write_file", AgentToolEffect::WorkspaceWrite, &arguments,)
+                .unwrap()
+                .status,
+            ToolReconciliationStatus::NotApplied
+        );
+
+        runtime
+            .execute(
+                "write_file",
+                &arguments,
+                true,
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            runtime
+                .reconcile_unknown("write_file", AgentToolEffect::WorkspaceWrite, &arguments,)
+                .unwrap()
+                .status,
+            ToolReconciliationStatus::Applied
+        );
+
+        fs::write(root.join("src/lib.rs"), "externally diverged\n").unwrap();
+        assert_eq!(
+            runtime
+                .reconcile_unknown("write_file", AgentToolEffect::WorkspaceWrite, &arguments,)
+                .unwrap()
+                .status,
+            ToolReconciliationStatus::Diverged
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).unwrap();
+    }
+
+    #[test]
+    fn unknown_effect_policy_retries_reads_but_blocks_unsafe_replay() {
+        let (root, artifacts) = fixture();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        assert_eq!(
+            runtime
+                .reconcile_unknown(
+                    "read_file",
+                    AgentToolEffect::Observe,
+                    &json!({"path":"src/lib.rs"}),
+                )
+                .unwrap()
+                .status,
+            ToolReconciliationStatus::RetrySafe
+        );
+        assert_eq!(
+            runtime
+                .reconcile_unknown(
+                    "run_command",
+                    AgentToolEffect::Process,
+                    &json!({"program":"cargo","argv":["test"]}),
+                )
+                .unwrap()
+                .status,
+            ToolReconciliationStatus::ProcessInterrupted
+        );
+        assert_eq!(
+            runtime
+                .reconcile_unknown(
+                    "git_commit",
+                    AgentToolEffect::Destructive,
+                    &json!({"message":"do not replay"}),
+                )
+                .unwrap()
+                .status,
+            ToolReconciliationStatus::ManualReview
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).ok();
     }
 
     #[test]

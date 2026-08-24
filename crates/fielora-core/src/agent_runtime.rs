@@ -7,7 +7,7 @@
 
 use fielora_agent::{
     AgentError, CommandCancellation, CompiledContext, ContextCompiler, PolicyEngine, ToolExecution,
-    ToolExecutor, ToolRuntime, coding_tool_catalog,
+    ToolExecutor, ToolReconciliationStatus, ToolRuntime, coding_tool_catalog,
 };
 use fielora_contracts::*;
 use fielora_field::DomainError;
@@ -20,6 +20,7 @@ use fielora_platform::{CredentialStore, SecretBytes, WindowsCredentialStore};
 use fielora_storage::{AgentEventCommit, AgentProjectionUpdate, StorageHandle};
 use futures_util::future::join_all;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -35,12 +36,21 @@ const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 4_096;
 struct ExecutionCancellation {
     model: CancellationToken,
     command: CommandCancellation,
+    pause_requested: Arc<AtomicBool>,
 }
 
 impl ExecutionCancellation {
     fn cancel(&self) {
         self.model.cancel();
         self.command.cancel();
+    }
+
+    fn request_pause(&self) {
+        self.pause_requested.store(true, Ordering::SeqCst);
+    }
+
+    fn should_pause(&self) -> bool {
+        self.pause_requested.load(Ordering::SeqCst)
     }
 }
 
@@ -68,6 +78,13 @@ struct PreparedRun {
 struct Continuation {
     approved_tool: Option<AgentToolCallView>,
     user_note: Option<String>,
+    recovery: Option<RecoveryAssessment>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RecoveryAssessment {
+    confirmed_workspace_mutation: bool,
+    notes: Vec<String>,
 }
 
 struct ExecutedTool {
@@ -387,19 +404,18 @@ impl AgentCoordinator {
         validate_task(&request.task)?;
         let input_attachments = request.attachments.clone().unwrap_or_default();
         validate_agent_attachments(&input_attachments)?;
-        if self
+        let existing_runs = self
             .storage
-            .list_agent_runs(request.conversation_id.clone())?
-            .iter()
-            .any(|run| {
-                matches!(
-                    run.status,
-                    AgentRunStatus::Queued
-                        | AgentRunStatus::Running
-                        | AgentRunStatus::WaitingApproval
-                )
-            })
-        {
+            .list_agent_runs(request.conversation_id.clone())?;
+        if existing_runs.iter().any(|run| {
+            matches!(
+                run.status,
+                AgentRunStatus::Queued
+                    | AgentRunStatus::Running
+                    | AgentRunStatus::WaitingApproval
+                    | AgentRunStatus::Paused
+            )
+        }) {
             return Err(DomainError::Validation("AGENT_RUN_ALREADY_ACTIVE".into()));
         }
 
@@ -417,10 +433,30 @@ impl AgentCoordinator {
         project_root
             .canonicalize()
             .map_err(|_| DomainError::Validation("AGENT_PROJECT_ROOT_UNAVAILABLE".into()))?;
+        let retry = explicit_retry_assessment(
+            &self.storage,
+            &existing_runs,
+            request.user_message_id.as_ref(),
+            &project_root,
+            &self.artifact_root,
+        );
 
         let created = self.storage.create_agent_run(request, now_ms())?;
         emit_commit(&self.sender, &created);
-        let run = created.run.clone();
+        let durable_run = if let Some(retry) = retry {
+            append_event(
+                &self.storage,
+                &self.sender,
+                created.run.id.clone(),
+                AgentEventKind::CheckpointCreated,
+                json!({"kind":"RETRY_STARTED","automatic":false,"retry":retry}),
+                AgentProjectionUpdate::default(),
+            )?
+            .run
+        } else {
+            created.run
+        };
+        let run = durable_run.clone();
         if !input_attachments.is_empty() {
             self.input_attachments
                 .lock()
@@ -429,7 +465,7 @@ impl AgentCoordinator {
         }
         self.launch(
             PreparedRun {
-                run: created.run,
+                run: durable_run,
                 endpoint: ProviderEndpoint {
                     kind: provider.view.provider_kind,
                     base_url: provider.view.base_url,
@@ -442,12 +478,69 @@ impl AgentCoordinator {
         Ok(run)
     }
 
+    pub fn pause(&self, run_id: AgentRunId) -> Result<AgentRunView, DomainError> {
+        let run = self.storage.get_agent_run(run_id.clone())?;
+        if run.status == AgentRunStatus::Paused || run.status.is_terminal() {
+            return Ok(run);
+        }
+        if run.status == AgentRunStatus::Running
+            && let Some(control) = self.cancellations.lock().unwrap().get(&run_id.0).cloned()
+        {
+            control.request_pause();
+            return Ok(run);
+        }
+        if !matches!(
+            run.status,
+            AgentRunStatus::Queued | AgentRunStatus::Running | AgentRunStatus::WaitingApproval
+        ) {
+            return Err(DomainError::InvalidStateTransition);
+        }
+        let paused = append_event(
+            &self.storage,
+            &self.sender,
+            run_id,
+            AgentEventKind::RunPaused,
+            json!({"reason":"USER_PAUSE","previous_status":run.status}),
+            AgentProjectionUpdate {
+                status: Some(AgentRunStatus::Paused),
+                ..Default::default()
+            },
+        )?;
+        Ok(paused.run)
+    }
+
     pub fn resume(&self, run_id: AgentRunId) -> Result<AgentRunView, DomainError> {
         let run = self.storage.get_agent_run(run_id.clone())?;
         if run.status != AgentRunStatus::Paused {
             return Err(DomainError::InvalidStateTransition);
         }
         let prepared = self.prepare(run)?;
+        let pending_approval = self
+            .storage
+            .list_agent_tool_calls(run_id.clone())?
+            .iter()
+            .any(|tool| tool.status == AgentToolStatus::WaitingApproval);
+        if pending_approval {
+            let resumed = append_event(
+                &self.storage,
+                &self.sender,
+                run_id,
+                AgentEventKind::RunResumed,
+                json!({"reason":"USER_RESUME","restored_state":"WAITING_APPROVAL"}),
+                AgentProjectionUpdate {
+                    status: Some(AgentRunStatus::WaitingApproval),
+                    ..Default::default()
+                },
+            )?;
+            return Ok(resumed.run);
+        }
+        let recovery = match self.reconcile_for_resume(&prepared) {
+            Ok(assessment) => assessment,
+            Err(code) => {
+                fail_run(&self.storage, &self.sender, run_id.clone(), code);
+                return self.storage.get_agent_run(run_id);
+            }
+        };
         let resumed = append_event(
             &self.storage,
             &self.sender,
@@ -467,9 +560,15 @@ impl AgentCoordinator {
                 ..prepared
             },
             Continuation {
-                user_note: Some(
-                    "The previous Core process stopped. Inspect the current workspace and continue; do not replay an unknown side effect.".into(),
-                ),
+                user_note: Some(if recovery.notes.is_empty() {
+                    "Continue from the durable AgentRun state. Do not repeat a receipt-backed side effect.".into()
+                } else {
+                    format!(
+                        "Recovery facts: {} Continue from durable receipts; do not replay an unknown or receipt-backed side effect.",
+                        recovery.notes.join(" ")
+                    )
+                }),
+                recovery: Some(recovery),
                 ..Default::default()
             },
         );
@@ -513,6 +612,7 @@ impl AgentCoordinator {
             ApprovalDecision::AllowOnce => Continuation {
                 approved_tool: Some(tool),
                 user_note: None,
+                recovery: None,
             },
             ApprovalDecision::Deny => Continuation {
                 approved_tool: None,
@@ -520,6 +620,7 @@ impl AgentCoordinator {
                     "The user denied tool {}. Find a safe alternative or explain the blocker.",
                     tool.name
                 )),
+                recovery: None,
             },
         };
         self.launch(prepared, continuation);
@@ -556,9 +657,10 @@ impl AgentCoordinator {
         self.storage.get_agent_run(run_id)
     }
 
-    pub fn cancel_all(&self) {
+    pub fn prepare_for_shutdown(&self) {
         for cancellation in self.cancellations.lock().unwrap().values() {
-            cancellation.cancel();
+            cancellation.request_pause();
+            cancellation.command.cancel();
         }
     }
 
@@ -598,10 +700,235 @@ impl AgentCoordinator {
         })
     }
 
+    fn reconcile_for_resume(
+        &self,
+        prepared: &PreparedRun,
+    ) -> Result<RecoveryAssessment, &'static str> {
+        let unknown = self
+            .storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .map_err(|_| "AGENT_RECOVERY_READ_FAILED")?
+            .into_iter()
+            .filter(|tool| tool.status == AgentToolStatus::Unknown)
+            .collect::<Vec<_>>();
+        if unknown.is_empty() {
+            return Ok(RecoveryAssessment::default());
+        }
+        append_event(
+            &self.storage,
+            &self.sender,
+            prepared.run.id.clone(),
+            AgentEventKind::RecoveryStarted,
+            json!({"reason":"USER_RESUME","unknown_tools":unknown.len()}),
+            AgentProjectionUpdate::default(),
+        )
+        .map_err(|_| "AGENT_RECOVERY_PERSIST_FAILED")?;
+        let runtime = ToolRuntime::new(&prepared.project_root, &self.artifact_root)
+            .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+        let mut assessment = RecoveryAssessment::default();
+        let mut facts = Vec::with_capacity(unknown.len());
+        let mut blocked = None;
+        for tool in unknown {
+            let reconciliation = runtime
+                .reconcile_unknown(&tool.name, tool.effect, &tool.arguments)
+                .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+            let status = reconciliation.status;
+            facts.push(json!({
+                "tool_call_id":tool.id,
+                "name":tool.name,
+                "effect":tool.effect,
+                "outcome":status.id(),
+                "evidence":reconciliation.evidence.clone(),
+            }));
+            match status {
+                ToolReconciliationStatus::RetrySafe => {
+                    let _ = self.storage.reconcile_unknown_agent_tool_call(
+                        tool.id.clone(),
+                        AgentToolStatus::Failed,
+                        None,
+                        Some("RECOVERY_RETRY_SAFE".into()),
+                        now_ms(),
+                    );
+                    let _ = append_event(
+                        &self.storage,
+                        &self.sender,
+                        prepared.run.id.clone(),
+                        AgentEventKind::ToolFailed,
+                        json!({"tool_call_id":tool.id,"name":tool.name,"error_code":"RECOVERY_RETRY_SAFE","recovered":true}),
+                        AgentProjectionUpdate::default(),
+                    );
+                    assessment
+                        .notes
+                        .push(format!("Read-only {} may be read again.", tool.name));
+                }
+                ToolReconciliationStatus::Applied => {
+                    let reconciled_patches = reconciliation
+                        .evidence
+                        .get("paths")
+                        .and_then(Value::as_array)
+                        .map(|paths| {
+                            paths
+                                .iter()
+                                .map(|path| {
+                                    json!({
+                                        "path":path.get("path"),
+                                        "before_sha256":path.get("expected_before_sha256"),
+                                        "after_sha256":path.get("current_sha256"),
+                                    })
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    let receipt = json!({
+                        "kind":"UNKNOWN_EXECUTION_RECONCILED",
+                        "reconciliation_status":"APPLIED",
+                        "evidence":reconciliation.evidence,
+                        "patches":reconciled_patches,
+                    });
+                    self.storage
+                        .reconcile_unknown_agent_tool_call(
+                            tool.id.clone(),
+                            AgentToolStatus::Completed,
+                            Some(receipt),
+                            None,
+                            now_ms(),
+                        )
+                        .map_err(|_| "AGENT_RECOVERY_PERSIST_FAILED")?;
+                    let _ = append_event(
+                        &self.storage,
+                        &self.sender,
+                        prepared.run.id.clone(),
+                        AgentEventKind::ToolCompleted,
+                        json!({"tool_call_id":tool.id,"name":tool.name,"recovered":true,"reconciliation_status":"APPLIED"}),
+                        AgentProjectionUpdate::default(),
+                    );
+                    assessment.confirmed_workspace_mutation = true;
+                    assessment.notes.push(format!(
+                        "{} is already reflected in the current workspace and requires fresh verification.",
+                        tool.name
+                    ));
+                }
+                ToolReconciliationStatus::NotApplied => {
+                    self.storage
+                        .reconcile_unknown_agent_tool_call(
+                            tool.id.clone(),
+                            AgentToolStatus::Failed,
+                            Some(json!({
+                                "kind":"UNKNOWN_EXECUTION_RECONCILED",
+                                "reconciliation_status":"NOT_APPLIED",
+                                "evidence":reconciliation.evidence,
+                            })),
+                            Some("UNKNOWN_EXECUTION_NOT_APPLIED".into()),
+                            now_ms(),
+                        )
+                        .map_err(|_| "AGENT_RECOVERY_PERSIST_FAILED")?;
+                    let _ = append_event(
+                        &self.storage,
+                        &self.sender,
+                        prepared.run.id.clone(),
+                        AgentEventKind::ToolFailed,
+                        json!({"tool_call_id":tool.id,"name":tool.name,"error_code":"UNKNOWN_EXECUTION_NOT_APPLIED","recovered":true}),
+                        AgentProjectionUpdate::default(),
+                    );
+                    assessment.notes.push(format!(
+                        "{} did not change the current workspace; re-plan from fresh evidence.",
+                        tool.name
+                    ));
+                }
+                ToolReconciliationStatus::ProcessInterrupted
+                    if verification_command(&tool.arguments) =>
+                {
+                    self.storage
+                        .reconcile_unknown_agent_tool_call(
+                            tool.id.clone(),
+                            AgentToolStatus::Failed,
+                            None,
+                            Some("VERIFICATION_INTERRUPTED".into()),
+                            now_ms(),
+                        )
+                        .map_err(|_| "AGENT_RECOVERY_PERSIST_FAILED")?;
+                    let _ = append_event(
+                        &self.storage,
+                        &self.sender,
+                        prepared.run.id.clone(),
+                        AgentEventKind::ToolFailed,
+                        json!({"tool_call_id":tool.id,"name":tool.name,"error_code":"VERIFICATION_INTERRUPTED","fresh_verification_required":true}),
+                        AgentProjectionUpdate::default(),
+                    );
+                    assessment.notes.push(
+                        "Interrupted verification has no valid receipt and must run fresh.".into(),
+                    );
+                }
+                ToolReconciliationStatus::Diverged => {
+                    blocked.get_or_insert("UNKNOWN_EXECUTION");
+                }
+                ToolReconciliationStatus::ProcessInterrupted
+                | ToolReconciliationStatus::ManualReview => {
+                    blocked.get_or_insert(
+                        if tool.name.starts_with("git_")
+                            || tool.effect == AgentToolEffect::Destructive
+                            || tool.effect == AgentToolEffect::Network
+                        {
+                            "UNKNOWN_HIGH_RISK_EXECUTION"
+                        } else {
+                            "UNKNOWN_EXECUTION"
+                        },
+                    );
+                }
+            }
+        }
+        append_event(
+            &self.storage,
+            &self.sender,
+            prepared.run.id.clone(),
+            AgentEventKind::RecoveryReconciled,
+            json!({
+                "reason":"USER_RESUME",
+                "phase":"WORKSPACE_RECONCILIATION_COMPLETED",
+                "facts":facts,
+                "blocked":blocked,
+            }),
+            AgentProjectionUpdate::default(),
+        )
+        .map_err(|_| "AGENT_RECOVERY_PERSIST_FAILED")?;
+        if let Some(code) = blocked {
+            return Err(code);
+        }
+        Ok(assessment)
+    }
+
+    fn pause_at_boundary(
+        &self,
+        run_id: &AgentRunId,
+        control: &ExecutionCancellation,
+        boundary: &str,
+    ) -> bool {
+        if !control.should_pause() {
+            return false;
+        }
+        append_event(
+            &self.storage,
+            &self.sender,
+            run_id.clone(),
+            AgentEventKind::RunPaused,
+            json!({
+                "reason":"USER_PAUSE",
+                "previous_status":"RUNNING",
+                "safe_boundary":boundary,
+            }),
+            AgentProjectionUpdate {
+                status: Some(AgentRunStatus::Paused),
+                ..Default::default()
+            },
+        )
+        .is_ok()
+    }
+
     fn launch(&self, prepared: PreparedRun, continuation: Continuation) {
         let cancellation = ExecutionCancellation {
             model: CancellationToken::new(),
             command: CommandCancellation::default(),
+            pause_requested: Arc::new(AtomicBool::new(false)),
         };
         self.cancellations
             .lock()
@@ -617,7 +944,12 @@ impl AgentCoordinator {
             let keep_context = coordinator
                 .storage
                 .get_agent_run(AgentRunId::new(id.clone()))
-                .is_ok_and(|run| run.status == AgentRunStatus::WaitingApproval);
+                .is_ok_and(|run| {
+                    matches!(
+                        run.status,
+                        AgentRunStatus::WaitingApproval | AgentRunStatus::Paused
+                    )
+                });
             if !keep_context {
                 coordinator.compiled_contexts.lock().unwrap().remove(&id);
                 coordinator.transcripts.lock().unwrap().remove(&id);
@@ -632,6 +964,7 @@ impl AgentCoordinator {
         cancellation: ExecutionCancellation,
     ) {
         let run_id = prepared.run.id.clone();
+        let recovery = continuation.recovery.clone().unwrap_or_default();
         let behavior = coding_behavior_profile(&prepared.endpoint, &prepared.run.model_id);
         let harness_profile = CodingHarnessProfile::for_task(&prepared.run.task);
         let task_class = harness_profile.task_class;
@@ -656,24 +989,22 @@ impl AgentCoordinator {
             .storage
             .list_agent_tool_calls(run_id.clone())
             .unwrap_or_default();
-        let mut wrote_workspace = false;
-        let mut verification_passed = false;
-        for tool in existing_tools
-            .iter()
-            .filter(|tool| tool.status == AgentToolStatus::Completed)
-        {
-            if matches!(
-                tool.effect,
-                AgentToolEffect::WorkspaceWrite | AgentToolEffect::Destructive
-            ) && !tool.name.starts_with("git_")
-            {
-                wrote_workspace = true;
-                // A later mutation invalidates every earlier verification receipt.
-                verification_passed = false;
-            } else if persisted_tool_is_successful_verification(tool) {
-                verification_passed = true;
-            }
-        }
+        let mut wrote_workspace = recovery.confirmed_workspace_mutation
+            || existing_tools.iter().any(|tool| {
+                tool.status == AgentToolStatus::Completed
+                    && !tool.name.starts_with("git_")
+                    && matches!(
+                        tool.effect,
+                        AgentToolEffect::WorkspaceWrite | AgentToolEffect::Destructive
+                    )
+            });
+        let mut verification_passed = wrote_workspace
+            && has_fresh_verification(
+                &self.storage,
+                &run_id,
+                &prepared.project_root,
+                &self.artifact_root,
+            );
 
         let context_started = Instant::now();
         let cached_context = self
@@ -745,7 +1076,14 @@ impl AgentCoordinator {
             manifest: json!(manifest),
             created_at: now_ms(),
         };
-        if !context_cache_hit && self.storage.save_agent_context_snapshot(snapshot).is_err() {
+        let context_snapshot_exists = self
+            .storage
+            .has_agent_context_snapshot(run_id.clone(), prepared.run.current_step)
+            .unwrap_or(false);
+        if !context_cache_hit
+            && !context_snapshot_exists
+            && self.storage.save_agent_context_snapshot(snapshot).is_err()
+        {
             fail_run(
                 &self.storage,
                 &self.sender,
@@ -780,6 +1118,9 @@ impl AgentCoordinator {
         )
         .is_err()
         {
+            return;
+        }
+        if self.pause_at_boundary(&run_id, &cancellation, "CONTEXT_COMPILED") {
             return;
         }
 
@@ -865,6 +1206,9 @@ impl AgentCoordinator {
                     return;
                 }
             }
+            if self.pause_at_boundary(&run_id, &cancellation, "TOOL_RECEIPT_PERSISTED") {
+                return;
+            }
         }
 
         if task_class == AgentTaskClass::FastEdit {
@@ -893,6 +1237,9 @@ impl AgentCoordinator {
             prepared.run.max_steps
         };
         for step in start_step..=effective_max_steps {
+            if self.pause_at_boundary(&run_id, &cancellation, "STEP_BOUNDARY") {
+                return;
+            }
             if cancellation.model.is_cancelled() || cancellation.command.is_cancelled() {
                 cancel_run(&self.storage, &self.sender, run_id);
                 return;
@@ -978,6 +1325,8 @@ impl AgentCoordinator {
                             &self.storage,
                             &self.sender,
                             &prepared.run,
+                            &prepared.project_root,
+                            &self.artifact_root,
                             step,
                             code,
                         );
@@ -1006,6 +1355,9 @@ impl AgentCoordinator {
                 }),
                 AgentProjectionUpdate::default(),
             );
+            if self.pause_at_boundary(&run_id, &cancellation, "MODEL_TURN_COMPLETED") {
+                return;
+            }
 
             if turn.tool_calls.is_empty() {
                 if should_nudge_action(
@@ -1040,6 +1392,14 @@ impl AgentCoordinator {
                         "You changed the workspace but have not produced a passing verification receipt. Run the narrowest relevant test or check before finishing.".into(),
                     ));
                     continue;
+                }
+                if wrote_workspace {
+                    verification_passed = has_fresh_verification(
+                        &self.storage,
+                        &run_id,
+                        &prepared.project_root,
+                        &self.artifact_root,
+                    );
                 }
                 if wrote_workspace && !verification_passed {
                     fail_run(
@@ -1201,6 +1561,9 @@ impl AgentCoordinator {
                         }
                     }
                 }
+                if self.pause_at_boundary(&run_id, &cancellation, "OBSERVE_BATCH_COMPLETED") {
+                    return;
+                }
                 continue;
             }
             for proposed in turn.tool_calls {
@@ -1229,6 +1592,42 @@ impl AgentCoordinator {
                     });
                     continue;
                 };
+                if let Some(existing) = receipt_backed_duplicate_side_effect(
+                    &self.storage,
+                    &run_id,
+                    &proposed.name,
+                    spec.effect,
+                    &proposed.arguments,
+                ) {
+                    let receipt = existing.receipt.unwrap_or_else(|| {
+                        json!({
+                            "kind":"DURABLE_SIDE_EFFECT_RECEIPT",
+                            "tool_call_id":existing.id,
+                        })
+                    });
+                    let _ = append_event(
+                        &self.storage,
+                        &self.sender,
+                        run_id.clone(),
+                        AgentEventKind::CheckpointCreated,
+                        json!({
+                            "kind":"DUPLICATE_EXECUTION_SKIPPED",
+                            "existing_tool_call_id":existing.id,
+                            "name":proposed.name,
+                        }),
+                        AgentProjectionUpdate::default(),
+                    );
+                    messages.push(AgentModelMessage::ToolResult {
+                        call_id: model_call_id,
+                        name: proposed.name,
+                        content: tool_result_content(
+                            &receipt,
+                            "The durable receipt proves this identical side effect already completed; it was not executed again.",
+                        ),
+                        is_error: false,
+                    });
+                    continue;
+                }
                 let decision =
                     PolicyEngine.decide(prepared.run.permission, spec, &proposed.arguments);
                 let tool = match self.storage.create_agent_tool_call(
@@ -1293,6 +1692,10 @@ impl AgentCoordinator {
                             &executed,
                         );
                         messages.push(executed.message);
+                        if self.pause_at_boundary(&run_id, &cancellation, "TOOL_RECEIPT_PERSISTED")
+                        {
+                            return;
+                        }
                     }
                     ToolDisposition::Waiting => {
                         messages.pop();
@@ -1368,6 +1771,9 @@ impl AgentCoordinator {
             }),
         );
         loop {
+            if self.pause_at_boundary(&run_id, &cancellation, "FAST_EDIT_PHASE_BOUNDARY") {
+                return;
+            }
             if cancellation.model.is_cancelled() || cancellation.command.is_cancelled() {
                 cancel_run(&self.storage, &self.sender, run_id);
                 return;
@@ -1527,6 +1933,10 @@ impl AgentCoordinator {
                         return;
                     }
                 };
+                if self.pause_at_boundary(&run_id, &cancellation, "FAST_EDIT_MODEL_TURN_COMPLETED")
+                {
+                    return;
+                }
                 let proposed = turn.tool_calls.first().cloned();
                 if evidence_ready {
                     let evidence = self
@@ -1822,6 +2232,10 @@ impl AgentCoordinator {
                                 AgentProjectionUpdate::default(),
                             );
                         }
+                        if self.pause_at_boundary(&run_id, &cancellation, "PATCH_RECEIPT_PERSISTED")
+                        {
+                            return;
+                        }
                         continue;
                     }
                     ToolDisposition::Waiting => {
@@ -1983,6 +2397,10 @@ impl AgentCoordinator {
                 }
             }
 
+            if self.pause_at_boundary(&run_id, &cancellation, "VERIFICATION_RECEIPT_PERSISTED") {
+                return;
+            }
+
             if !self.record_fast_edit_content_invariant(prepared, &successful_patch) {
                 self.finish_fast_edit_failure(
                     prepared,
@@ -2080,6 +2498,9 @@ impl AgentCoordinator {
                         return;
                     }
                 }
+                if self.pause_at_boundary(&run_id, &cancellation, "DIFF_RECEIPT_PERSISTED") {
+                    return;
+                }
             }
 
             let _ = emit_fast_edit_phase(
@@ -2116,17 +2537,24 @@ impl AgentCoordinator {
                         &self.storage,
                         &self.sender,
                         &prepared.run,
+                        &prepared.project_root,
+                        &self.artifact_root,
                         prepared.run.current_step,
                         error.code(),
                     );
                     return;
                 }
             };
+            if self.pause_at_boundary(&run_id, &cancellation, "FAST_EDIT_FINAL_MODEL_COMPLETED") {
+                return;
+            }
             if !turn.tool_calls.is_empty() {
                 let _ = complete_verified_with_warning(
                     &self.storage,
                     &self.sender,
                     &prepared.run,
+                    &prepared.project_root,
+                    &self.artifact_root,
                     prepared.run.current_step,
                     "FAST_EDIT_FINAL_RESPONSE_INVALID",
                 );
@@ -2672,6 +3100,25 @@ impl AgentCoordinator {
         content: String,
         changed_files: usize,
     ) {
+        if !has_fresh_verification(
+            &self.storage,
+            &prepared.run.id,
+            &prepared.project_root,
+            &self.artifact_root,
+        ) {
+            self.finish_fast_edit_failure(
+                prepared,
+                "AGENT_VERIFICATION_STALE",
+                "修改后的验证证据已过期，因此任务没有被标记为完成。请重新运行相关验证。",
+                [
+                    FastEditPhaseState::Succeeded,
+                    FastEditPhaseState::Succeeded,
+                    FastEditPhaseState::Failed,
+                    FastEditPhaseState::Running,
+                ],
+            );
+            return;
+        }
         let content = strip_reasoning_markers(&content);
         emit_text_delta(
             &self.sender,
@@ -3108,6 +3555,11 @@ impl AgentCoordinator {
                     _ = cancellation.cancelled() => return Err(ModelError::InvocationCancelled),
                     _ = tokio::time::sleep(Duration::from_secs(5)) => {}
                 }
+            } else if prepared.run.model_id == "__fielora_agent_fixture_pause__" {
+                tokio::select! {
+                    _ = cancellation.cancelled() => return Err(ModelError::InvocationCancelled),
+                    _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+                }
             } else {
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
@@ -3251,13 +3703,22 @@ impl AgentCoordinator {
             if prepared.run.task.contains("FIELORA_AGENT_FIXTURE_CREATE")
                 && !completed_tools.iter().any(|name| name == "run_command")
             {
+                let verification_arguments = if prepared
+                    .run
+                    .task
+                    .contains("FIELORA_AGENT_FIXTURE_INTERRUPTED_VERIFICATION")
+                {
+                    json!({"program":"node","argv":["verify-slow.cjs"],"timeout_ms":30000})
+                } else {
+                    json!({"program":"git","argv":["diff","--check"],"timeout_ms":30000})
+                };
                 return Ok(invoked_fixture_turn(
                     AgentModelTurn {
                         text: "I will verify the result.".into(),
                         tool_calls: vec![AgentModelToolCall {
                             id: format!("fixture-verify-{step}"),
                             name: "run_command".into(),
-                            arguments: json!({"program":"git","argv":["diff","--check"],"timeout_ms":30000}),
+                            arguments: verification_arguments,
                         }],
                         usage: None,
                     },
@@ -3463,6 +3924,16 @@ impl AgentCoordinator {
                     && let Some(object) = receipt.as_object_mut()
                 {
                     object.insert("verification_eligible".into(), json!(verification_eligible));
+                    object.insert(
+                        "workspace_revision".into(),
+                        workspace_revision_for_run(
+                            &self.storage,
+                            &tool.run_id,
+                            &prepared.project_root,
+                            &self.artifact_root,
+                        )
+                        .map_or(Value::Null, Value::String),
+                    );
                 }
                 let verification_passed = if verification_eligible {
                     let passed = receipt.get("success").and_then(Value::as_bool) == Some(true);
@@ -3500,7 +3971,7 @@ impl AgentCoordinator {
                         &self.sender,
                         tool.run_id.clone(),
                         AgentEventKind::VerificationRecorded,
-                        json!({"receipt":verification}),
+                        json!({"receipt":verification,"workspace_revision":receipt.get("workspace_revision"),"verification_eligible":true}),
                         AgentProjectionUpdate::default(),
                     );
                     passed
@@ -3542,6 +4013,29 @@ impl AgentCoordinator {
                 })
             }
             Err(AgentError::Cancelled) => {
+                if cancellation.should_pause() {
+                    let _ = self.storage.update_agent_tool_call(
+                        tool.id.clone(),
+                        AgentToolStatus::Unknown,
+                        None,
+                        Some("CORE_SHUTDOWN".into()),
+                        now_ms(),
+                    );
+                    let _ = append_event(
+                        &self.storage,
+                        &self.sender,
+                        tool.run_id.clone(),
+                        AgentEventKind::ToolUnknown,
+                        json!({"tool_call_id":tool.id,"name":tool.name,"reason":"CORE_SHUTDOWN","duration_ms":tool_started.elapsed().as_millis()}),
+                        AgentProjectionUpdate::default(),
+                    );
+                    let _ = self.pause_at_boundary(
+                        &tool.run_id,
+                        cancellation,
+                        "INTERRUPTED_PROCESS_STOPPED",
+                    );
+                    return ToolDisposition::Waiting;
+                }
                 let _ = self.storage.update_agent_tool_call(
                     tool.id.clone(),
                     AgentToolStatus::Cancelled,
@@ -3593,10 +4087,22 @@ impl AgentCoordinator {
 }
 
 fn fast_edit_changed_paths(patch: &AgentToolCallView) -> Vec<String> {
-    patch
+    let receipt_paths = patch
         .receipt
         .as_ref()
         .and_then(|receipt| receipt.get("patches"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("path").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if !receipt_paths.is_empty() {
+        return receipt_paths;
+    }
+    patch
+        .arguments
+        .get("patches")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
@@ -4615,6 +5121,112 @@ fn emit_text_delta(sender: &SyncSender<Value>, run_id: &AgentRunId, step: u32, d
     }));
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetryFailureType {
+    ModelTransient,
+    ProcessFailure,
+    ToolFailure,
+    StaleSha,
+    UnknownExecution,
+    VerificationFailure,
+    PolicyDenied,
+    UserDenied,
+}
+
+impl RetryFailureType {
+    fn id(self) -> &'static str {
+        match self {
+            Self::ModelTransient => "MODEL_TRANSIENT",
+            Self::ProcessFailure => "PROCESS_FAILURE",
+            Self::ToolFailure => "TOOL_FAILURE",
+            Self::StaleSha => "STALE_SHA",
+            Self::UnknownExecution => "UNKNOWN_EXECUTION",
+            Self::VerificationFailure => "VERIFICATION_FAILURE",
+            Self::PolicyDenied => "POLICY_DENIED",
+            Self::UserDenied => "USER_DENIED",
+        }
+    }
+}
+
+fn classify_retry_failure(
+    error_code: Option<&str>,
+    last_tool: Option<&AgentToolCallView>,
+) -> RetryFailureType {
+    let code = error_code.unwrap_or_default();
+    if code.contains("POLICY_DENIED") {
+        return RetryFailureType::PolicyDenied;
+    }
+    if code.contains("USER_DENIED") || code.contains("APPROVAL_DENIED") {
+        return RetryFailureType::UserDenied;
+    }
+    if code.contains("UNKNOWN") {
+        return RetryFailureType::UnknownExecution;
+    }
+    if code.contains("STALE") || code.contains("FILE_CHANGED") || code.contains("SHA") {
+        return RetryFailureType::StaleSha;
+    }
+    if code.contains("VERIFICATION") || code.contains("CHECK_FAILED") {
+        return RetryFailureType::VerificationFailure;
+    }
+    if code.starts_with("MODEL_") || code.contains("PROVIDER_") {
+        return RetryFailureType::ModelTransient;
+    }
+    if last_tool.is_some_and(|tool| tool.effect == AgentToolEffect::Process) {
+        return RetryFailureType::ProcessFailure;
+    }
+    RetryFailureType::ToolFailure
+}
+
+fn explicit_retry_assessment(
+    storage: &StorageHandle,
+    existing_runs: &[AgentRunView],
+    user_message_id: Option<&MessageId>,
+    project_root: &Path,
+    artifact_root: &Path,
+) -> Option<Value> {
+    let user_message_id = user_message_id?;
+    let previous = existing_runs
+        .iter()
+        .filter(|run| run.status == AgentRunStatus::Failed)
+        .filter(|run| {
+            storage
+                .list_agent_events(ListAgentEventsRequest {
+                    run_id: run.id.clone(),
+                    after_sequence: None,
+                    limit: Some(10),
+                })
+                .unwrap_or_default()
+                .iter()
+                .any(|event| {
+                    event.kind == AgentEventKind::RunCreated
+                        && event.payload.get("user_message_id").and_then(Value::as_str)
+                            == Some(user_message_id.0.as_str())
+                })
+        })
+        .max_by_key(|run| run.updated_at)?;
+    let tools = storage
+        .list_agent_tool_calls(previous.id.clone())
+        .unwrap_or_default();
+    let last_tool = tools.iter().max_by_key(|tool| tool.updated_at);
+    let failure_type = classify_retry_failure(previous.error_code.as_deref(), last_tool);
+    let workspace_revision =
+        workspace_revision_for_run(storage, &previous.id, project_root, artifact_root);
+    let verification_valid = workspace_revision.as_deref().is_some_and(|revision| {
+        tools
+            .iter()
+            .any(|tool| persisted_tool_is_successful_verification(tool, revision))
+    });
+    Some(json!({
+        "retry_of":previous.id,
+        "failure_type":failure_type.id(),
+        "tool_effect":last_tool.map(|tool| tool.effect),
+        "receipt_state":last_tool.map(|tool| tool.status),
+        "workspace_revision":workspace_revision,
+        "verification_valid":verification_valid,
+        "automatic_retry_allowed":!matches!(failure_type, RetryFailureType::PolicyDenied | RetryFailureType::UserDenied),
+    }))
+}
+
 fn changed_paths_for_run(storage: &StorageHandle, run_id: &AgentRunId) -> HashSet<String> {
     let mut paths = HashSet::new();
     for tool in storage
@@ -4623,6 +5235,7 @@ fn changed_paths_for_run(storage: &StorageHandle, run_id: &AgentRunId) -> HashSe
         .into_iter()
         .filter(|tool| {
             tool.status == AgentToolStatus::Completed
+                && !tool.name.starts_with("git_")
                 && matches!(
                     tool.effect,
                     AgentToolEffect::WorkspaceWrite | AgentToolEffect::Destructive
@@ -4648,11 +5261,102 @@ fn changed_paths_for_run(storage: &StorageHandle, run_id: &AgentRunId) -> HashSe
     paths
 }
 
+fn workspace_revision_for_run(
+    storage: &StorageHandle,
+    run_id: &AgentRunId,
+    project_root: &Path,
+    artifact_root: &Path,
+) -> Option<String> {
+    let mutations = storage
+        .list_agent_tool_calls(run_id.clone())
+        .ok()?
+        .into_iter()
+        .filter(|tool| {
+            tool.status == AgentToolStatus::Completed
+                && !tool.name.starts_with("git_")
+                && matches!(
+                    tool.effect,
+                    AgentToolEffect::WorkspaceWrite | AgentToolEffect::Destructive
+                )
+        })
+        .collect::<Vec<_>>();
+    if mutations.is_empty() {
+        return None;
+    }
+    let mut paths = changed_paths_for_run(storage, run_id)
+        .into_iter()
+        .collect::<Vec<_>>();
+    paths.sort();
+    let fingerprint = ToolRuntime::new(project_root, artifact_root)
+        .ok()?
+        .fingerprint_paths(&paths)
+        .ok()?;
+    let generation = mutations
+        .iter()
+        .map(|tool| tool.id.0.as_str())
+        .collect::<Vec<_>>();
+    let encoded = serde_json::to_vec(&json!({
+        "mutation_generation":generation,
+        "workspace_fingerprint":fingerprint,
+    }))
+    .ok()?;
+    Some(format!("{:x}", Sha256::digest(encoded)))
+}
+
+fn has_fresh_verification(
+    storage: &StorageHandle,
+    run_id: &AgentRunId,
+    project_root: &Path,
+    artifact_root: &Path,
+) -> bool {
+    let Some(revision) = workspace_revision_for_run(storage, run_id, project_root, artifact_root)
+    else {
+        return false;
+    };
+    storage
+        .list_agent_tool_calls(run_id.clone())
+        .unwrap_or_default()
+        .iter()
+        .any(|tool| persisted_tool_is_successful_verification(tool, &revision))
+}
+
+fn receipt_backed_duplicate_side_effect(
+    storage: &StorageHandle,
+    run_id: &AgentRunId,
+    name: &str,
+    effect: AgentToolEffect,
+    arguments: &Value,
+) -> Option<AgentToolCallView> {
+    if !replay_sensitive_effect(effect, arguments) {
+        return None;
+    }
+    storage
+        .list_agent_tool_calls(run_id.clone())
+        .ok()?
+        .into_iter()
+        .find(|tool| {
+            tool.status == AgentToolStatus::Completed
+                && tool.receipt.is_some()
+                && tool.name == name
+                && tool.arguments == *arguments
+        })
+}
+
+fn replay_sensitive_effect(effect: AgentToolEffect, arguments: &Value) -> bool {
+    matches!(
+        effect,
+        AgentToolEffect::WorkspaceWrite | AgentToolEffect::Destructive | AgentToolEffect::Network
+    ) || (effect == AgentToolEffect::Process && !verification_command(arguments))
+}
+
 /// Rebuilds only receipt-backed verification state after pause/restart.
 ///
 /// A successful process is not verification unless the Harness classified the
 /// command as a real test/check/build/lint/typecheck when it executed.
-fn persisted_tool_is_successful_verification(tool: &AgentToolCallView) -> bool {
+fn persisted_tool_is_successful_verification(
+    tool: &AgentToolCallView,
+    current_workspace_revision: &str,
+) -> bool {
     tool.effect == AgentToolEffect::Process
         && tool.receipt.as_ref().is_some_and(|receipt| {
             receipt
@@ -4660,6 +5364,8 @@ fn persisted_tool_is_successful_verification(tool: &AgentToolCallView) -> bool {
                 .and_then(Value::as_bool)
                 == Some(true)
                 && receipt.get("success").and_then(Value::as_bool) == Some(true)
+                && receipt.get("workspace_revision").and_then(Value::as_str)
+                    == Some(current_workspace_revision)
         })
 }
 
@@ -4708,9 +5414,15 @@ fn complete_verified_with_warning(
     storage: &StorageHandle,
     sender: &SyncSender<Value>,
     run: &AgentRunView,
+    project_root: &Path,
+    artifact_root: &Path,
     step: u32,
     warning_code: &str,
 ) -> Result<(), DomainError> {
+    if !has_fresh_verification(storage, &run.id, project_root, artifact_root) {
+        fail_run(storage, sender, run.id.clone(), "AGENT_VERIFICATION_STALE");
+        return Ok(());
+    }
     let changed_files = changed_paths_for_run(storage, &run.id).len();
     let content = format!(
         "## 修改已经完成\n\n已完成 {changed_files} 个文件的修改并通过验证，但结果说明生成时出现异常。"
@@ -4918,18 +5630,99 @@ mod tests {
     }
 
     #[test]
+    fn retry_policy_classifies_failures_without_generic_automatic_replay() {
+        let process = persisted_process(json!({"success":false}));
+        assert_eq!(
+            classify_retry_failure(Some("MODEL_PROVIDER_RATE_LIMITED"), None),
+            RetryFailureType::ModelTransient
+        );
+        assert_eq!(
+            classify_retry_failure(Some("COMMAND_EXIT_NONZERO"), Some(&process)),
+            RetryFailureType::ProcessFailure
+        );
+        assert_eq!(
+            classify_retry_failure(Some("AGENT_TOOL_EXECUTION_FAILED"), None),
+            RetryFailureType::ToolFailure
+        );
+        assert_eq!(
+            classify_retry_failure(Some("AGENT_FILE_CHANGED_STALE_SHA"), None),
+            RetryFailureType::StaleSha
+        );
+        assert_eq!(
+            classify_retry_failure(Some("UNKNOWN_EXECUTION"), None),
+            RetryFailureType::UnknownExecution
+        );
+        assert_eq!(
+            classify_retry_failure(Some("AGENT_VERIFICATION_REQUIRED"), None),
+            RetryFailureType::VerificationFailure
+        );
+        assert_eq!(
+            classify_retry_failure(Some("AGENT_POLICY_DENIED"), None),
+            RetryFailureType::PolicyDenied
+        );
+        assert_eq!(
+            classify_retry_failure(Some("USER_DENIED"), None),
+            RetryFailureType::UserDenied
+        );
+    }
+
+    #[test]
+    fn duplicate_guard_protects_side_effects_but_allows_fresh_verification() {
+        assert!(replay_sensitive_effect(
+            AgentToolEffect::WorkspaceWrite,
+            &json!({})
+        ));
+        assert!(replay_sensitive_effect(
+            AgentToolEffect::Destructive,
+            &json!({})
+        ));
+        assert!(replay_sensitive_effect(
+            AgentToolEffect::Network,
+            &json!({})
+        ));
+        assert!(replay_sensitive_effect(
+            AgentToolEffect::Process,
+            &json!({"program":"node","argv":["generate.js"]})
+        ));
+        assert!(!replay_sensitive_effect(
+            AgentToolEffect::Process,
+            &json!({"program":"cargo","argv":["test"]})
+        ));
+        assert!(!replay_sensitive_effect(
+            AgentToolEffect::Observe,
+            &json!({})
+        ));
+    }
+
+    #[test]
     fn persisted_process_requires_explicit_fresh_verification_evidence() {
         assert!(!persisted_tool_is_successful_verification(
-            &persisted_process(json!({"success":true}))
+            &persisted_process(json!({"success":true})),
+            "revision-a"
         ));
         assert!(!persisted_tool_is_successful_verification(
-            &persisted_process(json!({"success":true,"verification_eligible":false}))
+            &persisted_process(
+                json!({"success":true,"verification_eligible":false,"workspace_revision":"revision-a"})
+            ),
+            "revision-a"
         ));
         assert!(!persisted_tool_is_successful_verification(
-            &persisted_process(json!({"success":false,"verification_eligible":true}))
+            &persisted_process(
+                json!({"success":false,"verification_eligible":true,"workspace_revision":"revision-a"})
+            ),
+            "revision-a"
         ));
         assert!(persisted_tool_is_successful_verification(
-            &persisted_process(json!({"success":true,"verification_eligible":true}))
+            &persisted_process(
+                json!({"success":true,"verification_eligible":true,"workspace_revision":"revision-a"})
+            ),
+            "revision-a"
+        ));
+        assert!(!persisted_tool_is_successful_verification(
+            &persisted_process(
+                json!({"success":true,"verification_eligible":true,"workspace_revision":"revision-a"})
+            ),
+            "revision-b"
         ));
     }
 

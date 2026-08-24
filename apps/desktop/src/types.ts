@@ -169,6 +169,7 @@ export interface FieloraBridge {
     events(request: ListAgentEventsRequest): Promise<AgentEventView[]>;
     toolCalls(request: AgentRunRequest): Promise<AgentToolCallView[]>;
     cancel(request: AgentRunRequest): Promise<AgentRunView>;
+    pause(request: AgentRunRequest): Promise<AgentRunView>;
     resume(request: AgentRunRequest): Promise<AgentRunView>;
     resolveApproval(request: ResolveAgentApprovalRequest): Promise<ApprovalView>;
   };

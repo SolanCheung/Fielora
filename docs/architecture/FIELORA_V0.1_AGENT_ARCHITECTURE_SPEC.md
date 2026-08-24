@@ -219,6 +219,13 @@ Current implementation:
 - Conversation messages;
 - startup reconciliation of incomplete tools to `UNKNOWN` and active Runs to
   `PAUSED`;
+- cooperative safe-boundary pause, durable resume/cancel, pending Approval
+  restoration, and terminal-state non-reexecution;
+- effect-aware `UNKNOWN` reconciliation: retry-safe reads, contained file/hash
+  inspection, fresh verification after interrupted checks, and fail-closed
+  Git/network/destructive handling;
+- verification receipts bound to the current workspace mutation revision, plus
+  receipt-backed duplicate side-effect suppression;
 - in-memory transcript/context caches for an active process.
 
 The immutable Agent Event ledger is durable history, not a claim that the whole
@@ -652,15 +659,16 @@ reuse its Governance, Continuity, Execution, and Evidence.
 
 ## Continuity
 
-- mature checkpoints and durable scheduling;
-- stable long-task resume/replay semantics;
-- complete crash reconciliation.
+- mature checkpoint selection and durable background scheduling;
+- richer user-assisted reconciliation for ambiguous/high-risk external effects;
+- multi-attempt history beyond the current explicit, classified retry facts.
 
 ## Execution
 
-- mature pause/resume and preemption;
+- preemptive suspension inside arbitrary third-party operations (current pause
+  is cooperative at safe receipt/model/context boundaries);
 - durable queueing/scheduling;
-- long-running task control.
+- timeout/budget policy beyond existing bounded model/process execution.
 
 ## Adaptation
 
@@ -732,12 +740,16 @@ Add a Profile only alongside its first real product workflow.
 14. Verification must follow mutations.
 15. Old verification cannot prove newer mutations.
 16. A successful generic process is not verification.
-17. Aegis strengthens Harness; it does not create another Core.
-18. IDR resolves intent; it does not execute.
-19. DXE composes Product work surfaces; it does not replace Harness.
-20. AG-UI is an interaction adapter, not durable truth.
-21. New task categories use Harness Profiles.
-22. Future capabilities extend this architecture instead of bypassing it.
+17. A started Tool without a final receipt becomes `UNKNOWN`; it is neither
+    assumed successful nor replayed without effect-aware reconciliation.
+18. A Run with a workspace mutation cannot complete unless a successful,
+    verification-eligible receipt matches the current workspace revision.
+19. Aegis strengthens Harness; it does not create another Core.
+20. IDR resolves intent; it does not execute.
+21. DXE composes Product work surfaces; it does not replace Harness.
+22. AG-UI is an interaction adapter, not durable truth.
+23. New task categories use Harness Profiles.
+24. Future capabilities extend this architecture instead of bypassing it.
 
 ---
 

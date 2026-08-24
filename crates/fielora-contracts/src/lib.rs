@@ -1377,6 +1377,30 @@ impl AgentRunStatus {
     pub fn is_terminal(self) -> bool {
         matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
     }
+
+    pub fn can_transition_to(self, next: Self) -> bool {
+        use AgentRunStatus::*;
+        self == next
+            || matches!(
+                (self, next),
+                (Queued, Running)
+                    | (Queued, Paused)
+                    | (Queued, Cancelled)
+                    | (Running, WaitingApproval)
+                    | (Running, Paused)
+                    | (Running, Completed)
+                    | (Running, Failed)
+                    | (Running, Cancelled)
+                    | (WaitingApproval, Running)
+                    | (WaitingApproval, Paused)
+                    | (WaitingApproval, Failed)
+                    | (WaitingApproval, Cancelled)
+                    | (Paused, Running)
+                    | (Paused, WaitingApproval)
+                    | (Paused, Failed)
+                    | (Paused, Cancelled)
+            )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1418,6 +1442,7 @@ pub enum AgentEventKind {
     ToolUnknown,
     VerificationRecorded,
     CheckpointCreated,
+    RecoveryStarted,
     RecoveryReconciled,
 }
 

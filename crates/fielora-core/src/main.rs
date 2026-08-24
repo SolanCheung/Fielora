@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 const PROTOCOL: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
-const CAPABILITIES: [&str; 66] = [
+const CAPABILITIES: [&str; 67] = [
     "system.build_provenance",
     "field.create",
     "field.list",
@@ -94,6 +94,7 @@ const CAPABILITIES: [&str; 66] = [
     "agent.events",
     "agent.tool_calls",
     "agent.cancel",
+    "agent.pause",
     "agent.resume",
     "agent.resolve_approval",
     "agent.stream",
@@ -307,7 +308,7 @@ fn run() -> Result<(), CoreError> {
     for cancellation in runtime.cancellations.lock().unwrap().values() {
         cancellation.cancel();
     }
-    runtime.agent.cancel_all();
+    runtime.agent.prepare_for_shutdown();
     if let Some(async_runtime) = runtime.async_runtime.take() {
         async_runtime.shutdown_timeout(std::time::Duration::from_millis(750));
     }
@@ -543,6 +544,10 @@ fn dispatch_request(
         "command.agent.cancel" => {
             let params: AgentRunRequest = parse_params(&request.params)?;
             serialize(runtime.agent.cancel(params.run_id)?)
+        }
+        "command.agent.pause" => {
+            let params: AgentRunRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.pause(params.run_id)?)
         }
         "command.agent.resume" => {
             let params: AgentRunRequest = parse_params(&request.params)?;

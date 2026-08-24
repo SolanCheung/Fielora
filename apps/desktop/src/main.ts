@@ -403,6 +403,7 @@ function registerBridgeHandlers(): void {
   handle(channels.agentEvents, validateListAgentEvents, 'query.agent.events');
   handle(channels.agentToolCalls, validateAgentRun, 'query.agent.tool_calls');
   handle(channels.agentCancel, validateAgentRun, 'command.agent.cancel');
+  handle(channels.agentPause, validateAgentRun, 'command.agent.pause');
   handle(channels.agentResume, validateAgentRun, 'command.agent.resume');
   handle(channels.agentResolveApproval, validateResolveAgentApproval, 'command.agent.resolve_approval');
   handle(channels.captureCreate, validateCreateCapture, 'command.capture.create');

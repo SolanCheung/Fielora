@@ -529,6 +529,9 @@ impl StorageHandle {
                 return Err(DomainError::TerminalResource);
             }
             let status = update.status.unwrap_or(current.status);
+            if !current.status.can_transition_to(status) {
+                return Err(DomainError::InvalidStateTransition);
+            }
             let current_step = update.current_step.unwrap_or(current.current_step);
             if current_step > current.max_steps {
                 return Err(DomainError::Validation("AGENT_STEP_BUDGET_EXCEEDED".into()));
@@ -661,6 +664,41 @@ impl StorageHandle {
         })
     }
 
+    pub fn reconcile_unknown_agent_tool_call(
+        &self,
+        id: ToolCallId,
+        status: AgentToolStatus,
+        receipt: Option<Value>,
+        error_code: Option<String>,
+        now: i64,
+    ) -> Result<AgentToolCallView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            let current = get_agent_tool_call(connection, &owner, &id)?;
+            if current.status != AgentToolStatus::Unknown
+                || !matches!(status, AgentToolStatus::Completed | AgentToolStatus::Failed)
+            {
+                return Err(DomainError::InvalidStateTransition);
+            }
+            let receipt_json = receipt.map(|value| value.to_string());
+            if receipt_json
+                .as_ref()
+                .is_some_and(|value| value.len() > 1024 * 1024)
+            {
+                return Err(DomainError::Validation(
+                    "AGENT_TOOL_RECEIPT_TOO_LARGE".into(),
+                ));
+            }
+            connection
+                .execute(
+                    "UPDATE agent_tool_calls SET status=?1,receipt_json=?2,error_code=?3,updated_at=?4,finished_at=?4 WHERE id=?5 AND status='UNKNOWN'",
+                    params![wire(&status), receipt_json, error_code, now, id.0],
+                )
+                .map_err(storage_domain)?;
+            get_agent_tool_call(connection, &owner, &id)
+        })
+    }
+
     pub fn list_agent_tool_calls(
         &self,
         run_id: AgentRunId,
@@ -781,6 +819,24 @@ impl StorageHandle {
         })
     }
 
+    pub fn has_agent_context_snapshot(
+        &self,
+        run_id: AgentRunId,
+        step: u32,
+    ) -> Result<bool, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_agent_run(connection, &owner, &run_id)?;
+            connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM agent_context_snapshots WHERE run_id=?1 AND step=?2)",
+                    params![run_id.0, i64::from(step)],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(storage_domain)
+        })
+    }
+
     pub fn record_agent_verification(
         &self,
         receipt: VerificationReceiptView,
@@ -829,34 +885,69 @@ impl StorageHandle {
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(storage_domain)?;
                 drop(tool_statement);
-                let event_id = AgentEventId::new(Uuid::now_v7().to_string());
-                let payload = serde_json::json!({"reason":"CORE_RESTARTED","unknown_tool_call_ids":unknown_tools});
+                let mut recovery_events = vec![(
+                    AgentEventKind::RecoveryStarted,
+                    serde_json::json!({"reason":"CORE_RESTARTED"}),
+                )];
+                recovery_events.extend(unknown_tools.iter().map(|tool_call_id| {
+                    (
+                        AgentEventKind::ToolUnknown,
+                        serde_json::json!({
+                            "reason":"CORE_RESTARTED",
+                            "tool_call_id":tool_call_id,
+                        }),
+                    )
+                }));
+                recovery_events.push((
+                    AgentEventKind::RunPaused,
+                    serde_json::json!({
+                        "reason":"CORE_RESTARTED",
+                        "previous_status":"RUNNING",
+                    }),
+                ));
+                recovery_events.push((
+                    AgentEventKind::RecoveryReconciled,
+                    serde_json::json!({
+                        "reason":"CORE_RESTARTED",
+                        "phase":"STARTUP_MARKED_UNKNOWN",
+                        "unknown_tool_call_ids":unknown_tools,
+                    }),
+                ));
                 let transaction = connection.transaction().map_err(storage_domain)?;
                 transaction.execute(
                     "UPDATE agent_tool_calls SET status='UNKNOWN',error_code='CORE_RESTARTED',updated_at=?1,finished_at=?1 WHERE run_id=?2 AND status='RUNNING'",
                     params![now,run_id.0],
                 ).map_err(storage_domain)?;
-                transaction.execute(
-                    "INSERT INTO agent_events(id,run_id,sequence,schema_version,kind,payload_json,created_at) VALUES(?1,?2,?3,1,?4,?5,?6)",
-                    params![event_id.0,run_id.0,revision_to_domain(current.next_sequence)?,wire(&AgentEventKind::RecoveryReconciled),payload.to_string(),now],
-                ).map_err(storage_domain)?;
+                let mut inserted = Vec::with_capacity(recovery_events.len());
+                for (offset, (kind, payload)) in recovery_events.into_iter().enumerate() {
+                    let event_id = AgentEventId::new(Uuid::now_v7().to_string());
+                    let sequence = current.next_sequence + offset as u64;
+                    transaction.execute(
+                        "INSERT INTO agent_events(id,run_id,sequence,schema_version,kind,payload_json,created_at) VALUES(?1,?2,?3,1,?4,?5,?6)",
+                        params![event_id.0,run_id.0,revision_to_domain(sequence)?,wire(&kind),payload.to_string(),now],
+                    ).map_err(storage_domain)?;
+                    inserted.push((event_id, sequence, kind, payload));
+                }
                 transaction.execute(
                     "UPDATE agent_runs SET status='PAUSED',next_sequence=?1,error_code='CORE_RESTARTED',updated_at=?2 WHERE id=?3",
-                    params![revision_to_domain(current.next_sequence+1)?,now,run_id.0],
+                    params![revision_to_domain(current.next_sequence+inserted.len() as u64)?,now,run_id.0],
                 ).map_err(storage_domain)?;
                 transaction.commit().map_err(storage_domain)?;
-                commits.push(AgentEventCommit {
-                    event: AgentEventView {
-                        id: event_id,
-                        run_id: run_id.clone(),
-                        sequence: current.next_sequence,
-                        schema_version: 1,
-                        kind: AgentEventKind::RecoveryReconciled,
-                        payload,
-                        created_at: now,
-                    },
-                    run: get_agent_run(connection, &owner, &run_id)?,
-                });
+                let recovered_run = get_agent_run(connection, &owner, &run_id)?;
+                commits.extend(inserted.into_iter().map(|(id, sequence, kind, payload)| {
+                    AgentEventCommit {
+                        event: AgentEventView {
+                            id,
+                            run_id: run_id.clone(),
+                            sequence,
+                            schema_version: 1,
+                            kind,
+                            payload,
+                            created_at: now,
+                        },
+                        run: recovered_run.clone(),
+                    }
+                }));
             }
             Ok(commits)
         })
@@ -5230,7 +5321,7 @@ mod tests {
     #[test]
     fn agent_ledger_is_append_only_and_restart_reconciles_incomplete_tools() {
         let root = temporary_root();
-        let (run_id, tool_id) = {
+        let (run_id, tool_id, waiting_run_id, pending_approval_id, paused_run_id) = {
             let worker = start(&root, 1);
             let handle = worker.handle();
             let project = handle
@@ -5272,10 +5363,10 @@ mod tests {
             let created = handle
                 .create_agent_run(
                     StartAgentRunRequest {
-                        field_id: project.field_id,
-                        conversation_id: conversation.id,
+                        field_id: project.field_id.clone(),
+                        conversation_id: conversation.id.clone(),
                         user_message_id: None,
-                        provider_config_id: provider.view.id,
+                        provider_config_id: provider.view.id.clone(),
                         model_id: None,
                         task: "Fix the fixture".into(),
                         permission: AgentPermission::ReviewChanges,
@@ -5340,14 +5431,81 @@ mod tests {
             handle
                 .update_agent_tool_call(tool.id.clone(), AgentToolStatus::Running, None, None, 12)
                 .unwrap();
-            (created.run.id, tool.id)
+            let waiting = handle
+                .create_agent_run(
+                    StartAgentRunRequest {
+                        field_id: project.field_id.clone(),
+                        conversation_id: conversation.id.clone(),
+                        user_message_id: None,
+                        provider_config_id: provider.view.id.clone(),
+                        model_id: None,
+                        task: "Wait for approval".into(),
+                        permission: AgentPermission::ReviewChanges,
+                        max_steps: Some(8),
+                        attachments: None,
+                    },
+                    13,
+                )
+                .unwrap();
+            let waiting_tool = handle
+                .create_agent_tool_call(
+                    waiting.run.id.clone(),
+                    "write_file".into(),
+                    AgentToolEffect::WorkspaceWrite,
+                    AgentPolicyDecision::Ask,
+                    serde_json::json!({"path":"src/lib.rs"}),
+                    14,
+                )
+                .unwrap();
+            let pending_approval = handle
+                .create_agent_approval(waiting.run.id.clone(), waiting_tool.id, 15)
+                .unwrap();
+            let paused = handle
+                .create_agent_run(
+                    StartAgentRunRequest {
+                        field_id: project.field_id,
+                        conversation_id: conversation.id,
+                        user_message_id: None,
+                        provider_config_id: provider.view.id,
+                        model_id: None,
+                        task: "Remain paused".into(),
+                        permission: AgentPermission::ReviewChanges,
+                        max_steps: Some(8),
+                        attachments: None,
+                    },
+                    16,
+                )
+                .unwrap();
+            handle
+                .append_agent_event(
+                    paused.run.id.clone(),
+                    AgentEventKind::RunPaused,
+                    serde_json::json!({"reason":"TEST"}),
+                    AgentProjectionUpdate {
+                        status: Some(AgentRunStatus::Paused),
+                        ..Default::default()
+                    },
+                    17,
+                )
+                .unwrap();
+            (
+                created.run.id,
+                tool.id,
+                waiting.run.id,
+                pending_approval,
+                paused.run.id,
+            )
         };
         {
             let worker = start(&root, 13);
             let handle = worker.handle();
             let reconciled = handle.reconcile_agent_runs(14).unwrap();
-            assert_eq!(reconciled.len(), 1);
-            assert_eq!(reconciled[0].run.status, AgentRunStatus::Paused);
+            assert_eq!(reconciled.len(), 4);
+            assert!(
+                reconciled
+                    .iter()
+                    .all(|commit| commit.run.status == AgentRunStatus::Paused)
+            );
             assert_eq!(
                 handle.list_agent_tool_calls(run_id.clone()).unwrap()[0].status,
                 AgentToolStatus::Unknown
@@ -5364,7 +5522,20 @@ mod tests {
                     .iter()
                     .map(|event| event.sequence)
                     .collect::<Vec<_>>(),
-                vec![1, 2, 3]
+                vec![1, 2, 3, 4, 5, 6]
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .skip(2)
+                    .map(|event| event.kind)
+                    .collect::<Vec<_>>(),
+                vec![
+                    AgentEventKind::RecoveryStarted,
+                    AgentEventKind::ToolUnknown,
+                    AgentEventKind::RunPaused,
+                    AgentEventKind::RecoveryReconciled,
+                ]
             );
             let connection = open_connection(&handle.database_path).unwrap();
             assert!(
@@ -5390,6 +5561,29 @@ mod tests {
                     .error_code
                     .as_deref(),
                 Some("CORE_RESTARTED")
+            );
+            assert_eq!(
+                handle.get_agent_run(waiting_run_id.clone()).unwrap().status,
+                AgentRunStatus::WaitingApproval
+            );
+            assert_eq!(
+                handle
+                    .resolve_agent_approval(
+                        ResolveAgentApprovalRequest {
+                            run_id: waiting_run_id,
+                            approval_id: pending_approval_id.id,
+                            nonce: pending_approval_id.nonce,
+                            decision: ApprovalDecision::Deny,
+                        },
+                        18,
+                    )
+                    .unwrap()
+                    .decision,
+                Some(ApprovalDecision::Deny)
+            );
+            assert_eq!(
+                handle.get_agent_run(paused_run_id).unwrap().status,
+                AgentRunStatus::Paused
             );
         }
         fs::remove_dir_all(root).unwrap();

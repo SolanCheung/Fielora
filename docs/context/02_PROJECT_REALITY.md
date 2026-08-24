@@ -1516,3 +1516,35 @@ Targeted alignment Gate 使用冻结 Node 24.18.1 / pnpm 11.21.0：
 durable Harness Profile/strategy facts、Approval、Tool receipt、Verification、
 Run completion 与 recovery。未运行与本轮无关的 UI、Browse、packaging 或
 真实 Provider Gate。
+
+## 81. Stable Long Tasks Minimum Reliable Closure
+
+Stable Long Tasks 的最小闭环继续位于既有 `Harness.Continuity +
+Harness.Execution`，没有新增 LongTask Core、Runtime、状态库、权限系统或
+schema。AgentRun 使用既有 `QUEUED / RUNNING / WAITING_APPROVAL / PAUSED /
+COMPLETED / FAILED / CANCELLED`；Core/App 中断时，RUNNING Tool 没有 final
+receipt 即持久化为 `UNKNOWN`，Run 进入 `PAUSED`，WAITING_APPROVAL 的原 nonce
+和 PAUSED 状态跨重启保留。
+
+用户 Resume 之前不执行新动作。恢复时只读操作可重读；文件写入依据受
+project-root/symlink/sensitive-path 保护的当前文件 hash 与预期 before/after
+状态判定 APPLIED、NOT_APPLIED 或 DIVERGED；中断 Verification 必须 fresh
+执行；Git、network、destructive 和普通未知 process 不盲目 replay。已确认
+APPLIED 的 mutation 保留原 Tool identity 并要求新 verification，已有可信
+成功 receipt 的同参副作用不会重复执行。
+
+Verification process receipt 现在记录当前 workspace mutation revision。
+只有 `success + verification_eligible=true + current workspace revision` 可证明
+当前修改；普通成功 process、旧 revision、缺失/失败/中断 verification 或
+未裁决 UNKNOWN 均不能进入 COMPLETED。显式 retry 记录前次 failure type、
+tool effect、receipt state、workspace revision 与 verification validity；
+POLICY_DENIED / USER_DENIED 永不自动 retry。
+
+```text
+STABLE_LONG_TASKS_MINIMUM_CLOSURE: IMPLEMENTED
+SCHEMA_CHANGE: NONE
+UNKNOWN_IS_FIRST_CLASS: YES
+FRESH_VERIFICATION_REVISION: ENFORCED
+BACKGROUND_SCHEDULER: NOT_IMPLEMENTED
+AEGIS_DXE_IDR_AG_UI: DEFERRED
+```
