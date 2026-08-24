@@ -37,6 +37,16 @@ function safeRelative(value: string): string {
   return normalized;
 }
 
+function terminalDirectoryTarget(command: string): string | null {
+  const match = /^(cd|chdir|sl|set-location)(.*)$/i.exec(command.trim());
+  if (!match) return null;
+  const suffix = match[2] ?? '';
+  if (!suffix || !/^[\s.\\/~'"]/.test(suffix) || /[;|&]/.test(suffix)) return null;
+  let target = suffix.trim().replace(/^\/d\s+/i, '').trim();
+  if ((target.startsWith('"') && target.endsWith('"')) || (target.startsWith("'") && target.endsWith("'"))) target = target.slice(1, -1);
+  return target || null;
+}
+
 function inside(root: string, target: string): boolean {
   const relative = path.relative(root, target);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -190,12 +200,23 @@ export class WorkspaceRuntime {
     };
   }
 
-  async runTerminal(rootPath: string, fieldId: string, command: string): Promise<TerminalRunResult> {
+  async runTerminal(rootPath: string, fieldId: string, command: string, workingDirectory = rootPath): Promise<TerminalRunResult> {
     const root = await this.#root(rootPath);
     if (!command.trim() || command.length > 8_000 || command.includes('\0')) throw new Error('Invalid terminal command');
+    const currentDirectory = await realpath(workingDirectory || root);
+    if (!(await stat(currentDirectory)).isDirectory()) throw new Error('Terminal working directory is unavailable');
     const runId = `run_${randomUUID()}`;
+    const directoryCommand = terminalDirectoryTarget(command);
+    if (directoryCommand !== null) {
+      const target = directoryCommand === '~'
+        ? process.env.USERPROFILE ?? process.env.HOME ?? currentDirectory
+        : path.resolve(currentDirectory, directoryCommand);
+      const nextDirectory = await realpath(target);
+      if (!(await stat(nextDirectory)).isDirectory()) throw new Error('Terminal directory is unavailable');
+      return { run_id: runId, working_directory: nextDirectory };
+    }
     const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
-      cwd: root,
+      cwd: currentDirectory,
       env: process.env,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -231,7 +252,7 @@ export class WorkspaceRuntime {
       });
     });
     child.stdin.end();
-    return { run_id: runId };
+    return { run_id: runId, working_directory: null };
   }
 
   cancelTerminal(runId: string): void {

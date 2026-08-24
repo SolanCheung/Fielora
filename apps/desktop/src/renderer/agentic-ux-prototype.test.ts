@@ -51,7 +51,9 @@ test('agent conversation typography stays on the shared readable scale', () => {
     '--fl-font-agent-sans: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;',
     '--fl-font-agent-mono: "Cascadia Code", Consolas, monospace;',
     '--fl-font-size-agent-meta: calc(12.5px * var(--fl-ui-font-scale));',
+    '--fl-font-size-agent-execution: calc(14px * var(--fl-ui-font-scale));',
     '--fl-font-size-agent-body: calc(15px * var(--fl-ui-font-scale));',
+    '--fl-font-size-agent-lead: calc(16px * var(--fl-ui-font-scale));',
     '--fl-font-size-agent-title: calc(17px * var(--fl-ui-font-scale));',
     '--fl-font-size-agent-button: calc(13.5px * var(--fl-ui-font-scale));',
     '--fl-font-weight-regular: 400;',
@@ -63,7 +65,7 @@ test('agent conversation typography stays on the shared readable scale', () => {
   assert.match(productionComponent, /agent-terminal-result/);
   assert.doesNotMatch(prototypeComponent, /prototype-speaker[^>]*>\s*Fielora\s*</);
   assert.match(productionStyles, /\.markdown-body\s*\{[^}]*font-size:\s*var\(--fl-font-size-agent-body\)[^}]*font-weight:\s*var\(--fl-font-weight-regular\)[^}]*line-height:\s*var\(--fl-line-height-agent-body\)/s);
-  assert.match(productionStyles, /\.agent-terminal-result h2\s*\{[^}]*font-size:\s*var\(--fl-font-size-agent-title\)[^}]*font-weight:\s*var\(--fl-font-weight-result-title\)/s);
+  assert.match(productionStyles, /\.agent-terminal-result h2\s*\{[^}]*font-size:\s*var\(--fl-font-size-agent-lead\)[^}]*font-weight:\s*var\(--fl-font-weight-result-title\)/s);
   assert.match(productionStyles, /\.message-list button, \.conversation-composer button\s*\{[^}]*font-size:\s*var\(--fl-font-size-agent-button\)[^}]*font-weight:\s*var\(--fl-font-weight-medium\)/s);
   assert.match(productionStyles, /\.human-review-raw\s*\{[^}]*font-family:\s*var\(--fl-font-agent-mono\)/s);
   assert.match(prototypeStyles, /\.prototype-assistant-turn\s*\{[^}]*font-size:\s*var\(--fl-font-size-agent-body\)[^}]*font-weight:\s*var\(--fl-font-weight-regular\)[^}]*line-height:\s*var\(--fl-line-height-agent-body\)/s);

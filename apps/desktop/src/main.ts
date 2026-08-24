@@ -1,4 +1,5 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { access, readFile, writeFile } from 'node:fs/promises';
+import { execFile, spawn } from 'node:child_process';
 import path from 'node:path';
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, nativeImage, nativeTheme, protocol, shell } from 'electron';
 import type { ContextMenuParams, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
@@ -22,7 +23,7 @@ import {
   validatePickProject, validateCreateProject, validateUpdateProject, validateArchiveProject, validateWorkspaceProject, validateCreateConversation,
   validateConversationReference, validateUpdateConversation, validateArchiveConversation,
   validateCreateConversationMessage, validateListConversationMessages, validateWorkspaceFile,
-  validateApplyWorkspaceFile, validateRunTerminal, validateCancelTerminal,
+  validateApplyWorkspaceFile, validateRunTerminal, validateCancelTerminal, validateOpenWorkspaceProject,
   validateStartAgent, validateAgentRun, validateListAgentRuns, validateListAgentEvents,
   validateResolveAgentApproval,
   validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment, validateStoreWorkspaceAttachment,
@@ -112,6 +113,91 @@ function handle(channel: string, validator: (payload: unknown) => unknown, metho
 async function projectRoot(fieldId: string): Promise<string> {
   const project = await supervisor.request('query.project.get', { field_id: fieldId }) as ProjectView;
   return project.root_path;
+}
+
+type WorkspaceOpenTargetId = import('./workspace-types').WorkspaceProjectOpenTarget;
+type WorkspaceOpenTargetView = import('./workspace-types').WorkspaceProjectOpenTargetView;
+
+const workspaceOpenApplications: Array<{
+  target: Exclude<WorkspaceOpenTargetId, 'FILE_EXPLORER'>;
+  label: string;
+  commands: string[];
+  commonPaths: string[];
+}> = [
+  { target: 'VISUAL_STUDIO_CODE', label: 'Visual Studio Code', commands: ['Code.exe', 'code.exe'], commonPaths: [path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Microsoft VS Code', 'Code.exe'), path.join(process.env.ProgramFiles ?? '', 'Microsoft VS Code', 'Code.exe')] },
+  { target: 'CURSOR', label: 'Cursor', commands: ['Cursor.exe', 'cursor.exe'], commonPaths: [path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'cursor', 'Cursor.exe'), path.join(process.env.ProgramFiles ?? '', 'Cursor', 'Cursor.exe')] },
+  { target: 'VISUAL_STUDIO', label: 'Visual Studio', commands: ['devenv.exe'], commonPaths: [] },
+  { target: 'GIT_BASH', label: 'Git Bash', commands: ['git-bash.exe'], commonPaths: [path.join(process.env.ProgramFiles ?? '', 'Git', 'git-bash.exe')] },
+  { target: 'INTELLIJ_IDEA', label: 'IntelliJ IDEA', commands: ['idea64.exe', 'idea.exe'], commonPaths: [] },
+  { target: 'PYCHARM', label: 'PyCharm', commands: ['pycharm64.exe', 'pycharm.exe'], commonPaths: [] },
+  { target: 'WEBSTORM', label: 'WebStorm', commands: ['webstorm64.exe', 'webstorm.exe'], commonPaths: [] },
+];
+
+async function findWorkspaceApplication(target: Exclude<WorkspaceOpenTargetId, 'FILE_EXPLORER'>): Promise<string | null> {
+  const application = workspaceOpenApplications.find((item) => item.target === target);
+  if (!application) return null;
+  for (const candidate of application.commonPaths.filter((value) => path.isAbsolute(value))) {
+    try { await access(candidate); return candidate; } catch { /* Try PATH next. */ }
+  }
+  for (const command of application.commands) {
+    const registryKeys = [
+      `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${command}`,
+      `HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${command}`,
+      `HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${command}`,
+      ...(target === 'VISUAL_STUDIO_CODE' ? ['HKCR\\vscode\\shell\\open\\command'] : []),
+      ...(target === 'CURSOR' ? ['HKCR\\cursor\\shell\\open\\command'] : []),
+    ];
+    for (const key of registryKeys) {
+      const registered = await new Promise<string | null>((resolve) => {
+        execFile('reg.exe', ['query', key, '/ve'], { windowsHide: true, timeout: 2_500 }, (error, stdout) => {
+          if (error) { resolve(null); return; }
+          const value = stdout.match(/REG_SZ\s+(.+)$/mu)?.[1]?.trim() ?? '';
+          resolve(value.match(/^"([^"]+\.exe)"/iu)?.[1] ?? value.match(/^([^\s]+\.exe)/iu)?.[1] ?? null);
+        });
+      });
+      if (registered) {
+        try { await access(registered); return registered; } catch { /* Keep looking. */ }
+      }
+    }
+    const located = await new Promise<string | null>((resolve) => {
+      execFile('where.exe', [command], { windowsHide: true, timeout: 2_500 }, (error, stdout) => resolve(error ? null : stdout.split(/\r?\n/u).find(Boolean) ?? null));
+    });
+    if (located) return located;
+  }
+  return null;
+}
+
+async function workspaceProtocolAvailable(target: Exclude<WorkspaceOpenTargetId, 'FILE_EXPLORER'>): Promise<boolean> {
+  const scheme = target === 'VISUAL_STUDIO_CODE' ? 'vscode' : target === 'CURSOR' ? 'cursor' : null;
+  if (!scheme) return false;
+  return new Promise<boolean>((resolve) => execFile('reg.exe', ['query', `HKCR\\${scheme}\\shell\\open\\command`, '/ve'], { windowsHide: true, timeout: 2_500 }, (error) => resolve(!error)));
+}
+
+async function workspaceApplicationIcon(executable: string | null): Promise<string | null> {
+  if (!executable) return null;
+  try {
+    const icon = await app.getFileIcon(executable, { size: 'normal' });
+    return icon.isEmpty() ? null : icon.toDataURL();
+  } catch {
+    return null;
+  }
+}
+
+let workspaceOpenTargetsCache: WorkspaceOpenTargetView[] | null = null;
+
+async function workspaceOpenTargets(): Promise<WorkspaceOpenTargetView[]> {
+  if (workspaceOpenTargetsCache) return workspaceOpenTargetsCache;
+  const explorerExecutable = path.join(process.env.WINDIR || 'C:\\Windows', 'explorer.exe');
+  const detected = await Promise.all(workspaceOpenApplications.map(async (application) => {
+    const executable = await findWorkspaceApplication(application.target);
+    const available = Boolean(executable) || await workspaceProtocolAvailable(application.target);
+    return { application, available, iconDataUrl: await workspaceApplicationIcon(executable) };
+  }));
+  workspaceOpenTargetsCache = [
+    { target: 'FILE_EXPLORER', label: '文件资源管理器', icon_data_url: await workspaceApplicationIcon(explorerExecutable) },
+    ...detected.filter((item) => item.available).map(({ application, iconDataUrl }) => ({ target: application.target, label: application.label, icon_data_url: iconDataUrl })),
+  ];
+  return workspaceOpenTargetsCache;
 }
 
 function registerBridgeHandlers(): void {
@@ -223,9 +309,33 @@ function registerBridgeHandlers(): void {
     assertBridgeEvent(event); const request=validateWorkspaceProject(payload);
     return workspaceRuntime.getEnvironment(await projectRoot(request.field_id));
   });
+  ipcMain.handle(channels.workspaceOpenTargets, async (event, payload) => {
+    assertBridgeEvent(event); validateWorkspaceProject(payload);
+    return workspaceOpenTargets();
+  });
+  ipcMain.handle(channels.workspaceOpenProject, async (event, payload) => {
+    assertBridgeEvent(event);
+    const request = validateOpenWorkspaceProject(payload);
+    const root = await projectRoot(request.field_id);
+    if (request.target === 'FILE_EXPLORER') {
+      const error = await shell.openPath(root);
+      if (error) throw new Error('无法在文件资源管理器中打开当前 Project');
+      return null;
+    }
+    const executable = await findWorkspaceApplication(request.target);
+    if (!executable && (request.target === 'VISUAL_STUDIO_CODE' || request.target === 'CURSOR') && await workspaceProtocolAvailable(request.target)) {
+      const scheme = request.target === 'VISUAL_STUDIO_CODE' ? 'vscode' : 'cursor';
+      await shell.openExternal(`${scheme}://file/${encodeURI(root.replaceAll('\\', '/'))}`);
+      return null;
+    }
+    if (!executable) throw new Error('这个应用当前不可用');
+    const child = spawn(executable, [root], { cwd: root, detached: true, windowsHide: true, stdio: 'ignore' });
+    child.unref();
+    return null;
+  });
   ipcMain.handle(channels.workspaceTerminalRun, async (event, payload) => {
     assertBridgeEvent(event); const request=validateRunTerminal(payload);
-    return workspaceRuntime.runTerminal(await projectRoot(request.field_id), request.field_id, request.command);
+    return workspaceRuntime.runTerminal(await projectRoot(request.field_id), request.field_id, request.command, request.working_directory);
   });
   ipcMain.handle(channels.workspaceTerminalCancel, (event, payload) => {
     assertBridgeEvent(event); const request=validateCancelTerminal(payload);

@@ -18,6 +18,7 @@ import type {
 import type { BrowserNavigateRequest, BrowserPageRequest, BrowserViewBounds } from './browser-types';
 import type {
   ApplyWorkspaceFileRequest, CancelTerminalRequest, PickProjectRequest, RunTerminalRequest,
+  OpenWorkspaceProjectRequest,
   ReadWorkspaceAttachmentRequest, SaveWorkspaceAttachmentRequest, StoreWorkspaceAttachmentRequest,
   WorkspaceFileRequest, WorkspaceProjectRequest,
 } from './workspace-types';
@@ -183,6 +184,7 @@ export function validateCreateProject(value: unknown): CreateProjectRequest {
 export function validateUpdateProject(value:unknown):UpdateProjectRequest{const input=object(value);exact(input,['field_id','expected_revision','title']);return{field_id:id(input.field_id),expected_revision:revision(input.expected_revision),title:boundedUnicodeText(input.title,120,480,'Project title')};}
 export function validateArchiveProject(value:unknown):ArchiveProjectRequest{const input=object(value);exact(input,['field_id','expected_revision']);return{field_id:id(input.field_id),expected_revision:revision(input.expected_revision)};}
 export const validateWorkspaceProject=(value:unknown):WorkspaceProjectRequest=>validateReference(value);
+export function validateOpenWorkspaceProject(value:unknown):OpenWorkspaceProjectRequest{const input=object(value);exact(input,['field_id','target']);return{field_id:id(input.field_id),target:enumValue(input.target,new Set(['FILE_EXPLORER','VISUAL_STUDIO_CODE','CURSOR','VISUAL_STUDIO','GIT_BASH','INTELLIJ_IDEA','PYCHARM','WEBSTORM']),'workspace open target') as OpenWorkspaceProjectRequest['target']};}
 function conversationFields(input:Record<string,unknown>):{title:string;provider_config_id:string|null;model_id:string|null}{
   if(!(input.provider_config_id===null||typeof input.provider_config_id==='string')||!(input.model_id===null||typeof input.model_id==='string'))throw new Error('Invalid Conversation selection');
   return{title:boundedUnicodeText(input.title,120,480,'Conversation title'),provider_config_id:input.provider_config_id===null?null:id(input.provider_config_id),model_id:input.model_id===null?null:boundedUnicodeText(input.model_id,256,1024,'model')};
@@ -204,5 +206,5 @@ export function validateStoreWorkspaceAttachment(value:unknown):StoreWorkspaceAt
 export function validateReadWorkspaceAttachment(value:unknown):ReadWorkspaceAttachmentRequest{const input=object(value);exact(input,['content_ref']);if(typeof input.content_ref!=='string'||!/^[0-9a-f]{64}\.(?:png|jpg|webp)$/.test(input.content_ref))throw new Error('Invalid attachment reference');return{content_ref:input.content_ref};}
 export function validateSaveWorkspaceAttachment(value:unknown):SaveWorkspaceAttachmentRequest{const input=object(value);exact(input,['content_ref','filename']);const reference=validateReadWorkspaceAttachment({content_ref:input.content_ref});const filename=boundedUnicodeText(input.filename,260,1024,'attachment filename');if(/[\\/:*?"<>|]/.test(filename)||filename==='.'||filename==='..')throw new Error('Invalid attachment filename');return{...reference,filename};}
 export function validateApplyWorkspaceFile(value:unknown):ApplyWorkspaceFileRequest{const input=object(value);exact(input,['field_id','relative_path','expected_sha256','content']);if(typeof input.expected_sha256!=='string'||!/^[0-9a-f]{64}$/.test(input.expected_sha256))throw new Error('Invalid file hash');return{field_id:id(input.field_id),relative_path:relativePath(input.relative_path),expected_sha256:input.expected_sha256,content:boundedUnicodeText(input.content,1048576,1048576,'file content',true)};}
-export function validateRunTerminal(value:unknown):RunTerminalRequest{const input=object(value);exact(input,['field_id','command']);return{field_id:id(input.field_id),command:boundedUnicodeText(input.command,8000,32000,'terminal command')};}
+export function validateRunTerminal(value:unknown):RunTerminalRequest{const input=object(value);exact(input,['field_id','command','working_directory']);return{field_id:id(input.field_id),command:boundedUnicodeText(input.command,8000,32000,'terminal command'),working_directory:boundedUnicodeText(input.working_directory,4096,16384,'terminal working directory')};}
 export function validateCancelTerminal(value:unknown):CancelTerminalRequest{const input=object(value);exact(input,['run_id']);if(typeof input.run_id!=='string'||!/^run_[0-9a-f-]{36}$/.test(input.run_id))throw new Error('Invalid terminal run');return{run_id:input.run_id};}

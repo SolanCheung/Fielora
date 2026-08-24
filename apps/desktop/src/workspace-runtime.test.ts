@@ -62,11 +62,15 @@ test('terminal streams output and exposes cancellation', async () => {
     }
   };
   try {
-    const completed = await runtime.runTerminal(root, 'field', "Write-Output 'terminal-ok'");
+    const moved = await runtime.runTerminal(root, 'field', 'cd..', root);
+    assert.equal(moved.working_directory, path.dirname(root));
+
+    const completed = await runtime.runTerminal(root, 'field', "Write-Output 'terminal-ok'", root);
+    assert.equal(completed.working_directory, null);
     await waitFor(() => events.some((event) => event.run_id === completed.run_id && event.kind === 'COMPLETED'));
     assert.equal(events.filter((event) => event.run_id === completed.run_id && event.kind === 'OUTPUT').some((event) => event.text?.includes('terminal-ok')), true);
 
-    const cancelled = await runtime.runTerminal(root, 'field', 'Start-Sleep -Seconds 5');
+    const cancelled = await runtime.runTerminal(root, 'field', 'Start-Sleep -Seconds 5', root);
     runtime.cancelTerminal(cancelled.run_id);
     await waitFor(() => events.some((event) => event.run_id === cancelled.run_id && event.kind === 'CANCELLED'));
   } finally {

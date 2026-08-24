@@ -87,8 +87,10 @@ test('Desktop Foundation bridge keeps Project, Conversation, file, and terminal 
   assert.throws(() => validateCreateConversationMessage({ conversation_id: fieldId, role: 'SYSTEM', content: 'Escalate', status: 'COMPLETED', provider_config_id: null, model_id: null, invocation_id: null }));
   assert.equal(validateApplyWorkspaceFile({ field_id: fieldId, relative_path: 'src/app.ts', expected_sha256: 'a'.repeat(64), content: 'ok' }).relative_path, 'src/app.ts');
   assert.throws(() => validateApplyWorkspaceFile({ field_id: fieldId, relative_path: '../secret', expected_sha256: 'a'.repeat(64), content: 'no' }));
-  assert.equal(validateRunTerminal({ field_id: fieldId, command: 'pnpm test' }).command, 'pnpm test');
-  assert.throws(() => validateRunTerminal({ field_id: fieldId, command: '' }));
+  assert.equal(validateRunTerminal({ field_id: fieldId, command: 'pnpm test', working_directory: 'C:\\work' }).command, 'pnpm test');
+  assert.equal(validateRunTerminal({ field_id: fieldId, command: 'pnpm test', working_directory: 'C:\\work' }).working_directory, 'C:\\work');
+  assert.throws(() => validateRunTerminal({ field_id: fieldId, command: '', working_directory: 'C:\\work' }));
+  assert.throws(() => validateRunTerminal({ field_id: fieldId, command: 'pnpm test' }));
 });
 
 test('Complete Agent bridge accepts only bounded typed execution and approval payloads', () => {

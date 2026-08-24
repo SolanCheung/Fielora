@@ -44,13 +44,15 @@ export interface SelectMenuOption<T extends string = string> {
   label: string;
   description?: string;
   disabled?: boolean;
+  icon?: ReactNode;
+  tone?: 'warning';
 }
 
 export function ChevronIcon({ open = false }: { open?: boolean }) {
   return <svg className={`ui-chevron chevron-icon ${open ? 'open' : ''}`} viewBox="0 0 16 16" aria-hidden="true"><path d="m4.25 6.25 3.75 3.5 3.75-3.5" /></svg>;
 }
 
-export function SelectMenu<T extends string>({ value, options, onChange, ariaLabel, testId, className = '', placement = 'bottom', leading }: {
+export function SelectMenu<T extends string>({ value, options, onChange, ariaLabel, testId, className = '', placement = 'bottom', leading, hideChevron = false }: {
   value: T;
   options: SelectMenuOption<T>[];
   onChange: (value: T) => void;
@@ -59,6 +61,7 @@ export function SelectMenu<T extends string>({ value, options, onChange, ariaLab
   className?: string;
   placement?: 'top' | 'bottom';
   leading?: ReactNode;
+  hideChevron?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -86,13 +89,13 @@ export function SelectMenu<T extends string>({ value, options, onChange, ariaLab
     };
   }, [onChange, open, options, value]);
 
-  return <div ref={rootRef} className={`ui-select select-menu ${placement === 'top' ? 'place-top' : ''} ${open ? 'open' : ''} ${className}`.trim()}>
+  return <div ref={rootRef} className={`ui-select select-menu ${placement === 'top' ? 'place-top' : ''} ${open ? 'open' : ''} ${className}`.trim()} data-value={value}>
     <button type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((current) => !current)} data-testid={testId}>
-      {leading}<span className="ui-select-value select-menu-value">{selected?.label ?? ariaLabel}</span><ChevronIcon open={open} />
+      {leading}<span className="ui-select-value select-menu-value">{selected?.label ?? ariaLabel}</span>{!hideChevron && <ChevronIcon open={open} />}
     </button>
     {open && <div className="ui-select-popover select-menu-popover" role="listbox" aria-label={ariaLabel} data-testid={testId ? `${testId}-menu` : undefined}>
-      {options.map((option) => <button key={option.value || 'empty'} type="button" role="option" aria-selected={option.value === value} disabled={option.disabled} onClick={() => { onChange(option.value); setOpen(false); }} data-testid={testId ? `${testId}-option-${option.value || 'empty'}` : undefined}>
-        <span><strong>{option.label}</strong>{option.description && <small>{option.description}</small>}</span>{option.value === value && <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.25 3 3 6-6" /></svg>}
+      {options.map((option) => <button key={option.value || 'empty'} className={option.tone ? `is-${option.tone}` : undefined} type="button" role="option" aria-selected={option.value === value} disabled={option.disabled} onClick={() => { onChange(option.value); setOpen(false); }} data-testid={testId ? `${testId}-option-${option.value || 'empty'}` : undefined}>
+        <span className="ui-select-option-content">{option.icon && <span className="ui-select-option-icon">{option.icon}</span>}<span className="ui-select-option-copy"><strong>{option.label}</strong>{option.description && <small>{option.description}</small>}</span></span>{option.value === value && <svg className="ui-select-check" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.25 3 3 6-6" /></svg>}
       </button>)}
     </div>}
   </div>;

@@ -171,3 +171,14 @@ export function buildAgentReview(tools: readonly AgentToolCallView[]): AgentRevi
     state: ordered.some((file) => file.state === 'APPLIED') ? 'APPLIED' : ordered.length ? 'PROPOSED' : 'EMPTY',
   };
 }
+
+export function appliedAgentReview(review: AgentReviewSummary | null): AgentReviewSummary | null {
+  if (!review) return null;
+  const files = review.files.filter((file) => file.state === 'APPLIED');
+  return {
+    files,
+    additions: files.reduce((sum, file) => sum + file.additions, 0),
+    deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+    state: files.length > 0 ? 'APPLIED' : 'EMPTY',
+  };
+}

@@ -66,9 +66,61 @@
 .ui-select-popover > button[aria-selected="true"] { background: var(--fl-color-surface-hover); }
 .ui-select-popover > button:disabled { color: var(--fl-color-text-subtle); cursor: default; }
 .ui-select-popover > button > span { min-width: 0; display: grid; gap: 2px; }
+.ui-select-popover .ui-select-option-content { grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--fl-space-4); }
+.ui-select-option-icon { width: 20px; height: 20px; display: grid; place-items: center; color: var(--fl-color-icon); }
+.ui-select-option-copy { min-width: 0; display: grid; gap: 2px; }
 .ui-select-popover strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fl-font-size-label); font-weight: 600; }
 .ui-select-popover small { overflow: hidden; color: var(--fl-color-text-subtle); text-overflow: ellipsis; white-space: nowrap; font-size: var(--fl-font-size-caption); }
 .ui-select-popover svg { width: 15px; height: 15px; fill: none; stroke: var(--fl-color-brand-ink); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ui-select-popover .ui-select-option-icon svg { width: 19px; height: 19px; stroke: currentColor; stroke-width: 1.65; }
+.ui-select-popover > button.is-warning .ui-select-option-icon,
+.ui-select-popover > button.is-warning strong { color: var(--fl-color-text-warning); }
+.ui-select-popover > button.is-warning small { color: color-mix(in srgb, var(--fl-color-text-warning) 84%, var(--fl-color-text-subtle)); }
+.ui-select-popover > button.is-warning .ui-select-check { stroke: var(--fl-color-text-warning); }
+.permission-picker,
+.permission-picker button { font-family: var(--fl-font-sans); }
+.select-menu.permission-picker > button {
+  color: var(--fl-color-text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+.permission-picker .ui-select-popover {
+  width: min(420px, calc(100vw - 28px));
+  min-width: min(420px, calc(100vw - 28px));
+  padding: 7px;
+  border-radius: 14px;
+}
+.permission-picker .ui-select-popover > button {
+  min-height: 58px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  color: var(--fl-color-text-strong);
+}
+.permission-picker .ui-select-option-copy { gap: 1px; }
+.permission-picker .ui-select-popover strong {
+  color: var(--fl-color-text-strong);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+.permission-picker .ui-select-popover small {
+  color: var(--fl-color-text-subtle);
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+.permission-icon[data-permission-icon="FULL_CONTROL"] { color: var(--fl-color-permission-warning); stroke: var(--fl-color-permission-warning); }
+.select-menu.permission-picker[data-value="FULL_CONTROL"] > button { color: var(--fl-color-permission-warning); }
+.select-menu.permission-picker[data-value="FULL_CONTROL"] > button:hover,
+.select-menu.permission-picker[data-value="FULL_CONTROL"].open > button { color: var(--fl-color-permission-warning); background: color-mix(in srgb, var(--fl-color-permission-warning) 8%, transparent); }
+.permission-picker .ui-select-popover > button.is-warning .ui-select-option-icon,
+.permission-picker .ui-select-popover > button.is-warning strong,
+.permission-picker .ui-select-popover > button.is-warning small { color: var(--fl-color-permission-warning); }
+.permission-picker .ui-select-popover > button.is-warning .ui-select-check { stroke: var(--fl-color-permission-warning); }
 
 .ui-dialog-backdrop { position: fixed; z-index: var(--fl-layer-dialog); inset: 0; display: grid; place-items: center; padding: var(--fl-space-7); background: var(--fl-color-overlay); backdrop-filter: blur(5px); }
 .ui-dialog { width: min(430px, calc(100vw - 32px)); padding: 18px; border: 1px solid color-mix(in srgb, var(--fl-color-text-muted) 17%, transparent); border-radius: var(--fl-radius-dialog); color: var(--fl-color-text-strong); background: var(--fl-color-surface-raised); box-shadow: var(--fl-shadow-dialog); }

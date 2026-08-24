@@ -46,7 +46,9 @@
   --fl-font-size-body: calc(13px * var(--fl-ui-font-scale));
   --fl-font-size-title: calc(16px * var(--fl-ui-font-scale));
   --fl-font-size-agent-meta: calc(12.5px * var(--fl-ui-font-scale));
+  --fl-font-size-agent-execution: calc(14px * var(--fl-ui-font-scale));
   --fl-font-size-agent-body: calc(15px * var(--fl-ui-font-scale));
+  --fl-font-size-agent-lead: calc(16px * var(--fl-ui-font-scale));
   --fl-font-size-agent-title: calc(17px * var(--fl-ui-font-scale));
   --fl-font-size-agent-result-evidence: calc(13px * var(--fl-ui-font-scale));
   --fl-font-size-agent-result-action: calc(13px * var(--fl-ui-font-scale));
@@ -96,6 +98,9 @@
   --fl-duration-control: 140ms;
   --fl-duration-surface: 220ms;
   --fl-duration-panel: 280ms;
+  --fl-motion-distance-surface: 8px;
+  --fl-motion-distance-panel: 14px;
+  --fl-motion-offset-popover: -4px;
 
   /* Layering */
   --fl-layer-content: 1;
@@ -158,6 +163,7 @@
   --fl-color-text-danger: #9f3e51;
   --fl-color-text-warning: #94561f;
   --fl-color-text-warning-strong: #673c17;
+  --fl-color-permission-warning: #e95016;
   --fl-color-text-success: #26704e;
   --fl-color-status-info: #356dcc;
   --fl-color-surface-danger: #fff3f5;
@@ -166,6 +172,14 @@
   --fl-color-surface-info: #eff5ff;
   --fl-color-border-warning: #ecc99d;
   --fl-color-message-user: color-mix(in srgb, var(--fl-color-accent) 6%, #ffffff);
+
+  /* Code semantics */
+  --fl-code-keyword: #7652b8;
+  --fl-code-property: #ad4058;
+  --fl-code-string: #287e4f;
+  --fl-code-number: #b15c20;
+  --fl-code-comment: #7d8690;
+  --fl-code-punctuation: #6f7782;
 
   /* Elevation */
   --fl-color-control-hover: color-mix(in srgb, var(--fl-color-accent) 6%, transparent);
@@ -218,6 +232,7 @@
   --fl-color-text-danger: #e28a99;
   --fl-color-text-warning: #deb17c;
   --fl-color-text-warning-strong: #f0c99a;
+  --fl-color-permission-warning: #f28a4f;
   --fl-color-text-success: #75bf98;
   --fl-color-status-info: #77a0f0;
   --fl-color-surface-danger: #351f26;
@@ -226,6 +241,12 @@
   --fl-color-surface-info: #1d293d;
   --fl-color-border-warning: #685035;
   --fl-color-message-user: color-mix(in srgb, var(--fl-color-accent) 20%, #202228);
+  --fl-code-keyword: #b99aee;
+  --fl-code-property: #ef94a7;
+  --fl-code-string: #82c99f;
+  --fl-code-number: #e2a36f;
+  --fl-code-comment: #858d99;
+  --fl-code-punctuation: #aeb5bf;
   --fl-color-control-hover: rgba(255, 255, 255, 0.06);
   --fl-color-control-active: rgba(255, 255, 255, 0.1);
   --fl-color-control-disabled: #353941;

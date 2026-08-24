@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AgentToolCallView } from '@fielora/contracts';
-import { buildAgentReview, reviewDisplayFor } from './agent-review.ts';
+import { appliedAgentReview, buildAgentReview, reviewDisplayFor } from './agent-review.ts';
 
 function tool(overrides: Partial<AgentToolCallView>): AgentToolCallView {
   return {
@@ -20,6 +20,20 @@ test('applied Agent patches become real Review files and diff counts', () => {
   assert.match(review.files[0]!.diff, /-optional/);
   assert.match(review.files[0]!.diff, /\+required/);
   assert.deepEqual(review.files[0]!.changes, [{ before: 'optional', after: 'required' }]);
+});
+
+test('live edited-file totals stay hidden before a write and update from the same applied review', () => {
+  assert.deepEqual(appliedAgentReview(buildAgentReview([])), { files: [], additions: 0, deletions: 0, state: 'EMPTY' });
+  const first = appliedAgentReview(buildAgentReview([
+    tool({ id: 'write-a', name: 'create_file', arguments: { path: 'src/a.ts', content: 'export const a = true;' } }),
+  ]));
+  assert.deepEqual({ files: first?.files.length, additions: first?.additions, deletions: first?.deletions }, { files: 1, additions: 1, deletions: 0 });
+
+  const updated = appliedAgentReview(buildAgentReview([
+    tool({ id: 'write-a', name: 'create_file', arguments: { path: 'src/a.ts', content: 'export const a = true;' } }),
+    tool({ id: 'write-b', name: 'replace_text', arguments: { path: 'src/b.ts', old_text: 'false', new_text: 'true' } }),
+  ]));
+  assert.deepEqual({ files: updated?.files.length, additions: updated?.additions, deletions: updated?.deletions }, { files: 2, additions: 2, deletions: 1 });
 });
 
 test('waiting REVIEW_CHANGES patches are proposed while failed tools stay out', () => {

@@ -29,6 +29,7 @@
     "test:e2e:desktop-foundation": "pnpm build:core:debug && node tests/e2e/desktop-foundation-e2e.mjs dev",
     "test:e2e:desktop-foundation:packaged": "node tests/e2e/desktop-foundation-e2e.mjs packaged",
     "test:e2e:project-navigation": "pnpm build:core:debug && node tests/e2e/project-navigation-e2e.mjs",
+    "test:e2e:agent-codex-style": "node tests/e2e/agent-codex-style-execution-real-e2e.mjs",
     "test:e2e:appearance": "pnpm build:core:debug && node tests/e2e/appearance-settings-e2e.mjs",
     "probe:configured-providers": "pnpm build:core:debug && node scripts/probe-configured-providers.mjs",
     "test:eval:china-model": "node --test tests/eval/china-model-preflight.test.mjs",

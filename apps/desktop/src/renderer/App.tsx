@@ -47,7 +47,7 @@ export function App() {
   });
   const [newConversationRequest, setNewConversationRequest] = useState(0);
   const [addProjectRequest, setAddProjectRequest] = useState(0);
-  const [workspaceRequest, setWorkspaceRequest] = useState<{ id: number; tool: 'FILES' | 'DIFF' | 'TERMINAL' }>({ id: 0, tool: 'FILES' });
+  const [workspaceRequest, setWorkspaceRequest] = useState<{ id: number; tool: 'FILES' | 'DIFF' | 'TERMINAL' | 'BROWSER' }>({ id: 0, tool: 'FILES' });
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>('GENERAL');
   const [newStateKind, setNewStateKind] = useState<FieldStateKind>('TASK');
   const [stateEdit, setStateEdit] = useState<{ mode: 'REVISE' | 'SUPERSEDE'; state: StateView; value: string } | null>(null);
@@ -182,10 +182,10 @@ export function App() {
   const goFields = useCallback(() => navigateTo('FIELDS'), [navigateTo]);
   const goSettings = useCallback(() => { setSettingsCategory('GENERAL'); navigateTo('SETTINGS'); }, [navigateTo]);
   const goNewConversation = useCallback(() => { setNewConversationRequest((value) => value + 1); navigateTo('PROJECTS'); }, [navigateTo]);
-  const openWorkspaceTool = useCallback((tool: 'FILES' | 'DIFF' | 'TERMINAL') => {
+  const openWorkspaceTool = useCallback((tool: 'FILES' | 'DIFF' | 'TERMINAL' | 'BROWSER') => {
     if (tool === 'TERMINAL' && appViewRef.current !== 'PROJECTS') return;
     setWorkspaceRequest((current) => ({ id: current.id + 1, tool }));
-    if (tool !== 'TERMINAL') navigateTo('PROJECTS');
+    if (tool !== 'TERMINAL' && tool !== 'BROWSER') navigateTo('PROJECTS');
   }, [navigateTo]);
   const requestAddProject = useCallback(() => { setAddProjectRequest((value) => value + 1); navigateTo('PROJECTS'); }, [navigateTo]);
   const updatePreferences = (next: AppPreferences) => { setPreferences(next); writeAppPreferences(window.localStorage, next); };
@@ -219,8 +219,8 @@ export function App() {
     const newConversation = () => goNewConversation();
     const addProject = () => requestAddProject();
     const workspace = (event: Event) => {
-      const tool = (event as CustomEvent<'FILES' | 'DIFF' | 'TERMINAL'>).detail;
-      if (['FILES', 'DIFF', 'TERMINAL'].includes(tool)) openWorkspaceTool(tool);
+      const tool = (event as CustomEvent<'FILES' | 'DIFF' | 'TERMINAL' | 'BROWSER'>).detail;
+      if (['FILES', 'DIFF', 'TERMINAL', 'BROWSER'].includes(tool)) openWorkspaceTool(tool);
     };
     const openSettings = (event: Event) => {
       const category = (event as CustomEvent<SettingsCategory>).detail;

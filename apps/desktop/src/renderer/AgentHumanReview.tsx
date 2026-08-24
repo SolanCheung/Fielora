@@ -6,6 +6,7 @@ interface AgentHumanReviewProps {
   task: string;
   runId: string;
   onOpenFile: (path: string) => void;
+  selectedPathHint?: string;
 }
 
 function taskLabel(task: string): string {
@@ -75,17 +76,23 @@ function VisualReview({ file, display }: { file: AgentReviewFile; display: Retur
   </div>;
 }
 
-export function AgentHumanReview({ review, task, runId, onOpenFile }: AgentHumanReviewProps) {
+export function AgentHumanReview({ review, task, runId, onOpenFile, selectedPathHint = '' }: AgentHumanReviewProps) {
   const [selectedPath, setSelectedPath] = useState(review.files[0]?.path ?? '');
   const initialFile = review.files[0] ?? null;
   const [mode, setMode] = useState<'VISUAL' | 'RAW'>(() => initialFile && reviewDisplayFor(initialFile) !== 'RAW' ? 'VISUAL' : 'RAW');
   useEffect(() => {
     if (!review.files.some((file) => file.path === selectedPath)) setSelectedPath(review.files[0]?.path ?? '');
   }, [review.files, selectedPath]);
+  useEffect(() => {
+    if (!selectedPathHint || !review.files.some((file) => file.path === selectedPathHint)) return;
+    const next = review.files.find((file) => file.path === selectedPathHint)!;
+    setSelectedPath(selectedPathHint);
+    setMode(reviewDisplayFor(next) === 'RAW' ? 'RAW' : 'VISUAL');
+  }, [review.files, selectedPathHint]);
   const selected = useMemo<AgentReviewFile | null>(() => review.files.find((file) => file.path === selectedPath) ?? review.files[0] ?? null, [review.files, selectedPath]);
   const display = selected ? reviewDisplayFor(selected) : 'RAW';
 
-  return <section className="agent-review agent-human-review" data-testid="agent-review" data-review-mode={mode} data-agent-run-id={runId} aria-label={taskLabel(task)}>
+  return <section className="agent-review agent-human-review" data-testid="agent-review" data-review-mode={mode} data-agent-run-id={runId} data-file-count={review.files.length} data-additions={review.additions} data-deletions={review.deletions} aria-label={taskLabel(task)}>
     <header className="human-review-heading">
       <h2>变更</h2>
       <p className="human-review-count"><strong>{review.files.length} 文件</strong><span className="diff-additions">+{review.additions}</span><span className="diff-deletions">−{review.deletions}</span></p>

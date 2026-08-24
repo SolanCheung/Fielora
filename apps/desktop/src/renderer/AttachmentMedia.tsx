@@ -64,10 +64,12 @@ export function ImagePreview({ attachment, onClose, onContextMenu }: {
   </div>;
 }
 
-export function ImageContextMenu({ left, top, attachment, onCopy, onSave, onClose }: {
+export function ImageContextMenu({ left, top, attachment, locationLabel, onShow, onCopy, onSave, onClose }: {
   left: number;
   top: number;
   attachment: WorkspaceAttachmentView;
+  locationLabel: string;
+  onShow: (attachment: WorkspaceAttachmentView) => void;
   onCopy: (attachment: WorkspaceAttachmentView) => void;
   onSave: (attachment: WorkspaceAttachmentView) => void;
   onClose: () => void;
@@ -79,6 +81,8 @@ export function ImageContextMenu({ left, top, attachment, onCopy, onSave, onClos
     return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('blur', close); };
   }, [onClose]);
   return <div className="image-context-menu" role="menu" style={{ left, top }} onPointerDown={(event) => event.stopPropagation()} data-testid="image-context-menu">
+    <p className="image-context-menu-location" title={locationLabel}><ShellIcon name="source"/><span>{locationLabel}</span></p>
+    <button type="button" role="menuitem" onClick={() => onShow(attachment)}>在右侧工作区显示</button>
     <button type="button" role="menuitem" onClick={() => onCopy(attachment)}>复制图片</button>
     <button type="button" role="menuitem" onClick={() => onSave(attachment)}>图片另存为…</button>
   </div>;

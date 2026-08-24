@@ -37,6 +37,7 @@ import type { BrowserContextCandidate, BrowserNavigateRequest, BrowserPageReques
 import type {
   ApplyWorkspaceFileRequest, CancelTerminalRequest, PickProjectRequest, RunTerminalRequest,
   TerminalEvent, TerminalRunResult, WorkspaceFileEntry, WorkspaceFileRequest, WorkspaceFileView, WorkspaceImagePreview,
+  OpenWorkspaceProjectRequest, WorkspaceProjectOpenTargetView,
   CopyWorkspaceAttachmentResult, ReadWorkspaceAttachmentRequest, SaveWorkspaceAttachmentRequest, SaveWorkspaceAttachmentResult, StoreWorkspaceAttachmentRequest,
   WorkspaceAttachmentSelection, WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceProjectRequest,
 } from './workspace-types';
@@ -80,6 +81,8 @@ export interface FieloraBridge {
     previewFile(request: WorkspaceFileRequest): Promise<WorkspaceImagePreview>;
     applyFile(request: ApplyWorkspaceFileRequest): Promise<WorkspaceFileView>;
     getEnvironment(request: WorkspaceProjectRequest): Promise<WorkspaceEnvironmentView>;
+    getOpenTargets(request: WorkspaceProjectRequest): Promise<WorkspaceProjectOpenTargetView[]>;
+    openProject(request: OpenWorkspaceProjectRequest): Promise<null>;
     pickAttachments(): Promise<WorkspaceAttachmentSelection>;
     storeAttachment(request: StoreWorkspaceAttachmentRequest): Promise<WorkspaceAttachmentView>;
     readAttachment(request: ReadWorkspaceAttachmentRequest): Promise<{ data_url: string; mime_type: string }>;

@@ -7,6 +7,26 @@ export interface WorkspaceProjectRequest {
   field_id: string;
 }
 
+export type WorkspaceProjectOpenTarget =
+  | 'FILE_EXPLORER'
+  | 'VISUAL_STUDIO_CODE'
+  | 'CURSOR'
+  | 'VISUAL_STUDIO'
+  | 'GIT_BASH'
+  | 'INTELLIJ_IDEA'
+  | 'PYCHARM'
+  | 'WEBSTORM';
+
+export interface OpenWorkspaceProjectRequest extends WorkspaceProjectRequest {
+  target: WorkspaceProjectOpenTarget;
+}
+
+export interface WorkspaceProjectOpenTargetView {
+  target: WorkspaceProjectOpenTarget;
+  label: string;
+  icon_data_url: string | null;
+}
+
 export interface WorkspaceFileEntry {
   relative_path: string;
   size: number;
@@ -87,6 +107,7 @@ export interface ApplyWorkspaceFileRequest extends WorkspaceFileRequest {
 
 export interface RunTerminalRequest extends WorkspaceProjectRequest {
   command: string;
+  working_directory: string;
 }
 
 export interface CancelTerminalRequest {
@@ -95,6 +116,7 @@ export interface CancelTerminalRequest {
 
 export interface TerminalRunResult {
   run_id: string;
+  working_directory: string | null;
 }
 
 export type TerminalEventKind = 'STARTED' | 'OUTPUT' | 'COMPLETED' | 'CANCELLED' | 'FAILED';

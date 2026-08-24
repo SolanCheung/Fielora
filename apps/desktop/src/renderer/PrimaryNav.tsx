@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import fieloraMark from '../../assets/fielora-mark.svg';
 
 export type PrimarySection = 'PROJECTS' | 'NOW' | 'BROWSE' | 'FIELDS';
-export type ShellIconName = 'compose' | 'conversation' | 'now' | 'browse' | 'fields' | 'inbox' | 'folder' | 'folderOpen' | 'files' | 'diff' | 'terminal' | 'settings' | 'refresh' | 'close' | 'more' | 'models' | 'appearance' | 'keyboard' | 'info' | 'environment' | 'branch' | 'cloud' | 'source' | 'copy' | 'check' | 'sort' | 'plus' | 'edit' | 'chevronDown';
+export type ShellIconName = 'compose' | 'conversation' | 'now' | 'browse' | 'fields' | 'inbox' | 'folder' | 'folderOpen' | 'files' | 'image' | 'filePlus' | 'diff' | 'terminal' | 'computer' | 'settings' | 'refresh' | 'close' | 'more' | 'models' | 'appearance' | 'keyboard' | 'info' | 'environment' | 'branch' | 'cloud' | 'source' | 'copy' | 'check' | 'sort' | 'plus' | 'edit' | 'chevronDown' | 'panelRight';
 
 export function ShellIcon({ name }: { name: ShellIconName }) {
   const paths: Record<ShellIconName, ReactNode> = {
@@ -14,9 +14,12 @@ export function ShellIcon({ name }: { name: ShellIconName }) {
     inbox: <><path d="M5 5h14v14H5z"/><path d="M5 14h4l1.5 2h3L15 14h4"/></>,
     folder: <path d="M3.75 7.25v9.5a2 2 0 0 0 2 2h12.5a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6.1l-1.8-2H5.75a2 2 0 0 0-2 2.25Z"/>,
     folderOpen: <><path d="M3.75 9V7.25a2 2 0 0 1 2-2h4.6l1.8 2h6.1a2 2 0 0 1 2 2V10"/><path d="M4.6 10.25h14.8a1.5 1.5 0 0 1 1.45 1.87l-1.35 5.25a2 2 0 0 1-1.94 1.5H5.7a2 2 0 0 1-1.94-1.52l-1.1-4.5a2.1 2.1 0 0 1 1.94-2.6Z"/></>,
-    files: <><path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4"/></>,
-    diff: <><path d="M8 4v12a4 4 0 0 0 4 4h4"/><circle cx="8" cy="4" r="2"/><circle cx="16" cy="20" r="2"/><path d="M13 7h7M16.5 3.5v7"/></>,
+    files: <><rect x="6" y="3.5" width="12" height="17" rx="2.5"/><path d="M9.5 9.5h5M9.5 13h5"/></>,
+    image: <><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m5.5 17 4.5-4.5 3 3 2-2 3.5 3.5"/></>,
+    filePlus: <><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 12h6M12 9v6"/></>,
+    diff: <><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h5M10.5 6.5v5M14.5 15.5h3"/></>,
     terminal: <><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="m7 10 2.5 2L7 14M12 15h4"/></>,
+    computer: <><rect x="3.5" y="4.5" width="17" height="12" rx="2"/><path d="M8 20h8M10 16.5 9 20M14 16.5l1 3"/></>,
     settings: <><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/></>,
     refresh: <><path d="M19 8a7 7 0 1 0 1 6"/><path d="M19 3v5h-5"/></>,
     close: <path d="m7 7 10 10M17 7 7 17"/>,
@@ -28,13 +31,14 @@ export function ShellIcon({ name }: { name: ShellIconName }) {
     environment: <><path d="M5 6h14M5 12h14M5 18h14"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></>,
     branch: <><circle cx="7" cy="5" r="2"/><circle cx="17" cy="6" r="2"/><circle cx="7" cy="19" r="2"/><path d="M7 7v10M9 9c2.5 0 3-3 6-3M9 15c4 0 4-5 6-7"/></>,
     cloud: <><path d="M7.5 18H18a4 4 0 0 0 .5-8A6.5 6.5 0 0 0 6 8.5 4.5 4.5 0 0 0 7.5 18Z"/><path d="m9 13 3-3 3 3M12 10v7"/></>,
-    source: <><path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4M10 12h5M10 16h5"/></>,
+    source: <><rect x="6" y="3.5" width="12" height="17" rx="2.5"/><path d="M9.5 9.5h5M9.5 13h5M9.5 16.5h3.5"/></>,
     copy: <><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></>,
     check: <path d="m5 12.5 4.25 4.25L19 7"/>,
     sort: <><path d="M8 6h11M8 12h8M8 18h5"/><path d="M4 5v14m0 0-2.5-2.5M4 19l2.5-2.5"/></>,
     plus: <path d="M12 5v14M5 12h14"/>,
     edit: <><path d="M5 19h4l10-10-4-4L5 15z"/><path d="m13.5 6.5 4 4"/></>,
     chevronDown: <path d="m7 10 5 5 5-5"/>,
+    panelRight: <><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M15.25 4v16"/></>,
   };
   return <svg className="shell-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" data-icon={name}>{paths[name]}</svg>;
 }
@@ -62,12 +66,12 @@ export function PrimaryNav({ active, onProjects, onNow, onBrowse, onFields, onNe
     <header className="project-brand"><button className="project-brand-button" onClick={onProjects} data-testid="projects-nav"><img src={fieloraMark} alt="" aria-hidden="true" /><strong>Fielora</strong></button></header>
     <button className="new-chat-button" onClick={onNewConversation} data-testid="new-conversation"><ShellIcon name="compose"/><span>新对话</span><kbd>＋</kbd></button>
     <nav className="project-global-nav" aria-label="主要功能">
-      <button className={active === 'NOW' ? 'active' : ''} onClick={onNow} data-testid="now-nav"><ShellIcon name="now"/><span>Now</span></button>
+      <button className={active === 'NOW' ? 'active' : ''} onClick={onNow} data-testid="now-nav"><ShellIcon name="now"/><span>现在</span></button>
       <button className={active === 'BROWSE' ? 'active' : ''} onClick={onBrowse} data-testid="browse-nav"><ShellIcon name="browse"/><span>浏览器</span></button>
-      <button className={active === 'FIELDS' ? 'active' : ''} onClick={onFields} data-testid="fields-nav"><ShellIcon name="fields"/><span>Fields</span></button>
-      <button onClick={openInbox} data-testid="inbox-nav"><ShellIcon name="inbox"/><span>Inbox</span></button>
+      <button className={active === 'FIELDS' ? 'active' : ''} onClick={onFields} data-testid="fields-nav"><ShellIcon name="fields"/><span>空间</span></button>
+      <button onClick={openInbox} data-testid="inbox-nav"><ShellIcon name="inbox"/><span>收件箱</span></button>
     </nav>
-    <section className="project-tree" aria-label="Projects and conversations">
+    <section className="project-tree" aria-label="项目与对话">
       <div className="section-title"><span>项目</span><div className="section-title-actions">{projectHeaderControls ?? <button onClick={onAddProject ?? onProjects} title={onAddProject ? '添加本地 Project' : '打开 Projects'}><ShellIcon name="plus"/></button>}</div></div>
       {projectContent ?? <button className={`sidebar-project-home ${active === 'PROJECTS' ? 'active' : ''}`} onClick={onProjects}><ShellIcon name="folder"/><span>所有项目</span></button>}
     </section>

@@ -5,6 +5,7 @@ export const channels = {
   conversationMessageCreate: 'fielora:conversation:message:create', conversationMessageList: 'fielora:conversation:message:list',
   workspaceFileList: 'fielora:workspace:file:list', workspaceFileRead: 'fielora:workspace:file:read', workspaceFilePreview: 'fielora:workspace:file:preview', workspaceFileApply: 'fielora:workspace:file:apply',
   workspaceEnvironment: 'fielora:workspace:environment',
+  workspaceOpenTargets: 'fielora:workspace:open-targets', workspaceOpenProject: 'fielora:workspace:open-project',
   workspaceAttachmentPick: 'fielora:workspace:attachment:pick', workspaceAttachmentStore: 'fielora:workspace:attachment:store', workspaceAttachmentRead: 'fielora:workspace:attachment:read', workspaceAttachmentCopy: 'fielora:workspace:attachment:copy', workspaceAttachmentSave: 'fielora:workspace:attachment:save',
   workspaceTerminalRun: 'fielora:workspace:terminal:run', workspaceTerminalCancel: 'fielora:workspace:terminal:cancel', workspaceEvent: 'fielora:workspace:event',
   fieldCreate: 'fielora:field:create',

@@ -199,14 +199,12 @@
 .select-menu.composer-menu-picker > button,
 .composer-menu-picker > button { color: var(--fl-color-icon); }
 .voice-button.active { color: var(--fl-color-text-on-accent); background: var(--fl-color-accent); box-shadow: 0 0 0 4px var(--fl-color-focus); }
-.permission-picker,
-.permission-picker > button { color: var(--fl-color-text-warning); }
 .conversation-composer .composer-submit,
 .send-button { color: var(--fl-color-text-on-accent); background: var(--fl-color-accent); box-shadow: var(--fl-shadow-control-hover); }
 .conversation-composer .composer-submit:hover:not(:disabled) { background: var(--fl-color-accent-hover); }
 .conversation-composer .composer-submit:disabled { color: var(--fl-color-text-disabled); background: var(--fl-color-control-disabled); }
 .conversation-composer .composer-submit.stop,
-.stop-button { color: var(--fl-color-text-on-accent); background: var(--fl-color-danger); }
+.stop-button { color: var(--fl-color-text-on-accent); background: var(--fl-color-accent); }
 .conversation-composer > small { color: var(--fl-color-text-faint); }
 
 .workspace-panel-header > div,
@@ -227,13 +225,10 @@
 .file-tree > button { color: var(--fl-color-text-muted); font-family: var(--fl-font-mono); }
 .file-tree > button.active { color: var(--fl-color-text-strong); background: var(--fl-color-surface-selected); }
 .file-editor header button,
-.file-editor footer button,
-.terminal-toolbar button { border-color: var(--fl-color-border); color: var(--fl-color-text); background: var(--fl-color-surface-hover); }
+.file-editor footer button { border-color: var(--fl-color-border); color: var(--fl-color-text); background: var(--fl-color-surface-hover); }
 .file-editor textarea,
 .diff-view { color: var(--fl-color-text-strong); background: var(--fl-color-canvas); font-family: var(--fl-font-mono); }
-.terminal-toolbar input,
-.terminal-output { border-color: var(--fl-color-border); font-family: var(--fl-font-mono); }
-.terminal-dock { color: var(--terminal-ink); background: var(--terminal-surface); }
+.terminal-dock { color: var(--fl-color-text); background: var(--fl-color-surface); }
 .terminal-dock > header span,
 .terminal-dock > header > button { color: var(--fl-color-text-subtle); }
 .terminal-dock > header > button:hover { background: var(--fl-color-surface-hover); }
