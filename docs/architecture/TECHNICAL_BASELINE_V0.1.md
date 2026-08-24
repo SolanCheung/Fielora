@@ -181,3 +181,13 @@ Slice 05 第二轮 Repair 继续不增加 durable contract：trusted Omnibox 的
 Codex 不得在未评审情况下把这些设计成不可替换的深耦合实现。
 
 Rapid Desktop Foundation 已在 additive Migration 0005/schema 5 中实现首个 Project/Conversation 工作闭环。Project 仍以 Field stable identity + `PROJECT_ROOT` device binding 表达；Conversation/Message 由 Rust Core/SQLite 持久化。Electron Main 提供 bounded filesystem/process adapter，trusted renderer 只获得精确 Project-scoped bridge，Remote Browse WebContents 不获得本地 workspace capability。当前文件工作面是 bounded UTF-8 editor/diff，并非完整 code editor；Terminal 是显式 PowerShell process adapter，并非 PTY。LSP、PTY、Git change model、agent multi-file transaction、installer/updater/code signing 与真实 Provider acceptance 仍是开放项。
+
+## 18. Agent 架构兼容基线
+
+自 2026-08-24 起，Agent 相关模块与术语以
+`FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md` 为 canonical baseline：
+`Agent = Model + Harness + Tools`。Agent Runtime 属于
+`Harness.Execution`；Electron `BrowserRuntime`、`WorkspaceRuntime` 与
+Rust `ToolRuntime` 是 capability/tool backends，不构成第四层。现有
+Provider、Project、Conversation、schema 6、permission 与 Browser security
+合同不因此改变。

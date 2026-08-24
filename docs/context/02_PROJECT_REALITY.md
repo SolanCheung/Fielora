@@ -1471,3 +1471,48 @@ EXE_SHA256: D09ABB3938AD8C9AC049B159A32D5B437569AB4922063E6849CC8E5C655118ED
 CORE_SHA256: C3AB157A875F9EAB0F86555489A13B5A238AAF3BD4784D05BD10F8CAFE191808
 ASAR_SHA256: 75222B2AFE9230A6A53782A426DB7BE5E3EFEDC373D47CA82ED15728409524B5
 ```
+
+## 80. Canonical Model / Harness / Tools Agent Architecture
+
+用户于 2026-08-24 提供并要求采用
+`FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md`。当前 Agent 的唯一正式顶层
+结构为 `Model + Harness + Tools`；Harness 统一由 Ingress & Context、
+Identity & Goal、Continuity、Orchestration、Governance、Execution、
+Verification & Evidence、Adaptation 八个功能域理解。Aegis、IDR、AG-UI 与
+DXE 只能按该规格进入既有边界，不得形成第二套 Core/Runtime/State/
+Permission/Evidence。
+
+真实代码审计确认 Provider adapter 与 normalized model turn 位于
+`fielora-model`；`AgentCoordinator`、`ContextCompiler`、
+`PolicyEngine`、AgentRun/Event、Approval 与 Verification 均为 Harness
+职责；Rust `ToolRuntime` 主体是 Filesystem/Process/Git Tool executor，
+而 Policy、Approval、ToolCall lifecycle、receipt persistence 与 completion
+仍由 Harness 持有。当前新增实际使用的 `ToolExecutor` 接口固定该边界，
+不做 crate/目录重写。`BrowserRuntime` 与 `WorkspaceRuntime` 是 Tool/
+product capability backends；Agent Runtime 只属于 `Harness.Execution`。
+
+当前只建立并使用 `CODING_V0.1` Harness Profile；
+`FAST_EDIT_ADAPTIVE_V1`、`FOCUSED_EDIT_V1` 与
+`GENERAL_AGENT_LOOP_V1` 是其 strategy，所选 Profile/strategy 进入 durable
+`RUN_STARTED` facts。没有创建 Research/Browser/Document/Data/Creative
+空 Profile。审计同时修正恢复路径：只有执行时被 Harness 标记
+`verification_eligible=true` 且成功的 receipt 才可重建 verification；
+普通成功进程不得在 pause/restart 后证明 mutation。
+
+```text
+AGENT_ARCHITECTURE_BASELINE: MODEL_HARNESS_TOOLS
+CURRENT_HARNESS_PROFILE: CODING_V0.1
+FAST_EDIT_OWNERSHIP: CODING_HARNESS_STRATEGY
+TOOL_EXECUTION_BOUNDARY: ToolExecutor
+SECOND_AGENT_CORE: FORBIDDEN
+SCHEMA_CHANGE: NONE
+USER_VISIBLE_BEHAVIOR_CHANGE: NONE
+```
+
+Targeted alignment Gate 使用冻结 Node 24.18.1 / pnpm 11.21.0：
+`verify:dev:docs` PASS（80-entry context manifest）；
+`verify:dev:core` PASS（format、70 Rust workspace tests、workspace Clippy）；
+`test:integration` 10/10 PASS，并验证 General 与 FAST_EDIT 真实 Core 路径的
+durable Harness Profile/strategy facts、Approval、Tool receipt、Verification、
+Run completion 与 recovery。未运行与本轮无关的 UI、Browse、packaging 或
+真实 Provider Gate。

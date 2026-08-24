@@ -30,6 +30,11 @@
 
 项目真正的当前事实源是 `02_PROJECT_REALITY.md`；已冻结实现边界见 `docs/architecture/TECHNICAL_ARCHITECTURE_V0.1.md`、`CORE_CONTRACTS_V0.1.md`、`SCHEMA_FREEZE_V0.1.md`、`PHASE_01_IMPLEMENTATION_SPEC_V0.1.md`、`PHASE_02_IMPLEMENTATION_SPEC_V0.1.md`、`PHASE_02_CONTRACT_DELTA_V0.1.md` 与 `PHASE_02_MIGRATION_0002_V0.1.md`。
 
+当前 Agent 的正式架构基线为
+`docs/architecture/FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md`。后续 Agent
+能力统一按 `Model + Harness + Tools` 扩展；Harness 内部使用八个功能域，
+现有 `FAST_EDIT_ADAPTIVE_V1` 归属 `CODING_V0.1` Harness Profile。
+
 ## 当前阶段状态
 
 Phase 01 Core Vertical Slice 已完成 Engineering、Desktop Reality 与 Human Experience Gate。用户于 2026-08-14 正式裁决 `PHASE_01: COMPLETE`。

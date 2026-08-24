@@ -8,6 +8,12 @@
 
 实现 Gate：Phase 01 COMPLETE；Phase 02 COMPLETE；Phase 03 Browse Foundation 于 2026-08-16 裁决 COMPLETE；Phase 04 → Alpha Remap work 已授权并形成独立 Candidate，Phase 04 尚未 Freeze、未获实现授权
 
+> Compatibility context (2026-08-24)：本文件保留早期 Frozen Product/Core
+> architecture。Agent 内部的 canonical ownership 与术语由
+> `FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md` 补充；旧文中的 Agent/Provider/
+> Browser “Adapter”不表示它们是并列 Agent Core，也不改变
+> `Model + Harness + Tools` 三层边界。
+
 ## 1. 架构目标
 
 Fielora V0.1 的架构首先服务一个事实：Field Reality 必须独立于当前 UI、Browser Host、模型、Agent、Provider 和本地路径而持续存在。

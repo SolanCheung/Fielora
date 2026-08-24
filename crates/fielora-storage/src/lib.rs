@@ -1,3 +1,10 @@
+//! Local-first persistence infrastructure for Fielora product and Harness state.
+//!
+//! AgentRun projections, durable Agent events, approvals, context snapshots,
+//! tool receipts, and verification receipts implement Harness.Continuity and
+//! Harness.Verification & Evidence. Storage is infrastructure, not a separate
+//! Agent layer or an independent source of execution authority.
+
 use fielora_contracts::*;
 use fielora_field::{
     Activity, DomainError, Field, FieldRepository, RealityRepository, SurfaceRepository,

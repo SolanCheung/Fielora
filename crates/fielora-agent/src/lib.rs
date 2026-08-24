@@ -1,3 +1,10 @@
+//! Reusable Harness primitives and the current project-tool executor.
+//!
+//! `ContextCompiler` and `PolicyEngine` belong to the Harness. `ToolRuntime`
+//! is the concrete Tools-side executor for the current coding capabilities;
+//! its caller owns orchestration, policy decisions, approval lifecycle,
+//! durable receipts, and completion semantics.
+
 use fielora_contracts::{
     AgentPermission, AgentPolicyDecision, AgentRunStatus, AgentToolEffect, ModelToolDefinition,
 };
@@ -989,6 +996,28 @@ pub struct ToolExecution {
     pub observation: String,
 }
 
+/// Tools-side execution boundary used by the Harness.
+///
+/// Implementations execute an already-selected capability and return typed
+/// facts. They do not choose tools, decide policy, persist lifecycle state, or
+/// decide whether the AgentRun is verified or complete. `authorization_confirmed`
+/// is supplied by Harness Governance and remains subject to executor invariants
+/// such as project containment, sensitive-path denial, and SHA guards.
+pub trait ToolExecutor {
+    fn execute(
+        &self,
+        name: &str,
+        arguments: &Value,
+        authorization_confirmed: bool,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, AgentError>;
+}
+
+/// Concrete project-scoped executor for the current coding tool catalog.
+///
+/// The historical `ToolRuntime` name is retained for compatibility. This is a
+/// Tools implementation, not the Agent Runtime; Agent lifecycle and dispatch
+/// remain in Harness.Execution.
 pub struct ToolRuntime {
     root: PathBuf,
     checkpoint_root: PathBuf,
@@ -1006,12 +1035,14 @@ impl ToolRuntime {
             checkpoint_root,
         })
     }
+}
 
-    pub fn execute(
+impl ToolExecutor for ToolRuntime {
+    fn execute(
         &self,
         name: &str,
         arguments: &Value,
-        approved_unsandboxed: bool,
+        authorization_confirmed: bool,
         cancellation: &CommandCancellation,
     ) -> Result<ToolExecution, AgentError> {
         if cancellation.is_cancelled() {
@@ -1023,16 +1054,16 @@ impl ToolRuntime {
             "search_text" => self.search_text(arguments),
             "stat_path" => self.stat_path(arguments),
             "git_read" => self.git_read(arguments, cancellation),
-            "git_stage" => self.git_stage(arguments, approved_unsandboxed, cancellation),
-            "git_unstage" => self.git_unstage(arguments, approved_unsandboxed, cancellation),
+            "git_stage" => self.git_stage(arguments, authorization_confirmed, cancellation),
+            "git_unstage" => self.git_unstage(arguments, authorization_confirmed, cancellation),
             "git_create_branch" => {
-                self.git_create_branch(arguments, approved_unsandboxed, cancellation)
+                self.git_create_branch(arguments, authorization_confirmed, cancellation)
             }
             "git_switch_branch" => {
-                self.git_switch_branch(arguments, approved_unsandboxed, cancellation)
+                self.git_switch_branch(arguments, authorization_confirmed, cancellation)
             }
-            "git_commit" => self.git_commit(arguments, approved_unsandboxed, cancellation),
-            "git_push" => self.git_push(arguments, approved_unsandboxed, cancellation),
+            "git_commit" => self.git_commit(arguments, authorization_confirmed, cancellation),
+            "git_push" => self.git_push(arguments, authorization_confirmed, cancellation),
             "list_skills" => self.list_skills(arguments),
             "load_skill" => self.load_skill(arguments),
             "capability_status" => self.capability_status(arguments),
@@ -1041,13 +1072,15 @@ impl ToolRuntime {
             "replace_text" => self.replace_text(arguments),
             "apply_patches" => self.apply_patches(arguments),
             "move_file" => self.move_file(arguments),
-            "delete_file" => self.delete_file(arguments, approved_unsandboxed),
+            "delete_file" => self.delete_file(arguments, authorization_confirmed),
             "restore_file" => self.restore_file(arguments),
-            "run_command" => self.run_command(arguments, approved_unsandboxed, cancellation),
+            "run_command" => self.run_command(arguments, authorization_confirmed, cancellation),
             _ => Err(AgentError::ToolNotFound),
         }
     }
+}
 
+impl ToolRuntime {
     fn list_files(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -2459,6 +2492,27 @@ impl ProcessJob {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    fn create_directory_link(link: &Path, target: &Path) {
+        let status = Command::new("cmd.exe")
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[cfg(unix)]
+    fn create_directory_link(link: &Path, target: &Path) {
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+
+    #[cfg(not(any(windows, unix)))]
+    fn create_directory_link(_link: &Path, _target: &Path) {
+        panic!("directory-link invariant test is unsupported on this platform");
+    }
+
     fn fixture() -> (PathBuf, PathBuf) {
         let root = std::env::temp_dir().join(format!("fielora-agent-{}", Uuid::now_v7()));
         let artifacts =
@@ -2898,6 +2952,75 @@ mod tests {
             AgentError::SensitivePathDenied
         );
         fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).unwrap();
+    }
+
+    #[test]
+    fn confirmed_authorization_never_disables_tool_executor_invariants() {
+        let (root, artifacts) = fixture();
+        let outside =
+            std::env::temp_dir().join(format!("fielora-agent-outside-{}", Uuid::now_v7()));
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.txt"), "outside").unwrap();
+        let link = root.join("linked-outside");
+        create_directory_link(&link, &outside);
+
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let executor: &dyn ToolExecutor = &runtime;
+        let cancel = CommandCancellation::default();
+        assert_eq!(
+            executor
+                .execute(
+                    "read_file",
+                    &json!({"path":"linked-outside/secret.txt"}),
+                    true,
+                    &cancel,
+                )
+                .unwrap_err(),
+            AgentError::WorkspaceEscape
+        );
+        assert_eq!(
+            executor
+                .execute(
+                    "create_file",
+                    &json!({"path":"linked-outside/new.txt","content":"denied"}),
+                    true,
+                    &cancel,
+                )
+                .unwrap_err(),
+            AgentError::WorkspaceEscape
+        );
+        assert_eq!(
+            executor
+                .execute(
+                    "create_file",
+                    &json!({"path":".env","content":"denied"}),
+                    true,
+                    &cancel,
+                )
+                .unwrap_err(),
+            AgentError::SensitivePathDenied
+        );
+        let read = executor
+            .execute("read_file", &json!({"path":"src/lib.rs"}), true, &cancel)
+            .unwrap();
+        let stale = read.receipt["sha256"].as_str().unwrap().to_owned();
+        fs::write(root.join("src/lib.rs"), "changed outside the executor\n").unwrap();
+        assert_eq!(
+            executor
+                .execute(
+                    "write_file",
+                    &json!({"path":"src/lib.rs","content":"denied","expected_sha256":stale}),
+                    true,
+                    &cancel,
+                )
+                .unwrap_err(),
+            AgentError::FileChanged
+        );
+
+        fs::remove_dir(&link).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
         fs::remove_dir_all(artifacts).unwrap();
     }
 

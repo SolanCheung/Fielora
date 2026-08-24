@@ -31,12 +31,12 @@
       "bytes": 2973
     },
     "README.md": {
-      "sha256": "d58a71e9fbb7c768dc3d0edcc4c8bec8671b08434a91b1f0b72fc7faf7ed2e06",
-      "bytes": 12597
+      "sha256": "7a2dbb4ae7bfff9db48dfcae805fc86165098d67300e0f22355a9f5908f4e2f0",
+      "bytes": 12872
     },
     "AGENTS.md": {
-      "sha256": "3801f08e1e2246692262d2750ac0da631f8d1defa21ba9d7814a67e1896a5890",
-      "bytes": 23124
+      "sha256": "19d11269434e83620c00d01cbf4d1c1128bd363d2895ee3dcab32bd60e4b5592",
+      "bytes": 23448
     },
     "docs/context/00_CONVERSATION_INDEX.md": {
       "sha256": "6e0836ba596c315d50cf1af8e2fe6b914f6642215e04a6e21b3d26b910433850",
@@ -47,12 +47,12 @@
       "bytes": 12753
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "2f7d286b3893881e5463982fd8382e6b5981a52086596252db475b54b17bcfd3",
-      "bytes": 133638
+      "sha256": "ffdfb0601a0e7596cc5d356a387052167cc8d13087038e0611f011837ec8b8e1",
+      "bytes": 142887
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "cc58412bd32a1b8fe78861f71fe75e26cb1729afee90f8f06dd24ca90cb39f96",
-      "bytes": 73036
+      "sha256": "16395a1737584141e9f9b826d2dc083d58420297e2d890fe98a1241ba3183bb2",
+      "bytes": 77102
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
       "sha256": "0b4f9bd00ad5b9a198e4f3a6523503aaacbf8b5630aaa5d029577ee08abbc160",
@@ -75,12 +75,16 @@
       "bytes": 12618
     },
     "docs/architecture/TECHNICAL_BASELINE_V0.1.md": {
-      "sha256": "39cb8df25db88ac70c99b8a866ad2a30c33b8dae08c0d51d089314ae2bc3ca9a",
-      "bytes": 14471
+      "sha256": "347d30f371803e174e07ac0522c0b856d840c0c82434c965c5e15c3b5696b332",
+      "bytes": 14937
+    },
+    "docs/architecture/FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md": {
+      "sha256": "124a47c42f26fc035930dff6bd2709a0d5b7f185065421094d9032130c91176a",
+      "bytes": 25737
     },
     "docs/architecture/TECHNICAL_ARCHITECTURE_V0.1.md": {
-      "sha256": "33dcbbf68fc75278f2625e0b8d93c709286085c58a288a35ff7a7460b55639f4",
-      "bytes": 29375
+      "sha256": "c57d97ae7c7b5d4d1a16cd992e4f16fd543193dcc7b1483d45e63a31f959f759",
+      "bytes": 29723
     },
     "docs/architecture/PHASE_04_ALPHA_REMAP_CANDIDATE_V0.1.md": {
       "sha256": "96b792e2e07ac66fce8ce78faf9fa6ebc2e7eed11ddd640cdf833ac2ac408352",

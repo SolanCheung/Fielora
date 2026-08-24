@@ -1,6 +1,13 @@
+//! Fielora Harness runtime and current Coding Harness Profile.
+//!
+//! `AgentCoordinator` owns Harness orchestration, governance integration,
+//! execution lifecycle, continuity, and verification/evidence recording. The
+//! model remains behind `fielora-model`, while concrete project capabilities
+//! cross the `ToolExecutor` boundary into `fielora-agent::ToolRuntime`.
+
 use fielora_agent::{
     AgentError, CommandCancellation, CompiledContext, ContextCompiler, PolicyEngine, ToolExecution,
-    ToolRuntime, coding_tool_catalog,
+    ToolExecutor, ToolRuntime, coding_tool_catalog,
 };
 use fielora_contracts::*;
 use fielora_field::DomainError;
@@ -143,6 +150,33 @@ impl AgentTaskClass {
             Self::FastEdit => (10, 40 * 1024),
             Self::FocusedEdit => (12, 48 * 1024),
             Self::General => (32, 128 * 1024),
+        }
+    }
+}
+
+const CODING_HARNESS_PROFILE_ID: &str = "CODING_V0.1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CodingHarnessProfile {
+    task_class: AgentTaskClass,
+}
+
+impl CodingHarnessProfile {
+    fn for_task(task: &str) -> Self {
+        Self {
+            task_class: classify_task(task),
+        }
+    }
+
+    fn id(self) -> &'static str {
+        CODING_HARNESS_PROFILE_ID
+    }
+
+    fn strategy_id(self) -> &'static str {
+        match self.task_class {
+            AgentTaskClass::FastEdit => FAST_EDIT_PIPELINE_VERSION,
+            AgentTaskClass::FocusedEdit => "FOCUSED_EDIT_V1",
+            AgentTaskClass::General => "GENERAL_AGENT_LOOP_V1",
         }
     }
 }
@@ -599,14 +633,15 @@ impl AgentCoordinator {
     ) {
         let run_id = prepared.run.id.clone();
         let behavior = coding_behavior_profile(&prepared.endpoint, &prepared.run.model_id);
-        let task_class = classify_task(&prepared.run.task);
+        let harness_profile = CodingHarnessProfile::for_task(&prepared.run.task);
+        let task_class = harness_profile.task_class;
         if prepared.run.status == AgentRunStatus::Queued {
             match append_event(
                 &self.storage,
                 &self.sender,
                 run_id.clone(),
                 AgentEventKind::RunStarted,
-                json!({"provider_config_id":prepared.run.provider_config_id,"model_id":prepared.run.model_id,"behavior_profile":behavior.id,"model_family":format!("{:?}",behavior.family),"task_class":task_class.id(),"fast_edit_implementation":FAST_EDIT_PIPELINE_VERSION,"context_compiler_version":CONTEXT_COMPILER_VERSION,"build_provenance":crate::build_provenance::event_payload()}),
+                json!({"provider_config_id":prepared.run.provider_config_id,"model_id":prepared.run.model_id,"behavior_profile":behavior.id,"model_family":format!("{:?}",behavior.family),"harness_profile":harness_profile.id(),"harness_strategy":harness_profile.strategy_id(),"task_class":task_class.id(),"fast_edit_implementation":FAST_EDIT_PIPELINE_VERSION,"context_compiler_version":CONTEXT_COMPILER_VERSION,"build_provenance":crate::build_provenance::event_payload()}),
                 AgentProjectionUpdate {
                     status: Some(AgentRunStatus::Running),
                     ..Default::default()
@@ -635,14 +670,7 @@ impl AgentCoordinator {
                 wrote_workspace = true;
                 // A later mutation invalidates every earlier verification receipt.
                 verification_passed = false;
-            } else if tool.effect == AgentToolEffect::Process
-                && tool
-                    .receipt
-                    .as_ref()
-                    .and_then(|value| value.get("success"))
-                    .and_then(Value::as_bool)
-                    == Some(true)
-            {
+            } else if persisted_tool_is_successful_verification(tool) {
                 verification_passed = true;
             }
         }
@@ -4620,6 +4648,21 @@ fn changed_paths_for_run(storage: &StorageHandle, run_id: &AgentRunId) -> HashSe
     paths
 }
 
+/// Rebuilds only receipt-backed verification state after pause/restart.
+///
+/// A successful process is not verification unless the Harness classified the
+/// command as a real test/check/build/lint/typecheck when it executed.
+fn persisted_tool_is_successful_verification(tool: &AgentToolCallView) -> bool {
+    tool.effect == AgentToolEffect::Process
+        && tool.receipt.as_ref().is_some_and(|receipt| {
+            receipt
+                .get("verification_eligible")
+                .and_then(Value::as_bool)
+                == Some(true)
+                && receipt.get("success").and_then(Value::as_bool) == Some(true)
+        })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GoalResult {
     Success,
@@ -4831,6 +4874,22 @@ mod tests {
         }
     }
 
+    fn persisted_process(receipt: Value) -> AgentToolCallView {
+        AgentToolCallView {
+            id: ToolCallId::new("tool"),
+            run_id: AgentRunId::new("run"),
+            name: "run_command".into(),
+            effect: AgentToolEffect::Process,
+            status: AgentToolStatus::Completed,
+            policy_decision: AgentPolicyDecision::Allow,
+            arguments: json!({}),
+            receipt: Some(receipt),
+            error_code: None,
+            created_at: 1,
+            updated_at: 2,
+        }
+    }
+
     #[test]
     fn later_workspace_write_invalidates_earlier_verification() {
         let mut wrote_workspace = false;
@@ -4856,6 +4915,34 @@ mod tests {
             &execution(false, true),
         );
         assert!(verification_passed);
+    }
+
+    #[test]
+    fn persisted_process_requires_explicit_fresh_verification_evidence() {
+        assert!(!persisted_tool_is_successful_verification(
+            &persisted_process(json!({"success":true}))
+        ));
+        assert!(!persisted_tool_is_successful_verification(
+            &persisted_process(json!({"success":true,"verification_eligible":false}))
+        ));
+        assert!(!persisted_tool_is_successful_verification(
+            &persisted_process(json!({"success":false,"verification_eligible":true}))
+        ));
+        assert!(persisted_tool_is_successful_verification(
+            &persisted_process(json!({"success":true,"verification_eligible":true}))
+        ));
+    }
+
+    #[test]
+    fn coding_harness_profile_owns_fast_edit_as_a_strategy() {
+        let profile = CodingHarnessProfile::for_task("删除列表显示设置中的 stage 字段勾选项");
+        assert_eq!(profile.id(), "CODING_V0.1");
+        assert_eq!(profile.task_class, AgentTaskClass::FastEdit);
+        assert_eq!(profile.strategy_id(), "FAST_EDIT_ADAPTIVE_V1");
+
+        let general = CodingHarnessProfile::for_task("解释一下这个仓库");
+        assert_eq!(general.id(), "CODING_V0.1");
+        assert_eq!(general.strategy_id(), "GENERAL_AGENT_LOOP_V1");
     }
 
     #[test]

@@ -3,6 +3,10 @@
 日期：2026-08-21
 状态：IMPLEMENTED / QWEN LIVE ROBUSTNESS PASS
 
+架构归属：`FAST_EDIT_ADAPTIVE_V1` 是 `CODING_V0.1` Harness Profile 的
+Orchestration / Verification strategy，复用同一 AgentRun、Governance、
+ToolExecutor、durable events 与 receipts；它不是独立 Agent 或 Model 架构。
+
 ## 用户流程
 
 用户用自然语言提出一个小范围代码修改。Fielora 必须在不扩大范围的前提下定位、修改、验证；上下文不足时自动补一次证据，修改集不合格时自动纠正一次。目标本来已经满足时，以“无需修改”正常完成。

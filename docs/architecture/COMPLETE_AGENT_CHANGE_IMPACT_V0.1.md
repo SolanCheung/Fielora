@@ -3,6 +3,12 @@
 Status: IMPLEMENTED / REVIEWED
 Date: 2026-08-18
 
+> Compatibility context (2026-08-24): this document records the schema 6
+> implementation impact. Canonical Agent ownership and terminology now follow
+> `FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md`. Approval-routing details that
+> were later changed by D-250 are historical here; invariant safety, typed
+> receipts, and fresh verification remain mandatory under every permission.
+
 ## Scope
 
 This change introduces the first durable Fielora Agent execution system. It adds schema version 6, a provider-neutral model/tool loop, controlled project tools, approvals, verification receipts, crash recovery, bounded read-only subagents, and the corresponding Desktop bridge and UI.

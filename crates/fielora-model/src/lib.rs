@@ -1,3 +1,10 @@
+//! Provider-neutral Model layer for the Fielora Agent.
+//!
+//! This crate owns provider adapters, wire normalization, model capability
+//! metadata, and bounded model behavior hints. It does not own AgentRun state,
+//! tool authority, approvals, execution, or verification; those are Harness
+//! responsibilities.
+
 use fielora_contracts::{
     ContextSensitivity, ModelCapabilityProfile, ModelInvocationEvent, ModelInvocationEventKind,
     ModelInvocationRequest, ModelToolDefinition, ModelUsage, ProviderKind, ToolProposal,

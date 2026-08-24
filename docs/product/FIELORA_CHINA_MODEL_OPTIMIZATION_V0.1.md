@@ -29,7 +29,7 @@ not Agent acceptance.
 The following parts are accepted as hard rules:
 
 - generic baseline before model optimization;
-- Provider-neutral Agent Kernel and canonical tool/runtime semantics;
+- Provider-neutral Harness and canonical Model/Harness/Tools semantics;
 - capability facts separated from eval-derived behavior preferences;
 - stable English tool identifiers and typed JSON Schema;
 - Chinese requirements, mixed identifiers, Windows/Unicode paths, repository
@@ -57,8 +57,8 @@ The original instruction is intentionally narrowed in four places:
 
 ## 3. Current repository evidence
 
-- Existing runtime: `Project → Conversation → AgentRun`, Rust Agent Kernel,
-  Context Compiler, typed Tool Runtime, Policy/Approval, Verification and
+- Existing runtime: `Project → Conversation → AgentRun`, Rust Harness,
+  Context Compiler, typed Tool executor, Policy/Approval, Verification and
   recovery are implemented.
 - Existing adapters: OpenAI Responses, Anthropic Messages and OpenAI-compatible
   chat completions normalize to one model/tool turn.
@@ -90,9 +90,10 @@ The original instruction is intentionally narrowed in four places:
 - `run_command` success is not automatically “verification”. Only recognized
   test/build/lint/typecheck commands can satisfy the completion invariant.
 - Typed `git_stage`, `git_unstage`, `git_create_branch`, `git_switch_branch`,
-  `git_commit` and `git_push` reject broad/force operations and always request
-  one-time approval, including under Full Control. Generic command execution
-  cannot smuggle a Git mutation.
+  `git_commit` and `git_push` reject broad/force operations. Current permission
+  presets route approval independently: Full Control may authorize a permitted
+  typed Git action, but cannot disable force/sensitive-path/receipt/verification
+  invariants. Generic command execution cannot smuggle a Git mutation.
 - Desktop Provider Setup supplies editable presets for the six initial model
   families, with separate Qwen general API and Qwen Coding Plan entries.
   Environment → Prepare commit preloads the safe Agent workflow instead of a

@@ -18,6 +18,12 @@ Fielora 是一个长期产品项目。
 6. `artifacts/phase04/KNOWN_ISSUES.md`
 7. 与本次修改直接相关的代码和测试
 
+涉及 Agent、Model、Harness、Tools、Aegis、IDR、AG-UI 或 Agent/DXE
+integration 的任务，还必须完整读取
+`docs/architecture/FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md`。后续 Agent
+能力只能在该 `Model + Harness + Tools` 基线上扩展，不得建立第二套
+Core/Runtime/State/Permission/Evidence。
+
 历史 Phase、Freeze、Conversation Archive 与 Evidence 只在修改相应旧 Contract、调查回归或追溯决定时按需阅读。不得为了“上下文完整”阻塞普通 UI、Conversation、Project 或 Provider 工作。
 
 ## 2. 快速执行规则

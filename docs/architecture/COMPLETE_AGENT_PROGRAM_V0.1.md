@@ -4,6 +4,13 @@
 
 日期：2026-08-18
 
+> 2026-08-24 compatibility context：本文件保留 Complete Agent 的实施与
+> schema 6 合同；Agent 架构术语现统一由
+> `FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md` 解释。本文历史称谓
+> `Kernel` 指当前 Harness 的 Orchestration/Execution，不是第四层；
+> typed tool runtime 指具体 Tool executor，不拥有 Policy、Approval、
+> persistence 或 Verification authority。
+
 ## 1. 用户流程
 
 用户在一个本地 Project 的持久 Conversation 中提出编程任务，Fielora 创建可恢复的 `AgentRun`。Agent 在受控边界内理解仓库、调用模型、读取和修改文件、运行命令与测试、根据失败继续修复，并把计划、工具调用、Diff、审批、测试和最终状态持续呈现。Desktop 或 Core 重启后，同一运行可解释、可恢复，非幂等动作不会被静默重放。
