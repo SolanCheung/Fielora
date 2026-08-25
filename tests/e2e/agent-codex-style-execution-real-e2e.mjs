@@ -28,9 +28,9 @@ const task = [
 const steering = `完成后再确认 ${acceptanceFile} 已通过语法检查；只回答确认结果，不要继续修改文件。`;
 const screenshotNames = [
   '01-thinking-only.png',
-  '02-floating-execution-dock.png',
-  '03-hover-step-evidence.png',
-  '04-expanded-execution-detail.png',
+  '02-conversation-activity-stream.png',
+  '03-activity-evidence.png',
+  '04-activity-completion-hover.png',
   '05-scroll-to-latest.png',
   '06-running-steering.png',
   '07-result-changed-files.png',
@@ -252,11 +252,13 @@ try {
   await cdp.eval(setValue('.conversation-composer textarea', task));
   await cdp.eval(`document.querySelector('[data-testid="send-message"]')?.click()`);
   await wait(cdp, `document.querySelector('[data-testid="agent-execution-status"][data-execution-stage="THINKING"]')`, 30_000);
-  const thinking = await cdp.eval(`(()=>{const dock=document.querySelector('[data-testid="agent-execution-status"]');const turn=dock?.closest('[data-agent-turn="true"]');const dockRect=dock?.getBoundingClientRect();const turnRect=turn?.getBoundingClientRect();return{text:dock?.querySelector('[data-testid="agent-execution-dock-trigger"]')?.innerText??'',steps:dock?.querySelectorAll('[data-step-state]').length??0,narrative:Boolean(turn?.querySelector('[data-testid="agent-narrative"]')),insideTurn:Boolean(turn),leftOffset:Math.abs((dockRect?.left??0)-(turnRect?.left??0))};})()`);
+  const thinking = await cdp.eval(`(()=>{const status=document.querySelector('[data-testid="agent-execution-status"]');const turn=status?.closest('[data-agent-turn="true"]');const statusRect=status?.getBoundingClientRect();const turnRect=turn?.getBoundingClientRect();return{text:status?.querySelector('[data-testid="agent-progress-summary"]')?.innerText??'',steps:status?.querySelectorAll('[data-step-state]').length??0,narrative:Boolean(turn?.querySelector('[data-testid="agent-narrative"]')),insideTurn:Boolean(turn),activity:Boolean(turn?.querySelector('[data-testid="conversation-activity-stream"]')),details:Boolean(status?.querySelector('[data-testid="agent-run-details"]')),leftOffset:Math.abs((statusRect?.left??0)-(turnRect?.left??0))};})()`);
   assert.match(thinking.text, /正在思考/);
   assert.equal(thinking.steps, 0);
   assert.equal(thinking.narrative, false);
   assert.equal(thinking.insideTurn, true);
+  assert.equal(thinking.activity, true);
+  assert.equal(thinking.details, false);
   assert.ok(thinking.leftOffset < 2, JSON.stringify(thinking));
   assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="agent-live-edited-files"]'))`), false);
   screenshots.push(await capture(cdp, screenshotNames[0]));
@@ -265,34 +267,41 @@ try {
   await wait(cdp, `document.querySelector('[data-testid="agent-execution-status"][data-execution-stage="ACTIVE"]')||window.fielora.agent.get({run_id:${JSON.stringify(firstRun.id)}}).then((run)=>['COMPLETED','FAILED','CANCELLED'].includes(run.status))`, 300_000);
   const preDockRun = await cdp.eval(`window.fielora.agent.get({run_id:${JSON.stringify(firstRun.id)}})`);
   assert.equal(['COMPLETED', 'FAILED', 'CANCELLED'].includes(preDockRun.status), false, `Run reached ${preDockRun.status} before producing execution evidence: ${JSON.stringify(preDockRun)}`);
-  const dockMetrics = await cdp.eval(`(()=>{const dock=document.querySelector('[data-testid="agent-execution-status"]');const trigger=dock.querySelector('[data-testid="agent-execution-dock-trigger"]');const stop=document.querySelector('[data-testid="stop-agent"]');const probe=document.createElement('i');probe.style.color='var(--fl-color-accent)';const glyphProbe=document.createElement('i');glyphProbe.style.color='var(--fl-color-accent-foreground)';document.body.append(probe,glyphProbe);const style=getComputedStyle(dock);const triggerStyle=getComputedStyle(trigger);const value={insideTurn:Boolean(dock.closest('[data-agent-turn="true"]')),text:trigger?.innerText??'',size:style.fontSize,weight:style.fontWeight,background:triggerStyle.backgroundColor,shadow:triggerStyle.boxShadow,stopColor:getComputedStyle(stop).backgroundColor,accentColor:getComputedStyle(probe).color,stopGlyph:getComputedStyle(stop.querySelector('rect')).fill,glyphColor:getComputedStyle(glyphProbe).color,legacy:document.querySelectorAll('[data-testid="agent-live-activity"]').length};probe.remove();glyphProbe.remove();return value;})()`);
+  const dockMetrics = await cdp.eval(`(()=>{const status=document.querySelector('[data-testid="agent-execution-status"]');const trigger=status.querySelector('[data-testid="agent-progress-summary"]');const activity=document.querySelector('[data-testid="conversation-activity-stream"]');const stop=document.querySelector('[data-testid="stop-agent"]');const probe=document.createElement('i');probe.style.color='var(--fl-color-accent)';const glyphProbe=document.createElement('i');glyphProbe.style.color='var(--fl-color-accent-foreground)';document.body.append(probe,glyphProbe);const value={insideTurn:Boolean(status.closest('[data-agent-turn="true"]')),layout:status.dataset.layout,text:trigger?.innerText??'',activityPosition:getComputedStyle(activity).position,details:Boolean(status.querySelector('[data-testid="agent-run-details"]')),stopColor:getComputedStyle(stop).backgroundColor,accentColor:getComputedStyle(probe).color,stopGlyph:getComputedStyle(stop.querySelector('rect')).fill,glyphColor:getComputedStyle(glyphProbe).color,legacy:document.querySelectorAll('[data-testid="agent-live-activity"],[data-testid="agent-execution-inline"]').length};probe.remove();glyphProbe.remove();return value;})()`);
   assert.equal(dockMetrics.insideTurn, true);
+  assert.equal(dockMetrics.layout, 'conversation-stream');
   assert.match(dockMetrics.text, /正在执行/);
-  assert.doesNotMatch(dockMetrics.text, /第 \d/);
-  assert.equal(dockMetrics.size, '14px');
-  assert.equal(dockMetrics.weight, '550');
-  assert.equal(dockMetrics.background, 'rgba(0, 0, 0, 0)');
-  assert.equal(dockMetrics.shadow, 'none');
+  assert.match(dockMetrics.text, /第 \d+ \/ \d+ 步/);
+  assert.equal(dockMetrics.activityPosition, 'static');
+  assert.equal(dockMetrics.details, false);
   assert.equal(dockMetrics.stopColor, dockMetrics.accentColor);
   assert.equal(dockMetrics.stopGlyph, dockMetrics.glyphColor);
   assert.equal(dockMetrics.legacy, 0);
   screenshots.push(await capture(cdp, screenshotNames[1]));
 
-  await cdp.eval(`document.querySelector('[data-testid="agent-execution-dock-trigger"]')?.click()`);
-  await wait(cdp, `getComputedStyle(document.querySelector('[data-testid="agent-execution-popover"]')).visibility==='visible'`);
-  const hover = await cdp.eval(`(()=>{const popover=document.querySelector('[data-testid="agent-execution-popover"]');return{steps:popover.querySelectorAll('[data-step-state]').length,pendingDetails:popover.querySelectorAll('[data-step-state="pending"] [data-step-detail]').length,evidence:popover.querySelector('.agent-live-evidence')?.innerText??'',detail:Boolean(popover.querySelector('[data-testid="agent-execution-detail"]'))};})()`);
-  assert.ok(hover.steps >= 3 && hover.steps <= 6, JSON.stringify(hover));
-  assert.equal(hover.pendingDetails, 0);
-  assert.equal(hover.detail, true);
+  await wait(cdp, `document.querySelector('[data-testid="conversation-activity-stream"] [data-activity-entry]')`);
+  const hover = await cdp.eval(`(()=>{const activity=document.querySelector('[data-testid="conversation-activity-stream"]');const entries=[...activity.querySelectorAll('[data-activity-entry]')];const sequences=entries.map((entry)=>Number(entry.dataset.activitySequence));return{groups:activity.querySelectorAll('[data-testid="conversation-activity-group"]').length,entries:entries.length,chronological:sequences.every((sequence,index)=>index===0||sequence>=sequences[index-1]),details:Boolean(document.querySelector('[data-testid="agent-run-details"]'))};})()`);
+  assert.ok(hover.groups > 0, JSON.stringify(hover));
+  assert.ok(hover.entries > 0, JSON.stringify(hover));
+  assert.equal(hover.chronological, true);
+  assert.equal(hover.details, false);
   screenshots.push(await capture(cdp, screenshotNames[2]));
 
+  await cdp.eval(`document.querySelector('[data-testid="agent-progress-summary"]')?.click()`);
+  await wait(cdp, `document.querySelector('[data-testid="agent-run-details"]')`);
   const detail = await cdp.eval(`(()=>{const detail=document.querySelector('[data-testid="agent-execution-status"] [data-testid="agent-execution-detail"]');return{text:detail?.innerText??'',privateThink:(detail?.innerText??'').toLowerCase().includes('<think'),operations:detail?.querySelectorAll('.agent-operation-timeline li').length??0};})()`);
-  assert.match(detail.text, /工作说明/);
+  assert.match(detail.text, /操作记录/);
   assert.match(detail.text, /步骤/);
   assert.equal(detail.privateThink, false);
   assert.ok(detail.operations > 0);
+  await cdp.eval(`document.querySelector('[data-testid="agent-progress-summary"]')?.click()`);
+  const completedSegment = await cdp.eval(`(()=>{const segment=document.querySelector('[data-activity-entry][data-completed-at]');if(!segment)return null;const box=segment.getBoundingClientRect();return{title:segment.title,completedAt:Number(segment.dataset.completedAt),x:box.left+Math.min(box.width-12,Math.max(12,box.width/2)),y:box.top+box.height/2};})()`);
+  assert.ok(completedSegment?.completedAt > 0, JSON.stringify(completedSegment));
+  assert.match(completedSegment.title, /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/);
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: completedSegment.x, y: completedSegment.y });
+  await wait(cdp, `getComputedStyle(document.querySelector('[data-activity-entry][data-completed-at] > .agent-completion-time')).visibility==='visible'`);
+  assert.equal(await cdp.eval(`document.querySelector('[data-activity-entry][data-completed-at] > .agent-completion-time').innerText`), completedSegment.title);
   screenshots.push(await capture(cdp, screenshotNames[3]));
-  await cdp.eval(`document.querySelector('[data-testid="agent-execution-dock-trigger"]')?.click()`);
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 });
 
   await cdp.eval(setValue('.conversation-composer textarea', steering));
@@ -321,23 +330,22 @@ try {
   await wait(cdp, `!document.querySelector('[data-testid="jump-to-latest"]')`);
   await wait(cdp, `(()=>{const list=document.querySelector('.message-list');return list.scrollHeight-list.scrollTop-list.clientHeight<8;})()`);
 
+  await cdp.eval(`document.querySelector('[data-testid="agent-progress-summary"]')?.click()`);
   await wait(cdp, `document.querySelector('[data-testid="agent-live-edited-files"]')||window.fielora.agent.get({run_id:${JSON.stringify(firstRun.id)}}).then((run)=>['COMPLETED','FAILED','CANCELLED'].includes(run.status))`, 180_000);
   const liveRun = await cdp.eval(`window.fielora.agent.get({run_id:${JSON.stringify(firstRun.id)}})`);
   assert.equal(['COMPLETED', 'FAILED', 'CANCELLED'].includes(liveRun.status), false, `Run reached ${liveRun.status} before the live edited-files summary was observable.`);
-  const liveStats = await cdp.eval(`(()=>{const root=document.querySelector('[data-testid="agent-live-edited-files"]');const trigger=document.querySelector('[data-testid="agent-execution-dock-trigger"]');return{count:Number(root?.dataset.fileCount??0),additions:Number(root?.dataset.additions??0),deletions:Number(root?.dataset.deletions??0),paths:[...root.querySelectorAll('[data-live-review-path]')].map((item)=>item.dataset.liveReviewPath),summary:trigger?.innerText??''};})()`);
+  const liveStats = await cdp.eval(`(()=>{const root=document.querySelector('[data-testid="agent-live-edited-files"]');const trigger=document.querySelector('[data-testid="agent-progress-summary"]');return{count:Number(root?.dataset.fileCount??0),additions:Number(root?.dataset.additions??0),deletions:Number(root?.dataset.deletions??0),paths:[...root.querySelectorAll('[data-live-review-path]')].map((item)=>item.dataset.liveReviewPath),summary:trigger?.innerText??''};})()`);
   assert.ok(liveStats.count > 0, JSON.stringify(liveStats));
   assert.match(liveStats.summary, new RegExp(`${liveStats.count} 个文件已更改`));
   assert.ok(liveStats.paths.includes(acceptanceFile), JSON.stringify(liveStats));
   screenshots.push(await capture(cdp, liveEditedScreenshotNames[0]));
 
-  await cdp.eval(`document.querySelector('[data-testid="agent-execution-dock-trigger"]')?.click()`);
-  await wait(cdp, `getComputedStyle(document.querySelector('[data-testid="agent-execution-popover"]')).visibility==='visible'`);
   const livePopover = await cdp.eval(`(()=>{const root=document.querySelector('[data-testid="agent-live-edited-files"]');const file=root?.querySelector('[data-live-review-path]');const add=getComputedStyle(file.querySelector('b')).color;const del=getComputedStyle(file.querySelector('i')).color;return{path:file?.dataset.liveReviewPath??'',disabled:file?.disabled,add,del};})()`);
   assert.equal(livePopover.path, acceptanceFile);
   assert.notEqual(livePopover.add, livePopover.del);
   screenshots.push(await capture(cdp, liveEditedScreenshotNames[1]));
   assert.equal(livePopover.disabled, false);
-  await cdp.eval(`document.querySelector('[data-testid="agent-execution-dock-trigger"]')?.click()`);
+  await cdp.eval(`document.querySelector('[data-testid="agent-progress-summary"]')?.click()`);
 
   await wait(cdp, `window.fielora.agent.get({run_id:${JSON.stringify(firstRun.id)}}).then((run)=>['COMPLETED','FAILED','CANCELLED'].includes(run.status))`, 300_000);
   const firstTerminal = await cdp.eval(`window.fielora.agent.get({run_id:${JSON.stringify(firstRun.id)}})`);
@@ -362,9 +370,9 @@ try {
   assert.deepEqual(terminalDisclosure, { tag: 'BUTTON', parent: 'DIV', inline: false });
   await clickCenter(cdp, `[data-agent-run-id=${JSON.stringify(firstRun.id)}] [data-testid="agent-execution-detail-toggle"]`);
   await cdp.eval('new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-  const terminalClickState = await cdp.eval(`(()=>{const turn=document.querySelector('[data-agent-run-id=${JSON.stringify(firstRun.id)}]');const toggle=turn?.querySelector('[data-testid="agent-execution-detail-toggle"]');return{expanded:toggle?.getAttribute('aria-expanded')??'',inline:Boolean(turn?.querySelector('.agent-execution-detail.is-inline')),active:document.activeElement===toggle};})()`);
-  assert.deepEqual(terminalClickState, { expanded: 'true', inline: true, active: true });
-  const terminalDetailBeforeTitle = await cdp.eval(`(()=>{const turn=document.querySelector('[data-agent-run-id=${JSON.stringify(firstRun.id)}]');const detail=turn?.querySelector('.agent-execution-detail.is-inline');const title=turn?.querySelector('.agent-terminal-result h2');return Boolean(detail&&title&&(detail.compareDocumentPosition(title)&Node.DOCUMENT_POSITION_FOLLOWING));})()`);
+  const terminalClickState = await cdp.eval(`(()=>{const turn=document.querySelector('[data-agent-run-id=${JSON.stringify(firstRun.id)}]');const toggle=turn?.querySelector('[data-testid="agent-execution-detail-toggle"]');return{expanded:toggle?.getAttribute('aria-expanded')??'',history:Boolean(turn?.querySelector('.agent-execution-detail.is-history [data-testid="conversation-activity-stream"]')),active:document.activeElement===toggle};})()`);
+  assert.deepEqual(terminalClickState, { expanded: 'true', history: true, active: true });
+  const terminalDetailBeforeTitle = await cdp.eval(`(()=>{const turn=document.querySelector('[data-agent-run-id=${JSON.stringify(firstRun.id)}]');const detail=turn?.querySelector('.agent-execution-detail.is-history');const title=turn?.querySelector('.agent-terminal-result h2');return Boolean(detail&&title&&(detail.compareDocumentPosition(title)&Node.DOCUMENT_POSITION_FOLLOWING));})()`);
   assert.equal(terminalDetailBeforeTitle, true);
   await cdp.eval(`document.querySelector('[data-agent-run-id=${JSON.stringify(firstRun.id)}] [data-testid="agent-execution-detail-toggle"]')?.click()`);
 

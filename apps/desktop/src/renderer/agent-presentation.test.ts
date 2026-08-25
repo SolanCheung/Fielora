@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AgentEventView, AgentRunView, AgentToolCallView } from '@fielora/contracts';
-import { agentOpeningNarrative, agentRequestKind, agentTerminalBody, agentTerminalTitle, approvalActionLabel, buildAgentPresentation, buildAgentResultViewModel, stripTerminalHeading } from './agent-presentation.ts';
+import { agentCompletionTimeLabel, agentOpeningNarrative, agentRequestKind, agentTerminalBody, agentTerminalTitle, approvalActionLabel, buildAgentPresentation, buildAgentResultViewModel, stripTerminalHeading } from './agent-presentation.ts';
 
 function run(status: AgentRunView['status'], errorCode: string | null = null): AgentRunView {
   return {
@@ -19,6 +19,13 @@ function tool(overrides: Partial<AgentToolCallView>): AgentToolCallView {
     ...overrides,
   };
 }
+
+test('completion timestamp uses stable local date and distinguishes incomplete terminal work', () => {
+  const timestamp = new Date(2026, 7, 25, 14, 3, 7).getTime();
+  assert.equal(agentCompletionTimeLabel(timestamp), '完成于 2026/08/25 14:03:07');
+  assert.equal(agentCompletionTimeLabel(timestamp, false), '结束于 2026/08/25 14:03:07');
+  assert.equal(agentCompletionTimeLabel(Number.NaN), '');
+});
 
 function phaseEvent(activePhase: 'LOCATE' | 'EDIT' | 'VERIFY' | 'FINALIZE', phases: Record<string, string>, fact: Record<string, unknown> = {}): AgentEventView {
   return { id: 'event-phase', run_id: 'run-1', sequence: 7, schema_version: 1, kind: 'PHASE_CHANGED', payload: { active_phase: activePhase, phases, fact }, created_at: 4_000 };

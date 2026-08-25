@@ -222,6 +222,15 @@ function formatElapsed(milliseconds: number): string {
   return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分钟`;
 }
 
+export function agentCompletionTimeLabel(timestamp: number, completed = true): string {
+  const value = new Date(timestamp);
+  if (!Number.isFinite(timestamp) || Number.isNaN(value.getTime())) return '';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  const date = `${value.getFullYear()}/${pad(value.getMonth() + 1)}/${pad(value.getDate())}`;
+  const time = `${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+  return `${completed ? '完成于' : '结束于'} ${date} ${time}`;
+}
+
 function receiptPassed(tool: AgentToolCallView): boolean {
   if (!tool.receipt || typeof tool.receipt !== 'object') return false;
   const receipt = tool.receipt as { verification_eligible?: unknown; success?: unknown };
