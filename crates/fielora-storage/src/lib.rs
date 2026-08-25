@@ -5765,6 +5765,207 @@ mod tests {
     }
 
     #[test]
+    fn existing_tool_receipt_and_events_preserve_execution_source_across_reopen() {
+        let root = temporary_root();
+        fs::create_dir_all(root.join("workspace")).unwrap();
+        let run_id = {
+            let worker = start(&root, 1);
+            let handle = worker.handle();
+            let project = handle
+                .create_project(
+                    CreateProjectRequest {
+                        title: "External provider receipt".into(),
+                        goal: None,
+                        root_path: root.join("workspace").to_string_lossy().into_owned(),
+                    },
+                    2,
+                )
+                .unwrap();
+            let provider = handle
+                .create_provider_config(
+                    CreateProviderConfigRequest {
+                        provider_kind: ProviderKind::Openai,
+                        display_name: "Fixture".into(),
+                        base_url: None,
+                        default_model: "fixture-model".into(),
+                        custom_endpoint_acknowledged: false,
+                    },
+                    3,
+                )
+                .unwrap();
+            handle
+                .set_provider_credential_present(provider.view.id.clone(), true, 4)
+                .unwrap();
+            let conversation = handle
+                .create_conversation(
+                    CreateConversationRequest {
+                        field_id: project.field_id.clone(),
+                        title: "Receipt persistence".into(),
+                        provider_config_id: Some(provider.view.id.clone()),
+                        model_id: Some("fixture-model".into()),
+                    },
+                    5,
+                )
+                .unwrap();
+            let created = handle
+                .create_agent_run(
+                    StartAgentRunRequest {
+                        field_id: project.field_id,
+                        conversation_id: conversation.id,
+                        user_message_id: None,
+                        provider_config_id: provider.view.id,
+                        model_id: None,
+                        task: "Persist external execution provenance".into(),
+                        permission: AgentPermission::ReadOnly,
+                        max_steps: Some(4),
+                        attachments: None,
+                    },
+                    6,
+                )
+                .unwrap();
+            handle
+                .append_agent_event(
+                    created.run.id.clone(),
+                    AgentEventKind::RunStarted,
+                    serde_json::json!({}),
+                    AgentProjectionUpdate {
+                        status: Some(AgentRunStatus::Running),
+                        ..Default::default()
+                    },
+                    7,
+                )
+                .unwrap();
+            let source = serde_json::json!({
+                "capability_id":"fixture.external.lookup",
+                "capability_version":"1.0.0",
+                "source_kind":"EXTERNAL",
+                "provider_id":"fixture.external",
+                "provider_tool_name":"lookup",
+            });
+            let completed = handle
+                .create_agent_tool_call(
+                    created.run.id.clone(),
+                    "fixture.external.lookup".into(),
+                    AgentToolEffect::Observe,
+                    AgentPolicyDecision::Allow,
+                    serde_json::json!({"key":"alpha"}),
+                    8,
+                )
+                .unwrap();
+            handle
+                .update_agent_tool_call(
+                    completed.id.clone(),
+                    AgentToolStatus::Running,
+                    None,
+                    None,
+                    9,
+                )
+                .unwrap();
+            handle
+                .update_agent_tool_call(
+                    completed.id.clone(),
+                    AgentToolStatus::Completed,
+                    Some(serde_json::json!({
+                        "kind":"EXTERNAL_FIXTURE_LOOKUP",
+                        "success":true,
+                        "execution_source":source.clone(),
+                    })),
+                    None,
+                    10,
+                )
+                .unwrap();
+            handle
+                .append_agent_event(
+                    created.run.id.clone(),
+                    AgentEventKind::ToolCompleted,
+                    serde_json::json!({
+                        "tool_call_id":completed.id,
+                        "name":"fixture.external.lookup",
+                        "execution_source":source.clone(),
+                    }),
+                    AgentProjectionUpdate::default(),
+                    11,
+                )
+                .unwrap();
+            let failed = handle
+                .create_agent_tool_call(
+                    created.run.id.clone(),
+                    "fixture.external.lookup".into(),
+                    AgentToolEffect::Observe,
+                    AgentPolicyDecision::Allow,
+                    serde_json::json!({"key":"fail"}),
+                    12,
+                )
+                .unwrap();
+            handle
+                .update_agent_tool_call(failed.id.clone(), AgentToolStatus::Running, None, None, 13)
+                .unwrap();
+            handle
+                .update_agent_tool_call(
+                    failed.id.clone(),
+                    AgentToolStatus::Failed,
+                    Some(serde_json::json!({
+                        "kind":"TOOL_EXECUTION_FAILED",
+                        "execution_source":source.clone(),
+                    })),
+                    Some("AGENT_TOOL_PROVIDER_FAILED".into()),
+                    14,
+                )
+                .unwrap();
+            handle
+                .append_agent_event(
+                    created.run.id.clone(),
+                    AgentEventKind::ToolFailed,
+                    serde_json::json!({
+                        "tool_call_id":failed.id,
+                        "name":"fixture.external.lookup",
+                        "error_code":"AGENT_TOOL_PROVIDER_FAILED",
+                        "execution_source":source,
+                    }),
+                    AgentProjectionUpdate::default(),
+                    15,
+                )
+                .unwrap();
+            created.run.id
+        };
+        {
+            let worker = start(&root, 16);
+            let handle = worker.handle();
+            let tools = handle.list_agent_tool_calls(run_id.clone()).unwrap();
+            assert_eq!(tools.len(), 2);
+            assert!(tools.iter().all(|tool| {
+                tool.receipt.as_ref().unwrap()["execution_source"]["provider_id"]
+                    == "fixture.external"
+            }));
+            assert!(tools.iter().any(|tool| {
+                tool.status == AgentToolStatus::Completed
+                    && tool.receipt.as_ref().unwrap()["execution_source"]["source_kind"]
+                        == "EXTERNAL"
+            }));
+            assert!(tools.iter().any(|tool| {
+                tool.status == AgentToolStatus::Failed
+                    && tool.error_code.as_deref() == Some("AGENT_TOOL_PROVIDER_FAILED")
+            }));
+            let events = handle
+                .list_agent_events(ListAgentEventsRequest {
+                    run_id,
+                    after_sequence: None,
+                    limit: Some(200),
+                })
+                .unwrap();
+            assert!(events.iter().any(|event| {
+                event.kind == AgentEventKind::ToolCompleted
+                    && event.payload["execution_source"]["provider_tool_name"] == "lookup"
+            }));
+            assert!(events.iter().any(|event| {
+                event.kind == AgentEventKind::ToolFailed
+                    && event.payload["execution_source"]["provider_tool_name"] == "lookup"
+            }));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn agent_ledger_is_append_only_and_restart_reconciles_incomplete_tools() {
         let root = temporary_root();
         let (run_id, tool_id, waiting_run_id, pending_approval_id, paused_run_id) = {

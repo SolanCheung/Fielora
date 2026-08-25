@@ -30,6 +30,11 @@ const MAX_OBSERVATION_BYTES: usize = 256 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_REPO_FILES: usize = 20_000;
 const MAX_CONTEXT_SCORE_BYTES: u64 = 32 * 1024;
+const MAX_TOOL_PROVIDERS: usize = 16;
+const MAX_TOOLS_PER_PROVIDER: usize = 32;
+const MAX_PROVIDER_SCHEMA_BYTES: usize = 64 * 1024;
+const MAX_PROVIDER_RECEIPT_BYTES: usize = 64 * 1024;
+const MAX_PROVIDER_OBSERVATION_BYTES: usize = 64 * 1024;
 const BUILTIN_SKILLS: &[(&str, &str, &str)] = &[
     (
         "understand_project",
@@ -99,6 +104,12 @@ pub enum AgentError {
     CommandTimeout,
     #[error("AGENT_CANCELLED")]
     Cancelled,
+    #[error("AGENT_TOOL_PROVIDER_UNAVAILABLE")]
+    ToolProviderUnavailable,
+    #[error("AGENT_TOOL_PROVIDER_DEFINITION_INVALID")]
+    ToolProviderDefinitionInvalid,
+    #[error("AGENT_TOOL_PROVIDER_FAILED")]
+    ToolProviderFailed,
     #[error("AGENT_IO_FAILED")]
     IoFailed,
 }
@@ -121,6 +132,9 @@ impl AgentError {
             Self::CommandDenied => "AGENT_COMMAND_DENIED",
             Self::CommandTimeout => "AGENT_COMMAND_TIMEOUT",
             Self::Cancelled => "AGENT_CANCELLED",
+            Self::ToolProviderUnavailable => "AGENT_TOOL_PROVIDER_UNAVAILABLE",
+            Self::ToolProviderDefinitionInvalid => "AGENT_TOOL_PROVIDER_DEFINITION_INVALID",
+            Self::ToolProviderFailed => "AGENT_TOOL_PROVIDER_FAILED",
             Self::IoFailed => "AGENT_IO_FAILED",
         }
     }
@@ -150,10 +164,99 @@ pub fn valid_run_transition(from: AgentRunStatus, to: AgentRunStatus) -> bool {
     from.can_transition_to(to)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolSourceKind {
+    Builtin,
+    External,
+}
+
+impl ToolSourceKind {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Builtin => "BUILTIN",
+            Self::External => "EXTERNAL",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolExecutionSource {
+    pub capability_id: String,
+    pub capability_version: String,
+    pub source_kind: ToolSourceKind,
+    pub provider_id: String,
+    pub provider_tool_name: String,
+}
+
+impl ToolExecutionSource {
+    pub fn receipt_envelope(&self) -> Value {
+        json!({
+            "capability_id":self.capability_id,
+            "capability_version":self.capability_version,
+            "source_kind":self.source_kind.id(),
+            "provider_id":self.provider_id,
+            "provider_tool_name":self.provider_tool_name,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ToolSpec {
     pub definition: ModelToolDefinition,
     pub effect: AgentToolEffect,
+    pub source: ToolExecutionSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolProviderIdentity {
+    pub id: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolProviderAvailability {
+    Available,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolProviderError {
+    Unavailable,
+    InvalidDefinition,
+    InvalidArguments,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderToolDefinition {
+    pub capability_id: String,
+    pub capability_version: String,
+    pub provider_tool_name: String,
+    pub definition: ModelToolDefinition,
+}
+
+/// Minimal Tools-side extension seam.
+///
+/// Providers contribute bounded, read-only definitions in this slice and
+/// execute only after Harness selection, policy, and approval routing. They do
+/// not own Agent lifecycle, permissions, durable receipts, or verification.
+pub trait ToolProvider: Send + Sync {
+    fn identity(&self) -> ToolProviderIdentity;
+
+    fn availability(&self) -> ToolProviderAvailability;
+
+    fn discover_tools(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<ProviderToolDefinition>, ToolProviderError>;
+
+    fn execute(
+        &self,
+        provider_tool_name: &str,
+        arguments: &Value,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, ToolProviderError>;
 }
 
 pub fn coding_tool_catalog() -> Vec<ToolSpec> {
@@ -339,6 +442,124 @@ fn tool(name: &str, description: &str, effect: AgentToolEffect, input_schema: Va
             input_schema,
         },
         effect,
+        source: ToolExecutionSource {
+            capability_id: name.into(),
+            capability_version: "0.1.0".into(),
+            source_kind: ToolSourceKind::Builtin,
+            provider_id: "fielora.builtin".into(),
+            provider_tool_name: name.into(),
+        },
+    }
+}
+
+/// Build the one available-tool catalog from built-ins plus healthy external
+/// providers. Admission is bounded and fail-closed; all external tools are
+/// assigned OBSERVE by Fielora for this first slice.
+pub fn coding_tool_catalog_with_providers(
+    providers: &[Arc<dyn ToolProvider>],
+) -> Result<Vec<ToolSpec>, AgentError> {
+    if providers.len() > MAX_TOOL_PROVIDERS {
+        return Err(AgentError::ToolProviderDefinitionInvalid);
+    }
+    let mut catalog = coding_tool_catalog();
+    let mut provider_ids = HashSet::new();
+    for provider in providers {
+        let identity = provider.identity();
+        if !valid_provider_identifier(&identity.id)
+            || !valid_version(&identity.version)
+            || !provider_ids.insert(identity.id.clone())
+        {
+            return Err(AgentError::ToolProviderDefinitionInvalid);
+        }
+        if provider.availability() == ToolProviderAvailability::Unavailable {
+            continue;
+        }
+        let definitions = provider
+            .discover_tools(MAX_TOOLS_PER_PROVIDER)
+            .map_err(map_provider_discovery_error)?;
+        if definitions.len() > MAX_TOOLS_PER_PROVIDER {
+            return Err(AgentError::ToolProviderDefinitionInvalid);
+        }
+        for discovered in definitions {
+            if !valid_capability_identifier(&discovered.capability_id)
+                || !valid_version(&discovered.capability_version)
+                || !valid_provider_tool_name(&discovered.provider_tool_name)
+                || discovered.definition.name != discovered.capability_id
+                || discovered.definition.description.len() > 4_096
+                || discovered
+                    .definition
+                    .input_schema
+                    .get("type")
+                    .and_then(Value::as_str)
+                    != Some("object")
+                || serde_json::to_vec(&discovered.definition.input_schema)
+                    .map_err(|_| AgentError::ToolProviderDefinitionInvalid)?
+                    .len()
+                    > MAX_PROVIDER_SCHEMA_BYTES
+                || catalog
+                    .iter()
+                    .any(|spec| spec.definition.name == discovered.capability_id)
+            {
+                return Err(AgentError::ToolProviderDefinitionInvalid);
+            }
+            catalog.push(ToolSpec {
+                definition: discovered.definition,
+                effect: AgentToolEffect::Observe,
+                source: ToolExecutionSource {
+                    capability_id: discovered.capability_id,
+                    capability_version: discovered.capability_version,
+                    source_kind: ToolSourceKind::External,
+                    provider_id: identity.id.clone(),
+                    provider_tool_name: discovered.provider_tool_name,
+                },
+            });
+        }
+    }
+    Ok(catalog)
+}
+
+fn valid_provider_identifier(value: &str) -> bool {
+    (1..=128).contains(&value.len())
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte)
+        })
+}
+
+fn valid_capability_identifier(value: &str) -> bool {
+    valid_provider_identifier(value)
+}
+
+fn valid_provider_tool_name(value: &str) -> bool {
+    (1..=128).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+}
+
+fn valid_version(value: &str) -> bool {
+    (1..=64).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() && !matches!(byte, b'"' | b'\\'))
+}
+
+fn map_provider_discovery_error(error: ToolProviderError) -> AgentError {
+    match error {
+        ToolProviderError::Unavailable => AgentError::ToolProviderUnavailable,
+        ToolProviderError::Cancelled => AgentError::Cancelled,
+        ToolProviderError::InvalidDefinition
+        | ToolProviderError::InvalidArguments
+        | ToolProviderError::Failed => AgentError::ToolProviderDefinitionInvalid,
+    }
+}
+
+fn map_provider_execution_error(error: ToolProviderError) -> AgentError {
+    match error {
+        ToolProviderError::Unavailable => AgentError::ToolProviderUnavailable,
+        ToolProviderError::InvalidDefinition => AgentError::ToolProviderDefinitionInvalid,
+        ToolProviderError::InvalidArguments => AgentError::ToolArgumentsInvalid,
+        ToolProviderError::Failed => AgentError::ToolProviderFailed,
+        ToolProviderError::Cancelled => AgentError::Cancelled,
     }
 }
 
@@ -1023,6 +1244,84 @@ pub trait ToolExecutor {
         authorization_confirmed: bool,
         cancellation: &CommandCancellation,
     ) -> Result<ToolExecution, AgentError>;
+}
+
+/// Provider-neutral executor that routes one admitted ToolSpec either to the
+/// existing built-in executor or to its external provider backend.
+///
+/// This implements the existing ToolExecutor boundary; it is not a second
+/// execution runtime. Provider output remains an execution fact only. Harness
+/// code still authors provenance, persistence, and verification semantics.
+pub struct RoutedToolExecutor<E> {
+    builtin: E,
+    catalog: Vec<ToolSpec>,
+    providers: HashMap<String, Arc<dyn ToolProvider>>,
+}
+
+impl<E> RoutedToolExecutor<E> {
+    pub fn new(
+        builtin: E,
+        catalog: Vec<ToolSpec>,
+        providers: &[Arc<dyn ToolProvider>],
+    ) -> Result<Self, AgentError> {
+        let mut by_id = HashMap::new();
+        for provider in providers {
+            let identity = provider.identity();
+            if !valid_provider_identifier(&identity.id)
+                || by_id.insert(identity.id, Arc::clone(provider)).is_some()
+            {
+                return Err(AgentError::ToolProviderDefinitionInvalid);
+            }
+        }
+        Ok(Self {
+            builtin,
+            catalog,
+            providers: by_id,
+        })
+    }
+}
+
+impl<E: ToolExecutor> ToolExecutor for RoutedToolExecutor<E> {
+    fn execute(
+        &self,
+        name: &str,
+        arguments: &Value,
+        authorization_confirmed: bool,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, AgentError> {
+        if cancellation.is_cancelled() {
+            return Err(AgentError::Cancelled);
+        }
+        let spec = self
+            .catalog
+            .iter()
+            .find(|spec| spec.definition.name == name)
+            .ok_or(AgentError::ToolNotFound)?;
+        if spec.source.source_kind == ToolSourceKind::Builtin {
+            return self
+                .builtin
+                .execute(name, arguments, authorization_confirmed, cancellation);
+        }
+        let provider = self
+            .providers
+            .get(&spec.source.provider_id)
+            .ok_or(AgentError::ToolProviderUnavailable)?;
+        if provider.availability() != ToolProviderAvailability::Available {
+            return Err(AgentError::ToolProviderUnavailable);
+        }
+        let execution = provider
+            .execute(&spec.source.provider_tool_name, arguments, cancellation)
+            .map_err(map_provider_execution_error)?;
+        if serde_json::to_vec(&execution.receipt)
+            .map_err(|_| AgentError::ToolProviderFailed)?
+            .len()
+            > MAX_PROVIDER_RECEIPT_BYTES
+            || execution.observation.len() > MAX_PROVIDER_OBSERVATION_BYTES
+        {
+            return Err(AgentError::ToolProviderFailed);
+        }
+        Ok(execution)
+    }
 }
 
 /// Concrete project-scoped executor for the current coding tool catalog.
@@ -2974,6 +3273,216 @@ mod tests {
         fs::write(root.join("src/lib.rs"), "pub fn answer() -> i32 { 41 }\n").unwrap();
         fs::write(root.join("README.md"), "Agent fixture\n").unwrap();
         (root, artifacts)
+    }
+
+    struct FixtureExternalProvider {
+        availability: ToolProviderAvailability,
+        tool_count: usize,
+        fail_execution: bool,
+    }
+
+    impl FixtureExternalProvider {
+        fn available() -> Self {
+            Self {
+                availability: ToolProviderAvailability::Available,
+                tool_count: 1,
+                fail_execution: false,
+            }
+        }
+    }
+
+    impl ToolProvider for FixtureExternalProvider {
+        fn identity(&self) -> ToolProviderIdentity {
+            ToolProviderIdentity {
+                id: "fixture.external".into(),
+                version: "1.0.0".into(),
+            }
+        }
+
+        fn availability(&self) -> ToolProviderAvailability {
+            self.availability
+        }
+
+        fn discover_tools(
+            &self,
+            limit: usize,
+        ) -> Result<Vec<ProviderToolDefinition>, ToolProviderError> {
+            assert_eq!(limit, MAX_TOOLS_PER_PROVIDER);
+            Ok((0..self.tool_count)
+                .map(|index| {
+                    let capability_id = if self.tool_count == 1 {
+                        "fixture.external.lookup".to_owned()
+                    } else {
+                        format!("fixture.external.lookup.{index}")
+                    };
+                    ProviderToolDefinition {
+                        capability_id: capability_id.clone(),
+                        capability_version: "1.0.0".into(),
+                        provider_tool_name: if self.tool_count == 1 {
+                            "lookup".into()
+                        } else {
+                            format!("lookup.{index}")
+                        },
+                        definition: ModelToolDefinition {
+                            name: capability_id,
+                            description: "Return one deterministic fixture value.".into(),
+                            input_schema: json!({
+                                "type":"object",
+                                "properties":{"key":{"type":"string","maxLength":64}},
+                                "required":["key"],
+                                "additionalProperties":false,
+                            }),
+                        },
+                    }
+                })
+                .collect())
+        }
+
+        fn execute(
+            &self,
+            provider_tool_name: &str,
+            arguments: &Value,
+            cancellation: &CommandCancellation,
+        ) -> Result<ToolExecution, ToolProviderError> {
+            if cancellation.is_cancelled() {
+                return Err(ToolProviderError::Cancelled);
+            }
+            if self.fail_execution {
+                return Err(ToolProviderError::Failed);
+            }
+            if provider_tool_name != "lookup"
+                || arguments.as_object().map(|value| value.len()) != Some(1)
+            {
+                return Err(ToolProviderError::InvalidArguments);
+            }
+            let key = arguments
+                .get("key")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty() && value.len() <= 64)
+                .ok_or(ToolProviderError::InvalidArguments)?;
+            Ok(ToolExecution {
+                receipt: json!({"kind":"EXTERNAL_FIXTURE_LOOKUP","success":true,"key_sha256":sha256(key.as_bytes())}),
+                observation: format!("fixture-value:{key}"),
+            })
+        }
+    }
+
+    #[test]
+    fn external_provider_discovery_is_bounded_and_admitted_as_observe() {
+        let provider: Arc<dyn ToolProvider> = Arc::new(FixtureExternalProvider::available());
+        let builtins = coding_tool_catalog();
+        let catalog = coding_tool_catalog_with_providers(&[provider]).unwrap();
+        assert_eq!(catalog.len(), builtins.len() + 1);
+        assert!(
+            catalog
+                .iter()
+                .any(|spec| spec.definition.name == "read_file")
+        );
+        let external = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "fixture.external.lookup")
+            .unwrap();
+        assert_eq!(external.effect, AgentToolEffect::Observe);
+        assert_eq!(external.source.source_kind, ToolSourceKind::External);
+        assert_eq!(external.source.provider_id, "fixture.external");
+        assert_eq!(external.source.provider_tool_name, "lookup");
+        assert_eq!(external.source.capability_version, "1.0.0");
+        assert_eq!(
+            PolicyEngine.decide(AgentPermission::ReadOnly, external, &json!({"key":"alpha"})),
+            AgentPolicyDecision::Allow
+        );
+
+        let unavailable: Arc<dyn ToolProvider> = Arc::new(FixtureExternalProvider {
+            availability: ToolProviderAvailability::Unavailable,
+            ..FixtureExternalProvider::available()
+        });
+        assert_eq!(
+            coding_tool_catalog_with_providers(&[unavailable])
+                .unwrap()
+                .len(),
+            builtins.len()
+        );
+
+        let oversized: Arc<dyn ToolProvider> = Arc::new(FixtureExternalProvider {
+            tool_count: MAX_TOOLS_PER_PROVIDER + 1,
+            ..FixtureExternalProvider::available()
+        });
+        assert_eq!(
+            coding_tool_catalog_with_providers(&[oversized]).unwrap_err(),
+            AgentError::ToolProviderDefinitionInvalid
+        );
+    }
+
+    #[test]
+    fn routed_executor_preserves_builtin_and_classifies_external_outcomes() {
+        let (root, artifacts) = fixture();
+        let provider: Arc<dyn ToolProvider> = Arc::new(FixtureExternalProvider::available());
+        let catalog = coding_tool_catalog_with_providers(&[Arc::clone(&provider)]).unwrap();
+        let executor = RoutedToolExecutor::new(
+            ToolRuntime::new(&root, &artifacts).unwrap(),
+            catalog,
+            &[provider],
+        )
+        .unwrap();
+        let cancellation = CommandCancellation::default();
+        let external = executor
+            .execute(
+                "fixture.external.lookup",
+                &json!({"key":"alpha"}),
+                false,
+                &cancellation,
+            )
+            .unwrap();
+        assert_eq!(external.receipt["success"], json!(true));
+        assert_eq!(external.receipt["key_sha256"], sha256(b"alpha"));
+        assert_eq!(external.observation, "fixture-value:alpha");
+        let builtin = executor
+            .execute(
+                "read_file",
+                &json!({"path":"src/lib.rs"}),
+                false,
+                &cancellation,
+            )
+            .unwrap();
+        assert!(builtin.observation.contains("answer"));
+
+        let failing: Arc<dyn ToolProvider> = Arc::new(FixtureExternalProvider {
+            fail_execution: true,
+            ..FixtureExternalProvider::available()
+        });
+        let catalog = coding_tool_catalog_with_providers(&[Arc::clone(&failing)]).unwrap();
+        let executor = RoutedToolExecutor::new(
+            ToolRuntime::new(&root, &artifacts).unwrap(),
+            catalog,
+            &[failing],
+        )
+        .unwrap();
+        assert_eq!(
+            executor
+                .execute(
+                    "fixture.external.lookup",
+                    &json!({"key":"alpha"}),
+                    false,
+                    &CommandCancellation::default(),
+                )
+                .unwrap_err(),
+            AgentError::ToolProviderFailed
+        );
+        let cancelled = CommandCancellation::default();
+        cancelled.cancel();
+        assert_eq!(
+            executor
+                .execute(
+                    "fixture.external.lookup",
+                    &json!({"key":"alpha"}),
+                    false,
+                    &cancelled,
+                )
+                .unwrap_err(),
+            AgentError::Cancelled
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).unwrap();
     }
 
     #[test]

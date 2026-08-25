@@ -6,8 +6,10 @@
 //! cross the `ToolExecutor` boundary into `fielora-agent::ToolRuntime`.
 
 use fielora_agent::{
-    AgentError, CommandCancellation, CompiledContext, ContextCompiler, PolicyEngine, ToolExecution,
-    ToolExecutor, ToolReconciliationStatus, ToolRuntime, coding_tool_catalog,
+    AgentError, CommandCancellation, CompiledContext, ContextCompiler, PolicyEngine,
+    RoutedToolExecutor, ToolExecution, ToolExecutionSource, ToolExecutor, ToolProvider,
+    ToolReconciliationStatus, ToolRuntime, ToolSpec, coding_tool_catalog,
+    coding_tool_catalog_with_providers,
 };
 use fielora_contracts::*;
 use fielora_field::DomainError;
@@ -65,6 +67,7 @@ pub struct AgentCoordinator {
     compiled_contexts: Arc<Mutex<HashMap<String, CompiledContext>>>,
     transcripts: Arc<Mutex<HashMap<String, Vec<AgentModelMessage>>>>,
     input_attachments: Arc<Mutex<HashMap<String, Vec<AgentInputAttachment>>>>,
+    tool_providers: Arc<Vec<Arc<dyn ToolProvider>>>,
 }
 
 struct PreparedRun {
@@ -138,6 +141,27 @@ fn invoked_fixture_turn(turn: AgentModelTurn, started: Instant) -> InvokedModelT
 
 fn tool_result_content(receipt: &Value, observation: &str) -> String {
     format!("Receipt (trusted execution metadata): {receipt}\nObservation:\n{observation}")
+}
+
+fn receipt_with_execution_source(receipt: Value, source: &ToolExecutionSource) -> Value {
+    match receipt {
+        Value::Object(mut object) => {
+            object.insert("execution_source".into(), source.receipt_envelope());
+            Value::Object(object)
+        }
+        provider_receipt => json!({
+            "kind":"TOOL_EXECUTION",
+            "provider_receipt":provider_receipt,
+            "execution_source":source.receipt_envelope(),
+        }),
+    }
+}
+
+fn terminal_execution_source_receipt(kind: &str, source: &ToolExecutionSource) -> Value {
+    json!({
+        "kind":kind,
+        "execution_source":source.receipt_envelope(),
+    })
 }
 
 enum ToolDisposition {
@@ -381,6 +405,24 @@ impl AgentCoordinator {
         artifact_root: PathBuf,
         runtime: Handle,
     ) -> Self {
+        Self::with_tool_providers(
+            storage,
+            credentials,
+            sender,
+            artifact_root,
+            runtime,
+            Vec::new(),
+        )
+    }
+
+    pub fn with_tool_providers(
+        storage: StorageHandle,
+        credentials: Arc<WindowsCredentialStore>,
+        sender: SyncSender<Value>,
+        artifact_root: PathBuf,
+        runtime: Handle,
+        tool_providers: Vec<Arc<dyn ToolProvider>>,
+    ) -> Self {
         Self {
             storage,
             credentials,
@@ -391,7 +433,12 @@ impl AgentCoordinator {
             compiled_contexts: Arc::new(Mutex::new(HashMap::new())),
             transcripts: Arc::new(Mutex::new(HashMap::new())),
             input_attachments: Arc::new(Mutex::new(HashMap::new())),
+            tool_providers: Arc::new(tool_providers),
         }
+    }
+
+    fn available_tool_catalog(&self) -> Result<Vec<ToolSpec>, AgentError> {
+        coding_tool_catalog_with_providers(self.tool_providers.as_slice())
     }
 
     pub fn emit_reconciled(&self, commits: Vec<AgentEventCommit>) {
@@ -1224,7 +1271,13 @@ impl AgentCoordinator {
             return;
         }
 
-        let catalog = coding_tool_catalog();
+        let catalog = match self.available_tool_catalog() {
+            Ok(catalog) => catalog,
+            Err(error) => {
+                fail_run(&self.storage, &self.sender, run_id, error.code());
+                return;
+            }
+        };
         let mut observe_cache: HashMap<String, (String, bool)> = HashMap::new();
         let mut verification_nudged = false;
         let mut action_nudged = false;
@@ -1488,14 +1541,8 @@ impl AgentCoordinator {
                     else {
                         continue;
                     };
-                    let tool = match self.storage.create_agent_tool_call(
-                        run_id.clone(),
-                        proposed.name.clone(),
-                        spec.effect,
-                        AgentPolicyDecision::Allow,
-                        proposed.arguments,
-                        now_ms(),
-                    ) {
+                    let model_call_id = proposed.id.clone();
+                    let tool = match self.propose_tool_call(&prepared.run, spec, proposed, true) {
                         Ok(tool) => tool,
                         Err(_) => {
                             fail_run(
@@ -1507,15 +1554,7 @@ impl AgentCoordinator {
                             return;
                         }
                     };
-                    let _ = append_event(
-                        &self.storage,
-                        &self.sender,
-                        run_id.clone(),
-                        AgentEventKind::ToolProposed,
-                        json!({"tool_call_id":tool.id,"name":tool.name,"effect":tool.effect,"policy_decision":tool.policy_decision,"arguments":tool.arguments,"parallel_observe":true}),
-                        AgentProjectionUpdate::default(),
-                    );
-                    pending.push((proposed.id, key, tool));
+                    pending.push((model_call_id, key, tool));
                 }
                 let results = join_all(pending.iter().map(|(_, _, tool)| {
                     self.execute_observe_tool(&prepared, tool.clone(), &cancellation)
@@ -1628,16 +1667,7 @@ impl AgentCoordinator {
                     });
                     continue;
                 }
-                let decision =
-                    PolicyEngine.decide(prepared.run.permission, spec, &proposed.arguments);
-                let tool = match self.storage.create_agent_tool_call(
-                    run_id.clone(),
-                    proposed.name,
-                    spec.effect,
-                    decision,
-                    proposed.arguments,
-                    now_ms(),
-                ) {
+                let tool = match self.propose_tool_call(&prepared.run, spec, proposed, false) {
                     Ok(tool) => tool,
                     Err(_) => {
                         fail_run(
@@ -1649,14 +1679,6 @@ impl AgentCoordinator {
                         return;
                     }
                 };
-                let _ = append_event(
-                    &self.storage,
-                    &self.sender,
-                    run_id.clone(),
-                    AgentEventKind::ToolProposed,
-                    json!({"tool_call_id":tool.id,"name":tool.name,"effect":tool.effect,"policy_decision":tool.policy_decision,"arguments":tool.arguments}),
-                    AgentProjectionUpdate::default(),
-                );
                 let waiting_tool = tool.clone();
                 match self
                     .execute_tool(&prepared, tool, false, &cancellation)
@@ -3435,6 +3457,12 @@ impl AgentCoordinator {
         tool: AgentToolCallView,
         cancellation: &ExecutionCancellation,
     ) -> Result<AgentModelMessage, AgentError> {
+        let catalog = self.available_tool_catalog()?;
+        let source = catalog
+            .iter()
+            .find(|spec| spec.definition.name == tool.name)
+            .map(|spec| spec.source.clone())
+            .ok_or(AgentError::ToolNotFound)?;
         self.storage
             .update_agent_tool_call(
                 tool.id.clone(),
@@ -3449,7 +3477,7 @@ impl AgentCoordinator {
             &self.sender,
             tool.run_id.clone(),
             AgentEventKind::ToolStarted,
-            json!({"tool_call_id":tool.id,"name":tool.name}),
+            json!({"tool_call_id":tool.id,"name":tool.name,"execution_source":source.receipt_envelope()}),
             AgentProjectionUpdate::default(),
         );
         let root = prepared.project_root.clone();
@@ -3457,9 +3485,11 @@ impl AgentCoordinator {
         let name = tool.name.clone();
         let arguments = tool.arguments.clone();
         let command_cancellation = cancellation.command.clone();
+        let providers = self.tool_providers.as_ref().clone();
         let tool_started = Instant::now();
         let result = tokio::task::spawn_blocking(move || {
-            ToolRuntime::new(&root, &artifacts)?.execute(
+            let runtime = ToolRuntime::new(&root, &artifacts)?;
+            RoutedToolExecutor::new(runtime, catalog, &providers)?.execute(
                 &name,
                 &arguments,
                 false,
@@ -3470,8 +3500,8 @@ impl AgentCoordinator {
         .unwrap_or(Err(AgentError::IoFailed));
         match result {
             Ok(execution) => {
-                let receipt_kind = execution
-                    .receipt
+                let receipt = receipt_with_execution_source(execution.receipt, &source);
+                let receipt_kind = receipt
                     .get("kind")
                     .and_then(Value::as_str)
                     .map(str::to_owned);
@@ -3479,7 +3509,7 @@ impl AgentCoordinator {
                     .update_agent_tool_call(
                         tool.id.clone(),
                         AgentToolStatus::Completed,
-                        Some(execution.receipt.clone()),
+                        Some(receipt.clone()),
                         None,
                         now_ms(),
                     )
@@ -3489,13 +3519,13 @@ impl AgentCoordinator {
                     &self.sender,
                     tool.run_id,
                     AgentEventKind::ToolCompleted,
-                    json!({"tool_call_id":tool.id,"name":tool.name,"receipt_kind":receipt_kind,"duration_ms":tool_started.elapsed().as_millis(),"observation_bytes":execution.observation.len()}),
+                    json!({"tool_call_id":tool.id,"name":tool.name,"receipt_kind":receipt_kind,"duration_ms":tool_started.elapsed().as_millis(),"observation_bytes":execution.observation.len(),"execution_source":source.receipt_envelope()}),
                     AgentProjectionUpdate::default(),
                 );
                 Ok(AgentModelMessage::ToolResult {
                     call_id: tool.id.0,
                     name: tool.name,
-                    content: tool_result_content(&execution.receipt, &execution.observation),
+                    content: tool_result_content(&receipt, &execution.observation),
                     is_error: false,
                 })
             }
@@ -3510,10 +3540,18 @@ impl AgentCoordinator {
                 } else {
                     AgentEventKind::ToolFailed
                 };
+                let receipt = terminal_execution_source_receipt(
+                    if error == AgentError::Cancelled {
+                        "TOOL_EXECUTION_CANCELLED"
+                    } else {
+                        "TOOL_EXECUTION_FAILED"
+                    },
+                    &source,
+                );
                 let _ = self.storage.update_agent_tool_call(
                     tool.id.clone(),
                     status,
-                    None,
+                    Some(receipt),
                     Some(error.code().into()),
                     now_ms(),
                 );
@@ -3522,7 +3560,7 @@ impl AgentCoordinator {
                     &self.sender,
                     tool.run_id,
                     kind,
-                    json!({"tool_call_id":tool.id,"name":tool.name,"error_code":error.code(),"duration_ms":tool_started.elapsed().as_millis()}),
+                    json!({"tool_call_id":tool.id,"name":tool.name,"error_code":error.code(),"duration_ms":tool_started.elapsed().as_millis(),"execution_source":source.receipt_envelope()}),
                     AgentProjectionUpdate::default(),
                 );
                 if error == AgentError::Cancelled {
@@ -3805,6 +3843,41 @@ impl AgentCoordinator {
         Err(last_error.unwrap_or(ModelError::ProviderUnavailable))
     }
 
+    fn propose_tool_call(
+        &self,
+        run: &AgentRunView,
+        spec: &ToolSpec,
+        proposed: AgentModelToolCall,
+        parallel_observe: bool,
+    ) -> Result<AgentToolCallView, DomainError> {
+        let decision = PolicyEngine.decide(run.permission, spec, &proposed.arguments);
+        let tool = self.storage.create_agent_tool_call(
+            run.id.clone(),
+            proposed.name,
+            spec.effect,
+            decision,
+            proposed.arguments,
+            now_ms(),
+        )?;
+        append_event(
+            &self.storage,
+            &self.sender,
+            run.id.clone(),
+            AgentEventKind::ToolProposed,
+            json!({
+                "tool_call_id":tool.id,
+                "name":tool.name,
+                "effect":tool.effect,
+                "policy_decision":tool.policy_decision,
+                "arguments":tool.arguments,
+                "parallel_observe":parallel_observe,
+                "execution_source":spec.source.receipt_envelope(),
+            }),
+            AgentProjectionUpdate::default(),
+        )?;
+        Ok(tool)
+    }
+
     async fn execute_tool(
         &self,
         prepared: &PreparedRun,
@@ -3812,11 +3885,59 @@ impl AgentCoordinator {
         approved_once: bool,
         cancellation: &ExecutionCancellation,
     ) -> ToolDisposition {
+        let catalog = match self.available_tool_catalog() {
+            Ok(catalog) => catalog,
+            Err(error) => {
+                let code = error.code();
+                let _ = self.storage.update_agent_tool_call(
+                    tool.id.clone(),
+                    AgentToolStatus::Failed,
+                    None,
+                    Some(code.into()),
+                    now_ms(),
+                );
+                return ToolDisposition::Executed(ExecutedTool {
+                    message: AgentModelMessage::ToolResult {
+                        call_id: tool.id.0,
+                        name: tool.name,
+                        content: code.into(),
+                        is_error: true,
+                    },
+                    wrote_workspace: false,
+                    verification_passed: false,
+                });
+            }
+        };
+        let Some(spec) = catalog
+            .iter()
+            .find(|spec| spec.definition.name == tool.name)
+        else {
+            let _ = self.storage.update_agent_tool_call(
+                tool.id.clone(),
+                AgentToolStatus::Failed,
+                None,
+                Some(AgentError::ToolNotFound.code().into()),
+                now_ms(),
+            );
+            return ToolDisposition::Executed(ExecutedTool {
+                message: AgentModelMessage::ToolResult {
+                    call_id: tool.id.0,
+                    name: tool.name,
+                    content: AgentError::ToolNotFound.code().into(),
+                    is_error: true,
+                },
+                wrote_workspace: false,
+                verification_passed: false,
+            });
+        };
+        let execution_source = spec.source.clone();
         if tool.policy_decision == AgentPolicyDecision::Deny {
+            let receipt =
+                terminal_execution_source_receipt("TOOL_EXECUTION_DENIED", &execution_source);
             let _ = self.storage.update_agent_tool_call(
                 tool.id.clone(),
                 AgentToolStatus::Denied,
-                None,
+                Some(receipt),
                 Some("AGENT_POLICY_DENIED".into()),
                 now_ms(),
             );
@@ -3825,7 +3946,7 @@ impl AgentCoordinator {
                 &self.sender,
                 tool.run_id.clone(),
                 AgentEventKind::ToolDenied,
-                json!({"tool_call_id":tool.id,"name":tool.name,"error_code":"AGENT_POLICY_DENIED"}),
+                json!({"tool_call_id":tool.id,"name":tool.name,"error_code":"AGENT_POLICY_DENIED","execution_source":execution_source.receipt_envelope()}),
                 AgentProjectionUpdate::default(),
             );
             return ToolDisposition::Executed(ExecutedTool {
@@ -3850,7 +3971,7 @@ impl AgentCoordinator {
                         &self.sender,
                         tool.run_id,
                         AgentEventKind::ApprovalRequested,
-                        json!({"approval":approval,"tool":{"id":tool.id,"name":tool.name,"effect":tool.effect,"arguments":tool.arguments}}),
+                        json!({"approval":approval,"tool":{"id":tool.id,"name":tool.name,"effect":tool.effect,"arguments":tool.arguments,"execution_source":execution_source.receipt_envelope()}}),
                         AgentProjectionUpdate {
                             status: Some(AgentRunStatus::WaitingApproval),
                             ..Default::default()
@@ -3888,7 +4009,7 @@ impl AgentCoordinator {
             &self.sender,
             tool.run_id.clone(),
             AgentEventKind::ToolStarted,
-            json!({"tool_call_id":tool.id,"name":tool.name}),
+            json!({"tool_call_id":tool.id,"name":tool.name,"execution_source":execution_source.receipt_envelope()}),
             AgentProjectionUpdate::default(),
         );
         let root = prepared.project_root.clone();
@@ -3896,6 +4017,7 @@ impl AgentCoordinator {
         let name = tool.name.clone();
         let arguments = tool.arguments.clone();
         let command_cancellation = cancellation.command.clone();
+        let providers = self.tool_providers.as_ref().clone();
         let preset_authorized = prepared.run.permission == AgentPermission::FullControl
             && tool.policy_decision == AgentPolicyDecision::Allow;
         let tool_started = Instant::now();
@@ -3905,7 +4027,8 @@ impl AgentCoordinator {
         } else {
             tokio::task::spawn_blocking(move || {
                 let runtime = ToolRuntime::new(&root, &artifact_root)?;
-                runtime.execute(
+                let executor = RoutedToolExecutor::new(runtime, catalog, &providers)?;
+                executor.execute(
                     &name,
                     &arguments,
                     approved_once || preset_authorized,
@@ -3917,7 +4040,8 @@ impl AgentCoordinator {
         };
         match result {
             Ok(execution) => {
-                let mut receipt = execution.receipt.clone();
+                let mut receipt =
+                    receipt_with_execution_source(execution.receipt.clone(), &execution_source);
                 let verification_eligible = tool.effect == AgentToolEffect::Process
                     && verification_command(&tool.arguments);
                 if tool.effect == AgentToolEffect::Process
@@ -3994,7 +4118,7 @@ impl AgentCoordinator {
                     &self.sender,
                     tool.run_id,
                     AgentEventKind::ToolCompleted,
-                    json!({"tool_call_id":tool.id,"name":tool.name,"receipt_kind":receipt_kind,"duration_ms":tool_started.elapsed().as_millis(),"observation_bytes":execution.observation.len()}),
+                    json!({"tool_call_id":tool.id,"name":tool.name,"receipt_kind":receipt_kind,"duration_ms":tool_started.elapsed().as_millis(),"observation_bytes":execution.observation.len(),"execution_source":execution_source.receipt_envelope()}),
                     AgentProjectionUpdate::default(),
                 );
                 let wrote_workspace = matches!(
@@ -4013,11 +4137,19 @@ impl AgentCoordinator {
                 })
             }
             Err(AgentError::Cancelled) => {
+                let receipt = terminal_execution_source_receipt(
+                    if cancellation.should_pause() {
+                        "TOOL_EXECUTION_UNKNOWN"
+                    } else {
+                        "TOOL_EXECUTION_CANCELLED"
+                    },
+                    &execution_source,
+                );
                 if cancellation.should_pause() {
                     let _ = self.storage.update_agent_tool_call(
                         tool.id.clone(),
                         AgentToolStatus::Unknown,
-                        None,
+                        Some(receipt),
                         Some("CORE_SHUTDOWN".into()),
                         now_ms(),
                     );
@@ -4026,7 +4158,7 @@ impl AgentCoordinator {
                         &self.sender,
                         tool.run_id.clone(),
                         AgentEventKind::ToolUnknown,
-                        json!({"tool_call_id":tool.id,"name":tool.name,"reason":"CORE_SHUTDOWN","duration_ms":tool_started.elapsed().as_millis()}),
+                        json!({"tool_call_id":tool.id,"name":tool.name,"reason":"CORE_SHUTDOWN","duration_ms":tool_started.elapsed().as_millis(),"execution_source":execution_source.receipt_envelope()}),
                         AgentProjectionUpdate::default(),
                     );
                     let _ = self.pause_at_boundary(
@@ -4039,7 +4171,7 @@ impl AgentCoordinator {
                 let _ = self.storage.update_agent_tool_call(
                     tool.id.clone(),
                     AgentToolStatus::Cancelled,
-                    None,
+                    Some(receipt),
                     Some("AGENT_CANCELLED".into()),
                     now_ms(),
                 );
@@ -4048,7 +4180,7 @@ impl AgentCoordinator {
                     &self.sender,
                     tool.run_id,
                     AgentEventKind::ToolCancelled,
-                    json!({"tool_call_id":tool.id,"name":tool.name,"duration_ms":tool_started.elapsed().as_millis()}),
+                    json!({"tool_call_id":tool.id,"name":tool.name,"duration_ms":tool_started.elapsed().as_millis(),"execution_source":execution_source.receipt_envelope()}),
                     AgentProjectionUpdate::default(),
                 );
                 ToolDisposition::Cancelled
@@ -4056,10 +4188,12 @@ impl AgentCoordinator {
             Err(error) => {
                 let code = error.code();
                 let recovery_message = error.model_recovery_message();
+                let receipt =
+                    terminal_execution_source_receipt("TOOL_EXECUTION_FAILED", &execution_source);
                 let _ = self.storage.update_agent_tool_call(
                     tool.id.clone(),
                     AgentToolStatus::Failed,
-                    None,
+                    Some(receipt),
                     Some(code.into()),
                     now_ms(),
                 );
@@ -4068,7 +4202,7 @@ impl AgentCoordinator {
                     &self.sender,
                     tool.run_id,
                     AgentEventKind::ToolFailed,
-                    json!({"tool_call_id":tool.id,"name":tool.name,"error_code":code,"duration_ms":tool_started.elapsed().as_millis()}),
+                    json!({"tool_call_id":tool.id,"name":tool.name,"error_code":code,"duration_ms":tool_started.elapsed().as_millis(),"execution_source":execution_source.receipt_envelope()}),
                     AgentProjectionUpdate::default(),
                 );
                 ToolDisposition::Executed(ExecutedTool {
@@ -5577,6 +5711,90 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fielora_platform::{DeviceIdentity, PlatformPaths};
+    use fielora_storage::StorageWorker;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::mpsc;
+
+    struct FixtureExternalProvider {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl ToolProvider for FixtureExternalProvider {
+        fn identity(&self) -> fielora_agent::ToolProviderIdentity {
+            fielora_agent::ToolProviderIdentity {
+                id: "fixture.external".into(),
+                version: "1.0.0".into(),
+            }
+        }
+
+        fn availability(&self) -> fielora_agent::ToolProviderAvailability {
+            fielora_agent::ToolProviderAvailability::Available
+        }
+
+        fn discover_tools(
+            &self,
+            limit: usize,
+        ) -> Result<Vec<fielora_agent::ProviderToolDefinition>, fielora_agent::ToolProviderError>
+        {
+            assert_eq!(limit, 32);
+            Ok(vec![fielora_agent::ProviderToolDefinition {
+                capability_id: "fixture.external.lookup".into(),
+                capability_version: "1.0.0".into(),
+                provider_tool_name: "lookup".into(),
+                definition: ModelToolDefinition {
+                    name: "fixture.external.lookup".into(),
+                    description: "Return one deterministic fixture value.".into(),
+                    input_schema: json!({
+                        "type":"object",
+                        "properties":{"key":{"type":"string","maxLength":64}},
+                        "required":["key"],
+                        "additionalProperties":false,
+                    }),
+                },
+            }])
+        }
+
+        fn execute(
+            &self,
+            provider_tool_name: &str,
+            arguments: &Value,
+            cancellation: &CommandCancellation,
+        ) -> Result<ToolExecution, fielora_agent::ToolProviderError> {
+            if cancellation.is_cancelled() {
+                return Err(fielora_agent::ToolProviderError::Cancelled);
+            }
+            if provider_tool_name != "lookup" {
+                return Err(fielora_agent::ToolProviderError::InvalidDefinition);
+            }
+            let key = arguments
+                .get("key")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty() && value.len() <= 64)
+                .ok_or(fielora_agent::ToolProviderError::InvalidArguments)?;
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if key == "fail" {
+                return Err(fielora_agent::ToolProviderError::Failed);
+            }
+            Ok(ToolExecution {
+                receipt: json!({
+                    "kind":"EXTERNAL_FIXTURE_LOOKUP",
+                    "success":true,
+                    "key_sha256":format!("{:x}", Sha256::digest(key.as_bytes())),
+                    "execution_source":{"provider_id":"provider-cannot-author-this"},
+                }),
+                observation: format!("fixture-value:{key}"),
+            })
+        }
+    }
+
+    fn test_cancellation() -> ExecutionCancellation {
+        ExecutionCancellation {
+            model: CancellationToken::new(),
+            command: CommandCancellation::default(),
+            pause_requested: Arc::new(AtomicBool::new(false)),
+        }
+    }
 
     fn execution(wrote_workspace: bool, verification_passed: bool) -> ExecutedTool {
         ExecutedTool {
@@ -5600,6 +5818,309 @@ mod tests {
             created_at: 1,
             updated_at: 2,
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn external_provider_uses_policy_toolcall_receipt_and_verification_boundaries() {
+        let root = std::env::temp_dir().join(format!("fielora-core-provider-{}", Uuid::now_v7()));
+        let workspace = root.join("workspace");
+        let artifacts = root.join("artifacts");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::write(workspace.join("README.md"), "builtin regression\n").unwrap();
+        let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let worker = StorageWorker::start(&paths.database, device, 1).unwrap();
+        let storage = worker.handle();
+        let project = storage
+            .create_project(
+                CreateProjectRequest {
+                    title: "Provider pipeline".into(),
+                    goal: None,
+                    root_path: workspace.to_string_lossy().into_owned(),
+                },
+                2,
+            )
+            .unwrap();
+        let provider_config = storage
+            .create_provider_config(
+                CreateProviderConfigRequest {
+                    provider_kind: ProviderKind::Openai,
+                    display_name: "Fixture model provider".into(),
+                    base_url: None,
+                    default_model: "fixture-model".into(),
+                    custom_endpoint_acknowledged: false,
+                },
+                3,
+            )
+            .unwrap();
+        storage
+            .set_provider_credential_present(provider_config.view.id.clone(), true, 4)
+            .unwrap();
+        let conversation = storage
+            .create_conversation(
+                CreateConversationRequest {
+                    field_id: project.field_id.clone(),
+                    title: "Provider pipeline".into(),
+                    provider_config_id: Some(provider_config.view.id.clone()),
+                    model_id: Some("fixture-model".into()),
+                },
+                5,
+            )
+            .unwrap();
+        let created = storage
+            .create_agent_run(
+                StartAgentRunRequest {
+                    field_id: project.field_id.clone(),
+                    conversation_id: conversation.id,
+                    user_message_id: None,
+                    provider_config_id: provider_config.view.id,
+                    model_id: Some("fixture-model".into()),
+                    task: "Use the selected external lookup tool.".into(),
+                    permission: AgentPermission::ReadOnly,
+                    max_steps: Some(4),
+                    attachments: None,
+                },
+                6,
+            )
+            .unwrap();
+        let started = storage
+            .append_agent_event(
+                created.run.id.clone(),
+                AgentEventKind::RunStarted,
+                json!({}),
+                AgentProjectionUpdate {
+                    status: Some(AgentRunStatus::Running),
+                    ..Default::default()
+                },
+                7,
+            )
+            .unwrap();
+        let (sender, _receiver) = mpsc::sync_channel(256);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let external_provider: Arc<dyn ToolProvider> = Arc::new(FixtureExternalProvider {
+            calls: Arc::clone(&calls),
+        });
+        let (default_sender, _default_receiver) = mpsc::sync_channel(16);
+        let default_coordinator = AgentCoordinator::new(
+            storage.clone(),
+            Arc::new(WindowsCredentialStore),
+            default_sender,
+            artifacts.clone(),
+            Handle::current(),
+        );
+        assert!(
+            default_coordinator
+                .available_tool_catalog()
+                .unwrap()
+                .iter()
+                .all(|tool| tool.definition.name != "fixture.external.lookup")
+        );
+        drop(default_coordinator);
+        let coordinator = AgentCoordinator::with_tool_providers(
+            storage.clone(),
+            Arc::new(WindowsCredentialStore),
+            sender,
+            artifacts.clone(),
+            Handle::current(),
+            vec![external_provider],
+        );
+        let prepared = PreparedRun {
+            run: started.run,
+            endpoint: ProviderEndpoint {
+                kind: ProviderKind::Openai,
+                base_url: None,
+            },
+            project_root: workspace.canonicalize().unwrap(),
+            secret: SecretBytes::new(b"fixture".to_vec()),
+        };
+        let catalog = coordinator.available_tool_catalog().unwrap();
+        let external_spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "fixture.external.lookup")
+            .unwrap();
+        let exposed = visible_tool_definitions(
+            &catalog,
+            prepared.run.permission,
+            false,
+            false,
+            AgentTaskClass::General,
+        );
+        assert!(
+            exposed
+                .iter()
+                .any(|definition| definition.name == "fixture.external.lookup")
+        );
+
+        let success = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                external_spec,
+                AgentModelToolCall {
+                    id: "model-success".into(),
+                    name: "fixture.external.lookup".into(),
+                    arguments: json!({"key":"alpha"}),
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(success.effect, AgentToolEffect::Observe);
+        assert_eq!(success.policy_decision, AgentPolicyDecision::Allow);
+        let success_disposition = coordinator
+            .execute_tool(&prepared, success, false, &test_cancellation())
+            .await;
+        let ToolDisposition::Executed(success_result) = success_disposition else {
+            panic!("external OBSERVE tool must execute without approval")
+        };
+        assert!(!success_result.wrote_workspace);
+        assert!(!success_result.verification_passed);
+        assert!(matches!(
+            success_result.message,
+            AgentModelMessage::ToolResult {
+                is_error: false,
+                ..
+            }
+        ));
+
+        let failure = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                external_spec,
+                AgentModelToolCall {
+                    id: "model-failure".into(),
+                    name: "fixture.external.lookup".into(),
+                    arguments: json!({"key":"fail"}),
+                },
+                false,
+            )
+            .unwrap();
+        let failure_disposition = coordinator
+            .execute_tool(&prepared, failure, false, &test_cancellation())
+            .await;
+        assert!(matches!(
+            failure_disposition,
+            ToolDisposition::Executed(ExecutedTool {
+                verification_passed: false,
+                message: AgentModelMessage::ToolResult { is_error: true, .. },
+                ..
+            })
+        ));
+
+        let builtin_spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "read_file")
+            .unwrap();
+        let builtin = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                builtin_spec,
+                AgentModelToolCall {
+                    id: "model-builtin".into(),
+                    name: "read_file".into(),
+                    arguments: json!({"path":"README.md"}),
+                },
+                false,
+            )
+            .unwrap();
+        let builtin_disposition = coordinator
+            .execute_tool(&prepared, builtin, false, &test_cancellation())
+            .await;
+        assert!(matches!(
+            builtin_disposition,
+            ToolDisposition::Executed(ExecutedTool {
+                verification_passed: false,
+                message: AgentModelMessage::ToolResult {
+                    is_error: false,
+                    ..
+                },
+                ..
+            })
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+        let tools = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap();
+        let success = tools
+            .iter()
+            .find(|tool| {
+                tool.name == "fixture.external.lookup" && tool.status == AgentToolStatus::Completed
+            })
+            .unwrap();
+        let success_source = &success.receipt.as_ref().unwrap()["execution_source"];
+        assert_eq!(success_source["capability_id"], "fixture.external.lookup");
+        assert_eq!(success_source["capability_version"], "1.0.0");
+        assert_eq!(success_source["source_kind"], "EXTERNAL");
+        assert_eq!(success_source["provider_id"], "fixture.external");
+        assert_eq!(success_source["provider_tool_name"], "lookup");
+        assert_eq!(
+            success.receipt.as_ref().unwrap()["key_sha256"],
+            format!("{:x}", Sha256::digest(b"alpha"))
+        );
+        let failure = tools
+            .iter()
+            .find(|tool| {
+                tool.name == "fixture.external.lookup" && tool.status == AgentToolStatus::Failed
+            })
+            .unwrap();
+        assert_eq!(
+            failure.error_code.as_deref(),
+            Some("AGENT_TOOL_PROVIDER_FAILED")
+        );
+        assert_eq!(
+            failure.receipt.as_ref().unwrap()["execution_source"]["provider_id"],
+            "fixture.external"
+        );
+        let builtin = tools.iter().find(|tool| tool.name == "read_file").unwrap();
+        assert_eq!(builtin.status, AgentToolStatus::Completed);
+        assert_eq!(
+            builtin.receipt.as_ref().unwrap()["execution_source"]["source_kind"],
+            "BUILTIN"
+        );
+
+        let events = storage
+            .list_agent_events(ListAgentEventsRequest {
+                run_id: prepared.run.id.clone(),
+                after_sequence: None,
+                limit: Some(200),
+            })
+            .unwrap();
+        assert!(events.iter().any(|event| {
+            event.kind == AgentEventKind::ToolProposed
+                && event.payload["execution_source"]["provider_id"] == "fixture.external"
+                && event.payload["policy_decision"] == "ALLOW"
+        }));
+        assert!(events.iter().any(|event| {
+            event.kind == AgentEventKind::ToolCompleted
+                && event.payload["execution_source"]["provider_id"] == "fixture.external"
+        }));
+        assert!(events.iter().any(|event| {
+            event.kind == AgentEventKind::ToolFailed
+                && event.payload["execution_source"]["provider_id"] == "fixture.external"
+                && event.payload["error_code"] == "AGENT_TOOL_PROVIDER_FAILED"
+        }));
+        assert!(
+            events
+                .iter()
+                .all(|event| event.kind != AgentEventKind::VerificationRecorded)
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| event.kind != AgentEventKind::RunCompleted)
+        );
+        assert_eq!(
+            storage
+                .get_agent_run(prepared.run.id.clone())
+                .unwrap()
+                .status,
+            AgentRunStatus::Running
+        );
+
+        drop(coordinator);
+        drop(storage);
+        drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
