@@ -6,6 +6,12 @@
 //! durable receipts, and completion semantics.
 
 pub mod mcp;
+mod skills;
+
+pub use skills::{
+    CompiledSkillContext, LoadedSkill, SkillCatalog, SkillCatalogEntry, SkillDiagnostic,
+    SkillSourceKind,
+};
 
 use fielora_contracts::{
     AgentPermission, AgentPolicyDecision, AgentRunStatus, AgentToolEffect, ModelToolDefinition,
@@ -37,6 +43,7 @@ const MAX_TOOLS_PER_PROVIDER: usize = 32;
 const MAX_PROVIDER_SCHEMA_BYTES: usize = 64 * 1024;
 const MAX_PROVIDER_RECEIPT_BYTES: usize = 64 * 1024;
 const MAX_PROVIDER_OBSERVATION_BYTES: usize = 64 * 1024;
+const REPOSITORY_CONTEXT_INDEX_SCHEMA_VERSION: u16 = 2;
 const BUILTIN_SKILLS: &[(&str, &str, &str)] = &[
     (
         "understand_project",
@@ -114,6 +121,10 @@ pub enum AgentError {
     ToolProviderFailed,
     #[error("AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN")]
     ToolProviderOutcomeUnknown,
+    #[error("AGENT_SKILL_INVALID")]
+    SkillInvalid,
+    #[error("AGENT_SKILL_CHANGED")]
+    SkillChanged,
     #[error("AGENT_IO_FAILED")]
     IoFailed,
 }
@@ -140,6 +151,8 @@ impl AgentError {
             Self::ToolProviderDefinitionInvalid => "AGENT_TOOL_PROVIDER_DEFINITION_INVALID",
             Self::ToolProviderFailed => "AGENT_TOOL_PROVIDER_FAILED",
             Self::ToolProviderOutcomeUnknown => "AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN",
+            Self::SkillInvalid => "AGENT_SKILL_INVALID",
+            Self::SkillChanged => "AGENT_SKILL_CHANGED",
             Self::IoFailed => "AGENT_IO_FAILED",
         }
     }
@@ -370,13 +383,13 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
         ),
         tool(
             "list_skills",
-            "List focused built-in Agent skills available for progressive disclosure.",
+            "List metadata for focused built-in and project Agent Skills available for progressive disclosure.",
             AgentToolEffect::Observe,
             json!({"type":"object","properties":{},"additionalProperties":false}),
         ),
         tool(
             "load_skill",
-            "Load one focused built-in Agent skill by stable name.",
+            "Load one focused Agent Skill through bounded ContextCompiler admission by stable name.",
             AgentToolEffect::Observe,
             json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
         ),
@@ -938,7 +951,10 @@ fn prepare_repository_index(
         .as_ref()
         .and_then(|path| fs::read(path).ok())
         .and_then(|bytes| serde_json::from_slice::<RepositoryContextIndex>(&bytes).ok())
-        .filter(|index| index.schema_version == 1 && index.project_root_hash == project_root_hash);
+        .filter(|index| {
+            index.schema_version == REPOSITORY_CONTEXT_INDEX_SCHEMA_VERSION
+                && index.project_root_hash == project_root_hash
+        });
     let previous_entries = previous
         .as_ref()
         .map(|index| {
@@ -953,7 +969,7 @@ fn prepare_repository_index(
     let mut invalidated_files = previous_entries.len().saturating_sub(paths.len()) as u32;
     let mut entries = Vec::new();
     for relative in paths.into_iter().take(MAX_REPO_FILES) {
-        if sensitive_relative(&relative) {
+        if sensitive_relative(&relative) || is_project_skill_bundle(&relative) {
             continue;
         }
         let absolute = resolve_existing(root, &relative)?;
@@ -982,7 +998,7 @@ fn prepare_repository_index(
             .as_ref()
             .is_some_and(|index| index.entries.len() == entries.len());
     let index = RepositoryContextIndex {
-        schema_version: 1,
+        schema_version: REPOSITORY_CONTEXT_INDEX_SCHEMA_VERSION,
         project_root_hash,
         git_head: repository_git_head(root),
         entries,
@@ -1169,6 +1185,7 @@ fn repository_files(root: &Path) -> Result<Vec<PathBuf>, AgentError> {
             .filter(|bytes| !bytes.is_empty())
             .filter_map(|bytes| std::str::from_utf8(bytes).ok())
             .filter_map(|path| normalize_relative(path).ok())
+            .filter(|path| !is_project_skill_bundle(path))
             .take(MAX_REPO_FILES)
             .collect::<Vec<_>>();
         if !paths.is_empty() {
@@ -1203,6 +1220,9 @@ fn collect_files(
             if ignored_directory(&name) {
                 continue;
             }
+            if path.strip_prefix(root).is_ok_and(is_project_skill_bundle) {
+                continue;
+            }
             collect_files(root, &path, depth + 1, max_depth, files)?;
         } else if entry
             .file_type()
@@ -1217,6 +1237,11 @@ fn collect_files(
         }
     }
     Ok(())
+}
+
+fn is_project_skill_bundle(relative: &Path) -> bool {
+    let relative = relative_text(relative).to_ascii_lowercase();
+    relative == ".agents/skills" || relative.starts_with(".agents/skills/")
 }
 
 fn ignored_directory(name: &str) -> bool {
@@ -1389,10 +1414,19 @@ impl<E: ToolExecutor> ToolExecutor for RoutedToolExecutor<E> {
 pub struct ToolRuntime {
     root: PathBuf,
     checkpoint_root: PathBuf,
+    skill_catalog: SkillCatalog,
 }
 
 impl ToolRuntime {
     pub fn new(project_root: &Path, artifact_root: &Path) -> Result<Self, AgentError> {
+        Self::with_skill_catalog(project_root, artifact_root, SkillCatalog::builtin_only())
+    }
+
+    pub fn with_skill_catalog(
+        project_root: &Path,
+        artifact_root: &Path,
+        skill_catalog: SkillCatalog,
+    ) -> Result<Self, AgentError> {
         let root = project_root
             .canonicalize()
             .map_err(|_| AgentError::IoFailed)?;
@@ -1401,6 +1435,7 @@ impl ToolRuntime {
         Ok(Self {
             root,
             checkpoint_root,
+            skill_catalog,
         })
     }
 
@@ -2167,12 +2202,15 @@ impl ToolRuntime {
         #[serde(deny_unknown_fields)]
         struct Args {}
         let _: Args = parse_args(arguments)?;
-        let skills = BUILTIN_SKILLS
-            .iter()
-            .map(|(name, summary, _)| json!({"name":name,"summary":summary,"version":1}))
-            .collect::<Vec<_>>();
+        let skills = self.skill_catalog.tier_one_metadata();
         Ok(ToolExecution {
-            receipt: json!({"kind":"SKILL_LIST","count":skills.len()}),
+            receipt: json!({
+                "kind":"SKILL_LIST",
+                "count":skills.len(),
+                "catalog_sha256":self.skill_catalog.catalog_sha256(),
+                "diagnostic_count":self.skill_catalog.diagnostics().len(),
+                "diagnostics":self.skill_catalog.diagnostics(),
+            }),
             observation: bounded_observation(
                 serde_json::to_string_pretty(&skills).unwrap_or_default(),
             ),
@@ -2186,17 +2224,12 @@ impl ToolRuntime {
             name: String,
         }
         let args: Args = parse_args(arguments)?;
-        let Some((name, summary, instructions)) = BUILTIN_SKILLS
-            .iter()
-            .find(|(name, _, _)| *name == args.name)
-        else {
-            return Err(AgentError::ToolArgumentsInvalid);
-        };
+        let loaded = self
+            .skill_catalog
+            .load_skill(&args.name, &ContextCompiler::default())?;
         Ok(ToolExecution {
-            receipt: json!({"kind":"SKILL_LOADED","name":name,"version":1}),
-            observation: bounded_observation(format!(
-                "Skill: {name}\nPurpose: {summary}\n\n{instructions}"
-            )),
+            receipt: loaded.receipt,
+            observation: bounded_observation(loaded.context.rendered),
         })
     }
 
@@ -3756,11 +3789,28 @@ mod tests {
     fn context_compiler_is_bounded_relevant_and_secret_excluding() {
         let (root, artifacts) = fixture();
         fs::write(root.join(".env"), "API_KEY=secret").unwrap();
+        fs::create_dir_all(root.join(".agents/skills/eager-body")).unwrap();
+        fs::write(
+            root.join(".agents/skills/eager-body/SKILL.md"),
+            "---\nname: eager-body\ndescription: Must remain Tier 1.\n---\nEAGER_SKILL_BODY_SENTINEL",
+        )
+        .unwrap();
         let context = ContextCompiler::default()
-            .compile(&root, "fix answer in lib", &["src/lib.rs".into()])
+            .compile(
+                &root,
+                "fix answer in lib EAGER_SKILL_BODY_SENTINEL",
+                &["src/lib.rs".into()],
+            )
             .unwrap();
         assert!(context.files.iter().any(|file| file.path == "src/lib.rs"));
         assert!(!context.files.iter().any(|file| file.path == ".env"));
+        assert!(
+            context
+                .files
+                .iter()
+                .all(|file| !file.path.starts_with(".agents/skills/"))
+        );
+        assert!(!context.rendered.contains("EAGER_SKILL_BODY_SENTINEL"));
         assert!(context.rendered.contains("answer"));
         let selected = context
             .files

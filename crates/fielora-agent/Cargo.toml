@@ -17,3 +17,4 @@ tokio.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 uuid.workspace = true
 windows-sys.workspace = true
+yaml_serde.workspace = true
