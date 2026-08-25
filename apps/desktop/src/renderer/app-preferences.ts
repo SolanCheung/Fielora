@@ -135,14 +135,18 @@ export function readAppPreferences(storage: Pick<PreferenceStorage, 'getItem'>):
   try {
     const raw = storage.getItem(STORAGE_KEY) ?? storage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return freshDefaults();
-    const parsed = record(JSON.parse(raw));
-    if (!parsed) return freshDefaults();
-    return {
-      version: 2,
-      startupDestination: oneOf(parsed.startupDestination, ['PROJECTS', 'NOW', 'BROWSE'], defaultAppPreferences.startupDestination),
-      appearance: normalizeAppearance(parsed.appearance, parsed),
-    };
+    return normalizeAppPreferences(JSON.parse(raw));
   } catch { return freshDefaults(); }
+}
+
+export function normalizeAppPreferences(value: unknown): AppPreferences {
+  const parsed = record(value);
+  if (!parsed) return freshDefaults();
+  return {
+    version: 2,
+    startupDestination: oneOf(parsed.startupDestination, ['PROJECTS', 'NOW', 'BROWSE'], defaultAppPreferences.startupDestination),
+    appearance: normalizeAppearance(parsed.appearance, parsed),
+  };
 }
 
 export function writeAppPreferences(storage: Pick<PreferenceStorage, 'setItem'>, preferences: AppPreferences): void {

@@ -6,7 +6,7 @@ import type {
 import {
   defaultAppearancePreferences, exportThemeConfig, importThemeConfig, selectedAccent,
 } from './app-preferences';
-import { SelectMenu, TextActionDialog } from './UiPrimitives';
+import { SelectMenu, SettingsToggle, TextActionDialog } from './UiPrimitives';
 
 interface AppearanceSettingsProps {
   appearance: AppearancePreferences;
@@ -38,10 +38,6 @@ const advancedColors: Array<{ key: AdvancedColorKey; label: string; light: strin
 
 function Segment<T extends string>({ value, options, onChange, label }: { value: T; options: Array<{ value: T; label: string }>; onChange: (value: T) => void; label: string }) {
   return <div className="appearance-segment" role="radiogroup" aria-label={label}>{options.map((option) => <button type="button" key={option.value} role="radio" aria-checked={value === option.value} onClick={() => onChange(option.value)}>{option.label}</button>)}</div>;
-}
-
-function SettingSwitch({ value, onChange, label, testId }: { value: boolean; onChange: (value: boolean) => void; label: string; testId: string }) {
-  return <button type="button" className="setting-switch" role="switch" aria-label={label} aria-checked={value} onClick={() => onChange(!value)} data-testid={testId}><span/></button>;
 }
 
 function MiniWorkspace({ kind = 'live' }: { kind?: 'live' | 'system' | 'light' | 'dark' }) {
@@ -106,7 +102,7 @@ export function AppearanceSettings({ appearance, onChange }: AppearanceSettingsP
         <div className="appearance-setting-row accent-setting"><span><strong>强调色</strong><small>只用于选中状态、主操作、链接与焦点。</small></span><div className="accent-options">{accents.map((accent) => <button type="button" key={accent.value} aria-pressed={appearance.accentPreset === accent.value} title={accent.label} onClick={() => update({ accentPreset: accent.value })}><i style={accent.color === 'custom' ? { background: appearance.customAccent } : { background: accent.color }}/><span>{accent.label}</span></button>)}</div></div>
         {appearance.accentPreset === 'CUSTOM' && <label className="appearance-setting-row color-picker-row"><span><strong>自定义强调色</strong><small>{appearance.customAccent}</small></span><input type="color" value={appearance.customAccent} onChange={(event) => update({ customAccent: event.target.value.toUpperCase() })} aria-label="自定义强调色" data-testid="appearance-custom-accent" /></label>}
         <div className="appearance-setting-row"><span><strong>对比度</strong><small>调整次级文字、边框和选中 Surface 的区分度。</small></span><Segment value={appearance.contrast} label="对比度" onChange={(contrast: InterfaceContrast) => update({ contrast })} options={[{ value: 'SOFT', label: '较柔和' }, { value: 'STANDARD', label: '标准' }, { value: 'HIGH', label: '较高' }]}/></div>
-        <div className="appearance-setting-row"><span><strong>高对比度</strong><small>强化文字、边框、焦点环和选中状态。</small></span><SettingSwitch value={appearance.highContrast} onChange={(highContrast) => update({ highContrast })} label="高对比度" testId="appearance-high-contrast"/></div>
+        <div className="appearance-setting-row"><span><strong>高对比度</strong><small>强化文字、边框、焦点环和选中状态。</small></span><SettingsToggle value={appearance.highContrast} onChange={(highContrast) => update({ highContrast })} label="高对比度" testId="appearance-high-contrast"/></div>
       </div>
     </section>
 
@@ -115,8 +111,8 @@ export function AppearanceSettings({ appearance, onChange }: AppearanceSettingsP
       <div className="appearance-card">
         <div className="appearance-setting-row"><span><strong>界面密度</strong><small>Coding Workspace 可用紧凑模式显示更多内容。</small></span><Segment value={appearance.density} label="界面密度" onChange={(density: InterfaceDensity) => update({ density })} options={[{ value: 'COMFORTABLE', label: '舒适' }, { value: 'STANDARD', label: '标准' }, { value: 'COMPACT', label: '紧凑' }]}/></div>
         <div className="appearance-setting-row"><span><strong>界面圆角</strong><small>统一控制列表、Surface、弹窗与 Composer。</small></span><Segment value={appearance.radius} label="界面圆角" onChange={(radius: InterfaceRadius) => update({ radius })} options={[{ value: 'SMALL', label: '小' }, { value: 'STANDARD', label: '标准' }, { value: 'LARGE', label: '大' }]}/></div>
-        <div className="appearance-setting-row"><span><strong>半透明侧边栏</strong><small>使用稳定的柔和着色与轻量模糊，不穿透外部网页。</small></span><SettingSwitch value={appearance.translucentSidebar} onChange={(translucentSidebar) => update({ translucentSidebar })} label="半透明侧边栏" testId="appearance-translucent-sidebar"/></div>
-        <div className="appearance-setting-row"><span><strong>柔和层次</strong><small>为 Composer、Popover 与 Dialog 增加极弱阴影。</small></span><SettingSwitch value={appearance.softElevation} onChange={(softElevation) => update({ softElevation })} label="柔和层次" testId="appearance-soft-elevation"/></div>
+        <div className="appearance-setting-row"><span><strong>半透明侧边栏</strong><small>使用稳定的柔和着色与轻量模糊，不穿透外部网页。</small></span><SettingsToggle value={appearance.translucentSidebar} onChange={(translucentSidebar) => update({ translucentSidebar })} label="半透明侧边栏" testId="appearance-translucent-sidebar"/></div>
+        <div className="appearance-setting-row"><span><strong>柔和层次</strong><small>为 Composer、Popover 与 Dialog 增加极弱阴影。</small></span><SettingsToggle value={appearance.softElevation} onChange={(softElevation) => update({ softElevation })} label="柔和层次" testId="appearance-soft-elevation"/></div>
       </div>
     </section>
 
@@ -133,8 +129,8 @@ export function AppearanceSettings({ appearance, onChange }: AppearanceSettingsP
       <div className="appearance-section-heading"><span><em>05</em><strong id="appearance-motion-title">动效与交互</strong></span></div>
       <div className="appearance-card">
         <div className="appearance-setting-row"><span><strong>减少动态效果</strong><small>保留进度与 Agent 状态等必要反馈。</small></span><SelectMenu value={appearance.reducedMotionPreference} onChange={(value) => update({ reducedMotionPreference: value as ReducedMotionPreference })} ariaLabel="减少动态效果" testId="appearance-reduced-motion" options={[{ value: 'SYSTEM', label: '系统' }, { value: 'REDUCE', label: '开启' }, { value: 'FULL', label: '关闭' }]}/></div>
-        <div className="appearance-setting-row"><span><strong>平滑滚动</strong><small>应用于 Fielora 自身滚动区域。</small></span><SettingSwitch value={appearance.smoothScrolling} onChange={(smoothScrolling) => update({ smoothScrolling })} label="平滑滚动" testId="appearance-smooth-scrolling"/></div>
-        <div className="appearance-setting-row"><span><strong>使用指针光标</strong><small>按钮和交互元素使用指针，不影响编辑器与调整手柄。</small></span><SettingSwitch value={appearance.pointerCursor} onChange={(pointerCursor) => update({ pointerCursor })} label="使用指针光标" testId="appearance-pointer-cursor"/></div>
+        <div className="appearance-setting-row"><span><strong>平滑滚动</strong><small>应用于 Fielora 自身滚动区域。</small></span><SettingsToggle value={appearance.smoothScrolling} onChange={(smoothScrolling) => update({ smoothScrolling })} label="平滑滚动" testId="appearance-smooth-scrolling"/></div>
+        <div className="appearance-setting-row"><span><strong>使用指针光标</strong><small>按钮和交互元素使用指针，不影响编辑器与调整手柄。</small></span><SettingsToggle value={appearance.pointerCursor} onChange={(pointerCursor) => update({ pointerCursor })} label="使用指针光标" testId="appearance-pointer-cursor"/></div>
       </div>
     </section>
 

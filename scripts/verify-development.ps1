@@ -9,6 +9,11 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location -LiteralPath $repoRoot
 
+& node 'scripts/check-node-version.cjs'
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
 function Invoke-Gate([string]$Name, [scriptblock]$Command) {
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     Write-Output "GATE_START $Name"

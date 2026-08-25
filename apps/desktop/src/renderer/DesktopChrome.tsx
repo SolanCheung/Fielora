@@ -71,6 +71,8 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
   };
   const toggleSidebar = () => setSidebarCollapsed((value) => !value);
   const settingsRoute = route.route === 'SETTINGS';
+  const globalPageRoute = route.route === 'NOW' || route.route === 'LIBRARY' || settingsRoute;
+  const workspaceControlsVisible = !globalPageRoute || toolsOpen;
 
   function openUtility(view: UtilityView) {
     if (settingsRoute) return;
@@ -254,12 +256,12 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
       </nav>
       <div className="chrome-drag-region" />
     </header>
-    <div ref={workAreaRef} className={`desktop-work-area ${toolsOpen ? 'utility-open' : renderTools ? 'utility-closing' : ''} ${focusMode && toolsOpen ? 'utility-focus' : ''} ${terminalLayout.open ? 'terminal-open' : ''} ${settingsRoute ? 'settings-route' : ''}`} style={layoutStyle} data-testid="desktop-work-area">
+    <div ref={workAreaRef} className={`desktop-work-area ${toolsOpen ? 'utility-open' : renderTools ? 'utility-closing' : ''} ${focusMode && toolsOpen ? 'utility-focus' : ''} ${terminalLayout.open ? 'terminal-open' : ''} ${settingsRoute ? 'settings-route' : ''}`} style={layoutStyle} data-testid="desktop-work-area" data-surface-context={workspaceControlsVisible ? 'workspace' : 'global'}>
       <div className="desktop-content">{children}</div>
       {renderTools && !settingsRoute && route.route !== 'PROJECTS' && <ResizableDivider label="调整右侧工具区宽度" value={utilityWidth} min={utilityMin} max={utilityMaximum()} onResize={resizeUtility} onKeyboardResize={resizeUtilityBy} testId="utility-resizer" className="utility-resizer" />}
       {renderTools && !settingsRoute && route.route !== 'PROJECTS' && <aside className={`utility-launcher view-${utilityView.toLowerCase()}`} aria-hidden={!toolsOpen} data-testid="utility-launcher">
         <header><div>{utilityView !== 'HOME' && <button className="utility-back" aria-label="返回工具列表" onClick={() => setUtilityView('HOME')}>←</button>}<strong>{utilityView === 'BROWSER' ? '浏览器' : '工作区工具'}</strong></div></header>
-        {utilityView === 'BROWSER' ? <BrowsePanel browser={window.fielora.browser} /> : <>
+        {utilityView === 'BROWSER' ? <BrowsePanel browser={window.fielora.browser} onSaveToLibrary={(input) => window.fielora.library.saveWeb(input)} onOpenBrowserSettings={() => emit('fielora:open-settings', 'BROWSER')} /> : <>
           <nav>
             <button onClick={() => openWorkspace('DIFF')} data-testid="utility-review"><ShellIcon name="diff"/><span>审阅</span><kbd>Ctrl+Shift+G</kbd></button>
             <button onClick={() => setUtilityView('BROWSER')} data-testid="utility-browser"><ShellIcon name="browse"/><span>浏览器</span><kbd>Ctrl+T</kbd></button>
@@ -270,7 +272,7 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
         </>}
       </aside>}
       {!settingsRoute && route.route === 'PROJECTS' && <aside className="project-context-controls" aria-label="Project 控制" data-testid="project-context-controls"><div id="desktop-project-actions-layer" className="desktop-project-actions-layer" data-testid="desktop-project-actions-layer" /></aside>}
-      {!settingsRoute && <aside className={`utility-control-dock ${toolsOpen || projectDockOpen ? 'in-utility' : 'floating'}`} aria-label="工作区控制" data-testid="utility-rail">
+      {!settingsRoute && workspaceControlsVisible && <aside className={`utility-control-dock ${toolsOpen || projectDockOpen ? 'in-utility' : 'floating'}`} aria-label="工作区控制" data-testid="utility-rail">
         {(toolsOpen || projectDockOpen) && <ToolbarAction active={route.route === 'PROJECTS' ? projectDockFocus : focusMode} label={(route.route === 'PROJECTS' ? projectDockFocus : focusMode) ? '恢复左右工作区' : '扩展右侧工具区'} icon={<ChromeGlyph name="focus"/>} onClick={() => route.route === 'PROJECTS' ? emit('fielora:toggle-workspace-focus') : toggleFocus()} testId="rail-focus" />}
         {route.route === 'PROJECTS' && <ToolbarAction active={terminalLayout.open} label={terminalLayout.open ? '关闭底部终端' : '打开底部终端'} icon={<ShellIcon name="terminal"/>} onClick={() => emit('fielora:toggle-terminal')} testId="rail-terminal" />}
         <ToolbarAction active={route.route === 'PROJECTS' ? projectDockOpen : toolsOpen} label={(route.route === 'PROJECTS' ? projectDockOpen : toolsOpen) ? '收起右侧工具区' : '展开右侧工具区'} icon={<ChromeGlyph name="tools"/>} onClick={() => route.route === 'PROJECTS' ? (projectDockOpen ? emit('fielora:close-workspace-dock') : emit('fielora:open-workspace-launcher')) : (toolsOpen ? closeUtility() : openUtility('HOME'))} testId="chrome-tools" />

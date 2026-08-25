@@ -7,6 +7,7 @@ import fieloraLogo from '../../assets/fielora-logo.svg';
 import { PrimaryNav } from './PrimaryNav';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { SettingsScreen, type SettingsCategory } from './SettingsScreen';
+import { LibraryScreen } from './LibraryScreen';
 import { SelectMenu, TextActionDialog } from './UiPrimitives';
 import { applyAppPreferences, readAppPreferences, resolveTheme, writeAppPreferences, type AppPreferences } from './app-preferences';
 import type { AppView } from './view-state';
@@ -212,7 +213,7 @@ export function App() {
     const navigate = (event: Event) => {
       const target = (event as CustomEvent<AppView>).detail;
       if (target === 'BROWSE') { goBrowse(); return; }
-      if (['PROJECTS', 'NOW', 'FIELDS', 'SETTINGS'].includes(target)) navigateTo(target);
+      if (['PROJECTS', 'NOW', 'LIBRARY', 'FIELDS', 'SETTINGS'].includes(target)) navigateTo(target);
     };
     const back = () => moveNavigation(-1);
     const forward = () => moveNavigation(1);
@@ -224,7 +225,7 @@ export function App() {
     };
     const openSettings = (event: Event) => {
       const category = (event as CustomEvent<SettingsCategory>).detail;
-      if (['GENERAL', 'APPEARANCE', 'MODELS', 'SHORTCUTS', 'ABOUT'].includes(category)) setSettingsCategory(category);
+      if (['GENERAL', 'APPEARANCE', 'MODELS', 'STORAGE_DATA', 'SHORTCUTS', 'ABOUT', 'BROWSER'].includes(category)) setSettingsCategory(category);
       navigateTo('SETTINGS');
     };
     window.addEventListener('fielora:navigate', navigate);
@@ -251,6 +252,8 @@ export function App() {
   }
 
   if (screen === 'projects') return <ProjectWorkspace onNow={goNow} onBrowse={goBrowse} onFields={goFields} onSettings={goSettings} newConversationRequest={newConversationRequest} addProjectRequest={addProjectRequest} workspaceRequest={workspaceRequest} />;
+
+  if (screen === 'library') return <LibraryScreen onProjects={goProjects} onNow={goNow} onBrowse={goBrowse} onFields={goFields} onNewConversation={goNewConversation} onSettings={goSettings} />;
 
   if (screen === 'settings') return <SettingsScreen preferences={preferences} onChange={updatePreferences} onBack={() => navigationIndex.current > 0 ? moveNavigation(-1) : goProjects()} initialCategory={settingsCategory} />;
 

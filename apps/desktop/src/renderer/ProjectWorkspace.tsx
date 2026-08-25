@@ -1108,6 +1108,14 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     } catch (reason) { setError(reasonMessage(reason)); }
   }
 
+  async function rebindProject(targetProject: ProjectView) {
+    setError('');
+    try {
+      const rebound = await window.fielora.project.rebind({ field_id: targetProject.field_id });
+      if (rebound) await refreshProjects(rebound.field_id);
+    } catch (reason) { setError(reasonMessage(reason)); }
+  }
+
   async function createConversationFor(targetProject: ProjectView): Promise<ConversationView | null> {
     const fieldId = targetProject.field_id;
     setProjectId(fieldId);
@@ -1895,7 +1903,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       </DockResourceLayout>}
       {tab.kind === 'IMAGE' && imageAttachment && <DockResourceLayout fileTree={dockFileTree} treeWidth={dockFileTreeWidth} treeCollapsed={dockFileTreeCollapsed} onTreeWidthChange={updateDockFileTreeWidth}><div className="dock-image-preview" data-testid="file-image-preview"><button type="button" aria-label={`放大 ${imageAttachment.name}`} onClick={() => setPreviewAttachment(imageAttachment)} onContextMenu={(event) => openImageContextMenu(event, imageAttachment)}><img src={imageAttachment.data_url ?? ''} alt={imageAttachment.name}/></button><small>{imageAttachment.mime_type} · {Math.max(1, Math.ceil(imageAttachment.size / 1024))} KB · 点击放大</small></div></DockResourceLayout>}
       {tab.kind === 'REVIEW' && <div className="diff-workspace">{draft ? <><header><div><p className="eyebrow">REVIEW</p><h3>{draft.relativePath}</h3></div><span>写入前不会修改磁盘</span></header><pre className="diff-view" data-testid="diff-view">{draft.diff}</pre><footer><button className="secondary-button" onClick={() => { setDraft(null); setEditorContent(selectedFile?.content ?? ''); if (selectedFile) ensureDockTab({ id: `file:${selectedFile.relative_path}`, kind: 'FILE', label: fileTabLabel(selectedFile.relative_path), icon: 'files', relativePath: selectedFile.relative_path }); else openDockTool('FILES'); }}>放弃</button><button className="primary-button" onClick={() => void acceptDraft()} data-testid="accept-change">接受变更</button></footer></> : (tab.reviewSelection?.review ?? displayedAgentReview).files.length > 0 ? <AgentHumanReview review={tab.reviewSelection?.review ?? displayedAgentReview} task={tab.reviewSelection?.task ?? agentRun?.task ?? conversation?.title ?? ''} runId={tab.reviewSelection?.runId ?? agentRun?.id ?? ''} selectedPathHint={tab.relativePath ?? agentReviewPath} onOpenFile={(path) => void openAgentReviewFile(path)}/> : <div className="workspace-blank"><h3>{conversation ? '本次任务没有文件变更' : '当前 Project 没有可审阅的变更'}</h3><p>文件写入、补丁和替换会显示在这里。</p></div>}</div>}
-      {tab.kind === 'BROWSER' && <BrowsePanel browser={window.fielora.browser}/>}
+      {tab.kind === 'BROWSER' && <BrowsePanel browser={window.fielora.browser} onSaveToLibrary={(input) => window.fielora.library.saveWeb(input)} onOpenBrowserSettings={() => window.dispatchEvent(new CustomEvent('fielora:open-settings', { detail: 'BROWSER' }))}/>}
       {tab.kind === 'TERMINAL' && <div className="right-terminal-view" data-testid="terminal-dock"><TerminalSession workingDirectory={terminalWorkingDirectory || project.root_path} command={terminalCommand} lastCommand={terminalLastCommand} output={terminalOutput} running={Boolean(terminalRunId)} active={workspaceOpen && tab.id === activeDockTabId} onCommandChange={setTerminalCommand} onRun={() => void runTerminal(terminalCommand, 'RIGHT')} onCancel={() => terminalRunId ? void window.fielora.workspace.cancelTerminal({ run_id: terminalRunId }) : undefined} testId="terminal"/></div>}
     </section>;
   }) : null;
@@ -1949,6 +1957,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
             <div className={`project-item-row ${item.field_id === projectId ? 'active' : ''}`} onContextMenu={(event) => { event.preventDefault(); setProjectContextMenu({ project: item, left: Math.max(8, Math.min(window.innerWidth - 184, event.clientX)), top: Math.max(8, Math.min(window.innerHeight - 116, event.clientY)) }); }} data-testid={`project-row-${item.field_id}`}>
               <button className="project-item" title={item.root_path} onClick={() => { setNewConversationStart(false); if (item.field_id === projectId) { setCollapsedProjectIds((current) => { const next = new Set(current); if (next.has(item.field_id)) next.delete(item.field_id); else next.add(item.field_id); return next; }); return; } setProjectId(item.field_id); setCollapsedProjectIds((current) => { if (!current.has(item.field_id)) return current; const next = new Set(current); next.delete(item.field_id); return next; }); }} onKeyDown={(event) => { if (!(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); setProjectContextMenu({ project: item, left: Math.max(8, Math.min(window.innerWidth - 184, bounds.left + 28)), top: Math.max(8, Math.min(window.innerHeight - 116, bounds.bottom)) }); }} aria-haspopup="menu" aria-expanded={item.field_id === projectId && !collapsedProjectIds.has(item.field_id)} data-testid={`project-${item.field_id}`}><span className="project-expand-indicator"><ShellIcon name="chevronDown"/></span><ShellIcon name={item.field_id === projectId ? 'folderOpen' : 'folder'}/><div><strong>{item.title}</strong></div></button>
               <div className="project-item-actions">
+                {!item.root_path && <button type="button" aria-label={`定位 ${item.title}`} title="原位置不可用，定位 Project" onClick={() => void rebindProject(item)} data-testid={`project-rebind-${item.field_id}`}><ShellIcon name="folderOpen"/></button>}
                 <button type="button" aria-label={`在 ${item.title} 新建对话`} title="新建对话" onClick={() => void createConversationFor(item)} data-testid={`project-new-conversation-${item.field_id}`}><ShellIcon name="plus"/></button>
                 <button type="button" aria-label={`编辑 ${item.title}`} title="编辑项目" onClick={() => setProjectDialog({ project: item, value: item.title })} data-testid={`project-edit-${item.field_id}`}><ShellIcon name="edit"/></button>
               </div>

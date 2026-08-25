@@ -1548,3 +1548,38 @@ FRESH_VERIFICATION_REVISION: ENFORCED
 BACKGROUND_SCHEDULER: NOT_IMPLEMENTED
 AEGIS_DXE_IDR_AG_UI: DEFERRED
 ```
+
+## 82. Navigation / Library / Storage / Portable Profile Foundation
+
+Desktop 固定导航收敛为“新聊天 / 现在 / 资料库”；Project 与 Conversation
+列表继续留在同一工作导航，Browse 等既有能力改为按需入口而非固定一级项。
+Browser 自身右侧 `⋮` 分组菜单承载保存到资料库与 Browser 设置入口；Browser
+设置不进入全局设置分类列表，现有隔离 Runtime 与安全策略不变。
+新增 Library MVP 使用 schema 7 的 SQLite metadata、stable Library Object ID、
+SHA-256 content hash 与独立 LibraryRoot blob；支持本地文件及当前 Browser 页面
+保存、筛选、打开/定位与 tombstone 删除，不建立第二套 Project 或 Browser
+history/bookmark identity。
+
+`StorageManager` 统一管理 DataRoot、LibraryRoot 与 CacheRoot。设置页显示数据库、
+Agent ledger、Library blob、内部 repository index 的实际路径；未实现的 vector /
+search index 明确显示 `NOT_PRESENT`。DataRoot 与 LibraryRoot 迁移均为 copy +
+validate + switch，源数据保留；失败回到原 root。Cache 清理只作用于明确的
+CacheRoot。
+
+Portable Profile 使用 versioned `.fielora` manifest、逐文件 SHA-256 与严格
+logical-path allowlist；导出闭合 SQLite snapshot，可选 Library blobs，并排除
+credential bytes、Browser session/cookie、device binding、absolute machine path、
+cache 与临时状态；Provider metadata 可保留，但恢复为 disabled 并要求新设备重新
+授权。新设备导入保留 stable Profile/Project/Conversation/Library
+identity，创建新的 device identity，Project path 由用户显式 rebind。Sync 只增加
+profile/device/revision/journal/tombstone 的 provider-neutral 基础，默认 provider
+禁用且没有网络实现。
+
+```text
+SCHEMA_VERSION: 7
+DATA_ROOT_SOURCE_DELETE: NEVER
+LIBRARY_ROOT_SOURCE_DELETE: NEVER
+PORTABLE_CREDENTIAL_BYTES: EXCLUDED
+CLOUD_SYNC_PROVIDER: DISABLED
+CLOUD_SYNC_REQUESTS: 0
+```

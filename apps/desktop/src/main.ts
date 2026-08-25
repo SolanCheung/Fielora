@@ -1,9 +1,10 @@
-import { access, readFile, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { execFile, spawn } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, nativeImage, nativeTheme, protocol, shell } from 'electron';
 import type { ContextMenuParams, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
-import type { ProjectView } from '@fielora/contracts';
+import type { LibraryMediaKind, LibraryObjectView, ProfileView, ProjectView } from '@fielora/contracts';
 import { BrowserRuntime } from './browser-runtime';
 import { channels } from './channels';
 import { assertTrustedSender, isAllowedNavigation, trustedOriginFor } from './security';
@@ -27,12 +28,16 @@ import {
   validateStartAgent, validateAgentRun, validateListAgentRuns, validateListAgentEvents,
   validateResolveAgentApproval,
   validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment, validateStoreWorkspaceAttachment,
+  validateSaveWebLibrary, validateLibraryObject, validateDeleteLibraryObject, validateListLibraryObjects,
 } from './validation';
 import { WorkspaceRuntime } from './workspace-runtime';
 import { loadSelectedAttachments, readStoredImage, storeImageAttachment } from './attachment-runtime';
 import { focusUsableWindow, usableWindow, withUsableWindow } from './window-lifecycle';
 import { desktopFoundationUserDataPath, hasExplicitUserDataDirectory } from './runtime-identity';
 import { windowSurfaceColors, type WindowSurfaceTheme } from './window-surface';
+import { StorageManager, directoryManifest, sha256File } from './storage-manager';
+import { createPortableProfile, extractPortableProfile, type PortableInputFile } from './portable-profile';
+import { normalizeAppPreferences } from './renderer/app-preferences';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
@@ -58,7 +63,8 @@ let appWindow: BrowserWindow | undefined;
 let browserRuntime: BrowserRuntime | undefined;
 let trustedOrigin = '';
 let quitting = false;
-const supervisor = new CoreProcessSupervisor();
+let storageManager: StorageManager | undefined;
+const supervisor = new CoreProcessSupervisor(() => storage().coreEnvironment());
 const workspaceRuntime = new WorkspaceRuntime((event) => {
   withUsableWindow(appWindow, (window) => window.webContents.send(channels.workspaceEvent, event));
 });
@@ -66,6 +72,11 @@ const workspaceRuntime = new WorkspaceRuntime((event) => {
 function browser(): BrowserRuntime {
   if (!browserRuntime) throw new Error('Browse runtime is unavailable');
   return browserRuntime;
+}
+
+function storage(): StorageManager {
+  if (!storageManager) throw new Error('StorageManager is unavailable');
+  return storageManager;
 }
 
 function assertBridgeEvent(event: IpcMainInvokeEvent): void {
@@ -103,15 +114,39 @@ function showTrustedEditContextMenu(params: ContextMenuParams): void {
   Menu.buildFromTemplate(template).popup({ window });
 }
 
+let storageMaintenance = false;
+let activeDurableMutations = 0;
+let durableDrain: (() => void) | null = null;
+
+async function durableMutation<T>(action: () => Promise<T>): Promise<T> {
+  if (storageMaintenance) throw new Error('Storage maintenance is in progress');
+  activeDurableMutations += 1;
+  try { return await action(); }
+  finally {
+    activeDurableMutations -= 1;
+    if (activeDurableMutations === 0) { durableDrain?.(); durableDrain = null; }
+  }
+}
+
+async function beginStorageMaintenance(): Promise<void> {
+  if (storageMaintenance) throw new Error('Storage maintenance is already in progress');
+  storageMaintenance = true;
+  if (activeDurableMutations > 0) await new Promise<void>((resolve) => { durableDrain = resolve; });
+}
+
+function endStorageMaintenance(): void { storageMaintenance = false; }
+
 function handle(channel: string, validator: (payload: unknown) => unknown, method: string): void {
   ipcMain.handle(channel, async (event, payload) => {
     assertBridgeEvent(event);
-    return supervisor.request(method, validator(payload));
+    const request = () => supervisor.request(method, validator(payload));
+    return method.startsWith('command.') ? durableMutation(request) : request();
   });
 }
 
 async function projectRoot(fieldId: string): Promise<string> {
   const project = await supervisor.request('query.project.get', { field_id: fieldId }) as ProjectView;
+  if (!project.root_path) throw new Error('Project 原位置不可用，请先定位项目文件夹');
   return project.root_path;
 }
 
@@ -183,6 +218,38 @@ async function workspaceApplicationIcon(executable: string | null): Promise<stri
   }
 }
 
+function libraryFileClassification(filename: string): { mime_type: string | null; media_kind: Exclude<LibraryMediaKind, 'WEB'> } {
+  const extension = path.extname(filename).toLocaleLowerCase();
+  const images: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
+  const audio: Record<string, string> = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.flac': 'audio/flac', '.ogg': 'audio/ogg' };
+  const video: Record<string, string> = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mkv': 'video/x-matroska' };
+  const documents: Record<string, string> = { '.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown', '.json': 'application/json', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+  if (images[extension]) return { mime_type: images[extension], media_kind: 'IMAGE' };
+  if (audio[extension]) return { mime_type: audio[extension], media_kind: 'AUDIO' };
+  if (video[extension]) return { mime_type: video[extension], media_kind: 'VIDEO' };
+  if (documents[extension]) return { mime_type: documents[extension], media_kind: 'DOCUMENT' };
+  return { mime_type: null, media_kind: 'OTHER' };
+}
+
+async function importPortableBlobs(extractedRoot: string): Promise<void> {
+  const source = path.join(extractedRoot, 'library');
+  try { await access(source); } catch { return; }
+  for (const item of await directoryManifest(source)) {
+    const blobRef = item.relative_path;
+    const target = storage().resolveBlob(blobRef);
+    if (item.sha256 !== path.posix.basename(blobRef)) throw new Error('Portable Library blob identity mismatch');
+    try {
+      await access(target);
+      if (await sha256File(target) !== item.sha256) throw new Error('Existing Library blob hash mismatch');
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Existing Library blob hash mismatch') throw error;
+      await mkdir(path.dirname(target), { recursive: true });
+      await copyFile(path.join(source, ...blobRef.split('/')), target);
+      if (await sha256File(target) !== item.sha256) throw new Error('Imported Library blob verification failed', { cause: error });
+    }
+  }
+}
+
 let workspaceOpenTargetsCache: WorkspaceOpenTargetView[] | null = null;
 
 async function workspaceOpenTargets(): Promise<WorkspaceOpenTargetView[]> {
@@ -223,14 +290,22 @@ function registerBridgeHandlers(): void {
       if (selection.canceled || selection.filePaths.length !== 1) return null;
       rootPath = path.resolve(selection.filePaths[0]!);
     }
-    return supervisor.request('command.project.create', {
+    return durableMutation(() => supervisor.request('command.project.create', {
       title: request.title.trim() || path.basename(rootPath), goal: request.goal, root_path: rootPath,
-    });
+    }));
   });
   ipcMain.handle(channels.projectList, (event) => { assertBridgeEvent(event); return supervisor.request('query.project.list'); });
   handle(channels.projectGet, validateReference, 'query.project.get');
   handle(channels.projectUpdate, validateUpdateProject, 'command.project.update');
   handle(channels.projectArchive, validateArchiveProject, 'command.project.archive');
+  ipcMain.handle(channels.projectRebind, async (event, payload) => {
+    assertBridgeEvent(event);
+    const request = validateReference(payload);
+    if (!appWindow || appWindow.isDestroyed()) throw new Error('App window is unavailable');
+    const selection = await dialog.showOpenDialog(appWindow, { title: '定位 Project 文件夹', properties: ['openDirectory'] });
+    if (selection.canceled || selection.filePaths.length !== 1) return null;
+    return durableMutation(() => supervisor.request('command.project.rebind', { field_id: request.field_id, root_path: path.resolve(selection.filePaths[0]!) }));
+  });
   handle(channels.conversationCreate, validateCreateConversation, 'command.conversation.create');
   handle(channels.conversationList, validateReference, 'query.conversation.list');
   handle(channels.conversationGet, validateConversationReference, 'query.conversation.get');
@@ -384,6 +459,7 @@ function registerBridgeHandlers(): void {
   handle(channels.providerGet, validateProviderReference, 'query.provider.get_config');
   ipcMain.handle(channels.modelStart, async (event, payload) => {
     assertBridgeEvent(event);
+    return durableMutation(async () => {
     const request=validateStartModel(payload);
     if(request.context_package.some((chip)=>chip.kind==='CURRENT_PAGE'||chip.kind==='CURRENT_SELECTION')){
       const candidate=await browser().getContextCandidate();
@@ -394,7 +470,8 @@ function registerBridgeHandlers(): void {
         return {...chip,display_label:chip.kind==='CURRENT_SELECTION'?'Current selection':(candidate.title||candidate.url),content:chip.kind==='CURRENT_SELECTION'?candidate.selection_text:`${candidate.url}\n\n${candidate.page_text}`,completeness:chip.kind==='CURRENT_SELECTION'||!candidate.is_partial?'COMPLETE':'PARTIAL'};
       });
     }
-    return supervisor.request('command.model.start',request);
+      return supervisor.request('command.model.start',request);
+    });
   });
   handle(channels.modelCancel, validateCancelModel, 'command.model.cancel');
   handle(channels.agentStart, validateStartAgent, 'command.agent.start');
@@ -413,6 +490,216 @@ function registerBridgeHandlers(): void {
   handle(channels.captureRestore, validateMutateCapture, 'command.capture.restore');
   handle(channels.captureList, validateListCaptures, 'query.capture.list');
   handle(channels.captureGet, validateCaptureReference, 'query.capture.get');
+  ipcMain.handle(channels.libraryAddFiles, async (event) => {
+    assertBridgeEvent(event);
+    return durableMutation(async () => {
+    if (!appWindow || appWindow.isDestroyed()) throw new Error('App window is unavailable');
+    const selection = process.env.FIELORA_E2E === '1' && process.env.FIELORA_E2E_LIBRARY_PATHS
+      ? { canceled: false, filePaths: JSON.parse(process.env.FIELORA_E2E_LIBRARY_PATHS) as string[] }
+      : await dialog.showOpenDialog(appWindow, { title: '添加到资料库', properties: ['openFile', 'multiSelections'] });
+    if (selection.canceled) return [];
+    if (!Array.isArray(selection.filePaths) || selection.filePaths.some((item) => typeof item !== 'string')) throw new Error('Invalid Library fixture paths');
+    const created: LibraryObjectView[] = [];
+    for (const selected of selection.filePaths) {
+      const source = path.resolve(selected);
+      const blob = await storage().importFile(source);
+      const classification = libraryFileClassification(path.basename(source));
+      created.push(await supervisor.request('command.library.create_file', {
+        title: path.basename(source),
+        original_source: source,
+        original_filename: path.basename(source),
+        mime_type: classification.mime_type,
+        media_kind: classification.media_kind,
+        size: blob.size,
+        blob_ref: blob.blob_ref,
+        content_hash: blob.content_hash,
+        metadata: { version: 1 },
+      }) as LibraryObjectView);
+    }
+      return created;
+    });
+  });
+  ipcMain.handle(channels.librarySaveWeb, async (event, payload) => {
+    assertBridgeEvent(event);
+    return durableMutation(async () => {
+    const requested = validateSaveWebLibrary(payload);
+    const current = await browser().getContextCandidate();
+    if (current.page_id === null || current.url !== requested.url) throw new Error('Browse page changed before it could be saved');
+      return supervisor.request('command.library.save_web', {
+      url: current.url,
+      title: current.title || requested.title || current.url,
+      source: 'BROWSER',
+      selected_content: current.selection_text || null,
+      metadata: { version: 1, snapshot_available: false },
+      });
+    });
+  });
+  ipcMain.handle(channels.libraryList, (event, payload) => { assertBridgeEvent(event); return supervisor.request('query.library.list', validateListLibraryObjects(payload)); });
+  ipcMain.handle(channels.libraryGet, (event, payload) => { assertBridgeEvent(event); return supervisor.request('query.library.get', validateLibraryObject(payload)); });
+  ipcMain.handle(channels.libraryDelete, (event, payload) => { assertBridgeEvent(event); return durableMutation(() => supervisor.request('command.library.delete', validateDeleteLibraryObject(payload))); });
+  ipcMain.handle(channels.libraryOpen, async (event, payload) => {
+    assertBridgeEvent(event);
+    const request = validateLibraryObject(payload);
+    const object = await supervisor.request('query.library.get', request) as LibraryObjectView;
+    if (object.lifecycle !== 'ACTIVE') throw new Error('Library object is deleted');
+    if (object.kind === 'WEB' && object.original_source) { await browser().navigate(object.original_source); return null; }
+    if (!object.blob_ref || !object.content_hash) throw new Error('Library blob is unavailable');
+    const blob = storage().resolveBlob(object.blob_ref);
+    if (await sha256File(blob) !== object.content_hash) throw new Error('Library blob integrity check failed');
+    const message = await shell.openPath(blob);
+    if (message) throw new Error('Library file could not be opened');
+    return null;
+  });
+  ipcMain.handle(channels.libraryReveal, async (event, payload) => {
+    assertBridgeEvent(event);
+    const object = await supervisor.request('query.library.get', validateLibraryObject(payload)) as LibraryObjectView;
+    if (!object.blob_ref) return null;
+    const blob = storage().resolveBlob(object.blob_ref);
+    await access(blob);
+    shell.showItemInFolder(blob);
+    return null;
+  });
+  ipcMain.handle(channels.storageInfo, (event) => { assertBridgeEvent(event); return storage().info(); });
+  ipcMain.handle(channels.storageOpen, async (event, payload) => {
+    assertBridgeEvent(event);
+    const allowed = new Set(['DATA_ROOT', 'LIBRARY_ROOT', 'CACHE_ROOT', 'MAIN_DATABASE', 'AGENT_LEDGER', 'LIBRARY_BLOBS', 'SQLITE_WAL', 'SQLITE_SHM', 'VECTOR_INDEX', 'SEARCH_INDEX', 'INTERNAL_INDEX', 'CACHE']);
+    if (typeof payload !== 'string' || !allowed.has(payload)) throw new Error('Invalid storage location');
+    const target = await storage().openablePath(payload as never);
+    if (!target) throw new Error('Storage location is not present');
+    if ((await stat(target)).isFile()) { shell.showItemInFolder(target); return null; }
+    const message = await shell.openPath(target);
+    if (message) throw new Error('Storage location could not be opened');
+    return null;
+  });
+  ipcMain.handle(channels.storageClearCache, async (event) => {
+    assertBridgeEvent(event);
+    return { removed_bytes: await storage().clearCache() };
+  });
+  ipcMain.handle(channels.storageMigrateData, async (event) => {
+    assertBridgeEvent(event);
+    if (!appWindow || appWindow.isDestroyed()) throw new Error('App window is unavailable');
+    const selection = process.env.FIELORA_E2E === '1' && process.env.FIELORA_E2E_DATA_ROOT_TARGET
+      ? { canceled: false, filePaths: [path.resolve(process.env.FIELORA_E2E_DATA_ROOT_TARGET)] }
+      : await dialog.showOpenDialog(appWindow, { title: '选择新的 Fielora DataRoot', properties: ['openDirectory', 'createDirectory'] });
+    if (selection.canceled || selection.filePaths.length !== 1) return { canceled: true, root: null };
+    await beginStorageMaintenance();
+    const previous = storage().current();
+    try {
+      await supervisor.shutdown();
+      const root = await storage().migrateClosedDataRoot(path.resolve(selection.filePaths[0]!), (database) => supervisor.runMaintenance(['--maintenance-validate-database', database]));
+      await supervisor.start();
+      return { canceled: false, root };
+    } catch (error) {
+      if (storage().current().data_root !== previous.data_root) await storage().restoreRoots(previous);
+      await supervisor.start();
+      throw error;
+    } finally { endStorageMaintenance(); }
+  });
+  ipcMain.handle(channels.storageMigrateLibrary, async (event) => {
+    assertBridgeEvent(event);
+    if (!appWindow || appWindow.isDestroyed()) throw new Error('App window is unavailable');
+    const selection = process.env.FIELORA_E2E === '1' && process.env.FIELORA_E2E_LIBRARY_ROOT_TARGET
+      ? { canceled: false, filePaths: [path.resolve(process.env.FIELORA_E2E_LIBRARY_ROOT_TARGET)] }
+      : await dialog.showOpenDialog(appWindow, { title: '选择新的 LibraryRoot', properties: ['openDirectory', 'createDirectory'] });
+    if (selection.canceled || selection.filePaths.length !== 1) return { canceled: true, root: null };
+    await beginStorageMaintenance();
+    try {
+      const root = await storage().migrateLibraryRoot(path.resolve(selection.filePaths[0]!));
+      return { canceled: false, root };
+    } finally { endStorageMaintenance(); }
+  });
+  ipcMain.handle(channels.profileGet, (event) => { assertBridgeEvent(event); return supervisor.request('query.profile.get'); });
+  ipcMain.handle(channels.profileExport, async (event, payload) => {
+    assertBridgeEvent(event);
+    if (!payload || typeof payload !== 'object' || Object.keys(payload).sort().join(',') !== 'include_library,preferences' || typeof (payload as { include_library?: unknown }).include_library !== 'boolean') throw new Error('Invalid profile export options');
+    if (!appWindow || appWindow.isDestroyed()) throw new Error('App window is unavailable');
+    const includeLibrary = (payload as { include_library: boolean }).include_library;
+    const preferences = normalizeAppPreferences((payload as { preferences?: unknown }).preferences);
+    const profile = await supervisor.request('query.profile.get') as ProfileView;
+    const selection = process.env.FIELORA_E2E === '1' && process.env.FIELORA_E2E_PROFILE_EXPORT_TARGET
+      ? { canceled: false, filePath: path.resolve(process.env.FIELORA_E2E_PROFILE_EXPORT_TARGET) }
+      : await dialog.showSaveDialog(appWindow, { title: '导出 Fielora', defaultPath: `Fielora-${new Date().toISOString().slice(0, 10)}.fielora`, filters: [{ name: 'Fielora Profile', extensions: ['fielora'] }] });
+    if (selection.canceled || !selection.filePath) return { canceled: true, path: null };
+    const temporary = await mkdtemp(path.join(os.tmpdir(), 'fielora-profile-export-'));
+    try { await beginStorageMaintenance(); }
+    catch (error) { await rm(temporary, { recursive: true, force: true }); throw error; }
+    let restart = false;
+    try {
+      await supervisor.shutdown(); restart = true;
+      const snapshot = path.join(temporary, 'profile.sqlite');
+      const preferencesFile = path.join(temporary, 'app-preferences.json');
+      await supervisor.runMaintenance(['--maintenance-export-snapshot', storage().databasePath(), snapshot]);
+      await writeFile(preferencesFile, `${JSON.stringify(preferences)}\n`, { flag: 'wx' });
+      const files: PortableInputFile[] = [
+        { archive_path: 'data/profile.sqlite', source_path: snapshot },
+        { archive_path: 'data/app-preferences.json', source_path: preferencesFile },
+      ];
+      if (includeLibrary) {
+        const libraryRoot = storage().current().library_root;
+        for (const item of await directoryManifest(libraryRoot)) {
+          if (!item.relative_path.startsWith('blobs/objects/')) continue;
+          files.push({ archive_path: `library/${item.relative_path}`, source_path: path.join(libraryRoot, ...item.relative_path.split('/')) });
+        }
+      }
+      await createPortableProfile(selection.filePath, {
+        profile_id: profile.profile_id,
+        profile_schema_version: profile.schema_version,
+        fielora_version: app.getVersion(),
+        source_os: process.platform,
+        included_sections: ['PROFILE', 'SETTINGS', 'PROJECT_METADATA', 'CONVERSATIONS', 'AGENT_HISTORY', 'LIBRARY_METADATA'],
+        library_mode: includeLibrary ? 'INCLUDE_BLOBS' : 'METADATA_ONLY',
+      }, files);
+      return { canceled: false, path: selection.filePath };
+    } catch (error) {
+      await rm(selection.filePath, { force: true });
+      throw error;
+    } finally {
+      try {
+        await rm(temporary, { recursive: true, force: true });
+        if (restart) await supervisor.start();
+      } finally { endStorageMaintenance(); }
+    }
+  });
+  ipcMain.handle(channels.profileImport, async (event) => {
+    assertBridgeEvent(event);
+    if (!appWindow || appWindow.isDestroyed()) throw new Error('App window is unavailable');
+    const selection = process.env.FIELORA_E2E === '1' && process.env.FIELORA_E2E_PROFILE_IMPORT_SOURCE
+      ? { canceled: false, filePaths: [path.resolve(process.env.FIELORA_E2E_PROFILE_IMPORT_SOURCE)] }
+      : await dialog.showOpenDialog(appWindow, { title: '导入 Fielora', properties: ['openFile'], filters: [{ name: 'Fielora Profile', extensions: ['fielora'] }] });
+    if (selection.canceled || selection.filePaths.length !== 1) return { canceled: true, profile_id: null, preferences: null };
+    const temporary = await mkdtemp(path.join(os.tmpdir(), 'fielora-profile-import-'));
+    try { await beginStorageMaintenance(); }
+    catch (error) { await rm(temporary, { recursive: true, force: true }); throw error; }
+    let backup: string | null = null;
+    let stopped = false;
+    try {
+      const manifest = await extractPortableProfile(selection.filePaths[0]!, temporary);
+      const database = path.join(temporary, 'data', 'profile.sqlite');
+      const preferencesPath = path.join(temporary, 'data', 'app-preferences.json');
+      let preferences = null;
+      try { preferences = normalizeAppPreferences(JSON.parse(await readFile(preferencesPath, 'utf8'))); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      await supervisor.runMaintenance(['--maintenance-validate-database', database]);
+      await supervisor.shutdown(); stopped = true;
+      backup = await storage().installImportedDatabase(database);
+      await importPortableBlobs(temporary);
+      await supervisor.start(); stopped = false;
+      const restored = await supervisor.request('query.profile.get') as ProfileView;
+      if (restored.profile_id !== manifest.profile_id) throw new Error('Portable profile identity mismatch');
+      return { canceled: false, profile_id: restored.profile_id, preferences };
+    } catch (error) {
+      if (!stopped) { await supervisor.shutdown(); stopped = true; }
+      if (backup) await storage().rollbackImportedDatabase(backup);
+      throw error;
+    } finally {
+      try {
+        await rm(temporary, { recursive: true, force: true });
+        if (stopped) await supervisor.start();
+      } finally { endStorageMaintenance(); }
+    }
+  });
   ipcMain.handle(channels.browserShow, (event, payload) => { assertBridgeEvent(event); return browser().show(validateBrowserBounds(payload)); });
   ipcMain.handle(channels.browserHide, (event) => { assertBridgeEvent(event); return browser().hide(); });
   ipcMain.handle(channels.browserCreatePage, (event) => { assertBridgeEvent(event); return browser().createPage(); });
@@ -430,8 +717,7 @@ function registerBridgeHandlers(): void {
   ipcMain.handle(channels.coreRetry, async (event) => { assertBridgeEvent(event); await supervisor.retry(); });
   ipcMain.handle(channels.coreOpenLogs, async (event) => {
     assertBridgeEvent(event);
-    const dbPath = supervisor.getHealth().db_path;
-    if (dbPath) await shell.openPath(path.join(path.dirname(path.dirname(dbPath)), 'logs'));
+    await shell.openPath(path.join(storage().base_root, 'logs'));
   });
   ipcMain.handle(channels.coreQuit, (event) => { assertBridgeEvent(event); app.quit(); });
   if (process.env.FIELORA_E2E === '1') {
@@ -541,6 +827,10 @@ if (!singleInstance) app.quit();
 else {
   app.on('second-instance', () => { focusUsableWindow(appWindow); });
   app.whenReady().then(async () => {
+    const localAppData = process.env.LOCALAPPDATA;
+    if (!localAppData) throw new Error('LOCALAPPDATA is unavailable');
+    const developmentRoot = (!app.isPackaged || process.env.FIELORA_E2E === '1') ? process.env.FIELORA_DATA_DIR : undefined;
+    storageManager = await StorageManager.open(localAppData, developmentRoot);
     registerBridgeHandlers();
     if (app.isPackaged) await registerApplicationProtocol();
     await createWindow();

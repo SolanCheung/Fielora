@@ -10,7 +10,10 @@ use fielora_model::{ModelClient, ModelError, ProviderEndpoint};
 use fielora_platform::{
     CredentialStore, DeviceIdentity, PlatformPaths, SecretBytes, WindowsCredentialStore,
 };
-use fielora_storage::{ProviderConfigRecord, StorageHandle, StorageWorker, schema_version};
+use fielora_storage::{
+    ProviderConfigRecord, StorageHandle, StorageWorker, create_portable_snapshot, schema_version,
+    validate_database_snapshot,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
@@ -30,7 +33,7 @@ use uuid::Uuid;
 
 const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 const PROTOCOL: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
-const CAPABILITIES: [&str; 67] = [
+const CAPABILITIES: [&str; 75] = [
     "system.build_provenance",
     "field.create",
     "field.list",
@@ -74,12 +77,20 @@ const CAPABILITIES: [&str; 67] = [
     "capture.restore",
     "capture.list",
     "capture.get",
+    "profile.get",
+    "library.create_file",
+    "library.save_web",
+    "library.get",
+    "library.list",
+    "library.delete",
+    "sync.change_journal",
     "context.package",
     "model.stream",
     "project.create",
     "project.list",
     "project.get",
     "project.update",
+    "project.rebind",
     "project.archive",
     "conversation.create",
     "conversation.list",
@@ -176,6 +187,31 @@ enum Dispatch {
 }
 
 fn main() {
+    let arguments = std::env::args().collect::<Vec<_>>();
+    if arguments
+        .get(1)
+        .is_some_and(|value| value.starts_with("--maintenance-"))
+    {
+        let result = match arguments.get(1).map(String::as_str) {
+            Some("--maintenance-export-snapshot") if arguments.len() == 4 => {
+                create_portable_snapshot(Path::new(&arguments[2]), Path::new(&arguments[3]))
+            }
+            Some("--maintenance-validate-database") if arguments.len() == 3 => {
+                validate_database_snapshot(Path::new(&arguments[2]))
+            }
+            _ => Err(fielora_storage::StorageError::OpenGate(
+                "invalid maintenance arguments".into(),
+            )),
+        };
+        match result {
+            Ok(()) => println!("PASS"),
+            Err(error) => {
+                eprintln!("fielora-core maintenance failed: {error}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
     if let Err(error) = run() {
         eprintln!("fielora-core fatal: {error}");
         std::process::exit(1);
@@ -477,6 +513,10 @@ fn dispatch_request(
             let params: UpdateProjectRequest = parse_params(&request.params)?;
             validate_update_project(&params)?;
             serialize(runtime.storage.update_project(params, now_ms())?)
+        }
+        "command.project.rebind" => {
+            let params: RebindProjectRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.rebind_project(params, now_ms())?)
         }
         "command.project.archive" => {
             let params: ArchiveProjectRequest = parse_params(&request.params)?;
@@ -897,6 +937,32 @@ fn dispatch_request(
             let params: CaptureRequest = parse_params(&request.params)?;
             serialize(runtime.storage.get_capture(params.capture_id)?)
         }
+        "query.profile.get" => serialize(runtime.storage.profile()?),
+        "command.library.create_file" => {
+            let params: CreateLibraryFileRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.create_library_file(params, now_ms())?)
+        }
+        "command.library.save_web" => {
+            let params: SaveWebLibraryRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.save_web_library(params, now_ms())?)
+        }
+        "query.library.get" => {
+            let params: LibraryObjectRequest = parse_params(&request.params)?;
+            serialize(
+                runtime
+                    .storage
+                    .get_library_object(params.library_object_id)?,
+            )
+        }
+        "query.library.list" => {
+            let params: ListLibraryObjectsRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.list_library_objects(params)?)
+        }
+        "command.library.delete" => {
+            let params: DeleteLibraryObjectRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.delete_library_object(params, now_ms())?)
+        }
+        "query.sync.change_journal" => serialize(runtime.storage.list_sync_changes()?),
         method => {
             warn!(method, "unknown FIPC method");
             Err(DomainError::Validation(format!("unknown_method:{method}")))

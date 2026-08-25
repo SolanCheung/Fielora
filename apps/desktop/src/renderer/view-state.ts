@@ -11,13 +11,14 @@ import type {
   StateView,
 } from '@fielora/contracts';
 
-export type AppView = 'PROJECTS' | 'NOW' | 'BROWSE' | 'FIELDS' | 'SETTINGS';
-export type Screen = 'startup' | 'projects' | 'now' | 'browse' | 'fields' | 'field' | 'settings';
+export type AppView = 'PROJECTS' | 'NOW' | 'LIBRARY' | 'BROWSE' | 'FIELDS' | 'SETTINGS';
+export type Screen = 'startup' | 'projects' | 'now' | 'library' | 'browse' | 'fields' | 'field' | 'settings';
 
 export function screenFor(health: HealthDTO | undefined, selectedField: string | undefined, appView: AppView = 'NOW'): Screen {
   if (!health || health.state !== 'READY') return 'startup';
   switch (appView) {
     case 'PROJECTS': return 'projects';
+    case 'LIBRARY': return 'library';
     case 'BROWSE': return 'browse';
     case 'FIELDS': return selectedField ? 'field' : 'fields';
     case 'SETTINGS': return 'settings';

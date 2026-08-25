@@ -13,6 +13,7 @@ const bridge: FieloraBridge = {
     get: (request) => ipcRenderer.invoke(channels.projectGet, request),
     update: (request) => ipcRenderer.invoke(channels.projectUpdate, request),
     archive: (request) => ipcRenderer.invoke(channels.projectArchive, request),
+    rebind: (request) => ipcRenderer.invoke(channels.projectRebind, request),
   },
   conversation: {
     create: (request) => ipcRenderer.invoke(channels.conversationCreate, request),
@@ -137,6 +138,27 @@ const bridge: FieloraBridge = {
     restore: (request) => ipcRenderer.invoke(channels.captureRestore, request),
     list: (request) => ipcRenderer.invoke(channels.captureList, request),
     get: (request) => ipcRenderer.invoke(channels.captureGet, request),
+  },
+  library: {
+    addFiles: () => ipcRenderer.invoke(channels.libraryAddFiles),
+    saveWeb: (request) => ipcRenderer.invoke(channels.librarySaveWeb, request),
+    list: (request) => ipcRenderer.invoke(channels.libraryList, request),
+    get: (request) => ipcRenderer.invoke(channels.libraryGet, request),
+    delete: (request) => ipcRenderer.invoke(channels.libraryDelete, request),
+    open: (request) => ipcRenderer.invoke(channels.libraryOpen, request),
+    reveal: (request) => ipcRenderer.invoke(channels.libraryReveal, request),
+  },
+  storage: {
+    info: () => ipcRenderer.invoke(channels.storageInfo),
+    open: (id) => ipcRenderer.invoke(channels.storageOpen, id),
+    migrateDataRoot: () => ipcRenderer.invoke(channels.storageMigrateData),
+    migrateLibraryRoot: () => ipcRenderer.invoke(channels.storageMigrateLibrary),
+    clearCache: () => ipcRenderer.invoke(channels.storageClearCache),
+  },
+  profile: {
+    get: () => ipcRenderer.invoke(channels.profileGet),
+    export: (request) => ipcRenderer.invoke(channels.profileExport, request),
+    import: () => ipcRenderer.invoke(channels.profileImport),
   },
   core: {
     getHealth: () => ipcRenderer.invoke(channels.coreHealth),

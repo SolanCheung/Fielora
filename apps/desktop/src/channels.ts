@@ -1,5 +1,5 @@
 export const channels = {
-  projectPick: 'fielora:project:pick', projectList: 'fielora:project:list', projectGet: 'fielora:project:get', projectUpdate: 'fielora:project:update', projectArchive: 'fielora:project:archive',
+  projectPick: 'fielora:project:pick', projectList: 'fielora:project:list', projectGet: 'fielora:project:get', projectUpdate: 'fielora:project:update', projectArchive: 'fielora:project:archive', projectRebind: 'fielora:project:rebind',
   conversationCreate: 'fielora:conversation:create', conversationList: 'fielora:conversation:list', conversationGet: 'fielora:conversation:get',
   conversationUpdate: 'fielora:conversation:update', conversationArchive: 'fielora:conversation:archive',
   conversationMessageCreate: 'fielora:conversation:message:create', conversationMessageList: 'fielora:conversation:message:list',
@@ -57,6 +57,9 @@ export const channels = {
   agentCancel: 'fielora:agent:cancel', agentPause: 'fielora:agent:pause', agentResume: 'fielora:agent:resume', agentResolveApproval: 'fielora:agent:resolve-approval',
   captureCreate: 'fielora:capture:create', captureAttach: 'fielora:capture:attach', capturePromote: 'fielora:capture:promote',
   captureArchive: 'fielora:capture:archive', captureRestore: 'fielora:capture:restore', captureList: 'fielora:capture:list', captureGet: 'fielora:capture:get',
+  libraryAddFiles: 'fielora:library:add-files', librarySaveWeb: 'fielora:library:save-web', libraryList: 'fielora:library:list', libraryGet: 'fielora:library:get', libraryDelete: 'fielora:library:delete', libraryOpen: 'fielora:library:open', libraryReveal: 'fielora:library:reveal',
+  storageInfo: 'fielora:storage:info', storageOpen: 'fielora:storage:open', storageMigrateData: 'fielora:storage:migrate-data', storageMigrateLibrary: 'fielora:storage:migrate-library', storageClearCache: 'fielora:storage:clear-cache',
+  profileGet: 'fielora:profile:get', profileExport: 'fielora:profile:export', profileImport: 'fielora:profile:import',
   browserEvent: 'fielora:browser:event',
   coreHealth: 'fielora:core:health',
   coreBuildProvenance: 'fielora:core:build-provenance',

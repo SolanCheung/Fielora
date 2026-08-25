@@ -4,7 +4,7 @@
   "private": true,
   "main": ".webpack/main",
   "scripts": {
-    "start": "electron-forge start",
+    "start": "node ../../scripts/check-node-version.cjs && electron-forge start",
     "package": "electron-forge package --arch=x64 --platform=win32",
     "make": "electron-forge make --arch=x64 --platform=win32",
     "icon:generate": "node ../../scripts/generate-desktop-icon.cjs",

@@ -1,100 +1,37 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import {
+  captureScreenshot,
+  cleanupElectronProcess,
+  connectToFieloraApp,
+  launchElectron,
+  waitForChildExit,
+  waitForExpression,
+} from './harness/electron-cdp-harness.mjs';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
 const dataRoot = await mkdtemp(path.join(tmpdir(), 'fielora-appearance-'));
 const evidence = path.join(root, 'artifacts', 'appearance');
 let child;
-let port;
 const output = [];
 
-class Cdp {
-  constructor(url) { this.socket = new WebSocket(url); this.id = 0; this.pending = new Map(); }
-  async open() {
-    if (this.socket.readyState !== WebSocket.OPEN) await new Promise((resolve, reject) => {
-      this.socket.addEventListener('open', resolve, { once: true });
-      this.socket.addEventListener('error', reject, { once: true });
-    });
-    this.socket.addEventListener('message', (event) => {
-      const value = JSON.parse(String(event.data));
-      const pending = this.pending.get(value.id);
-      if (!pending) return;
-      this.pending.delete(value.id);
-      value.error ? pending.reject(new Error(value.error.message)) : pending.resolve(value.result);
-    });
-  }
-  send(method, params = {}) {
-    const id = ++this.id;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.socket.send(JSON.stringify({ id, method, params }));
-    });
-  }
-  async eval(expression) {
-    const result = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-    if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
-    return result.result.value;
-  }
-  close() { this.socket.close(); }
-}
-
-async function freePort() {
-  const server = createServer();
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  const value = server.address().port;
-  await new Promise((resolve) => server.close(resolve));
-  return value;
-}
-
-async function connect() {
-  const started = Date.now();
-  while (Date.now() - started < 60_000) {
-    try {
-      const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-      const target = targets.find((item) => item.type === 'page' && (item.url.startsWith('fielora://app') || item.url.includes('main_window')));
-      if (target) {
-        const cdp = new Cdp(target.webSocketDebuggerUrl);
-        await cdp.open();
-        await cdp.send('Runtime.enable');
-        await cdp.send('Page.enable');
-        return cdp;
-      }
-    } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`Electron target timeout\n${output.join('')}`);
-}
-
-async function wait(cdp, expression, timeout = 20_000) {
-  const started = Date.now();
-  while (Date.now() - started < timeout) {
-    try { if (await cdp.eval(`Boolean(${expression})`)) return; } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 75));
-  }
-  throw new Error(`wait failed: ${expression}\n${output.join('')}`);
-}
+const wait = (cdp, expression, timeout = 20_000) => waitForExpression(cdp, expression, { timeoutMs: timeout, output });
 
 function setValue(selector, value) {
   return `(()=>{const element=document.querySelector(${JSON.stringify(selector)});const descriptor=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element),'value');descriptor.set.call(element,${JSON.stringify(value)});element.dispatchEvent(new Event('input',{bubbles:true}));})()`;
 }
 
 async function screenshot(cdp, name) {
-  const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-  await writeFile(path.join(evidence, name), Buffer.from(shot.data, 'base64'));
+  await captureScreenshot(cdp, path.join(evidence, name));
 }
 
 try {
   await mkdir(evidence, { recursive: true });
-  port = await freePort();
-  const env = { ...process.env, APPDATA: path.join(dataRoot, 'roaming'), LOCALAPPDATA: dataRoot, FIELORA_E2E: '1', FIELORA_E2E_DEBUG_PORT: String(port) };
-  child = spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', 'pnpm --filter @fielora/desktop start'], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stdout.on('data', (chunk) => output.push(String(chunk)));
-  child.stderr.on('data', (chunk) => output.push(String(chunk)));
-  const cdp = await connect();
+  const launched = await launchElectron({ root, dataRoot, output });
+  child = launched.child;
+  const cdp = await connectToFieloraApp({ ...launched, enablePage: true });
   await wait(cdp, `document.querySelector('[data-testid="project-workspace"]')`);
   assert.equal(await cdp.eval(`Boolean(document.documentElement.dataset.resolvedTheme)`), true);
 
@@ -176,12 +113,9 @@ try {
 
   await cdp.eval('void window.fielora.core.quit()');
   cdp.close();
-  await new Promise((resolve) => child.once('exit', resolve));
+  await waitForChildExit(child);
   console.log('appearance settings e2e: PASS');
 } finally {
-  if (child?.exitCode === null) {
-    spawnSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' });
-    await Promise.race([new Promise((resolve) => child.once('exit', resolve)), new Promise((resolve) => setTimeout(resolve, 2_000))]);
-  }
+  await cleanupElectronProcess(child);
   await rm(dataRoot, { recursive: true, force: true, maxRetries: 6, retryDelay: 150 });
 }

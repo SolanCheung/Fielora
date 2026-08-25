@@ -43,6 +43,9 @@ typed_id!(ToolCallId);
 typed_id!(ApprovalId);
 typed_id!(ContextSnapshotId);
 typed_id!(VerificationReceiptId);
+typed_id!(ProfileId);
+typed_id!(LibraryObjectId);
+typed_id!(SyncChangeId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ProtocolVersion {
@@ -1204,6 +1207,144 @@ pub struct CaptureChangedEvent {
     pub revision: u64,
 }
 
+// Library / portable-profile foundation. Library metadata is durable SQLite
+// state; blob_ref is a constrained LibraryRoot-relative content binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum LibraryObjectKind {
+    File,
+    Web,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum LibraryMediaKind {
+    Document,
+    Image,
+    Audio,
+    Video,
+    Other,
+    Web,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum LibraryLifecycle {
+    Active,
+    Tombstone,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct LibraryObjectView {
+    pub id: LibraryObjectId,
+    pub kind: LibraryObjectKind,
+    pub media_kind: LibraryMediaKind,
+    pub title: String,
+    pub original_source: Option<String>,
+    pub original_filename: Option<String>,
+    pub mime_type: Option<String>,
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
+    pub blob_ref: Option<String>,
+    pub content_hash: Option<String>,
+    #[ts(type = "unknown")]
+    pub metadata: Value,
+    pub lifecycle: LibraryLifecycle,
+    #[ts(type = "number")]
+    pub revision: u64,
+    pub updated_by_device: DeviceId,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+    #[ts(type = "number | null")]
+    pub deleted_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CreateLibraryFileRequest {
+    pub title: String,
+    pub original_source: String,
+    pub original_filename: String,
+    pub mime_type: Option<String>,
+    pub media_kind: LibraryMediaKind,
+    #[ts(type = "number")]
+    pub size: u64,
+    pub blob_ref: String,
+    pub content_hash: String,
+    #[ts(type = "unknown")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SaveWebLibraryRequest {
+    pub url: String,
+    pub title: String,
+    pub source: String,
+    pub selected_content: Option<String>,
+    #[ts(type = "unknown")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct LibraryObjectRequest {
+    pub library_object_id: LibraryObjectId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteLibraryObjectRequest {
+    pub library_object_id: LibraryObjectId,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ListLibraryObjectsRequest {
+    pub media_kind: Option<LibraryMediaKind>,
+    pub include_deleted: bool,
+    pub limit: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ProfileView {
+    pub profile_id: ProfileId,
+    pub schema_version: u32,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    pub device_id: DeviceId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SyncOperation {
+    Create,
+    Update,
+    Tombstone,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct SyncChangeView {
+    pub change_id: SyncChangeId,
+    pub profile_id: ProfileId,
+    pub device_id: DeviceId,
+    pub entity_type: String,
+    pub entity_id: String,
+    pub operation: SyncOperation,
+    #[ts(type = "number")]
+    pub revision: u64,
+    #[ts(type = "number")]
+    pub changed_at: i64,
+}
+
 // Rapid Desktop Foundation additive Project / Conversation contracts.
 // A Project keeps the stable Field identity and exposes a device-scoped local root.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -1249,6 +1390,13 @@ pub struct ArchiveProjectRequest {
 #[serde(deny_unknown_fields)]
 pub struct ProjectRequest {
     pub field_id: FieldId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct RebindProjectRequest {
+    pub field_id: FieldId,
+    pub root_path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

@@ -24,6 +24,8 @@ const EMPTY_BROWSER: BrowserPageState = {
 
 interface BrowseScreenProps {
   browser: FieloraBridge['browser'];
+  onSaveToLibrary: FieloraBridge['library']['saveWeb'];
+  onOpenBrowserSettings: () => void;
   onProjects: () => void;
   onNow: () => void;
   onFields: () => void;
@@ -31,11 +33,14 @@ interface BrowseScreenProps {
   onSettings: () => void;
 }
 
-export function BrowsePanel({ browser }: Pick<BrowseScreenProps, 'browser'>) {
+export function BrowsePanel({ browser, onSaveToLibrary, onOpenBrowserSettings }: Pick<BrowseScreenProps, 'browser' | 'onSaveToLibrary' | 'onOpenBrowserSettings'>) {
   const [page, setPage] = useState<BrowserPageState>(EMPTY_BROWSER);
   const [address, setAddress] = useState('');
   const [actionError, setActionError] = useState('');
+  const [actionStatus, setActionStatus] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
   const hostRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
   const editingAddress = useRef(false);
   const activePageIdRef = useRef('');
@@ -56,6 +61,10 @@ export function BrowsePanel({ browser }: Pick<BrowseScreenProps, 'browser'>) {
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    if (menuOpen) {
+      void browser.hide();
+      return;
+    }
     let settleTimer = 0;
     const syncBounds = () => {
       const rect = host.getBoundingClientRect();
@@ -84,7 +93,23 @@ export function BrowsePanel({ browser }: Pick<BrowseScreenProps, 'browser'>) {
       window.removeEventListener('resize', syncAfterWindowResize);
       void browser.hide();
     };
-  }, [browser]);
+  }, [browser, menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const dismissWithEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', dismissWithEscape);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', dismissWithEscape);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -124,6 +149,15 @@ export function BrowsePanel({ browser }: Pick<BrowseScreenProps, 'browser'>) {
     setActionError('');
     try { setPage(await action()); }
     catch (reason) { setActionError(toBrowserUserMessage(reason)); }
+  }
+
+  async function saveToLibrary() {
+    setMenuOpen(false);
+    setActionError(''); setActionStatus('');
+    try {
+      await onSaveToLibrary({ url: page.url, title: page.title || page.url, source: 'BROWSER', selected_content: null, metadata: { version: 1 } });
+      setActionStatus('已保存到资料库');
+    } catch (reason) { setActionError(reason instanceof Error ? reason.message : String(reason)); }
   }
 
   async function createPage() {
@@ -225,11 +259,28 @@ export function BrowsePanel({ browser }: Pick<BrowseScreenProps, 'browser'>) {
             data-testid="browser-address"
           />
         </form>
-        <span className="page-title" title={page.title}>{page.title}</span>
+        <div className="browser-toolbar-end" ref={menuRef}>
+          <span className="page-title" title={page.title}>{page.title}</span>
+          <button className="browser-overflow-button" type="button" aria-label="浏览器菜单" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((current) => !current)} data-testid="browser-overflow">⋮</button>
+          {menuOpen && <div className="browser-overflow-menu" role="menu" aria-label="浏览器菜单" data-testid="browser-overflow-menu">
+            <div className="browser-menu-group">
+              <button role="menuitem" type="button" onClick={() => { setMenuOpen(false); void createPage(); }}><span>新建标签页</span><kbd>Ctrl+T</kbd></button>
+              <button role="menuitem" type="button" disabled={!/^https?:\/\//u.test(page.url)} onClick={() => void saveToLibrary()} data-testid="browser-save-library"><span>保存到资料库</span></button>
+            </div>
+            <div className="browser-menu-group">
+              <button role="menuitem" type="button" disabled={!page.url} onClick={() => { setMenuOpen(false); void act(() => browser.reload()); }}><span>刷新页面</span><kbd>Ctrl+R</kbd></button>
+              <button role="menuitem" type="button" disabled={!page.active_page_id} onClick={() => { setMenuOpen(false); void closePage(page.active_page_id); }}><span>关闭标签页</span><kbd>Ctrl+W</kbd></button>
+            </div>
+            <div className="browser-menu-group browser-menu-settings">
+              <button role="menuitem" type="button" onClick={() => { setMenuOpen(false); onOpenBrowserSettings(); }} data-testid="browser-open-settings"><span>浏览器设置</span></button>
+            </div>
+          </div>}
+        </div>
         <span className="sr-only" role="status" aria-live="polite">{page.is_loading ? '网页正在加载' : ''}</span>
         {page.is_loading && <div className="browser-loading" role="progressbar" aria-label="网页正在加载" data-testid="browser-loading"><span /></div>}
       </div>
       {(actionError || page.error) && <div className="browser-error" role="status" data-testid="browser-error">{actionError || toBrowserUserMessage(page.error)}</div>}
+      {actionStatus && <div className="browser-status" role="status">{actionStatus}</div>}
       <div className="browse-viewport" ref={hostRef} data-testid="browse-viewport" aria-busy={page.is_loading}>
         {!page.url && <div className="browse-empty"><h2>新页面</h2><p>在地址栏输入网址或搜索内容。</p></div>}
       </div>
@@ -237,9 +288,9 @@ export function BrowsePanel({ browser }: Pick<BrowseScreenProps, 'browser'>) {
   </div>;
 }
 
-export function BrowseScreen({ browser, onProjects, onNow, onFields, onNewConversation, onSettings }: BrowseScreenProps) {
+export function BrowseScreen({ browser, onSaveToLibrary, onOpenBrowserSettings, onProjects, onNow, onFields, onNewConversation, onSettings }: BrowseScreenProps) {
   return <div className="shell browse-shell">
     <PrimaryNav active="BROWSE" onProjects={onProjects} onNow={onNow} onBrowse={() => undefined} onFields={onFields} onNewConversation={onNewConversation} onSettings={onSettings} />
-    <BrowsePanel browser={browser} />
+    <BrowsePanel browser={browser} onSaveToLibrary={onSaveToLibrary} onOpenBrowserSettings={onOpenBrowserSettings} />
   </div>;
 }

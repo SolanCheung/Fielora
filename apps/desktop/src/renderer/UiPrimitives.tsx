@@ -13,6 +13,16 @@ export function Button({ variant = 'secondary', className = '', children, ...pro
   return <button {...props} type={props.type ?? 'button'} className={`ui-button ui-button--${variant} ${className}`.trim()}>{children}</button>;
 }
 
+export function SettingsToggle({ value, onChange, label, testId, disabled = false }: {
+  value: boolean;
+  onChange: (value: boolean) => void;
+  label: string;
+  testId?: string;
+  disabled?: boolean;
+}) {
+  return <button type="button" className="setting-switch" role="switch" aria-label={label} aria-checked={value} disabled={disabled} onClick={() => onChange(!value)} data-testid={testId}><span /></button>;
+}
+
 export function IconButton({ label, icon, active = false, testId, className = '', title, size = 'md', ...props }: ProductButtonProps & {
   size?: 'sm' | 'md';
 }) {

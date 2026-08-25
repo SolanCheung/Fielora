@@ -150,7 +150,10 @@ pub enum PlatformError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlatformPaths {
+    pub base_dir: PathBuf,
     pub data_dir: PathBuf,
+    pub library_dir: PathBuf,
+    pub cache_dir: PathBuf,
     pub runtime_dir: PathBuf,
     pub logs_dir: PathBuf,
     pub config_dir: PathBuf,
@@ -168,22 +171,53 @@ impl PlatformPaths {
         } else {
             resolve_local_app_data_root()?
         };
-        Self::from_root(root)
+        let data_root = std::env::var_os("FIELORA_MANAGED_DATA_ROOT").map(PathBuf::from);
+        let library_root = std::env::var_os("FIELORA_MANAGED_LIBRARY_ROOT").map(PathBuf::from);
+        let cache_root = std::env::var_os("FIELORA_MANAGED_CACHE_ROOT").map(PathBuf::from);
+        Self::from_storage_roots(
+            root.clone(),
+            data_root.unwrap_or_else(|| root.join("data")),
+            library_root.unwrap_or_else(|| root.join("library")),
+            cache_root.unwrap_or_else(|| root.join("cache")),
+        )
     }
 
     pub fn from_root(root: PathBuf) -> Result<Self, PlatformError> {
-        let data_dir = root.join("data");
+        Self::from_storage_roots(
+            root.clone(),
+            root.join("data"),
+            root.join("library"),
+            root.join("cache"),
+        )
+    }
+
+    pub fn from_storage_roots(
+        root: PathBuf,
+        data_dir: PathBuf,
+        library_dir: PathBuf,
+        cache_dir: PathBuf,
+    ) -> Result<Self, PlatformError> {
         let runtime_dir = root.join("runtime");
         let logs_dir = root.join("logs");
         let config_dir = root.join("config");
-        for directory in [&data_dir, &runtime_dir, &logs_dir, &config_dir] {
+        for directory in [
+            &data_dir,
+            &library_dir,
+            &cache_dir,
+            &runtime_dir,
+            &logs_dir,
+            &config_dir,
+        ] {
             fs::create_dir_all(directory)?;
         }
         Ok(Self {
+            base_dir: root,
             database: data_dir.join("fielora.db"),
             core_log: logs_dir.join("fielora-core.log"),
             device_identity: config_dir.join("device-id"),
             data_dir,
+            library_dir,
+            cache_dir,
             runtime_dir,
             logs_dir,
             config_dir,
@@ -246,6 +280,26 @@ mod tests {
         let second = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
         assert_eq!(first.id, second.id);
         assert!(!first.id.0.contains('\\'));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn storage_roots_are_independent_and_database_stays_in_data_root() {
+        let root = temporary_root();
+        let data = root.join("durable");
+        let library = root.join("large-library");
+        let cache = root.join("disposable");
+        let paths = PlatformPaths::from_storage_roots(
+            root.clone(),
+            data.clone(),
+            library.clone(),
+            cache.clone(),
+        )
+        .unwrap();
+        assert_eq!(paths.data_dir, data);
+        assert_eq!(paths.database, data.join("fielora.db"));
+        assert_eq!(paths.library_dir, library);
+        assert_eq!(paths.cache_dir, cache);
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -44,6 +44,12 @@ export type ContextSnapshotId = string;
 
 export type VerificationReceiptId = string;
 
+export type ProfileId = string;
+
+export type LibraryObjectId = string;
+
+export type SyncChangeId = string;
+
 export type ProtocolVersion = { major: number, minor: number, };
 
 export type FipcErrorData = { code: string, trace_id: string, retryable: boolean, details: unknown, };
@@ -270,6 +276,30 @@ export type ListCapturesRequest = { placement: CapturePlacement | null, lifecycl
 
 export type CaptureChangedEvent = { event: string, capture_id: CaptureId, placement_status: CapturePlacement, lifecycle_status: CaptureLifecycle, attached_field_id: FieldId | null, revision: number, };
 
+export type LibraryObjectKind = "FILE" | "WEB";
+
+export type LibraryMediaKind = "DOCUMENT" | "IMAGE" | "AUDIO" | "VIDEO" | "OTHER" | "WEB";
+
+export type LibraryLifecycle = "ACTIVE" | "TOMBSTONE";
+
+export type LibraryObjectView = { id: LibraryObjectId, kind: LibraryObjectKind, media_kind: LibraryMediaKind, title: string, original_source: string | null, original_filename: string | null, mime_type: string | null, size: number | null, blob_ref: string | null, content_hash: string | null, metadata: unknown, lifecycle: LibraryLifecycle, revision: number, updated_by_device: DeviceId, created_at: number, updated_at: number, deleted_at: number | null, };
+
+export type CreateLibraryFileRequest = { title: string, original_source: string, original_filename: string, mime_type: string | null, media_kind: LibraryMediaKind, size: number, blob_ref: string, content_hash: string, metadata: unknown, };
+
+export type SaveWebLibraryRequest = { url: string, title: string, source: string, selected_content: string | null, metadata: unknown, };
+
+export type LibraryObjectRequest = { library_object_id: LibraryObjectId, };
+
+export type DeleteLibraryObjectRequest = { library_object_id: LibraryObjectId, expected_revision: number, };
+
+export type ListLibraryObjectsRequest = { media_kind: LibraryMediaKind | null, include_deleted: boolean, limit: number | null, };
+
+export type ProfileView = { profile_id: ProfileId, schema_version: number, created_at: number, device_id: DeviceId, };
+
+export type SyncOperation = "CREATE" | "UPDATE" | "TOMBSTONE";
+
+export type SyncChangeView = { change_id: SyncChangeId, profile_id: ProfileId, device_id: DeviceId, entity_type: string, entity_id: string, operation: SyncOperation, revision: number, changed_at: number, };
+
 export type ProjectView = { field_id: FieldId, title: string, goal: string | null, root_path: string, revision: number, created_at: number, updated_at: number, };
 
 export type CreateProjectRequest = { title: string, goal: string | null, root_path: string, };
@@ -279,6 +309,8 @@ export type UpdateProjectRequest = { field_id: FieldId, expected_revision: numbe
 export type ArchiveProjectRequest = { field_id: FieldId, expected_revision: number, };
 
 export type ProjectRequest = { field_id: FieldId, };
+
+export type RebindProjectRequest = { field_id: FieldId, root_path: string, };
 
 export type ConversationLifecycle = "ACTIVE" | "ARCHIVED";
 

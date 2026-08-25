@@ -37,7 +37,7 @@ async function quit(cdp){await cdp.evaluate('void window.fielora.core.quit()',fa
 let identifiers;
 try{
   launched=await launch();let cdp=await connect();await waitExpression(cdp,`document.querySelector('[data-testid="project-workspace"]')`);await cdp.evaluate(click('[data-testid="now-nav"]'));await waitExpression(cdp,`document.querySelector('[data-testid="now-screen"]')`);
-  const health=await cdp.evaluate('window.fielora.core.getHealth()');ownedCorePids.add(health.pid);assert.equal(health.schema_version,6);
+  const health=await cdp.evaluate('window.fielora.core.getHealth()');ownedCorePids.add(health.pid);assert.equal(health.schema_version,7);
   const origin=await cdp.evaluate('location.origin');
   if(packaged)assert.equal(origin,'fielora://app');else{const parsed=new URL(origin);assert.ok(['localhost','127.0.0.1','[::1]'].includes(parsed.hostname));assert.ok(parsed.port);}
   assert.equal(await cdp.evaluate(`typeof process==='undefined'&&typeof require==='undefined'`),true);

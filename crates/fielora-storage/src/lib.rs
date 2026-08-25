@@ -5,6 +5,8 @@
 //! Harness.Verification & Evidence. Storage is infrastructure, not a separate
 //! Agent layer or an independent source of execution authority.
 
+pub mod sync;
+
 use fielora_contracts::*;
 use fielora_field::{
     Activity, DomainError, Field, FieldRepository, RealityRepository, SurfaceRepository,
@@ -25,11 +27,13 @@ const MIGRATION_0002: &str = include_str!("../migrations/0002_phase02_reality.sq
 const MIGRATION_0004: &str = include_str!("../migrations/0004_phase04_entry.sql");
 const MIGRATION_0005: &str = include_str!("../migrations/0005_desktop_foundation.sql");
 const MIGRATION_0006: &str = include_str!("../migrations/0006_complete_agent.sql");
+const MIGRATION_0007: &str = include_str!("../migrations/0007_library_storage_profile.sql");
 const MIGRATION_0001_NAME: &str = "core";
 const MIGRATION_0002_NAME: &str = "phase02_reality";
 const MIGRATION_0004_NAME: &str = "phase04_entry";
 const MIGRATION_0005_NAME: &str = "desktop_foundation";
 const MIGRATION_0006_NAME: &str = "complete_agent";
+const MIGRATION_0007_NAME: &str = "library_storage_profile";
 const MIGRATION_0002_FROZEN_SHA256: &str =
     "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9";
 const MIGRATION_0004_FROZEN_SHA256: &str =
@@ -38,12 +42,14 @@ const MIGRATION_0005_FROZEN_SHA256: &str =
     "b7e1e586b47e50389502677e172741d69463e9518ed32211dfafe0dc910c1547";
 const MIGRATION_0006_FROZEN_SHA256: &str =
     "5257959801424a13426259ce10c9ed2d5037795ec7a3a207171c568bc80dbaae";
-const SCHEMA_VERSION: u32 = 6;
+const SCHEMA_VERSION: u32 = 7;
 const LOCAL_USER_NAME: &str = "Local user";
 const SYSTEM_NAME: &str = "Fielora system";
 
 #[derive(Debug, Error)]
 pub enum StorageError {
+    #[error("storage I/O failed: {0}")]
+    Io(#[from] std::io::Error),
     #[error("SQLite failed: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("migration checksum mismatch for version {version}")]
@@ -217,7 +223,7 @@ impl StorageHandle {
         let device = self.device_id.clone();
         request_task(&self.sender, move |connection| {
             let mut statement = connection.prepare(
-                "SELECT f.id,f.title,f.goal,b.local_locator,f.revision,f.created_at,MAX(f.updated_at,COALESCE((SELECT MAX(c.updated_at) FROM conversations c WHERE c.field_id=f.id AND c.lifecycle_status='ACTIVE'),f.updated_at)) AS project_activity_at FROM fields f JOIN device_bindings b ON b.object_id=f.id AND b.device_id=?1 AND b.binding_kind='PROJECT_ROOT' WHERE f.owner_principal_id=?2 AND f.lifecycle_status='ACTIVE' ORDER BY project_activity_at DESC,f.id DESC"
+                "SELECT f.id,f.title,f.goal,COALESCE(b.local_locator,''),f.revision,f.created_at,MAX(f.updated_at,COALESCE((SELECT MAX(c.updated_at) FROM conversations c WHERE c.field_id=f.id AND c.lifecycle_status='ACTIVE'),f.updated_at)) AS project_activity_at FROM fields f LEFT JOIN device_bindings b ON b.object_id=f.id AND b.device_id=?1 AND b.binding_kind='PROJECT_ROOT' WHERE f.owner_principal_id=?2 AND f.lifecycle_status='ACTIVE' ORDER BY project_activity_at DESC,f.id DESC"
             ).map_err(storage_domain)?;
             let rows = statement
                 .query_map(params![device.0, owner.0], project_from_row)
@@ -231,6 +237,32 @@ impl StorageHandle {
         let device = self.device_id.clone();
         request_task(&self.sender, move |connection| {
             get_project(connection, &owner, &device, &field_id)
+        })
+    }
+
+    pub fn rebind_project(
+        &self,
+        request: RebindProjectRequest,
+        now: i64,
+    ) -> Result<ProjectView, DomainError> {
+        let owner = self.local_user.clone();
+        let device = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            if request.root_path.trim().is_empty() || request.root_path.len() > 32_767 {
+                return Err(DomainError::Validation("invalid Project root".into()));
+            }
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM fields WHERE id=?1 AND owner_principal_id=?2 AND lifecycle_status='ACTIVE'",
+                params![request.field_id.0, owner.0], |row| row.get(0),
+            ).map_err(storage_domain)?;
+            if exists != 1 {
+                return Err(DomainError::NotFound);
+            }
+            connection.execute(
+                "INSERT INTO device_bindings(id,device_id,object_id,binding_kind,local_locator,metadata_json,created_at,updated_at) VALUES(?1,?2,?3,'PROJECT_ROOT',?4,'{\"version\":1}',?5,?5) ON CONFLICT(device_id,object_id,binding_kind) DO UPDATE SET local_locator=excluded.local_locator,metadata_json=excluded.metadata_json,updated_at=excluded.updated_at",
+                params![Uuid::now_v7().to_string(), device.0, request.field_id.0, request.root_path, now],
+            ).map_err(storage_domain)?;
+            get_project(connection, &owner, &device, &request.field_id)
         })
     }
 
@@ -1196,6 +1228,185 @@ impl StorageHandle {
         })
     }
 
+    pub fn profile(&self) -> Result<ProfileView, DomainError> {
+        let device_id = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            connection
+                .query_row(
+                    "SELECT profile_id,schema_version,created_at FROM profiles WHERE singleton_key=1",
+                    [],
+                    |row| Ok(ProfileView {
+                        profile_id: ProfileId::new(row.get::<_, String>(0)?),
+                        schema_version: row.get::<_, u32>(1)?,
+                        created_at: row.get(2)?,
+                        device_id: device_id.clone(),
+                    }),
+                )
+                .map_err(storage_domain)
+        })
+    }
+
+    pub fn create_library_file(
+        &self,
+        request: CreateLibraryFileRequest,
+        now: i64,
+    ) -> Result<LibraryObjectView, DomainError> {
+        let device_id = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            validate_library_file_request(&request)?;
+            let id = LibraryObjectId::new(Uuid::now_v7().to_string());
+            let profile_id = current_profile_id(connection)?;
+            let metadata = serde_json::to_string(&request.metadata)
+                .map_err(|error| DomainError::Validation(error.to_string()))?;
+            let tx = connection.transaction().map_err(storage_domain)?;
+            tx.execute(
+                "INSERT INTO library_objects(id,profile_id,kind,media_kind,title,original_source,original_filename,mime_type,size,blob_ref,content_hash,metadata_json,lifecycle,revision,updated_by_device,created_at,updated_at,deleted_at) VALUES(?1,?2,'FILE',?3,?4,?5,?6,?7,?8,?9,?10,?11,'ACTIVE',1,?12,?13,?13,NULL)",
+                params![id.0, profile_id.0, wire(&request.media_kind), request.title, request.original_source, request.original_filename, request.mime_type, revision_to_domain(request.size)?, request.blob_ref, request.content_hash, metadata, device_id.0, now],
+            ).map_err(storage_domain)?;
+            insert_sync_change(&tx, &profile_id, &device_id, &id, "CREATE", 1, now)?;
+            tx.commit().map_err(storage_domain)?;
+            get_library_object(connection, &id)
+        })
+    }
+
+    pub fn save_web_library(
+        &self,
+        request: SaveWebLibraryRequest,
+        now: i64,
+    ) -> Result<LibraryObjectView, DomainError> {
+        let device_id = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            if request.title.trim().is_empty() || request.title.chars().count() > 512 {
+                return Err(DomainError::Validation("invalid Library title".into()));
+            }
+            if !(request.url.starts_with("https://") || request.url.starts_with("http://"))
+                || request.url.len() > 2048
+            {
+                return Err(DomainError::Validation("invalid Library web URL".into()));
+            }
+            let id = LibraryObjectId::new(Uuid::now_v7().to_string());
+            let profile_id = current_profile_id(connection)?;
+            let mut metadata = request.metadata;
+            if !metadata.is_object() {
+                return Err(DomainError::Validation(
+                    "Library metadata must be an object".into(),
+                ));
+            }
+            if let Some(selected) = request.selected_content {
+                if selected.chars().count() > 16_000 {
+                    return Err(DomainError::Validation(
+                        "selected content is too large".into(),
+                    ));
+                }
+                metadata["selected_content"] = Value::String(selected);
+            }
+            metadata["source"] = Value::String(request.source);
+            let metadata = serde_json::to_string(&metadata)
+                .map_err(|error| DomainError::Validation(error.to_string()))?;
+            let tx = connection.transaction().map_err(storage_domain)?;
+            tx.execute(
+                "INSERT INTO library_objects(id,profile_id,kind,media_kind,title,original_source,original_filename,mime_type,size,blob_ref,content_hash,metadata_json,lifecycle,revision,updated_by_device,created_at,updated_at,deleted_at) VALUES(?1,?2,'WEB','WEB',?3,?4,NULL,'text/html',NULL,NULL,NULL,?5,'ACTIVE',1,?6,?7,?7,NULL)",
+                params![id.0, profile_id.0, request.title, request.url, metadata, device_id.0, now],
+            ).map_err(storage_domain)?;
+            insert_sync_change(&tx, &profile_id, &device_id, &id, "CREATE", 1, now)?;
+            tx.commit().map_err(storage_domain)?;
+            get_library_object(connection, &id)
+        })
+    }
+
+    pub fn get_library_object(
+        &self,
+        id: LibraryObjectId,
+    ) -> Result<LibraryObjectView, DomainError> {
+        request_task(&self.sender, move |connection| {
+            get_library_object(connection, &id)
+        })
+    }
+
+    pub fn list_library_objects(
+        &self,
+        request: ListLibraryObjectsRequest,
+    ) -> Result<Vec<LibraryObjectView>, DomainError> {
+        request_task(&self.sender, move |connection| {
+            let limit = request.limit.unwrap_or(200).clamp(1, 500) as i64;
+            let lifecycle = if request.include_deleted {
+                None
+            } else {
+                Some("ACTIVE")
+            };
+            let media = request.media_kind.as_ref().map(wire);
+            let mut statement = connection.prepare(
+                "SELECT id,kind,media_kind,title,original_source,original_filename,mime_type,size,blob_ref,content_hash,metadata_json,lifecycle,revision,updated_by_device,created_at,updated_at,deleted_at FROM library_objects WHERE (?1 IS NULL OR lifecycle=?1) AND (?2 IS NULL OR media_kind=?2) ORDER BY updated_at DESC,id DESC LIMIT ?3"
+            ).map_err(storage_domain)?;
+            statement
+                .query_map(params![lifecycle, media, limit], library_object_from_row)
+                .map_err(storage_domain)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(storage_domain)
+        })
+    }
+
+    pub fn delete_library_object(
+        &self,
+        request: DeleteLibraryObjectRequest,
+        now: i64,
+    ) -> Result<LibraryObjectView, DomainError> {
+        let device_id = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            let profile_id = current_profile_id(connection)?;
+            let next_revision = request
+                .expected_revision
+                .checked_add(1)
+                .ok_or_else(|| DomainError::Validation("revision overflow".into()))?;
+            let tx = connection.transaction().map_err(storage_domain)?;
+            let changed = tx.execute(
+                "UPDATE library_objects SET lifecycle='TOMBSTONE',revision=revision+1,updated_by_device=?1,updated_at=?2,deleted_at=?2 WHERE id=?3 AND lifecycle='ACTIVE' AND revision=?4",
+                params![device_id.0, now, request.library_object_id.0, revision_to_domain(request.expected_revision)?],
+            ).map_err(storage_domain)?;
+            if changed == 0 {
+                return match get_library_object(&tx, &request.library_object_id) {
+                    Ok(_) => Err(DomainError::RevisionConflict),
+                    Err(error) => Err(error),
+                };
+            }
+            insert_sync_change(
+                &tx,
+                &profile_id,
+                &device_id,
+                &request.library_object_id,
+                "TOMBSTONE",
+                next_revision,
+                now,
+            )?;
+            tx.commit().map_err(storage_domain)?;
+            get_library_object(connection, &request.library_object_id)
+        })
+    }
+
+    pub fn list_sync_changes(&self) -> Result<Vec<SyncChangeView>, DomainError> {
+        request_task(&self.sender, move |connection| {
+            let mut statement = connection.prepare(
+                "SELECT change_id,profile_id,device_id,entity_type,entity_id,operation,revision,changed_at FROM sync_change_journal ORDER BY changed_at ASC,change_id ASC"
+            ).map_err(storage_domain)?;
+            statement
+                .query_map([], |row| {
+                    Ok(SyncChangeView {
+                        change_id: SyncChangeId::new(row.get::<_, String>(0)?),
+                        profile_id: ProfileId::new(row.get::<_, String>(1)?),
+                        device_id: DeviceId::new(row.get::<_, String>(2)?),
+                        entity_type: row.get(3)?,
+                        entity_id: row.get(4)?,
+                        operation: parse_wire(row.get(5)?)?,
+                        revision: revision_from_row(row, 6)?,
+                        changed_at: row.get(7)?,
+                    })
+                })
+                .map_err(storage_domain)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(storage_domain)
+        })
+    }
+
     pub fn record_model_terminal(
         &self,
         field_id: Option<FieldId>,
@@ -1603,6 +1814,108 @@ fn parse_wire<T: serde::de::DeserializeOwned>(value: String) -> rusqlite::Result
         .map_err(|error| conversion_error(error.to_string()))
 }
 
+fn current_profile_id(connection: &Connection) -> Result<ProfileId, DomainError> {
+    connection
+        .query_row(
+            "SELECT profile_id FROM profiles WHERE singleton_key=1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .map(ProfileId::new)
+        .map_err(storage_domain)
+}
+
+fn validate_library_file_request(request: &CreateLibraryFileRequest) -> Result<(), DomainError> {
+    if request.title.trim().is_empty() || request.title.chars().count() > 512 {
+        return Err(DomainError::Validation("invalid Library title".into()));
+    }
+    if request.original_filename.trim().is_empty()
+        || request.original_filename.chars().count() > 512
+    {
+        return Err(DomainError::Validation("invalid Library filename".into()));
+    }
+    if request.size == 0 || request.original_source.len() > 32_767 {
+        return Err(DomainError::Validation("invalid Library file".into()));
+    }
+    if request.content_hash.len() != 64
+        || !request
+            .content_hash
+            .bytes()
+            .all(|value| value.is_ascii_hexdigit() && !value.is_ascii_uppercase())
+    {
+        return Err(DomainError::Validation(
+            "invalid Library content hash".into(),
+        ));
+    }
+    let expected_ref = format!(
+        "blobs/objects/{}/{}",
+        &request.content_hash[..2],
+        request.content_hash
+    );
+    if request.blob_ref != expected_ref || !request.metadata.is_object() {
+        return Err(DomainError::Validation(
+            "invalid Library blob binding".into(),
+        ));
+    }
+    if request.media_kind == LibraryMediaKind::Web {
+        return Err(DomainError::Validation(
+            "file media kind cannot be WEB".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn insert_sync_change(
+    transaction: &Transaction<'_>,
+    profile_id: &ProfileId,
+    device_id: &DeviceId,
+    entity_id: &LibraryObjectId,
+    operation: &str,
+    revision: u64,
+    changed_at: i64,
+) -> Result<(), DomainError> {
+    transaction.execute(
+        "INSERT INTO sync_change_journal(change_id,profile_id,device_id,entity_type,entity_id,operation,revision,changed_at) VALUES(?1,?2,?3,'LIBRARY_OBJECT',?4,?5,?6,?7)",
+        params![Uuid::now_v7().to_string(), profile_id.0, device_id.0, entity_id.0, operation, revision_to_domain(revision)?, changed_at],
+    ).map_err(storage_domain)?;
+    Ok(())
+}
+
+fn library_object_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryObjectView> {
+    let metadata: String = row.get(10)?;
+    Ok(LibraryObjectView {
+        id: LibraryObjectId::new(row.get::<_, String>(0)?),
+        kind: parse_wire(row.get(1)?)?,
+        media_kind: parse_wire(row.get(2)?)?,
+        title: row.get(3)?,
+        original_source: row.get(4)?,
+        original_filename: row.get(5)?,
+        mime_type: row.get(6)?,
+        size: row.get::<_, Option<i64>>(7)?.map(|value| value as u64),
+        blob_ref: row.get(8)?,
+        content_hash: row.get(9)?,
+        metadata: serde_json::from_str(&metadata)
+            .map_err(|error| conversion_error(error.to_string()))?,
+        lifecycle: parse_wire(row.get(11)?)?,
+        revision: revision_from_row(row, 12)?,
+        updated_by_device: DeviceId::new(row.get::<_, String>(13)?),
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+        deleted_at: row.get(16)?,
+    })
+}
+
+fn get_library_object(
+    connection: &Connection,
+    id: &LibraryObjectId,
+) -> Result<LibraryObjectView, DomainError> {
+    connection.query_row(
+        "SELECT id,kind,media_kind,title,original_source,original_filename,mime_type,size,blob_ref,content_hash,metadata_json,lifecycle,revision,updated_by_device,created_at,updated_at,deleted_at FROM library_objects WHERE id=?1",
+        [&id.0],
+        library_object_from_row,
+    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
 fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectView> {
     Ok(ProjectView {
         field_id: FieldId::new(row.get::<_, String>(0)?),
@@ -1622,7 +1935,7 @@ fn get_project(
     field_id: &FieldId,
 ) -> Result<ProjectView, DomainError> {
     connection.query_row(
-        "SELECT f.id,f.title,f.goal,b.local_locator,f.revision,f.created_at,MAX(f.updated_at,COALESCE((SELECT MAX(c.updated_at) FROM conversations c WHERE c.field_id=f.id AND c.lifecycle_status='ACTIVE'),f.updated_at)) FROM fields f JOIN device_bindings b ON b.object_id=f.id AND b.device_id=?1 AND b.binding_kind='PROJECT_ROOT' WHERE f.id=?2 AND f.owner_principal_id=?3 AND f.lifecycle_status='ACTIVE'",
+        "SELECT f.id,f.title,f.goal,COALESCE(b.local_locator,''),f.revision,f.created_at,MAX(f.updated_at,COALESCE((SELECT MAX(c.updated_at) FROM conversations c WHERE c.field_id=f.id AND c.lifecycle_status='ACTIVE'),f.updated_at)) FROM fields f LEFT JOIN device_bindings b ON b.object_id=f.id AND b.device_id=?1 AND b.binding_kind='PROJECT_ROOT' WHERE f.id=?2 AND f.owner_principal_id=?3 AND f.lifecycle_status='ACTIVE'",
         params![device.0, field_id.0, owner.0],
         project_from_row,
     ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
@@ -2153,7 +2466,12 @@ fn run_worker(mut connection: Connection, receiver: Receiver<StorageCommand>) {
             } => {
                 let _ = reply.send(latest_snapshot(&connection, &field_id, &device_id));
             }
-            StorageCommand::Shutdown => break,
+            StorageCommand::Shutdown => {
+                // All durable writes are serialized on this worker. Checkpoint
+                // before closing so DataRoot migration never copies a live WAL.
+                let _ = connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+                break;
+            }
         }
     }
 }
@@ -2196,6 +2514,7 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     let checksum_0004 = frozen_migration_checksum(MIGRATION_0004);
     let checksum_0005 = frozen_migration_checksum(MIGRATION_0005);
     let checksum_0006 = frozen_migration_checksum(MIGRATION_0006);
+    let checksum_0007 = migration_checksum(MIGRATION_0007);
     if checksum_0002 != MIGRATION_0002_FROZEN_SHA256 {
         return Err(StorageError::MigrationChecksum { version: 2 });
     }
@@ -2277,7 +2596,21 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
             "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (6, ?1, ?2, ?3)",
             params![MIGRATION_0006_NAME, checksum_0006, now],
         )?;
-        validate_schema(&transaction)?;
+        // Full current-schema validation runs after additive 0007 below.
+        validate_base_schema(&transaction)?;
+        transaction.commit()?;
+    }
+    verify_applied_migration(connection, 7, MIGRATION_0007_NAME, &checksum_0007)?;
+    if !migration_exists(connection, 7)? {
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if transaction.execute_batch(MIGRATION_0007).is_err() {
+            return Err(StorageError::MigrationIncompatibleData);
+        }
+        transaction.execute(
+            "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (7, ?1, ?2, ?3)",
+            params![MIGRATION_0007_NAME, checksum_0007, now],
+        )?;
         transaction.commit()?;
     }
     validate_schema(connection)?;
@@ -2491,11 +2824,11 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
         return Err(StorageError::OpenGate("foreign_key_check failed".into()));
     }
     let migrations: i64 = connection.query_row(
-        "SELECT COUNT(*) FROM schema_migrations WHERE version IN (1,2,4,5,6)",
+        "SELECT COUNT(*) FROM schema_migrations WHERE version IN (1,2,4,5,6,7)",
         [],
         |row| row.get(0),
     )?;
-    if migrations != 5 || migration_exists(connection, 3)? {
+    if migrations != 6 || migration_exists(connection, 3)? {
         return Err(StorageError::OpenGate(
             "migration registry incomplete".into(),
         ));
@@ -2531,6 +2864,9 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
         "agent_approvals",
         "agent_context_snapshots",
         "agent_verification_receipts",
+        "profiles",
+        "library_objects",
+        "sync_change_journal",
     ] {
         let exists: i64 = connection.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -2710,6 +3046,8 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
     for trigger in [
         "agent_events_immutable_update",
         "agent_events_immutable_delete",
+        "sync_change_journal_immutable_update",
+        "sync_change_journal_immutable_delete",
     ] {
         let exists: i64 = connection.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?1",
@@ -2719,6 +3057,48 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
         if exists != 1 {
             return Err(StorageError::OpenGate(format!(
                 "required trigger missing: {trigger}"
+            )));
+        }
+    }
+    for (table, column) in [
+        ("profiles", "profile_id"),
+        ("profiles", "schema_version"),
+        ("library_objects", "profile_id"),
+        ("library_objects", "kind"),
+        ("library_objects", "media_kind"),
+        ("library_objects", "metadata_json"),
+        ("library_objects", "lifecycle"),
+        ("library_objects", "revision"),
+        ("library_objects", "updated_by_device"),
+        ("sync_change_journal", "profile_id"),
+        ("sync_change_journal", "device_id"),
+        ("sync_change_journal", "operation"),
+        ("sync_change_journal", "revision"),
+    ] {
+        let count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name=?2 AND \"notnull\"=1",
+            params![table, column],
+            |row| row.get(0),
+        )?;
+        if count != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required NOT NULL column missing: {table}.{column}"
+            )));
+        }
+    }
+    for index in [
+        "idx_library_profile_lifecycle_updated",
+        "idx_library_profile_media_updated",
+        "idx_sync_change_profile_changed",
+    ] {
+        let exists: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+            [index],
+            |row| row.get(0),
+        )?;
+        if exists != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required index missing: {index}"
             )));
         }
     }
@@ -2745,6 +3125,10 @@ fn bootstrap_records(
             device.architecture,
             now
         ],
+    )?;
+    transaction.execute(
+        "INSERT OR IGNORE INTO profiles(singleton_key, profile_id, schema_version, created_at) VALUES(1, ?1, 1, ?2)",
+        params![Uuid::now_v7().to_string(), now],
     )?;
     transaction.commit()?;
     Ok(local_user)
@@ -4531,6 +4915,68 @@ pub fn schema_version() -> u32 {
     SCHEMA_VERSION
 }
 
+/// Create a closed, portable SQLite snapshot. The caller must stop the live
+/// StorageWorker first; machine-local device bindings and surface snapshots are
+/// deliberately removed from the copy, never from the source database.
+pub fn create_portable_snapshot(source: &Path, target: &Path) -> Result<(), StorageError> {
+    if source == target || target.exists() {
+        return Err(StorageError::OpenGate(
+            "invalid portable snapshot target".into(),
+        ));
+    }
+    std::fs::copy(source, target)?;
+    let mut connection = open_connection(target)?;
+    validate_schema(&connection)?;
+    let transaction = connection.transaction()?;
+    transaction.execute("DELETE FROM surface_snapshots", [])?;
+    transaction.execute("DELETE FROM device_bindings", [])?;
+    transaction.execute(
+        "UPDATE library_objects SET original_source=NULL WHERE kind='FILE'",
+        [],
+    )?;
+    transaction.execute(
+        "UPDATE provider_configs SET lifecycle_status='DISABLED' WHERE lifecycle_status='ACTIVE'",
+        [],
+    )?;
+    transaction.commit()?;
+    connection.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")?;
+    validate_database_snapshot_connection(&connection)?;
+    drop(connection);
+    let wal = PathBuf::from(format!("{}-wal", target.to_string_lossy()));
+    let shm = PathBuf::from(format!("{}-shm", target.to_string_lossy()));
+    if wal.exists() {
+        std::fs::remove_file(wal)?;
+    }
+    if shm.exists() {
+        std::fs::remove_file(shm)?;
+    }
+    Ok(())
+}
+
+pub fn validate_database_snapshot(path: &Path) -> Result<(), StorageError> {
+    let connection = open_connection(path)?;
+    validate_schema(&connection)?;
+    validate_database_snapshot_connection(&connection)
+}
+
+fn validate_database_snapshot_connection(connection: &Connection) -> Result<(), StorageError> {
+    let integrity: String = connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+    if integrity != "ok" {
+        return Err(StorageError::OpenGate("integrity_check failed".into()));
+    }
+    let profiles: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM profiles WHERE singleton_key=1 AND schema_version>=1",
+        [],
+        |row| row.get(0),
+    )?;
+    if profiles != 1 {
+        return Err(StorageError::OpenGate(
+            "portable profile identity missing".into(),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4689,7 +5135,7 @@ mod tests {
             frozen_migration_checksum(MIGRATION_0006),
             MIGRATION_0006_FROZEN_SHA256
         );
-        assert_eq!(schema_version(), 6);
+        assert_eq!(schema_version(), 7);
     }
 
     #[test]
@@ -5587,5 +6033,222 @@ mod tests {
             );
         }
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn library_profile_journal_and_tombstone_survive_reopen() {
+        let root = temporary_root();
+        let profile_id;
+        let library_id;
+        {
+            let worker = start(&root, 10);
+            let handle = worker.handle();
+            let profile = handle.profile().unwrap();
+            profile_id = profile.profile_id.clone();
+            let hash = "a".repeat(64);
+            let created = handle
+                .create_library_file(
+                    CreateLibraryFileRequest {
+                        title: "example.txt".into(),
+                        original_source: "C:\\fixture\\example.txt".into(),
+                        original_filename: "example.txt".into(),
+                        mime_type: Some("text/plain".into()),
+                        media_kind: LibraryMediaKind::Document,
+                        size: 7,
+                        blob_ref: format!("blobs/objects/aa/{hash}"),
+                        content_hash: hash,
+                        metadata: serde_json::json!({"version":1}),
+                    },
+                    11,
+                )
+                .unwrap();
+            library_id = created.id.clone();
+            assert_eq!(created.revision, 1);
+            let deleted = handle
+                .delete_library_object(
+                    DeleteLibraryObjectRequest {
+                        library_object_id: created.id,
+                        expected_revision: 1,
+                    },
+                    12,
+                )
+                .unwrap();
+            assert_eq!(deleted.lifecycle, LibraryLifecycle::Tombstone);
+            assert_eq!(deleted.revision, 2);
+            let changes = handle.list_sync_changes().unwrap();
+            assert_eq!(changes.len(), 2);
+            assert_eq!(changes[0].operation, SyncOperation::Create);
+            assert_eq!(changes[1].operation, SyncOperation::Tombstone);
+        }
+        {
+            let worker = start(&root, 20);
+            let handle = worker.handle();
+            assert_eq!(handle.profile().unwrap().profile_id, profile_id);
+            let objects = handle
+                .list_library_objects(ListLibraryObjectsRequest {
+                    media_kind: None,
+                    include_deleted: true,
+                    limit: None,
+                })
+                .unwrap();
+            assert_eq!(objects.len(), 1);
+            assert_eq!(objects[0].id, library_id);
+            assert_eq!(objects[0].lifecycle, LibraryLifecycle::Tombstone);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn portable_snapshot_restores_profile_to_a_new_device_without_machine_paths() {
+        let source_root = temporary_root();
+        let imported_root = temporary_root();
+        let source_paths = PlatformPaths::from_root(source_root.clone()).unwrap();
+        let source_device = DeviceIdentity::load_or_create(&source_paths.device_identity).unwrap();
+        let source_device_id = source_device.id.clone();
+        let profile_id;
+        let project_id;
+        let conversation_id;
+        {
+            let worker = StorageWorker::start(&source_paths.database, source_device, 1).unwrap();
+            let handle = worker.handle();
+            profile_id = handle.profile().unwrap().profile_id;
+            let project = handle
+                .create_project(
+                    CreateProjectRequest {
+                        title: "Portable Project".into(),
+                        goal: None,
+                        root_path: "F:\\machine-only\\project".into(),
+                    },
+                    2,
+                )
+                .unwrap();
+            project_id = project.field_id.clone();
+            let provider = handle
+                .create_provider_config(
+                    CreateProviderConfigRequest {
+                        provider_kind: ProviderKind::Openai,
+                        display_name: "Portable provider metadata".into(),
+                        base_url: None,
+                        default_model: "test-model".into(),
+                        custom_endpoint_acknowledged: false,
+                    },
+                    3,
+                )
+                .unwrap();
+            let provider = handle
+                .set_provider_credential_present(provider.view.id, true, 4)
+                .unwrap();
+            let conversation = handle
+                .create_conversation(
+                    CreateConversationRequest {
+                        field_id: project_id.clone(),
+                        title: "Durable conversation".into(),
+                        provider_config_id: Some(provider.view.id.clone()),
+                        model_id: Some("test-model".into()),
+                    },
+                    5,
+                )
+                .unwrap();
+            conversation_id = conversation.id.clone();
+            let message = handle
+                .create_conversation_message(
+                    CreateConversationMessageRequest {
+                        conversation_id: conversation.id.clone(),
+                        role: ConversationMessageRole::User,
+                        content: "durable message".into(),
+                        status: ConversationMessageStatus::Completed,
+                        provider_config_id: None,
+                        model_id: None,
+                        invocation_id: None,
+                    },
+                    6,
+                )
+                .unwrap();
+            handle
+                .create_agent_run(
+                    StartAgentRunRequest {
+                        field_id: project_id.clone(),
+                        conversation_id: conversation.id,
+                        user_message_id: Some(message.id),
+                        provider_config_id: provider.view.id,
+                        model_id: Some("test-model".into()),
+                        task: "durable agent history".into(),
+                        permission: AgentPermission::ReadOnly,
+                        max_steps: Some(2),
+                        attachments: None,
+                    },
+                    7,
+                )
+                .unwrap();
+            let hash = "b".repeat(64);
+            handle
+                .create_library_file(
+                    CreateLibraryFileRequest {
+                        title: "portable.txt".into(),
+                        original_source: "C:\\machine-only\\portable.txt".into(),
+                        original_filename: "portable.txt".into(),
+                        mime_type: Some("text/plain".into()),
+                        media_kind: LibraryMediaKind::Document,
+                        size: 8,
+                        blob_ref: format!("blobs/objects/bb/{hash}"),
+                        content_hash: hash,
+                        metadata: serde_json::json!({"version":1}),
+                    },
+                    8,
+                )
+                .unwrap();
+        }
+        let imported_paths = PlatformPaths::from_root(imported_root.clone()).unwrap();
+        create_portable_snapshot(&source_paths.database, &imported_paths.database).unwrap();
+        let imported_device =
+            DeviceIdentity::load_or_create(&imported_paths.device_identity).unwrap();
+        assert_ne!(imported_device.id, source_device_id);
+        {
+            let worker =
+                StorageWorker::start(&imported_paths.database, imported_device, 20).unwrap();
+            let handle = worker.handle();
+            assert_eq!(handle.profile().unwrap().profile_id, profile_id);
+            let projects = handle.list_projects().unwrap();
+            assert_eq!(projects.len(), 1);
+            assert_eq!(projects[0].field_id, project_id);
+            assert_eq!(projects[0].root_path, "");
+            assert_eq!(
+                handle
+                    .list_conversation_messages(conversation_id.clone())
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_eq!(handle.list_agent_runs(conversation_id).unwrap().len(), 1);
+            let providers = handle.list_provider_configs().unwrap();
+            assert_eq!(providers.len(), 1);
+            assert_eq!(
+                providers[0].view.lifecycle_status,
+                ProviderLifecycle::Disabled
+            );
+            assert!(!providers[0].view.credential_present);
+            let objects = handle
+                .list_library_objects(ListLibraryObjectsRequest {
+                    media_kind: None,
+                    include_deleted: false,
+                    limit: None,
+                })
+                .unwrap();
+            assert_eq!(objects.len(), 1);
+            assert_eq!(objects[0].original_source, None);
+        }
+        let source = StorageWorker::start(
+            &source_paths.database,
+            DeviceIdentity::load_or_create(&source_paths.device_identity).unwrap(),
+            30,
+        )
+        .unwrap();
+        assert_eq!(
+            source.handle().get_project(project_id).unwrap().root_path,
+            "F:\\machine-only\\project"
+        );
+        drop(source);
+        fs::remove_dir_all(source_root).unwrap();
+        fs::remove_dir_all(imported_root).unwrap();
     }
 }

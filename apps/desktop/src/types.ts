@@ -32,7 +32,11 @@ import type {
   AgentChangedEvent, AgentRunView, StartAgentRunRequest, AgentRunRequest, ListAgentRunsRequest,
   AgentEventView, ListAgentEventsRequest, AgentToolCallView, ApprovalView, ResolveAgentApprovalRequest,
   BuildProvenanceView,
+  LibraryObjectView, LibraryObjectRequest, DeleteLibraryObjectRequest, ListLibraryObjectsRequest,
+  SaveWebLibraryRequest, ProfileView,
 } from '@fielora/contracts';
+import type { StorageDetail, StorageInfo } from './storage-manager';
+import type { AppPreferences } from './renderer/app-preferences';
 import type { BrowserContextCandidate, BrowserNavigateRequest, BrowserPageRequest, BrowserPageState, BrowserViewBounds } from './browser-types';
 import type {
   ApplyWorkspaceFileRequest, CancelTerminalRequest, PickProjectRequest, RunTerminalRequest,
@@ -65,6 +69,7 @@ export interface FieloraBridge {
     get(request: ProjectRequest): Promise<ProjectView>;
     update(request: UpdateProjectRequest): Promise<ProjectView>;
     archive(request: ArchiveProjectRequest): Promise<ProjectView>;
+    rebind(request: ProjectRequest): Promise<ProjectView | null>;
   };
   conversation: {
     create(request: CreateConversationRequest): Promise<ConversationView>;
@@ -181,6 +186,27 @@ export interface FieloraBridge {
     restore(request: MutateCaptureRequest): Promise<CaptureView>;
     list(request: ListCapturesRequest): Promise<Page<CaptureView, CaptureCursor>>;
     get(request: CaptureRequest): Promise<CaptureView>;
+  };
+  library: {
+    addFiles(): Promise<LibraryObjectView[]>;
+    saveWeb(request: SaveWebLibraryRequest): Promise<LibraryObjectView>;
+    list(request: ListLibraryObjectsRequest): Promise<LibraryObjectView[]>;
+    get(request: LibraryObjectRequest): Promise<LibraryObjectView>;
+    delete(request: DeleteLibraryObjectRequest): Promise<LibraryObjectView>;
+    open(request: LibraryObjectRequest): Promise<null>;
+    reveal(request: LibraryObjectRequest): Promise<null>;
+  };
+  storage: {
+    info(): Promise<StorageInfo>;
+    open(id: 'DATA_ROOT' | 'LIBRARY_ROOT' | 'CACHE_ROOT' | StorageDetail['id']): Promise<null>;
+    migrateDataRoot(): Promise<{ canceled: boolean; root: string | null }>;
+    migrateLibraryRoot(): Promise<{ canceled: boolean; root: string | null }>;
+    clearCache(): Promise<{ removed_bytes: number }>;
+  };
+  profile: {
+    get(): Promise<ProfileView>;
+    export(request: { include_library: boolean; preferences: AppPreferences }): Promise<{ canceled: boolean; path: string | null }>;
+    import(): Promise<{ canceled: boolean; profile_id: string | null; preferences: AppPreferences | null }>;
   };
   core: {
     getHealth(): Promise<HealthDTO>;

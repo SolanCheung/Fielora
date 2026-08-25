@@ -45,8 +45,9 @@ test('selected project title toggles its conversation branch and hides the absol
 });
 
 test('system navigation labels are consistently Chinese', () => {
+  assert.match(navigation, /data-testid="new-conversation"[^>]*>[\s\S]*?<span>新聊天<\/span>/);
   assert.match(navigation, /data-testid="now-nav"[^>]*>[\s\S]*?<span>现在<\/span>/);
-  assert.match(navigation, /data-testid="fields-nav"[^>]*>[\s\S]*?<span>空间<\/span>/);
-  assert.match(navigation, /data-testid="inbox-nav"[^>]*>[\s\S]*?<span>收件箱<\/span>/);
-  assert.doesNotMatch(navigation, /<span>(?:Now|Fields|Inbox)<\/span>/);
+  assert.match(navigation, /data-testid="library-nav"[^>]*>[\s\S]*?<span>资料库<\/span>/);
+  assert.doesNotMatch(navigation, /data-testid="(?:fields|inbox|browse)-nav"/);
+  assert.doesNotMatch(navigation, /<span>(?:Now|Fields|Inbox|Browser)<\/span>/);
 });

@@ -18,6 +18,10 @@ export class CoreProcessSupervisor extends EventEmitter {
   private state: CoreHealthState = 'STARTING';
   private health?: HealthDTO;
 
+  constructor(private readonly environment: () => NodeJS.ProcessEnv = () => process.env) {
+    super();
+  }
+
   async start(): Promise<void> {
     if (this.child) return;
     this.stopping = false;
@@ -28,7 +32,7 @@ export class CoreProcessSupervisor extends EventEmitter {
       shell: false,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env,
+      env: this.environment(),
     });
     this.child = child;
     child.stderr.on('data', (chunk) => console.warn(`[core] ${String(chunk).trimEnd()}`));
@@ -98,6 +102,27 @@ export class CoreProcessSupervisor extends EventEmitter {
     if (child.exitCode === null) child.kill();
     this.child = undefined;
     this.client = undefined;
+  }
+
+  async runMaintenance(arguments_: string[]): Promise<void> {
+    const executable = this.resolveCorePath();
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(executable, arguments_, {
+        shell: false,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: this.environment(),
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+      child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+      child.once('error', reject);
+      child.once('exit', (code) => {
+        if (code === 0 && stdout.trim() === 'PASS') resolve();
+        else reject(new Error(stderr.trim() || `Core maintenance failed (${code ?? 'unknown'})`));
+      });
+    });
   }
 
   killForTest(): void {
