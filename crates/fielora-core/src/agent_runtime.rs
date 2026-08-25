@@ -3530,18 +3530,25 @@ impl AgentCoordinator {
                 })
             }
             Err(error) => {
-                let status = if error == AgentError::Cancelled {
+                let unknown = error == AgentError::ToolProviderOutcomeUnknown;
+                let status = if unknown {
+                    AgentToolStatus::Unknown
+                } else if error == AgentError::Cancelled {
                     AgentToolStatus::Cancelled
                 } else {
                     AgentToolStatus::Failed
                 };
-                let kind = if error == AgentError::Cancelled {
+                let kind = if unknown {
+                    AgentEventKind::ToolUnknown
+                } else if error == AgentError::Cancelled {
                     AgentEventKind::ToolCancelled
                 } else {
                     AgentEventKind::ToolFailed
                 };
                 let receipt = terminal_execution_source_receipt(
-                    if error == AgentError::Cancelled {
+                    if unknown {
+                        "TOOL_EXECUTION_UNKNOWN"
+                    } else if error == AgentError::Cancelled {
                         "TOOL_EXECUTION_CANCELLED"
                     } else {
                         "TOOL_EXECUTION_FAILED"
@@ -3616,6 +3623,47 @@ impl AgentCoordinator {
                 .filter(|tool| tool.status == AgentToolStatus::Completed)
                 .map(|tool| tool.name.clone())
                 .collect::<Vec<_>>();
+            if prepared
+                .run
+                .task
+                .contains("FIELORA_AGENT_FIXTURE_MCP_READONLY")
+                && !completed_tools
+                    .iter()
+                    .any(|name| name.starts_with("mcp.local."))
+            {
+                let external_name = request
+                    .tools
+                    .iter()
+                    .find(|tool| tool.name.starts_with("mcp.local."))
+                    .map(|tool| tool.name.clone())
+                    .ok_or(ModelError::ProviderProtocolError)?;
+                return Ok(invoked_fixture_turn(
+                    AgentModelTurn {
+                        text: "I will call the admitted read-only MCP tool.".into(),
+                        tool_calls: vec![AgentModelToolCall {
+                            id: format!("fixture-mcp-{step}"),
+                            name: external_name,
+                            arguments: json!({"value":"agent-pipeline"}),
+                        }],
+                        usage: None,
+                    },
+                    invocation_started,
+                ));
+            }
+            if prepared
+                .run
+                .task
+                .contains("FIELORA_AGENT_FIXTURE_MCP_READONLY")
+            {
+                return Ok(invoked_fixture_turn(
+                    AgentModelTurn {
+                        text: "## Completed\n\nThe read-only MCP tool returned through the existing Tool pipeline.".into(),
+                        tool_calls: vec![],
+                        usage: None,
+                    },
+                    invocation_started,
+                ));
+            }
             if prepared
                 .run
                 .task
@@ -4134,6 +4182,35 @@ impl AgentCoordinator {
                     },
                     wrote_workspace,
                     verification_passed,
+                })
+            }
+            Err(AgentError::ToolProviderOutcomeUnknown) => {
+                let receipt =
+                    terminal_execution_source_receipt("TOOL_EXECUTION_UNKNOWN", &execution_source);
+                let _ = self.storage.update_agent_tool_call(
+                    tool.id.clone(),
+                    AgentToolStatus::Unknown,
+                    Some(receipt),
+                    Some("AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN".into()),
+                    now_ms(),
+                );
+                let _ = append_event(
+                    &self.storage,
+                    &self.sender,
+                    tool.run_id,
+                    AgentEventKind::ToolUnknown,
+                    json!({"tool_call_id":tool.id,"name":tool.name,"error_code":"AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN","duration_ms":tool_started.elapsed().as_millis(),"execution_source":execution_source.receipt_envelope()}),
+                    AgentProjectionUpdate::default(),
+                );
+                ToolDisposition::Executed(ExecutedTool {
+                    message: AgentModelMessage::ToolResult {
+                        call_id: tool.id.0,
+                        name: tool.name,
+                        content: "AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN: the request was written but no trustworthy terminal result was received. Do not automatically replay this call.".into(),
+                        is_error: true,
+                    },
+                    wrote_workspace: false,
+                    verification_passed: false,
                 })
             }
             Err(AgentError::Cancelled) => {
@@ -5773,6 +5850,9 @@ mod tests {
                 .filter(|value| !value.is_empty() && value.len() <= 64)
                 .ok_or(fielora_agent::ToolProviderError::InvalidArguments)?;
             self.calls.fetch_add(1, Ordering::SeqCst);
+            if key == "unknown" {
+                return Err(fielora_agent::ToolProviderError::OutcomeUnknown);
+            }
             if key == "fail" {
                 return Err(fielora_agent::ToolProviderError::Failed);
             }
@@ -6006,6 +6086,30 @@ mod tests {
             })
         ));
 
+        let unknown = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                external_spec,
+                AgentModelToolCall {
+                    id: "model-unknown".into(),
+                    name: "fixture.external.lookup".into(),
+                    arguments: json!({"key":"unknown"}),
+                },
+                false,
+            )
+            .unwrap();
+        let unknown_disposition = coordinator
+            .execute_tool(&prepared, unknown, false, &test_cancellation())
+            .await;
+        assert!(matches!(
+            unknown_disposition,
+            ToolDisposition::Executed(ExecutedTool {
+                verification_passed: false,
+                message: AgentModelMessage::ToolResult { is_error: true, .. },
+                ..
+            })
+        ));
+
         let builtin_spec = catalog
             .iter()
             .find(|spec| spec.definition.name == "read_file")
@@ -6036,7 +6140,7 @@ mod tests {
                 ..
             })
         ));
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
 
         let tools = storage
             .list_agent_tool_calls(prepared.run.id.clone())
@@ -6071,6 +6175,20 @@ mod tests {
             failure.receipt.as_ref().unwrap()["execution_source"]["provider_id"],
             "fixture.external"
         );
+        let unknown = tools
+            .iter()
+            .find(|tool| {
+                tool.name == "fixture.external.lookup" && tool.status == AgentToolStatus::Unknown
+            })
+            .unwrap();
+        assert_eq!(
+            unknown.error_code.as_deref(),
+            Some("AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN")
+        );
+        assert_eq!(
+            unknown.receipt.as_ref().unwrap()["kind"],
+            "TOOL_EXECUTION_UNKNOWN"
+        );
         let builtin = tools.iter().find(|tool| tool.name == "read_file").unwrap();
         assert_eq!(builtin.status, AgentToolStatus::Completed);
         assert_eq!(
@@ -6099,6 +6217,11 @@ mod tests {
                 && event.payload["execution_source"]["provider_id"] == "fixture.external"
                 && event.payload["error_code"] == "AGENT_TOOL_PROVIDER_FAILED"
         }));
+        assert!(events.iter().any(|event| {
+            event.kind == AgentEventKind::ToolUnknown
+                && event.payload["execution_source"]["provider_id"] == "fixture.external"
+                && event.payload["error_code"] == "AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN"
+        }));
         assert!(
             events
                 .iter()
@@ -6118,6 +6241,342 @@ mod tests {
         );
 
         drop(coordinator);
+        drop(storage);
+        drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "mcp-fixture")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn real_mcp_stdio_round_trip_uses_agent_policy_durable_receipt_and_verification_boundary()
+    {
+        use fielora_agent::mcp::{McpStdioProviderConfig, McpStdioToolProvider};
+        use std::ffi::OsString;
+
+        let root = std::env::temp_dir().join(format!("fielora-core-mcp-{}", Uuid::now_v7()));
+        let workspace = root.join("workspace");
+        let artifacts = root.join("artifacts");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::write(workspace.join("README.md"), "mcp pipeline\n").unwrap();
+        let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let worker = StorageWorker::start(&paths.database, device, 1).unwrap();
+        let storage = worker.handle();
+        let project = storage
+            .create_project(
+                CreateProjectRequest {
+                    title: "MCP pipeline".into(),
+                    goal: None,
+                    root_path: workspace.to_string_lossy().into_owned(),
+                },
+                2,
+            )
+            .unwrap();
+        let provider_config = storage
+            .create_provider_config(
+                CreateProviderConfigRequest {
+                    provider_kind: ProviderKind::Openai,
+                    display_name: "Fixture model provider".into(),
+                    base_url: None,
+                    default_model: "__fielora_agent_fixture_mcp__".into(),
+                    custom_endpoint_acknowledged: false,
+                },
+                3,
+            )
+            .unwrap();
+        storage
+            .set_provider_credential_present(provider_config.view.id.clone(), true, 4)
+            .unwrap();
+        let conversation = storage
+            .create_conversation(
+                CreateConversationRequest {
+                    field_id: project.field_id.clone(),
+                    title: "MCP pipeline".into(),
+                    provider_config_id: Some(provider_config.view.id.clone()),
+                    model_id: Some("__fielora_agent_fixture_mcp__".into()),
+                },
+                5,
+            )
+            .unwrap();
+
+        let current_test = std::env::current_exe().unwrap();
+        let debug_directory = current_test.parent().unwrap().parent().unwrap();
+        let fixture = debug_directory.join(format!(
+            "fielora-mcp-fixture{}",
+            std::env::consts::EXE_SUFFIX
+        ));
+        assert!(fixture.is_file(), "repo-built MCP fixture is missing");
+        let mcp_provider = Arc::new(
+            McpStdioToolProvider::new(McpStdioProviderConfig {
+                config_key: "agent-coordinator-fixture".into(),
+                executable: fixture.clone(),
+                arguments: vec![OsString::from("normal")],
+                working_directory: std::env::current_dir().unwrap(),
+            })
+            .unwrap(),
+        );
+        let provider_id = mcp_provider.identity().id;
+        let crash_mcp_provider = Arc::new(
+            McpStdioToolProvider::new(McpStdioProviderConfig {
+                config_key: "agent-coordinator-crash-fixture".into(),
+                executable: fixture.clone(),
+                arguments: vec![OsString::from("crash-call")],
+                working_directory: std::env::current_dir().unwrap(),
+            })
+            .unwrap(),
+        );
+        let crash_provider_id = crash_mcp_provider.identity().id;
+        let failed_mcp_provider = Arc::new(
+            McpStdioToolProvider::new(McpStdioProviderConfig {
+                config_key: "agent-coordinator-failed-fixture".into(),
+                executable: fixture,
+                arguments: vec![OsString::from("tool-error")],
+                working_directory: std::env::current_dir().unwrap(),
+            })
+            .unwrap(),
+        );
+        let failed_provider_id = failed_mcp_provider.identity().id;
+        let tool_providers: Vec<Arc<dyn ToolProvider>> = vec![
+            mcp_provider.clone(),
+            crash_mcp_provider.clone(),
+            failed_mcp_provider.clone(),
+        ];
+        let (sender, _receiver) = mpsc::sync_channel(256);
+        let coordinator = AgentCoordinator::with_tool_providers(
+            storage.clone(),
+            Arc::new(WindowsCredentialStore),
+            sender,
+            artifacts,
+            Handle::current(),
+            tool_providers,
+        );
+
+        let prior_e2e = std::env::var_os("FIELORA_E2E");
+        unsafe { std::env::set_var("FIELORA_E2E", "1") };
+        let run = coordinator
+            .start(StartAgentRunRequest {
+                field_id: project.field_id,
+                conversation_id: conversation.id,
+                user_message_id: None,
+                provider_config_id: provider_config.view.id,
+                model_id: Some("__fielora_agent_fixture_mcp__".into()),
+                task: "FIELORA_AGENT_FIXTURE_MCP_READONLY".into(),
+                permission: AgentPermission::ReadOnly,
+                max_steps: Some(4),
+                attachments: None,
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let terminal = loop {
+            let current = storage.get_agent_run(run.id.clone()).unwrap();
+            if current.status.is_terminal() {
+                break current;
+            }
+            assert!(Instant::now() < deadline, "MCP Agent fixture timed out");
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        };
+        match prior_e2e {
+            Some(value) => unsafe { std::env::set_var("FIELORA_E2E", value) },
+            None => unsafe { std::env::remove_var("FIELORA_E2E") },
+        }
+        assert_eq!(terminal.status, AgentRunStatus::Completed);
+        let tools = storage.list_agent_tool_calls(run.id.clone()).unwrap();
+        assert_eq!(tools.len(), 1);
+        let tool = &tools[0];
+        assert!(tool.name.starts_with("mcp.local."));
+        assert_eq!(tool.effect, AgentToolEffect::Observe);
+        assert_eq!(tool.policy_decision, AgentPolicyDecision::Allow);
+        assert_eq!(tool.status, AgentToolStatus::Completed);
+        let source = &tool.receipt.as_ref().unwrap()["execution_source"];
+        assert_eq!(source["source_kind"], "MCP");
+        assert_eq!(source["provider_id"], provider_id);
+        assert_eq!(source["provider_tool_name"], "observe_echo");
+        assert_eq!(source["protocol_version"], "2026-07-28");
+        assert_eq!(source["transport"], "STDIO");
+        let events = storage
+            .list_agent_events(ListAgentEventsRequest {
+                run_id: run.id.clone(),
+                after_sequence: None,
+                limit: Some(200),
+            })
+            .unwrap();
+        assert!(events.iter().any(|event| {
+            event.kind == AgentEventKind::ToolCompleted
+                && event.payload["execution_source"]["source_kind"] == "MCP"
+        }));
+        assert!(
+            events
+                .iter()
+                .all(|event| event.kind != AgentEventKind::VerificationRecorded)
+        );
+
+        let unknown_created = storage
+            .create_agent_run(
+                StartAgentRunRequest {
+                    field_id: terminal.field_id.clone(),
+                    conversation_id: terminal.conversation_id.clone(),
+                    user_message_id: None,
+                    provider_config_id: terminal.provider_config_id.clone(),
+                    model_id: Some("__fielora_agent_fixture_mcp__".into()),
+                    task: "Exercise the admitted MCP unknown-outcome boundary.".into(),
+                    permission: AgentPermission::ReadOnly,
+                    max_steps: Some(2),
+                    attachments: None,
+                },
+                now_ms(),
+            )
+            .unwrap();
+        let unknown_started = storage
+            .append_agent_event(
+                unknown_created.run.id.clone(),
+                AgentEventKind::RunStarted,
+                json!({}),
+                AgentProjectionUpdate {
+                    status: Some(AgentRunStatus::Running),
+                    ..Default::default()
+                },
+                now_ms(),
+            )
+            .unwrap();
+        let unknown_prepared = PreparedRun {
+            run: unknown_started.run,
+            endpoint: ProviderEndpoint {
+                kind: ProviderKind::Openai,
+                base_url: None,
+            },
+            project_root: workspace.canonicalize().unwrap(),
+            secret: SecretBytes::new(b"fixture".to_vec()),
+        };
+        let catalog = coordinator.available_tool_catalog().unwrap();
+        let crash_spec = catalog
+            .iter()
+            .find(|tool| tool.source.provider_id == crash_provider_id)
+            .unwrap();
+        let unknown = coordinator
+            .propose_tool_call(
+                &unknown_prepared.run,
+                crash_spec,
+                AgentModelToolCall {
+                    id: "model-mcp-unknown".into(),
+                    name: crash_spec.definition.name.clone(),
+                    arguments: json!({"value":"unknown"}),
+                },
+                false,
+            )
+            .unwrap();
+        let unknown_disposition = coordinator
+            .execute_tool(&unknown_prepared, unknown, false, &test_cancellation())
+            .await;
+        assert!(matches!(
+            unknown_disposition,
+            ToolDisposition::Executed(ExecutedTool {
+                verification_passed: false,
+                message: AgentModelMessage::ToolResult { is_error: true, .. },
+                ..
+            })
+        ));
+        let failed_spec = catalog
+            .iter()
+            .find(|tool| tool.source.provider_id == failed_provider_id)
+            .unwrap();
+        let failed = coordinator
+            .propose_tool_call(
+                &unknown_prepared.run,
+                failed_spec,
+                AgentModelToolCall {
+                    id: "model-mcp-failed".into(),
+                    name: failed_spec.definition.name.clone(),
+                    arguments: json!({"value":"failed"}),
+                },
+                false,
+            )
+            .unwrap();
+        let failed_disposition = coordinator
+            .execute_tool(&unknown_prepared, failed, false, &test_cancellation())
+            .await;
+        assert!(matches!(
+            failed_disposition,
+            ToolDisposition::Executed(ExecutedTool {
+                verification_passed: false,
+                message: AgentModelMessage::ToolResult { is_error: true, .. },
+                ..
+            })
+        ));
+        let unknown_tools = storage
+            .list_agent_tool_calls(unknown_prepared.run.id.clone())
+            .unwrap();
+        assert_eq!(unknown_tools.len(), 2);
+        let unknown_tool = unknown_tools
+            .iter()
+            .find(|tool| tool.status == AgentToolStatus::Unknown)
+            .unwrap();
+        assert_eq!(unknown_tool.status, AgentToolStatus::Unknown);
+        assert_eq!(
+            unknown_tool.error_code.as_deref(),
+            Some("AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN")
+        );
+        let unknown_receipt = unknown_tool.receipt.as_ref().unwrap();
+        assert_eq!(unknown_receipt["kind"], "TOOL_EXECUTION_UNKNOWN");
+        assert_eq!(unknown_receipt["execution_source"]["source_kind"], "MCP");
+        assert_eq!(
+            unknown_receipt["execution_source"]["provider_id"],
+            crash_provider_id
+        );
+        assert_eq!(
+            unknown_receipt["execution_source"]["protocol_version"],
+            "2026-07-28"
+        );
+        assert_eq!(unknown_receipt["execution_source"]["transport"], "STDIO");
+        let failed_tool = unknown_tools
+            .iter()
+            .find(|tool| tool.status == AgentToolStatus::Failed)
+            .unwrap();
+        assert_eq!(
+            failed_tool.error_code.as_deref(),
+            Some("AGENT_TOOL_PROVIDER_FAILED")
+        );
+        assert_eq!(
+            failed_tool.receipt.as_ref().unwrap()["execution_source"]["source_kind"],
+            "MCP"
+        );
+        assert_eq!(
+            failed_tool.receipt.as_ref().unwrap()["execution_source"]["provider_id"],
+            failed_provider_id
+        );
+        let unknown_events = storage
+            .list_agent_events(ListAgentEventsRequest {
+                run_id: unknown_prepared.run.id.clone(),
+                after_sequence: None,
+                limit: Some(200),
+            })
+            .unwrap();
+        assert!(unknown_events.iter().any(|event| {
+            event.kind == AgentEventKind::ToolUnknown
+                && event.payload["execution_source"]["source_kind"] == "MCP"
+        }));
+        assert!(unknown_events.iter().any(|event| {
+            event.kind == AgentEventKind::ToolFailed
+                && event.payload["execution_source"]["provider_id"] == failed_provider_id
+        }));
+        assert!(unknown_events.iter().all(|event| {
+            !matches!(
+                event.kind,
+                AgentEventKind::VerificationRecorded | AgentEventKind::RunCompleted
+            )
+        }));
+        assert_eq!(
+            storage
+                .get_agent_run(unknown_prepared.run.id.clone())
+                .unwrap()
+                .status,
+            AgentRunStatus::Running
+        );
+
+        drop(coordinator);
+        drop(mcp_provider);
+        drop(crash_mcp_provider);
+        drop(failed_mcp_provider);
         drop(storage);
         drop(worker);
         std::fs::remove_dir_all(root).unwrap();

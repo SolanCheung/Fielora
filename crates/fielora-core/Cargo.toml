@@ -21,3 +21,11 @@ tokio.workspace = true
 tokio-util.workspace = true
 futures-util.workspace = true
 sha2.workspace = true
+
+[features]
+mcp-fixture = []
+
+[[bin]]
+name = "fielora-mcp-fixture"
+path = "tests/fixtures/mcp_fixture.rs"
+required-features = ["mcp-fixture"]

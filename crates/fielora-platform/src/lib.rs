@@ -1,10 +1,231 @@
 use fielora_contracts::DeviceId;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{ExitStatus, Stdio};
+use std::time::Duration;
 use thiserror::Error;
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use uuid::{Uuid, Version};
 
 pub const MAX_CREDENTIAL_BYTES: usize = 2048;
+
+const MAX_MANAGED_PROCESS_ARGUMENTS: usize = 128;
+const MAX_MANAGED_PROCESS_ENVIRONMENT: usize = 128;
+
+#[derive(Debug, Clone)]
+pub struct ManagedChildConfig {
+    pub executable: PathBuf,
+    pub arguments: Vec<OsString>,
+    pub working_directory: PathBuf,
+    pub environment: Vec<(OsString, OsString)>,
+}
+
+#[derive(Debug)]
+pub struct ManagedChildStdio {
+    pub stdin: ChildStdin,
+    pub stdout: ChildStdout,
+    pub stderr: ChildStderr,
+}
+
+#[derive(Debug, Error)]
+pub enum ManagedChildError {
+    #[error("managed child configuration is invalid")]
+    InvalidConfiguration,
+    #[error("managed child I/O failed: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("managed child did not exit after termination")]
+    TerminationTimeout,
+    #[error("managed child process handle is unavailable")]
+    ProcessHandleUnavailable,
+    #[error("Windows Job Object operation failed")]
+    JobObject,
+}
+
+/// A generic, bounded local child process owned by Fielora.
+///
+/// The child receives no inherited environment and is attached to a Windows
+/// Job Object so closing or terminating this owner applies to the process tree.
+pub struct ManagedChild {
+    child: Child,
+    #[cfg(windows)]
+    job: WindowsJob,
+}
+
+impl std::fmt::Debug for ManagedChild {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ManagedChild")
+            .field("id", &self.child.id())
+            .finish_non_exhaustive()
+    }
+}
+
+impl ManagedChild {
+    pub fn spawn(
+        config: ManagedChildConfig,
+    ) -> Result<(Self, ManagedChildStdio), ManagedChildError> {
+        if !config.executable.is_absolute()
+            || !config.executable.is_file()
+            || !config.working_directory.is_absolute()
+            || !config.working_directory.is_dir()
+            || config.arguments.len() > MAX_MANAGED_PROCESS_ARGUMENTS
+            || config.environment.len() > MAX_MANAGED_PROCESS_ENVIRONMENT
+            || config
+                .environment
+                .iter()
+                .any(|(key, _)| key.is_empty() || key.to_string_lossy().contains('='))
+        {
+            return Err(ManagedChildError::InvalidConfiguration);
+        }
+
+        let mut command = Command::new(&config.executable);
+        command
+            .args(&config.arguments)
+            .current_dir(&config.working_directory)
+            .env_clear()
+            .envs(config.environment)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(false);
+        let mut child = command.spawn()?;
+        #[cfg(windows)]
+        let job = match WindowsJob::assign(&child) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.start_kill();
+                return Err(error);
+            }
+        };
+        let stdio = ManagedChildStdio {
+            stdin: child
+                .stdin
+                .take()
+                .ok_or(ManagedChildError::ProcessHandleUnavailable)?,
+            stdout: child
+                .stdout
+                .take()
+                .ok_or(ManagedChildError::ProcessHandleUnavailable)?,
+            stderr: child
+                .stderr
+                .take()
+                .ok_or(ManagedChildError::ProcessHandleUnavailable)?,
+        };
+        Ok((
+            Self {
+                child,
+                #[cfg(windows)]
+                job,
+            },
+            stdio,
+        ))
+    }
+
+    pub fn id(&self) -> Option<u32> {
+        self.child.id()
+    }
+
+    pub fn try_wait(&mut self) -> Result<Option<ExitStatus>, ManagedChildError> {
+        Ok(self.child.try_wait()?)
+    }
+
+    pub async fn shutdown(
+        &mut self,
+        graceful_timeout: Duration,
+        termination_timeout: Duration,
+    ) -> Result<ExitStatus, ManagedChildError> {
+        if let Some(status) = self.child.try_wait()? {
+            return Ok(status);
+        }
+        if let Ok(result) = tokio::time::timeout(graceful_timeout, self.child.wait()).await {
+            return Ok(result?);
+        }
+        self.terminate_tree()?;
+        match tokio::time::timeout(termination_timeout, self.child.wait()).await {
+            Ok(result) => Ok(result?),
+            Err(_) => Err(ManagedChildError::TerminationTimeout),
+        }
+    }
+
+    pub fn terminate_tree(&mut self) -> Result<(), ManagedChildError> {
+        #[cfg(windows)]
+        {
+            self.job.terminate()
+        }
+        #[cfg(not(windows))]
+        {
+            self.child.start_kill()?;
+            Ok(())
+        }
+    }
+}
+
+impl Drop for ManagedChild {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.terminate_tree();
+            let _ = self.child.start_kill();
+        }
+    }
+}
+
+#[cfg(windows)]
+struct WindowsJob(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+unsafe impl Send for WindowsJob {}
+
+#[cfg(windows)]
+impl WindowsJob {
+    fn assign(child: &Child) -> Result<Self, ManagedChildError> {
+        use std::ptr::null;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
+        let job = unsafe { CreateJobObjectW(null(), null()) };
+        if job.is_null() {
+            return Err(ManagedChildError::JobObject);
+        }
+        let mut information: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &information as *const _ as *const _,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        let process = child
+            .raw_handle()
+            .ok_or(ManagedChildError::ProcessHandleUnavailable)?
+            as windows_sys::Win32::Foundation::HANDLE;
+        if configured == 0 || unsafe { AssignProcessToJobObject(job, process) } == 0 {
+            unsafe { windows_sys::Win32::Foundation::CloseHandle(job) };
+            return Err(ManagedChildError::JobObject);
+        }
+        Ok(Self(job))
+    }
+
+    fn terminate(&self) -> Result<(), ManagedChildError> {
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        if unsafe { TerminateJobObject(self.0, 1) } == 0 {
+            Err(ManagedChildError::JobObject)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsJob {
+    fn drop(&mut self) {
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+    }
+}
 
 #[derive(Debug)]
 pub struct SecretBytes(Vec<u8>);

@@ -5,6 +5,8 @@
 //! its caller owns orchestration, policy decisions, approval lifecycle,
 //! durable receipts, and completion semantics.
 
+pub mod mcp;
+
 use fielora_contracts::{
     AgentPermission, AgentPolicyDecision, AgentRunStatus, AgentToolEffect, ModelToolDefinition,
 };
@@ -110,6 +112,8 @@ pub enum AgentError {
     ToolProviderDefinitionInvalid,
     #[error("AGENT_TOOL_PROVIDER_FAILED")]
     ToolProviderFailed,
+    #[error("AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN")]
+    ToolProviderOutcomeUnknown,
     #[error("AGENT_IO_FAILED")]
     IoFailed,
 }
@@ -135,6 +139,7 @@ impl AgentError {
             Self::ToolProviderUnavailable => "AGENT_TOOL_PROVIDER_UNAVAILABLE",
             Self::ToolProviderDefinitionInvalid => "AGENT_TOOL_PROVIDER_DEFINITION_INVALID",
             Self::ToolProviderFailed => "AGENT_TOOL_PROVIDER_FAILED",
+            Self::ToolProviderOutcomeUnknown => "AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN",
             Self::IoFailed => "AGENT_IO_FAILED",
         }
     }
@@ -168,6 +173,7 @@ pub fn valid_run_transition(from: AgentRunStatus, to: AgentRunStatus) -> bool {
 pub enum ToolSourceKind {
     Builtin,
     External,
+    Mcp,
 }
 
 impl ToolSourceKind {
@@ -175,6 +181,7 @@ impl ToolSourceKind {
         match self {
             Self::Builtin => "BUILTIN",
             Self::External => "EXTERNAL",
+            Self::Mcp => "MCP",
         }
     }
 }
@@ -186,17 +193,31 @@ pub struct ToolExecutionSource {
     pub source_kind: ToolSourceKind,
     pub provider_id: String,
     pub provider_tool_name: String,
+    pub protocol_version: Option<String>,
+    pub transport: Option<String>,
 }
 
 impl ToolExecutionSource {
     pub fn receipt_envelope(&self) -> Value {
-        json!({
+        let mut envelope = json!({
             "capability_id":self.capability_id,
             "capability_version":self.capability_version,
             "source_kind":self.source_kind.id(),
             "provider_id":self.provider_id,
             "provider_tool_name":self.provider_tool_name,
-        })
+        });
+        if let Value::Object(object) = &mut envelope {
+            if let Some(protocol_version) = &self.protocol_version {
+                object.insert(
+                    "protocol_version".into(),
+                    Value::String(protocol_version.clone()),
+                );
+            }
+            if let Some(transport) = &self.transport {
+                object.insert("transport".into(), Value::String(transport.clone()));
+            }
+        }
+        envelope
     }
 }
 
@@ -226,6 +247,10 @@ pub enum ToolProviderError {
     InvalidArguments,
     Failed,
     Cancelled,
+    InteractionUnsupported,
+    ProtocolInvalid,
+    Timeout,
+    OutcomeUnknown,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -245,6 +270,22 @@ pub trait ToolProvider: Send + Sync {
     fn identity(&self) -> ToolProviderIdentity;
 
     fn availability(&self) -> ToolProviderAvailability;
+
+    fn can_attempt_recovery(&self) -> bool {
+        false
+    }
+
+    fn source_kind(&self) -> ToolSourceKind {
+        ToolSourceKind::External
+    }
+
+    fn protocol_version(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn transport(&self) -> Option<&'static str> {
+        None
+    }
 
     fn discover_tools(
         &self,
@@ -448,6 +489,8 @@ fn tool(name: &str, description: &str, effect: AgentToolEffect, input_schema: Va
             source_kind: ToolSourceKind::Builtin,
             provider_id: "fielora.builtin".into(),
             provider_tool_name: name.into(),
+            protocol_version: None,
+            transport: None,
         },
     }
 }
@@ -471,7 +514,9 @@ pub fn coding_tool_catalog_with_providers(
         {
             return Err(AgentError::ToolProviderDefinitionInvalid);
         }
-        if provider.availability() == ToolProviderAvailability::Unavailable {
+        if provider.availability() == ToolProviderAvailability::Unavailable
+            && !provider.can_attempt_recovery()
+        {
             continue;
         }
         let definitions = provider
@@ -508,9 +553,11 @@ pub fn coding_tool_catalog_with_providers(
                 source: ToolExecutionSource {
                     capability_id: discovered.capability_id,
                     capability_version: discovered.capability_version,
-                    source_kind: ToolSourceKind::External,
+                    source_kind: provider.source_kind(),
                     provider_id: identity.id.clone(),
                     provider_tool_name: discovered.provider_tool_name,
+                    protocol_version: provider.protocol_version().map(str::to_owned),
+                    transport: provider.transport().map(str::to_owned),
                 },
             });
         }
@@ -549,7 +596,11 @@ fn map_provider_discovery_error(error: ToolProviderError) -> AgentError {
         ToolProviderError::Cancelled => AgentError::Cancelled,
         ToolProviderError::InvalidDefinition
         | ToolProviderError::InvalidArguments
-        | ToolProviderError::Failed => AgentError::ToolProviderDefinitionInvalid,
+        | ToolProviderError::Failed
+        | ToolProviderError::InteractionUnsupported
+        | ToolProviderError::ProtocolInvalid
+        | ToolProviderError::Timeout
+        | ToolProviderError::OutcomeUnknown => AgentError::ToolProviderDefinitionInvalid,
     }
 }
 
@@ -560,6 +611,10 @@ fn map_provider_execution_error(error: ToolProviderError) -> AgentError {
         ToolProviderError::InvalidArguments => AgentError::ToolArgumentsInvalid,
         ToolProviderError::Failed => AgentError::ToolProviderFailed,
         ToolProviderError::Cancelled => AgentError::Cancelled,
+        ToolProviderError::InteractionUnsupported
+        | ToolProviderError::ProtocolInvalid
+        | ToolProviderError::Timeout => AgentError::ToolProviderFailed,
+        ToolProviderError::OutcomeUnknown => AgentError::ToolProviderOutcomeUnknown,
     }
 }
 
@@ -1306,7 +1361,9 @@ impl<E: ToolExecutor> ToolExecutor for RoutedToolExecutor<E> {
             .providers
             .get(&spec.source.provider_id)
             .ok_or(AgentError::ToolProviderUnavailable)?;
-        if provider.availability() != ToolProviderAvailability::Available {
+        if provider.availability() != ToolProviderAvailability::Available
+            && !provider.can_attempt_recovery()
+        {
             return Err(AgentError::ToolProviderUnavailable);
         }
         let execution = provider
