@@ -31,6 +31,7 @@ import type {
   ListConversationMessagesRequest,
   AgentChangedEvent, AgentRunView, StartAgentRunRequest, AgentRunRequest, ListAgentRunsRequest,
   AgentEventView, ListAgentEventsRequest, AgentToolCallView, ApprovalView, ResolveAgentApprovalRequest,
+  ActivateMcpConnectionRequest, McpConnectionCatalogView, McpConnectionRuntimeView,
   BuildProvenanceView,
   LibraryObjectView, LibraryObjectRequest, DeleteLibraryObjectRequest, ListLibraryObjectsRequest,
   SaveWebLibraryRequest, ProfileView,
@@ -177,6 +178,9 @@ export interface FieloraBridge {
     pause(request: AgentRunRequest): Promise<AgentRunView>;
     resume(request: AgentRunRequest): Promise<AgentRunView>;
     resolveApproval(request: ResolveAgentApprovalRequest): Promise<ApprovalView>;
+    mcpConnections(): Promise<McpConnectionCatalogView>;
+    mcpRuntime(request: AgentRunRequest): Promise<McpConnectionRuntimeView>;
+    activateMcpConnection(request: ActivateMcpConnectionRequest): Promise<AgentToolCallView>;
   };
   capture: {
     create(request: CreateCaptureRequest): Promise<CaptureView>;

@@ -12,8 +12,8 @@ use fielora_agent::mcp_connections::{McpConnectionSnapshot, USER_MCP_CONFIG_FILE
 use fielora_agent::{
     AgentError, CommandCancellation, CompiledContext, ContextCompiler, PolicyEngine,
     RoutedToolExecutor, SkillCatalog, ToolExecution, ToolExecutionSource, ToolExecutor,
-    ToolProvider, ToolProviderError, ToolReconciliationStatus, ToolRuntime, ToolSpec,
-    coding_tool_catalog, coding_tool_catalog_with_providers,
+    ToolProvider, ToolProviderAvailability, ToolProviderError, ToolReconciliationStatus,
+    ToolRuntime, ToolSpec, coding_tool_catalog, coding_tool_catalog_with_providers,
 };
 use fielora_contracts::*;
 use fielora_field::DomainError;
@@ -102,6 +102,7 @@ struct PreparedRun {
 #[derive(Default)]
 struct Continuation {
     approved_tool: Option<AgentToolCallView>,
+    requested_tool: Option<AgentToolCallView>,
     user_note: Option<String>,
     recovery: Option<RecoveryAssessment>,
 }
@@ -152,6 +153,39 @@ fn mcp_activation_execution(
             "already_active":already_active,
         })
         .to_string(),
+    }
+}
+
+fn mcp_catalog_view(snapshot: &McpConnectionSnapshot) -> McpConnectionCatalogView {
+    let status = match snapshot.status() {
+        "CONFIGURED" => McpConfigStatus::Configured,
+        "CONFIG_NOT_FOUND" => McpConfigStatus::ConfigNotFound,
+        _ => McpConfigStatus::ConfigMalformed,
+    };
+    let connections = snapshot
+        .connections()
+        .iter()
+        .map(|connection| McpConnectionView {
+            connection_id: connection.connection_id().into(),
+            transport: MCP_TRANSPORT.into(),
+            command_path: connection.executable().to_string_lossy().into_owned(),
+            command_argument_count: u32::try_from(connection.arguments().len()).unwrap_or(u32::MAX),
+            credential_support: "UNSUPPORTED".into(),
+        })
+        .collect::<Vec<_>>();
+    McpConnectionCatalogView {
+        status,
+        config_digest: snapshot.digest().map(str::to_owned),
+        connection_count: u32::try_from(connections.len()).unwrap_or(u32::MAX),
+        connections,
+        diagnostics: snapshot
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| McpDiagnosticView {
+                connection_id: diagnostic.connection_id.clone(),
+                code: diagnostic.code.into(),
+            })
+            .collect(),
     }
 }
 
@@ -563,6 +597,249 @@ impl AgentCoordinator {
     fn remove_run_mcp_state(&self, run_id: &str) {
         // Dropping the last provider Arc retires the MCP session and ManagedChild.
         self.run_mcp_states.lock().unwrap().remove(run_id);
+    }
+
+    /// Fresh passive application projection. Loading this view performs no
+    /// executable admission, process start, discovery, ToolCall, or receipt.
+    pub fn mcp_connections(&self) -> McpConnectionCatalogView {
+        let Some(path) = self.user_mcp_config_path.clone() else {
+            return McpConnectionCatalogView {
+                status: McpConfigStatus::ConfigNotFound,
+                config_digest: None,
+                connection_count: 0,
+                connections: Vec::new(),
+                diagnostics: vec![McpDiagnosticView {
+                    connection_id: None,
+                    code: "CONFIG_NOT_FOUND".into(),
+                }],
+            };
+        };
+        mcp_catalog_view(&McpConnectionSnapshot::load(path))
+    }
+
+    /// Ephemeral projection of the current Run snapshot and its ordinary
+    /// activation ToolCall lifecycle. It never performs MCP discovery.
+    pub fn mcp_runtime(&self, run_id: AgentRunId) -> Result<McpConnectionRuntimeView, DomainError> {
+        let run = self.storage.get_agent_run(run_id.clone())?;
+        if !run.status.is_terminal() {
+            self.ensure_mcp_snapshot(&run_id);
+        }
+        let tools = self.storage.list_agent_tool_calls(run_id.clone())?;
+        let fallback;
+        let states = self.run_mcp_states.lock().unwrap();
+        let snapshot = if let Some(state) = states.get(&run_id.0) {
+            &state.snapshot
+        } else {
+            fallback = self
+                .user_mcp_config_path
+                .clone()
+                .map(McpConnectionSnapshot::load);
+            match fallback.as_ref() {
+                Some(snapshot) => snapshot,
+                None => {
+                    return Ok(McpConnectionRuntimeView {
+                        run_id,
+                        run_status: run.status,
+                        connections: Vec::new(),
+                        diagnostics: vec![McpDiagnosticView {
+                            connection_id: None,
+                            code: "CONFIG_NOT_FOUND".into(),
+                        }],
+                    });
+                }
+            }
+        };
+        let state = states.get(&run_id.0);
+        let connections = snapshot
+            .connections()
+            .iter()
+            .map(|connection| {
+                let connection_id = connection.connection_id();
+                let latest = tools
+                    .iter()
+                    .filter(|tool| {
+                        tool.name == "mcp.activate_connection"
+                            && tool.arguments.get("connection_id").and_then(Value::as_str)
+                                == Some(connection_id)
+                    })
+                    .max_by_key(|tool| tool.created_at);
+                let facts = state.and_then(|state| state.activations.get(connection_id));
+                let provider_available = facts.and_then(|facts| {
+                    state.and_then(|state| {
+                        state
+                            .providers
+                            .iter()
+                            .find(|provider| provider.identity().id == facts.provider_id)
+                            .map(|provider| {
+                                provider.availability() == ToolProviderAvailability::Available
+                            })
+                    })
+                });
+                let activation_state = if run.status.is_terminal() {
+                    McpRunActivationState::NotActive
+                } else if facts.is_some() && provider_available == Some(true) {
+                    McpRunActivationState::ActiveInCurrentRun
+                } else if facts.is_some() {
+                    McpRunActivationState::ProcessUnavailable
+                } else {
+                    match latest.map(|tool| tool.status) {
+                        Some(AgentToolStatus::Proposed) => McpRunActivationState::ActivationQueued,
+                        Some(AgentToolStatus::WaitingApproval) => {
+                            McpRunActivationState::AwaitingApproval
+                        }
+                        Some(AgentToolStatus::Running) => McpRunActivationState::Starting,
+                        Some(AgentToolStatus::Denied) => McpRunActivationState::ActivationDenied,
+                        Some(
+                            AgentToolStatus::Failed
+                            | AgentToolStatus::Cancelled
+                            | AgentToolStatus::Unknown
+                            | AgentToolStatus::Completed,
+                        ) => McpRunActivationState::ActivationFailed,
+                        None => McpRunActivationState::NotActive,
+                    }
+                };
+                let activation_available = matches!(
+                    run.status,
+                    AgentRunStatus::Queued | AgentRunStatus::Running | AgentRunStatus::Paused
+                ) && matches!(
+                    activation_state,
+                    McpRunActivationState::NotActive
+                        | McpRunActivationState::ActivationDenied
+                        | McpRunActivationState::ActivationFailed
+                );
+                let activation_unavailable_reason = if activation_available {
+                    None
+                } else if run.status.is_terminal() {
+                    Some("RUN_ENDED".into())
+                } else if run.status == AgentRunStatus::WaitingApproval {
+                    Some("RUN_WAITING_APPROVAL".into())
+                } else if matches!(activation_state, McpRunActivationState::ActiveInCurrentRun) {
+                    Some("ALREADY_ACTIVE".into())
+                } else {
+                    Some("ACTIVATION_IN_PROGRESS".into())
+                };
+                McpRunConnectionView {
+                    connection_id: connection_id.into(),
+                    activation_state,
+                    activation_available,
+                    activation_unavailable_reason,
+                    provider_id: facts.map(|facts| facts.provider_id.clone()),
+                    transport: MCP_TRANSPORT.into(),
+                    protocol_version: facts.map(|_| MCP_PROTOCOL_VERSION.into()),
+                    discovered_tool_count: facts
+                        .and_then(|facts| u32::try_from(facts.discovered_tool_count).ok()),
+                    last_activation_tool_call_id: latest.map(|tool| tool.id.clone()),
+                    last_error_code: latest.and_then(|tool| tool.error_code.clone()),
+                }
+            })
+            .collect();
+        let diagnostics = snapshot
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| McpDiagnosticView {
+                connection_id: diagnostic.connection_id.clone(),
+                code: diagnostic.code.into(),
+            })
+            .collect();
+        Ok(McpConnectionRuntimeView {
+            run_id,
+            run_status: run.status,
+            connections,
+            diagnostics,
+        })
+    }
+
+    /// Human ingress for one exact built-in Tool. The durable proposal and
+    /// Policy decision are created before execution is queued at the existing
+    /// Agent safe boundary; no process is started here.
+    pub fn activate_mcp_connection(
+        &self,
+        request: ActivateMcpConnectionRequest,
+    ) -> Result<AgentToolCallView, DomainError> {
+        if !(1..=64).contains(&request.connection_id.len())
+            || !request
+                .connection_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        {
+            return Err(DomainError::Validation("MCP_CONNECTION_ID_INVALID".into()));
+        }
+        let run = self.storage.get_agent_run(request.run_id.clone())?;
+        if !matches!(
+            run.status,
+            AgentRunStatus::Queued | AgentRunStatus::Running | AgentRunStatus::Paused
+        ) {
+            return Err(DomainError::InvalidStateTransition);
+        }
+        self.ensure_mcp_snapshot(&run.id);
+        {
+            let states = self.run_mcp_states.lock().unwrap();
+            let state = states
+                .get(&run.id.0)
+                .ok_or_else(|| DomainError::Validation("MCP_CONFIG_NOT_FOUND".into()))?;
+            if state.snapshot.connection(&request.connection_id).is_none() {
+                return Err(DomainError::Validation("MCP_CONNECTION_NOT_FOUND".into()));
+            }
+            if state.activations.contains_key(&request.connection_id) {
+                return Err(DomainError::Validation(
+                    "MCP_CONNECTION_ALREADY_ACTIVE".into(),
+                ));
+            }
+        }
+        if self
+            .storage
+            .list_agent_tool_calls(run.id.clone())?
+            .iter()
+            .any(|tool| {
+                tool.name == "mcp.activate_connection"
+                    && !tool.status.is_terminal()
+                    && tool.arguments.get("connection_id").and_then(Value::as_str)
+                        == Some(request.connection_id.as_str())
+            })
+        {
+            return Err(DomainError::Validation(
+                "MCP_ACTIVATION_ALREADY_PENDING".into(),
+            ));
+        }
+        let catalog = self
+            .available_tool_catalog_for_run(&run.id)
+            .map_err(|error| DomainError::Validation(error.code().into()))?;
+        let spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "mcp.activate_connection")
+            .ok_or_else(|| DomainError::Validation("MCP_ACTIVATION_TOOL_MISSING".into()))?;
+        let tool = self.propose_tool_call(
+            &run,
+            spec,
+            AgentModelToolCall {
+                id: format!("ui-mcp-{}", Uuid::now_v7()),
+                name: "mcp.activate_connection".into(),
+                arguments: json!({"connection_id":request.connection_id}),
+            },
+            false,
+        )?;
+        if run.status == AgentRunStatus::Paused {
+            if let Err(error) = self.launch_requested_tool(run, tool.clone()) {
+                self.cancel_pending_mcp_activation(&tool, "MCP_ACTIVATION_RESUME_FAILED");
+                return Err(error);
+            }
+        } else if let Some(control) = self.cancellations.lock().unwrap().get(&run.id.0).cloned() {
+            // Existing Tools are not interrupted. The current loop observes
+            // this request only after the model/tool safe boundary.
+            control.request_pause();
+        } else {
+            let current = self.storage.get_agent_run(run.id.clone())?;
+            if current.status == AgentRunStatus::Paused {
+                if let Err(error) = self.launch_requested_tool(current, tool.clone()) {
+                    self.cancel_pending_mcp_activation(&tool, "MCP_ACTIVATION_RESUME_FAILED");
+                    return Err(error);
+                }
+            } else {
+                self.cancel_pending_mcp_activation(&tool, "MCP_ACTIVATION_RUN_UNAVAILABLE");
+                return Err(DomainError::InvalidStateTransition);
+            }
+        }
+        Ok(tool)
     }
 
     fn execute_mcp_connection_list(
@@ -982,11 +1259,13 @@ impl AgentCoordinator {
         let continuation = match decision {
             ApprovalDecision::AllowOnce => Continuation {
                 approved_tool: Some(tool),
+                requested_tool: None,
                 user_note: None,
                 recovery: None,
             },
             ApprovalDecision::Deny => Continuation {
                 approved_tool: None,
+                requested_tool: None,
                 user_note: Some(format!(
                     "The user denied tool {}. Find a safe alternative or explain the blocker.",
                     tool.name
@@ -1296,11 +1575,86 @@ impl AgentCoordinator {
         .is_ok()
     }
 
+    fn launch_requested_tool(
+        &self,
+        run: AgentRunView,
+        tool: AgentToolCallView,
+    ) -> Result<(), DomainError> {
+        if run.status != AgentRunStatus::Paused || tool.status != AgentToolStatus::Proposed {
+            return Err(DomainError::InvalidStateTransition);
+        }
+        let prepared = self.prepare(run)?;
+        let recovery = self
+            .reconcile_for_resume(&prepared)
+            .map_err(|code| DomainError::Validation(code.into()))?;
+        let resumed = append_event(
+            &self.storage,
+            &self.sender,
+            prepared.run.id.clone(),
+            AgentEventKind::RunResumed,
+            json!({"reason":"UI_MCP_ACTIVATION","requested_tool_call_id":tool.id}),
+            AgentProjectionUpdate {
+                status: Some(AgentRunStatus::Running),
+                error_code: None,
+                ..Default::default()
+            },
+        )?;
+        self.launch(
+            PreparedRun {
+                run: resumed.run,
+                ..prepared
+            },
+            Continuation {
+                requested_tool: Some(tool),
+                recovery: Some(recovery),
+                ..Default::default()
+            },
+        );
+        Ok(())
+    }
+
+    fn cancel_pending_mcp_activation(&self, tool: &AgentToolCallView, code: &str) {
+        let _ = self.storage.update_agent_tool_call(
+            tool.id.clone(),
+            AgentToolStatus::Cancelled,
+            None,
+            Some(code.into()),
+            now_ms(),
+        );
+        let execution_source = coding_tool_catalog()
+            .into_iter()
+            .find(|spec| spec.definition.name == "mcp.activate_connection")
+            .map(|spec| spec.source.receipt_envelope())
+            .unwrap_or(Value::Null);
+        let _ = append_event(
+            &self.storage,
+            &self.sender,
+            tool.run_id.clone(),
+            AgentEventKind::ToolCancelled,
+            json!({"tool_call_id":tool.id,"name":tool.name,"error_code":code,"execution_source":execution_source}),
+            AgentProjectionUpdate::default(),
+        );
+    }
+
+    fn pending_mcp_activation(&self, run_id: &AgentRunId) -> Option<AgentToolCallView> {
+        self.storage
+            .list_agent_tool_calls(run_id.clone())
+            .ok()?
+            .into_iter()
+            .filter(|tool| {
+                tool.name == "mcp.activate_connection" && tool.status == AgentToolStatus::Proposed
+            })
+            .max_by_key(|tool| tool.created_at)
+    }
+
     fn launch(&self, prepared: PreparedRun, continuation: Continuation) {
+        let pause_for_requested_tool = continuation.requested_tool.is_none()
+            && continuation.approved_tool.is_none()
+            && self.pending_mcp_activation(&prepared.run.id).is_some();
         let cancellation = ExecutionCancellation {
             model: CancellationToken::new(),
             command: CommandCancellation::default(),
-            pause_requested: Arc::new(AtomicBool::new(false)),
+            pause_requested: Arc::new(AtomicBool::new(pause_for_requested_tool)),
         };
         self.cancellations
             .lock()
@@ -1313,15 +1667,26 @@ impl AgentCoordinator {
                 .run_loop(prepared, continuation, cancellation)
                 .await;
             coordinator.cancellations.lock().unwrap().remove(&id);
-            let keep_context = coordinator
-                .storage
-                .get_agent_run(AgentRunId::new(id.clone()))
-                .is_ok_and(|run| {
-                    matches!(
-                        run.status,
-                        AgentRunStatus::WaitingApproval | AgentRunStatus::Paused
-                    )
-                });
+            let run_id = AgentRunId::new(id.clone());
+            let current = coordinator.storage.get_agent_run(run_id.clone()).ok();
+            let pending = coordinator.pending_mcp_activation(&run_id);
+            if let (Some(run), Some(tool)) = (current.clone(), pending) {
+                if run.status == AgentRunStatus::Paused {
+                    if coordinator.launch_requested_tool(run, tool.clone()).is_ok() {
+                        return;
+                    }
+                    coordinator
+                        .cancel_pending_mcp_activation(&tool, "MCP_ACTIVATION_RESUME_FAILED");
+                } else if run.status.is_terminal() {
+                    coordinator.cancel_pending_mcp_activation(&tool, "MCP_ACTIVATION_RUN_TERMINAL");
+                }
+            }
+            let keep_context = current.is_some_and(|run| {
+                matches!(
+                    run.status,
+                    AgentRunStatus::WaitingApproval | AgentRunStatus::Paused
+                )
+            });
             if !keep_context {
                 coordinator.compiled_contexts.lock().unwrap().remove(&id);
                 coordinator.skill_catalogs.lock().unwrap().remove(&id);
@@ -1586,8 +1951,12 @@ impl AgentCoordinator {
         if let Some(note) = continuation.user_note {
             messages.push(AgentModelMessage::User(note));
         }
-        if let Some(tool) = continuation.approved_tool {
-            if !resumed_transcript {
+        let continuation_tool = continuation
+            .approved_tool
+            .map(|tool| (tool, true))
+            .or_else(|| continuation.requested_tool.map(|tool| (tool, false)));
+        if let Some((tool, approved_once)) = continuation_tool {
+            if approved_once && !resumed_transcript {
                 messages.push(AgentModelMessage::Assistant {
                     text: String::new(),
                     tool_calls: vec![AgentModelToolCall {
@@ -1598,7 +1967,7 @@ impl AgentCoordinator {
                 });
             }
             match self
-                .execute_tool(&prepared, tool, true, &cancellation)
+                .execute_tool(&prepared, tool, approved_once, &cancellation)
                 .await
             {
                 ToolDisposition::Executed(executed) => {
@@ -8045,6 +8414,236 @@ mod tests {
         );
         coordinator.remove_run_mcp_state(&missing_run.0);
 
+        drop(coordinator);
+        drop(storage);
+        drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "mcp-fixture")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn ui_requested_mcp_activation_uses_existing_tool_policy_approval_and_run_cleanup() {
+        let root = std::env::temp_dir().join(format!("fielora-mcp-ui-{}", Uuid::now_v7()));
+        let workspace = root.join("workspace");
+        let artifacts = root.join("artifacts");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::write(workspace.join("README.md"), "MCP UI pipeline\n").unwrap();
+        let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
+        let fixture = mcp_fixture_executable();
+        let pid_path = root.join("ui-server.pid");
+        std::fs::write(
+            paths.config_dir.join(USER_MCP_CONFIG_FILENAME),
+            serde_json::to_vec(&json!({
+                "mcpServers":{
+                    "fixture-ui":{
+                        "command":fixture.to_string_lossy(),
+                        "args":["unknown-readonly-hint",pid_path.to_string_lossy()]
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let worker = StorageWorker::start(&paths.database, device, 1).unwrap();
+        let storage = worker.handle();
+        let project = storage
+            .create_project(
+                CreateProjectRequest {
+                    title: "MCP UI".into(),
+                    goal: None,
+                    root_path: workspace.to_string_lossy().into_owned(),
+                },
+                2,
+            )
+            .unwrap();
+        let provider = storage
+            .create_provider_config(
+                CreateProviderConfigRequest {
+                    provider_kind: ProviderKind::Openai,
+                    display_name: "Fixture".into(),
+                    base_url: None,
+                    default_model: "__fielora_agent_fixture_pause__".into(),
+                    custom_endpoint_acknowledged: false,
+                },
+                3,
+            )
+            .unwrap();
+        storage
+            .set_provider_credential_present(provider.view.id.clone(), true, 4)
+            .unwrap();
+        let conversation = storage
+            .create_conversation(
+                CreateConversationRequest {
+                    field_id: project.field_id.clone(),
+                    title: "MCP UI".into(),
+                    provider_config_id: Some(provider.view.id.clone()),
+                    model_id: Some("__fielora_agent_fixture_pause__".into()),
+                },
+                5,
+            )
+            .unwrap();
+        let (sender, _receiver) = mpsc::sync_channel(256);
+        let coordinator = AgentCoordinator::with_user_config_root(
+            storage.clone(),
+            Arc::new(WindowsCredentialStore),
+            sender,
+            artifacts,
+            Handle::current(),
+            paths.config_dir.clone(),
+        );
+        let catalog = coordinator.mcp_connections();
+        assert_eq!(catalog.status, McpConfigStatus::Configured);
+        assert_eq!(catalog.connection_count, 1);
+        assert!(!pid_path.exists(), "passive query started a process");
+
+        let _e2e_environment_guard = e2e_environment_guard().await;
+        let prior_e2e = std::env::var_os("FIELORA_E2E");
+        unsafe { std::env::set_var("FIELORA_E2E", "1") };
+        let run = coordinator
+            .start(StartAgentRunRequest {
+                field_id: project.field_id,
+                conversation_id: conversation.id,
+                user_message_id: None,
+                provider_config_id: provider.view.id,
+                model_id: Some("__fielora_agent_fixture_pause__".into()),
+                task: "Keep this fixture Run actionable for the MCP UI gate.".into(),
+                permission: AgentPermission::ReadOnly,
+                max_steps: Some(4),
+                attachments: None,
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while storage.get_agent_run(run.id.clone()).unwrap().status != AgentRunStatus::Running {
+            assert!(Instant::now() < deadline, "Run did not start");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        coordinator.pause(run.id.clone()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while storage.get_agent_run(run.id.clone()).unwrap().status != AgentRunStatus::Paused {
+            assert!(Instant::now() < deadline, "Run did not reach a safe pause");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let before = coordinator.mcp_runtime(run.id.clone()).unwrap();
+        assert_eq!(
+            before.connections[0].activation_state,
+            McpRunActivationState::NotActive
+        );
+        let proposed = coordinator
+            .activate_mcp_connection(ActivateMcpConnectionRequest {
+                run_id: run.id.clone(),
+                connection_id: "fixture-ui".into(),
+            })
+            .unwrap();
+        assert_eq!(proposed.name, "mcp.activate_connection");
+        assert_eq!(proposed.effect, AgentToolEffect::Process);
+        assert_eq!(proposed.policy_decision, AgentPolicyDecision::Ask);
+        assert!(!pid_path.exists(), "proposal started a process");
+
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while storage.get_agent_run(run.id.clone()).unwrap().status
+            != AgentRunStatus::WaitingApproval
+        {
+            assert!(Instant::now() < deadline, "approval was not requested");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!pid_path.exists(), "approval wait started a process");
+        let waiting = coordinator.mcp_runtime(run.id.clone()).unwrap();
+        assert_eq!(
+            waiting.connections[0].activation_state,
+            McpRunActivationState::AwaitingApproval
+        );
+        let approval = storage
+            .list_agent_events(ListAgentEventsRequest {
+                run_id: run.id.clone(),
+                after_sequence: None,
+                limit: Some(100),
+            })
+            .unwrap()
+            .into_iter()
+            .rev()
+            .find(|event| event.kind == AgentEventKind::ApprovalRequested)
+            .and_then(|event| {
+                serde_json::from_value::<ApprovalView>(event.payload["approval"].clone()).ok()
+            })
+            .unwrap();
+        coordinator
+            .resolve_approval(ResolveAgentApprovalRequest {
+                run_id: run.id.clone(),
+                approval_id: approval.id,
+                nonce: approval.nonce,
+                decision: ApprovalDecision::AllowOnce,
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            let runtime = coordinator.mcp_runtime(run.id.clone()).unwrap();
+            if runtime.connections[0].activation_state == McpRunActivationState::ActiveInCurrentRun
+            {
+                assert_eq!(runtime.connections[0].discovered_tool_count, Some(1));
+                break;
+            }
+            assert!(Instant::now() < deadline, "MCP did not become active");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(pid_path.exists(), "approved activation did not start MCP");
+        let activation = storage
+            .list_agent_tool_calls(run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|tool| tool.id == proposed.id)
+            .unwrap();
+        assert_eq!(activation.status, AgentToolStatus::Completed);
+        assert_eq!(
+            activation.receipt.as_ref().unwrap()["kind"],
+            "MCP_CONNECTION_ACTIVATION"
+        );
+        let events = storage
+            .list_agent_events(ListAgentEventsRequest {
+                run_id: run.id.clone(),
+                after_sequence: None,
+                limit: Some(200),
+            })
+            .unwrap();
+        assert!(
+            events
+                .iter()
+                .all(|event| event.kind != AgentEventKind::VerificationRecorded)
+        );
+        let durable = serde_json::to_string(&(activation, events)).unwrap();
+        assert!(!durable.contains(&fixture.to_string_lossy().to_string()));
+        assert!(!durable.contains(&pid_path.to_string_lossy().to_string()));
+
+        coordinator.cancel(run.id.clone()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while !storage
+            .get_agent_run(run.id.clone())
+            .unwrap()
+            .status
+            .is_terminal()
+        {
+            assert!(Instant::now() < deadline, "Run did not cancel");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let pid = std::fs::read_to_string(&pid_path)
+            .unwrap()
+            .parse::<u32>()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while test_process_exists(pid) && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!test_process_exists(pid), "terminal Run leaked MCP process");
+        let ended = coordinator.mcp_runtime(run.id.clone()).unwrap();
+        assert_eq!(
+            ended.connections[0].activation_state,
+            McpRunActivationState::NotActive
+        );
+        match prior_e2e {
+            Some(value) => unsafe { std::env::set_var("FIELORA_E2E", value) },
+            None => unsafe { std::env::remove_var("FIELORA_E2E") },
+        }
         drop(coordinator);
         drop(storage);
         drop(worker);

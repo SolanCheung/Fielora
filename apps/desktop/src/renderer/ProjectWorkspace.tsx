@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSPr
 import { createPortal } from 'react-dom';
 import type {
   AgentChangedEvent, AgentEventView, AgentPermission, AgentRunView, AgentToolCallView, ApprovalView,
+  McpConnectionRuntimeView,
   ConversationMessageStatus, ConversationMessageView, ConversationView, ProjectView, ProviderConfigView,
 } from '@fielora/contracts';
 import type { AgentTextDeltaEvent } from '../types';
@@ -660,6 +661,8 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const [agentRun, setAgentRun] = useState<AgentRunView | null>(null);
   const [agentEvents, setAgentEvents] = useState<AgentEventView[]>([]);
   const [agentTools, setAgentTools] = useState<AgentToolCallView[]>([]);
+  const [mcpRuntime, setMcpRuntime] = useState<McpConnectionRuntimeView | null>(null);
+  const [mcpBusyConnectionId, setMcpBusyConnectionId] = useState('');
   const [agentProjectionNotice, setAgentProjectionNotice] = useState('');
   const [terminalCommand, setTerminalCommand] = useState('');
   const [terminalLastCommand, setTerminalLastCommand] = useState('');
@@ -932,7 +935,10 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const afterSequence = existing.at(-1)?.sequence ?? null;
     const incremental = await window.fielora.agent.events({ run_id: run.id, after_sequence: afterSequence, limit: reset ? 200 : 100 });
     const needsTools = reset || !sameRun || incremental.some((event) => event.kind.startsWith('TOOL_') || event.kind.startsWith('APPROVAL_'));
-    const tools = needsTools ? await window.fielora.agent.toolCalls({ run_id: run.id }) : agentToolsRef.current;
+    const [tools, nextMcpRuntime] = await Promise.all([
+      needsTools ? window.fielora.agent.toolCalls({ run_id: run.id }) : Promise.resolve(agentToolsRef.current),
+      window.fielora.agent.mcpRuntime({ run_id: run.id }).catch(() => null),
+    ]);
     if (selectedConversationRef.current !== run.conversation_id) return;
     const activeRunId = activeAgentRef.current?.runId;
     if (agentRunIdRef.current && agentRunIdRef.current !== run.id && activeRunId !== run.id) return;
@@ -940,7 +946,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     agentEventsRef.current = events;
     agentToolsRef.current = tools;
     agentRunIdRef.current = run.id;
-    setAgentRun(run); setAgentEvents(events); setAgentTools(tools); setAgentProjectionNotice('');
+    setAgentRun(run); setAgentEvents(events); setAgentTools(tools); setMcpRuntime(nextMcpRuntime); setAgentProjectionNotice('');
     performance.clearMeasures('fielora.agent.projection');
     performance.measure('fielora.agent.projection', { start: projectionStarted });
     if (['QUEUED', 'RUNNING', 'WAITING_APPROVAL'].includes(run.status)) {
@@ -950,7 +956,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const refreshConversationAgent = useCallback(async (id: string) => {
     const runs = (await window.fielora.agent.list({ conversation_id: id })).filter((run) => !run.task.startsWith('[SUBAGENT '));
     if (selectedConversationRef.current !== id) return;
-    if (!runs[0]) { agentRunIdRef.current = ''; agentEventsRef.current = []; agentToolsRef.current = []; setAgentRun(null); setAgentEvents([]); setAgentTools([]); activeAgentRef.current = null; return; }
+    if (!runs[0]) { agentRunIdRef.current = ''; agentEventsRef.current = []; agentToolsRef.current = []; setAgentRun(null); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); activeAgentRef.current = null; return; }
     await loadAgentRun(runs[0], true);
   }, [loadAgentRun]);
 
@@ -991,7 +997,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     agentToolsRef.current = [];
     agentRunIdRef.current = '';
     setAgentProjectionNotice('');
-    if (!conversationId) { setMessages([]); setAgentRun(null); setAgentEvents([]); setAgentTools([]); activeAgentRef.current = null; return; }
+    if (!conversationId) { setMessages([]); setAgentRun(null); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); activeAgentRef.current = null; return; }
     void refreshMessages(conversationId).catch((reason) => setError(reasonMessage(reason)));
     void refreshConversationAgent(conversationId).catch(() => setAgentProjectionNotice(AGENT_PROJECTION_UNAVAILABLE_MESSAGE));
   }, [conversationId, projectId, refreshConversationAgent, refreshMessages]);
@@ -1291,6 +1297,22 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     catch (reason) { setError(reasonMessage(reason)); }
   }
 
+  async function activateMcpConnection(connectionId: string) {
+    if (!agentRun || mcpBusyConnectionId) return;
+    setMcpBusyConnectionId(connectionId); setError('');
+    try {
+      await window.fielora.agent.activateMcpConnection({ run_id: agentRun.id, connection_id: connectionId });
+      const next = await window.fielora.agent.get({ run_id: agentRun.id });
+      await loadAgentRun(next);
+    } catch (reason) {
+      setError(`MCP 激活请求失败：${reasonMessage(reason)}`);
+      const runtime = await window.fielora.agent.mcpRuntime({ run_id: agentRun.id }).catch(() => null);
+      setMcpRuntime(runtime);
+    } finally {
+      setMcpBusyConnectionId('');
+    }
+  }
+
   async function cancelAgent() {
     if (!agentRun) return;
     try { await window.fielora.agent.cancel({ run_id: agentRun.id }); }
@@ -1324,7 +1346,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       });
       activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '' };
       agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
-      setAgentRun(started); setAgentEvents([]); setAgentTools([]); setStreamingOutput('');
+      setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); setStreamingOutput('');
       scrollToLatestAnswer();
     } catch (reason) { setError(reasonMessage(reason)); }
     finally { setBusy(false); }
@@ -1467,7 +1489,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     });
     activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '' };
     agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
-    setAgentRun(started); setAgentEvents([]); setAgentTools([]); setStreamingOutput('');
+    setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); setStreamingOutput('');
     scrollToLatestAnswer();
     setQueuedFollowUps((current) => {
       const next = current.filter((queued) => queued.messageId !== item.messageId);
@@ -1539,7 +1561,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       });
       activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '' };
       agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
-      setAgentRun(started); setAgentEvents([]); setAgentTools([]);
+      setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null);
       setStreamingOutput(''); setPrompt(''); setAttachments([]);
       scrollToLatestAnswer();
     } catch (reason) { setError(reasonMessage(reason)); }
@@ -1926,6 +1948,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     onDecision={(decision) => void decideApproval(decision)}
     onCopy={currentTerminalMessage ? () => void copyMessage(currentTerminalMessage) : undefined}
     onCopyError={(reason) => setError(`复制代码失败：${reason}`)}
+    mcpRuntime={mcpRuntime}
+    mcpBusyConnectionId={mcpBusyConnectionId}
+    onActivateMcp={(connectionId) => void activateMcpConnection(connectionId)}
   /> : null;
   const visibleMessages = messages.filter((message) => message.role !== 'ASSISTANT' || !isLegacyTerminalMessage(message.content));
 

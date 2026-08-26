@@ -598,6 +598,15 @@ fn dispatch_request(
             let params: ResolveAgentApprovalRequest = parse_params(&request.params)?;
             serialize(runtime.agent.resolve_approval(params)?)
         }
+        "query.agent.mcp_connections" => serialize(runtime.agent.mcp_connections()),
+        "query.agent.mcp_runtime" => {
+            let params: AgentRunRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.mcp_runtime(params.run_id)?)
+        }
+        "command.agent.activate_mcp_connection" => {
+            let params: ActivateMcpConnectionRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.activate_mcp_connection(params)?)
+        }
         "command.field.create" => {
             let params: CreateFieldRequest = parse_params(&request.params)?;
             let (field, event) =

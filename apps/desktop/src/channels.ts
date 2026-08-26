@@ -55,6 +55,7 @@ export const channels = {
   agentStart: 'fielora:agent:start', agentGet: 'fielora:agent:get', agentList: 'fielora:agent:list',
   agentEvents: 'fielora:agent:events', agentToolCalls: 'fielora:agent:tool-calls',
   agentCancel: 'fielora:agent:cancel', agentPause: 'fielora:agent:pause', agentResume: 'fielora:agent:resume', agentResolveApproval: 'fielora:agent:resolve-approval',
+  agentMcpConnections: 'fielora:agent:mcp-connections', agentMcpRuntime: 'fielora:agent:mcp-runtime', agentActivateMcpConnection: 'fielora:agent:activate-mcp-connection',
   captureCreate: 'fielora:capture:create', captureAttach: 'fielora:capture:attach', capturePromote: 'fielora:capture:promote',
   captureArchive: 'fielora:capture:archive', captureRestore: 'fielora:capture:restore', captureList: 'fielora:capture:list', captureGet: 'fielora:capture:get',
   libraryAddFiles: 'fielora:library:add-files', librarySaveWeb: 'fielora:library:save-web', libraryList: 'fielora:library:list', libraryGet: 'fielora:library:get', libraryDelete: 'fielora:library:delete', libraryOpen: 'fielora:library:open', libraryReveal: 'fielora:library:reveal',

@@ -7,6 +7,7 @@ import {
   validateCreateConversation, validateCreateConversationMessage, validateUpdateProject, validateApplyWorkspaceFile,
   validateRunTerminal,
   validateStartAgent, validateListAgentEvents, validateResolveAgentApproval,
+  validateActivateMcpConnection,
   validateStoreWorkspaceAttachment, validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment,
 } from './validation.ts';
 
@@ -105,6 +106,8 @@ test('Complete Agent bridge accepts only bounded typed execution and approval pa
   assert.throws(()=>validateListAgentEvents({run_id:fieldId,after_sequence:0,limit:501}));
   assert.equal(validateResolveAgentApproval({run_id:fieldId,approval_id:fieldId,nonce:'one-time-nonce',decision:'ALLOW_ONCE'}).decision,'ALLOW_ONCE');
   assert.throws(()=>validateResolveAgentApproval({run_id:fieldId,approval_id:fieldId,nonce:'one-time-nonce',decision:'ALWAYS_ALLOW'}));
+  assert.deepEqual(validateActivateMcpConnection({run_id:fieldId,connection_id:'local.docs-v1'}),{run_id:fieldId,connection_id:'local.docs-v1'});
+  assert.throws(()=>validateActivateMcpConnection({run_id:fieldId,connection_id:'local docs',command:'cmd.exe'}));
 });
 
 test('multimodal Agent and attachment bridges accept only bounded native image parts', () => {

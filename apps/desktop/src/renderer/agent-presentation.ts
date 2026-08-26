@@ -186,6 +186,7 @@ export function toolTitle(name: string): string {
     create_file: '创建文件', replace_text: '修改文件', apply_patches: '批量修改文件', write_file: '写入文件', delete_file: '删除文件', move_file: '移动文件',
     git_read: '检查 Git 变更', git_status: '检查 Git 状态', git_stage: '暂存变更', git_unstage: '取消暂存',
     git_commit: '创建 Git 提交', git_push: '推送分支', git_create_branch: '创建分支', git_switch_branch: '切换分支',
+    'mcp.list_connections': '查看 MCP 配置', 'mcp.activate_connection': '启动本地 MCP Server',
   };
   return labels[name] ?? name.replaceAll('_', ' ');
 }
@@ -201,11 +202,14 @@ export function toolDetail(tool: AgentToolCallView): string {
   else if (typeof values.from === 'string' && typeof values.to === 'string') detail = `${values.from} → ${values.to}`;
   else if (typeof values.branch === 'string') detail = values.branch;
   else if (typeof values.objective === 'string') detail = values.objective;
+  else if (typeof values.connection_id === 'string') detail = values.connection_id;
   return (detail || toolTitle(tool.name)).slice(0, 140);
 }
 
 export function approvalActionLabel(tool: AgentToolCallView | null): string {
   if (!tool) return '允许一次';
+  if (tool.name === 'mcp.activate_connection') return '允许此 Run 启动';
+  if (tool.name.startsWith('mcp.')) return '允许此 MCP 操作';
   if (tool.effect === 'PROCESS') return '允许运行';
   if (tool.effect === 'DESTRUCTIVE') return '允许删除';
   if (tool.effect === 'WORKSPACE_WRITE') return '允许修改';

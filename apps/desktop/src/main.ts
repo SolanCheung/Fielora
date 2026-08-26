@@ -27,6 +27,7 @@ import {
   validateApplyWorkspaceFile, validateRunTerminal, validateCancelTerminal, validateOpenWorkspaceProject,
   validateStartAgent, validateAgentRun, validateListAgentRuns, validateListAgentEvents,
   validateResolveAgentApproval,
+  validateActivateMcpConnection,
   validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment, validateStoreWorkspaceAttachment,
   validateSaveWebLibrary, validateLibraryObject, validateDeleteLibraryObject, validateListLibraryObjects,
 } from './validation';
@@ -483,6 +484,9 @@ function registerBridgeHandlers(): void {
   handle(channels.agentPause, validateAgentRun, 'command.agent.pause');
   handle(channels.agentResume, validateAgentRun, 'command.agent.resume');
   handle(channels.agentResolveApproval, validateResolveAgentApproval, 'command.agent.resolve_approval');
+  ipcMain.handle(channels.agentMcpConnections, (event) => { assertBridgeEvent(event); return supervisor.request('query.agent.mcp_connections'); });
+  handle(channels.agentMcpRuntime, validateAgentRun, 'query.agent.mcp_runtime');
+  handle(channels.agentActivateMcpConnection, validateActivateMcpConnection, 'command.agent.activate_mcp_connection');
   handle(channels.captureCreate, validateCreateCapture, 'command.capture.create');
   handle(channels.captureAttach, validateAttachCapture, 'command.capture.attach');
   handle(channels.capturePromote, validatePromoteCapture, 'command.capture.promote');

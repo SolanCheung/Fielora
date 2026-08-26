@@ -370,6 +370,22 @@ export type ApprovalView = { id: ApprovalId, run_id: AgentRunId, tool_call_id: T
 
 export type ResolveAgentApprovalRequest = { run_id: AgentRunId, approval_id: ApprovalId, nonce: string, decision: ApprovalDecision, };
 
+export type McpConfigStatus = "CONFIGURED" | "CONFIG_NOT_FOUND" | "CONFIG_MALFORMED";
+
+export type McpRunActivationState = "NOT_ACTIVE" | "ACTIVATION_QUEUED" | "AWAITING_APPROVAL" | "STARTING" | "ACTIVE_IN_CURRENT_RUN" | "PROCESS_UNAVAILABLE" | "ACTIVATION_DENIED" | "ACTIVATION_FAILED";
+
+export type McpDiagnosticView = { connection_id: string | null, code: string, };
+
+export type McpConnectionView = { connection_id: string, transport: string, command_path: string, command_argument_count: number, credential_support: string, };
+
+export type McpConnectionCatalogView = { status: McpConfigStatus, config_digest: string | null, connection_count: number, connections: Array<McpConnectionView>, diagnostics: Array<McpDiagnosticView>, };
+
+export type McpRunConnectionView = { connection_id: string, activation_state: McpRunActivationState, activation_available: boolean, activation_unavailable_reason: string | null, provider_id: string | null, transport: string, protocol_version: string | null, discovered_tool_count: number | null, last_activation_tool_call_id: ToolCallId | null, last_error_code: string | null, };
+
+export type McpConnectionRuntimeView = { run_id: AgentRunId, run_status: AgentRunStatus, connections: Array<McpRunConnectionView>, diagnostics: Array<McpDiagnosticView>, };
+
+export type ActivateMcpConnectionRequest = { run_id: AgentRunId, connection_id: string, };
+
 export type AgentContextSnapshotView = { id: ContextSnapshotId, run_id: AgentRunId, step: number, project_root_hash: string, selected_files: number, estimated_tokens: number, content_sha256: string, manifest: unknown, created_at: number, };
 
 export type VerificationReceiptView = { id: VerificationReceiptId, run_id: AgentRunId, tool_call_id: ToolCallId | null, check_kind: string, outcome: VerificationOutcome, summary: string, artifact_sha256: string | null, exit_code: number | null, created_at: number, };

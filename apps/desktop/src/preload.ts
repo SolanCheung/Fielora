@@ -129,6 +129,9 @@ const bridge: FieloraBridge = {
     pause: (request) => ipcRenderer.invoke(channels.agentPause, request),
     resume: (request) => ipcRenderer.invoke(channels.agentResume, request),
     resolveApproval: (request) => ipcRenderer.invoke(channels.agentResolveApproval, request),
+    mcpConnections: () => ipcRenderer.invoke(channels.agentMcpConnections),
+    mcpRuntime: (request) => ipcRenderer.invoke(channels.agentMcpRuntime, request),
+    activateMcpConnection: (request) => ipcRenderer.invoke(channels.agentActivateMcpConnection, request),
   },
   capture: {
     create: (request) => ipcRenderer.invoke(channels.captureCreate, request),

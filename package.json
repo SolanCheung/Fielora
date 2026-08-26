@@ -33,6 +33,7 @@
     "test:e2e:project-navigation": "pnpm build:core:debug && node tests/e2e/project-navigation-e2e.mjs",
     "test:e2e:agent-codex-style": "node tests/e2e/agent-codex-style-execution-real-e2e.mjs",
     "test:e2e:appearance": "pnpm build:core:debug && node tests/e2e/appearance-settings-e2e.mjs",
+    "test:e2e:mcp-connection-ui": "cargo build -p fielora-core --features mcp-fixture --bins && node tests/e2e/mcp-connection-ui-e2e.mjs",
     "probe:configured-providers": "pnpm build:core:debug && node scripts/probe-configured-providers.mjs",
     "test:eval:china-model": "node --test tests/eval/china-model-preflight.test.mjs",
     "eval:agent:china:preflight": "pnpm build:core:debug && cargo test -p fielora-model -p fielora-agent && pnpm test:eval:china-model && node scripts/eval-agent-china-preflight.mjs",

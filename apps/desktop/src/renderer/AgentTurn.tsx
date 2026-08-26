@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { AgentEventView, AgentRunView, AgentToolCallView, ApprovalView, ConversationMessageView } from '@fielora/contracts';
+import type { AgentEventView, AgentRunView, AgentToolCallView, ApprovalView, ConversationMessageView, McpConnectionRuntimeView } from '@fielora/contracts';
 import { appliedAgentReview, type AgentReviewSummary } from './agent-review';
 import {
   buildConversationActivityProjection,
@@ -43,6 +43,9 @@ interface AgentTurnProps {
   onReviewFile?: (path: string) => void;
   onCopy?: () => void;
   onCopyError?: (reason: string) => void;
+  mcpRuntime?: McpConnectionRuntimeView | null;
+  mcpBusyConnectionId?: string;
+  onActivateMcp?: (connectionId: string) => void;
 }
 
 function isTerminalRun(run: AgentRunView | null): boolean {
@@ -160,6 +163,37 @@ function ExecutionDetail({ run, presentation, events, tools, variant }: {
       {events.length > 0 && <ol>{events.slice(-12).map((event) => <li key={event.id}><span>{event.sequence}</span>{technicalEventLabel(event.kind)}</li>)}</ol>}
       {run.error_code && <code>{run.error_code}</code>}
     </details>
+  </section>;
+}
+
+function mcpActivationLabel(state: McpConnectionRuntimeView['connections'][number]['activation_state']): string {
+  if (state === 'ACTIVATION_QUEUED') return '等待当前安全边界';
+  if (state === 'AWAITING_APPROVAL') return '等待批准';
+  if (state === 'STARTING') return '正在启动';
+  if (state === 'ACTIVE_IN_CURRENT_RUN') return 'Active for this Run';
+  if (state === 'PROCESS_UNAVAILABLE') return '进程不可用';
+  if (state === 'ACTIVATION_DENIED') return '已拒绝';
+  if (state === 'ACTIVATION_FAILED') return '激活失败';
+  return 'Configured · Not active';
+}
+
+function CurrentRunMcp({ runtime, busyConnectionId, onActivate }: {
+  runtime: McpConnectionRuntimeView | null;
+  busyConnectionId?: string;
+  onActivate?: (connectionId: string) => void;
+}) {
+  if (!runtime) return null;
+  return <section className="agent-run-mcp" data-testid="agent-run-mcp" data-run-status={runtime.run_status}>
+    <header><span><strong>MCP for this run</strong><small>仅在此 AgentRun 中激活；Run 结束即停止。</small></span></header>
+    {runtime.connections.length === 0 ? <p className="agent-run-mcp-empty">当前 Run 没有可用的 Local MCP 配置。</p> : <div>{runtime.connections.map((connection) => {
+      const active = connection.activation_state === 'ACTIVE_IN_CURRENT_RUN';
+      const busy = busyConnectionId === connection.connection_id || ['ACTIVATION_QUEUED', 'AWAITING_APPROVAL', 'STARTING'].includes(connection.activation_state);
+      return <article key={connection.connection_id} data-testid={`agent-run-mcp-${connection.connection_id}`} data-activation-state={connection.activation_state}>
+        <span><strong>{connection.connection_id}</strong><small>{connection.transport} · {mcpActivationLabel(connection.activation_state)}</small>{active && <><small>{connection.discovered_tool_count ?? 0} Tools discovered · Fielora policy: unknown Tools → DESTRUCTIVE</small><small>{connection.provider_id} · MCP {connection.protocol_version}</small></>}{connection.last_error_code && <code>{connection.last_error_code}</code>}</span>
+        {connection.activation_available && onActivate ? <button type="button" disabled={Boolean(busyConnectionId)} onClick={() => onActivate(connection.connection_id)} data-testid={`mcp-activate-${connection.connection_id}`}>{busy ? '正在请求…' : 'Activate for this run'}</button> : <em>{active ? '仅此 Run' : mcpActivationLabel(connection.activation_state)}</em>}
+      </article>;
+    })}</div>}
+    {runtime.diagnostics.length > 0 && <details><summary>配置诊断</summary>{runtime.diagnostics.map((item, index) => <p key={`${item.connection_id ?? 'config'}-${item.code}-${index}`}><code>{item.code}</code>{item.connection_id && <span>{item.connection_id}</span>}</p>)}</details>}
   </section>;
 }
 
@@ -284,7 +318,7 @@ function ConversationActivityStream({ items, tools, approval, approvalSummary, b
   </div>;
 }
 
-function AgentProgressSummary({ run, presentation, events, tools, review, thinking, detailsOpen, onToggleDetails, onResume, onReviewFile }: {
+function AgentProgressSummary({ run, presentation, events, tools, review, thinking, detailsOpen, onToggleDetails, onResume, onReviewFile, mcpRuntime, mcpBusyConnectionId, onActivateMcp }: {
   run: AgentRunView;
   presentation: AgentPresentation;
   events: AgentEventView[];
@@ -295,6 +329,9 @@ function AgentProgressSummary({ run, presentation, events, tools, review, thinki
   onToggleDetails: () => void;
   onResume?: () => void;
   onReviewFile?: (path: string) => void;
+  mcpRuntime?: McpConnectionRuntimeView | null;
+  mcpBusyConnectionId?: string;
+  onActivateMcp?: (connectionId: string) => void;
 }) {
   const editedReview = appliedAgentReview(review);
   const filesStable = !tools.some((tool) => ['WORKSPACE_WRITE', 'DESTRUCTIVE'].includes(tool.effect) && ['PROPOSED', 'RUNNING', 'WAITING_APPROVAL'].includes(tool.status));
@@ -306,6 +343,7 @@ function AgentProgressSummary({ run, presentation, events, tools, review, thinki
   return <aside className={`agent-progress-summary${detailsOpen ? ' is-expanded' : ''}${thinking ? ' is-thinking' : ''}`} data-testid="agent-execution-status" data-execution-stage={thinking ? 'THINKING' : 'ACTIVE'} data-layout="conversation-stream">
     {detailsOpen && <div className="agent-run-details" id={detailId} data-testid="agent-run-details">
       <ExecutionDetail run={run} presentation={presentation} events={events} tools={tools} variant="details"/>
+      <CurrentRunMcp runtime={mcpRuntime ?? null} busyConnectionId={mcpBusyConnectionId} onActivate={onActivateMcp}/>
       {editedReview && editedReview.files.length > 0 && <LiveEditedFiles review={editedReview} stable={filesStable} onReviewFile={onReviewFile}/>}
       {run.status === 'PAUSED' && onResume && <button type="button" className="agent-resume-action" onClick={onResume}>继续工作</button>}
     </div>}
@@ -324,9 +362,12 @@ function AgentApproval({ tool, summary, busy, onDecision, onToggleSteps }: {
   onDecision: (decision: 'DENY' | 'ALLOW_ONCE') => void;
   onToggleSteps: () => void;
 }) {
+  const mcpActivation = tool?.name === 'mcp.activate_connection';
+  const connectionId = mcpActivation && tool?.arguments && typeof tool.arguments === 'object' && 'connection_id' in tool.arguments
+    ? String((tool.arguments as { connection_id?: unknown }).connection_id ?? '') : '';
   return <section className="agent-turn-approval" data-testid="agent-approval">
-    <p>我已经定位到需要执行的下一步。</p>
-    <p>{summary || (tool ? `${toolTitle(tool.name)} · ${toolDetail(tool)}` : '只会执行当前列出的操作，不会扩大范围。')}</p>
+    <p>{mcpActivation ? `Start local MCP Server “${connectionId}” for this Run` : '我已经定位到需要执行的下一步。'}</p>
+    <p>{mcpActivation ? '这会启动已配置的本地进程并发现有界 Tools；不会授予后续 Tool 权限。' : summary || (tool ? `${toolTitle(tool.name)} · ${toolDetail(tool)}` : '只会执行当前列出的操作，不会扩大范围。')}</p>
     <div><button type="button" onClick={onToggleSteps}>查看修改范围</button><button type="button" onClick={() => onDecision('DENY')} disabled={busy}>拒绝</button><button type="button" className="agent-primary-action" onClick={() => onDecision('ALLOW_ONCE')} disabled={busy} data-testid="agent-allow-once">{approvalActionLabel(tool)}</button></div>
   </section>;
 }
@@ -414,6 +455,7 @@ function CompletedActivityHistory({ items, tools }: { items: ConversationActivit
 export function AgentTurn({
   run, requestText = '', userMessageId, terminalMessage, events = [], tools = [], approval = null, approvalSummary = '', review = null,
   streamingContent = '', busy = false, copied = false, onResume, onDecision, onRetry, onReview, onReviewFile, onCopy, onCopyError,
+  mcpRuntime = null, mcpBusyConnectionId = '', onActivateMcp,
 }: AgentTurnProps) {
   const terminal = Boolean(terminalMessage) || isTerminalRun(run);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -456,10 +498,10 @@ export function AgentTurn({
     </div>}
     {!answerOnly && !terminal && run && presentation && <>
       <ConversationActivityStream items={activityItems} tools={tools} approval={approval} approvalSummary={approvalSummary} busy={busy} onDecision={onDecision} onOpenDetails={() => setDetailsOpen(true)}/>
-      <AgentProgressSummary run={run} presentation={presentation} events={events} tools={tools} review={review} thinking={thinking} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen((value) => !value)} onResume={onResume} onReviewFile={onReviewFile}/>
+      <AgentProgressSummary run={run} presentation={presentation} events={events} tools={tools} review={review} thinking={thinking} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen((value) => !value)} onResume={onResume} onReviewFile={onReviewFile} mcpRuntime={mcpRuntime} mcpBusyConnectionId={mcpBusyConnectionId} onActivateMcp={onActivateMcp}/>
     </>}
     {!answerOnly && terminal && status && (
-      <AgentTerminalResult status={status} message={terminalMessage} presentation={presentation} tools={tools} canExpand={canExpand} partial={partial} review={review} executionDetail={run && presentation ? <CompletedActivityHistory items={activityItems} tools={tools}/> : null} onRetry={onRetry} onReview={onReview} onReviewFile={onReviewFile}/>
+      <AgentTerminalResult status={status} message={terminalMessage} presentation={presentation} tools={tools} canExpand={canExpand} partial={partial} review={review} executionDetail={run && presentation ? <><CompletedActivityHistory items={activityItems} tools={tools}/><CurrentRunMcp runtime={mcpRuntime}/></> : null} onRetry={onRetry} onReview={onReview} onReviewFile={onReviewFile}/>
     )}
     {terminalMessage && onCopy && <footer className={`message-actions agent-turn-message-actions ${copied ? 'copy-confirmed' : ''}`}><button type="button" className={copied ? 'copied' : ''} aria-label={copied ? '消息已复制' : '复制消息'} title={copied ? '已复制' : '复制'} onClick={onCopy} data-testid="message-copy"><ShellIcon name={copied ? 'check' : 'copy'}/>{copied && <span role="status" aria-live="polite">已复制</span>}</button></footer>}
   </section>;

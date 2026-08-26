@@ -259,6 +259,17 @@
 .settings-empty { color: var(--fl-color-text-subtle); }
 .settings-primary-action { color: var(--fl-color-text-on-accent); background: var(--fl-color-accent); }
 .settings-provider-list article > div button { color: var(--fl-color-text); background: var(--fl-color-surface-hover); }
+.settings-mcp-card .settings-card-heading > button { color: var(--fl-color-text); background: var(--fl-color-surface-hover); }
+.settings-mcp-list,
+.settings-mcp-list article,
+.settings-mcp-empty,
+.settings-mcp-diagnostics { border-color: var(--fl-color-divider); }
+.settings-mcp-list article > span code,
+.settings-mcp-empty small,
+.settings-mcp-security,
+.settings-mcp-diagnostics p { color: var(--fl-color-text-muted); }
+.settings-mcp-list article em { color: var(--fl-color-text-success); }
+.settings-mcp-diagnostics code { color: var(--fl-color-text-warning); }
 .settings-provider-list em.ready { color: var(--fl-color-text-success); }
 .settings-provider-list em.warning { color: var(--fl-color-text-warning); }
 .shortcut-list kbd { border-color: var(--fl-color-border); color: var(--fl-color-text-muted); background: var(--fl-color-surface-subtle); font-family: var(--fl-font-sans); }

@@ -1786,6 +1786,88 @@ pub struct ResolveAgentApprovalRequest {
     pub decision: ApprovalDecision,
 }
 
+// Passive application-level and ephemeral AgentRun-level projections for the
+// existing local MCP Tool provider path. These contracts expose no process
+// handle, command arguments, credentials, or durable connection state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum McpConfigStatus {
+    Configured,
+    ConfigNotFound,
+    ConfigMalformed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum McpRunActivationState {
+    NotActive,
+    ActivationQueued,
+    AwaitingApproval,
+    Starting,
+    ActiveInCurrentRun,
+    ProcessUnavailable,
+    ActivationDenied,
+    ActivationFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct McpDiagnosticView {
+    pub connection_id: Option<String>,
+    pub code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct McpConnectionView {
+    pub connection_id: String,
+    pub transport: String,
+    pub command_path: String,
+    #[ts(type = "number")]
+    pub command_argument_count: u32,
+    pub credential_support: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct McpConnectionCatalogView {
+    pub status: McpConfigStatus,
+    pub config_digest: Option<String>,
+    #[ts(type = "number")]
+    pub connection_count: u32,
+    pub connections: Vec<McpConnectionView>,
+    pub diagnostics: Vec<McpDiagnosticView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct McpRunConnectionView {
+    pub connection_id: String,
+    pub activation_state: McpRunActivationState,
+    pub activation_available: bool,
+    pub activation_unavailable_reason: Option<String>,
+    pub provider_id: Option<String>,
+    pub transport: String,
+    pub protocol_version: Option<String>,
+    #[ts(type = "number | null")]
+    pub discovered_tool_count: Option<u32>,
+    pub last_activation_tool_call_id: Option<ToolCallId>,
+    pub last_error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct McpConnectionRuntimeView {
+    pub run_id: AgentRunId,
+    pub run_status: AgentRunStatus,
+    pub connections: Vec<McpRunConnectionView>,
+    pub diagnostics: Vec<McpDiagnosticView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ActivateMcpConnectionRequest {
+    pub run_id: AgentRunId,
+    pub connection_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct AgentContextSnapshotView {
     pub id: ContextSnapshotId,

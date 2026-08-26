@@ -7,8 +7,9 @@ import { ShellIcon } from './PrimaryNav';
 import { SelectMenu, SettingsToggle } from './UiPrimitives';
 import { persistWorkspaceNavigationWidth, readWorkspaceNavigationWidth, WorkspaceSurface } from './WorkspaceSurface';
 import { StorageDataSettings } from './StorageDataSettings';
+import { McpSettings } from './McpSettings';
 
-export type SettingsCategory = 'GENERAL' | 'APPEARANCE' | 'MODELS' | 'STORAGE_DATA' | 'SHORTCUTS' | 'ABOUT' | 'BROWSER';
+export type SettingsCategory = 'GENERAL' | 'APPEARANCE' | 'MODELS' | 'MCP' | 'STORAGE_DATA' | 'SHORTCUTS' | 'ABOUT' | 'BROWSER';
 
 interface SettingsScreenProps {
   preferences: AppPreferences;
@@ -21,6 +22,7 @@ const categories: Array<{ id: SettingsCategory; label: string; keywords: string 
   { id: 'GENERAL', label: '常规', keywords: '启动 页面 默认' },
   { id: 'APPEARANCE', label: '外观', keywords: '主题 浅色 深色 系统 字体 密度 圆角 动效 theme appearance' },
   { id: 'MODELS', label: '模型与服务', keywords: 'provider api key model 模型 服务' },
+  { id: 'MCP', label: 'MCP', keywords: 'mcp tool server stdio connection 工具 连接' },
   { id: 'STORAGE_DATA', label: '存储与数据', keywords: 'storage data library cache profile backup import export 存储 数据 资料库 缓存 备份 迁移' },
   { id: 'SHORTCUTS', label: '键盘快捷键', keywords: '快捷键 keyboard shortcut' },
   { id: 'ABOUT', label: '关于', keywords: '版本 about' },
@@ -104,7 +106,7 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
       <button className="settings-back" onClick={onBack} data-testid="settings-back">← <span>返回应用</span></button>
       <label className="settings-search"><span className="sr-only">搜索设置</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索设置…" data-testid="settings-search" /></label>
       <nav aria-label="设置分类">
-        {visibleCategories.map((item) => <button key={item.id} className={category === item.id ? 'active' : ''} onClick={() => setCategory(item.id)} data-testid={`settings-category-${item.id.toLowerCase()}`}><ShellIcon name={item.id === 'MODELS' ? 'models' : item.id === 'APPEARANCE' ? 'appearance' : item.id === 'STORAGE_DATA' ? 'source' : item.id === 'SHORTCUTS' ? 'keyboard' : item.id === 'ABOUT' ? 'info' : 'settings'} /><span>{item.label}</span></button>)}
+        {visibleCategories.map((item) => <button key={item.id} className={category === item.id ? 'active' : ''} onClick={() => setCategory(item.id)} data-testid={`settings-category-${item.id.toLowerCase()}`}><ShellIcon name={item.id === 'MODELS' ? 'models' : item.id === 'APPEARANCE' ? 'appearance' : item.id === 'MCP' || item.id === 'STORAGE_DATA' ? 'source' : item.id === 'SHORTCUTS' ? 'keyboard' : item.id === 'ABOUT' ? 'info' : 'settings'} /><span>{item.label}</span></button>)}
       </nav>
       <div className="settings-brand"><img src={fieloraMark} alt="" /><span>Fielora Desktop</span></div>
     </aside>}>
@@ -123,6 +125,7 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
           </article>)}</div>}
         </section>
       </div>}
+      {category === 'MCP' && <McpSettings/>}
       {category === 'STORAGE_DATA' && <StorageDataSettings preferences={preferences} onPreferencesChange={onChange} />}
       {category === 'SHORTCUTS' && <div className="settings-section" data-testid="settings-shortcuts"><header><p>效率</p><h1>键盘快捷键</h1></header><section className="settings-card shortcut-list"><div><span>新对话</span><kbd>Ctrl+N</kbd></div><div><span>打开 Project 文件夹</span><kbd>Ctrl+O</kbd></div><div><span>显示或隐藏侧栏</span><kbd>Ctrl+B</kbd></div><div><span>审阅</span><kbd>Ctrl+Shift+G</kbd></div><div><span>终端</span><kbd>Ctrl+`</kbd></div><div><span>浏览器 / 新建浏览页面</span><kbd>Ctrl+T</kbd></div><div><span>文件</span><kbd>Ctrl+P</kbd></div><div><span>侧边聊天</span><kbd>Ctrl+Alt+S</kbd></div><div><span>地址栏</span><kbd>Ctrl+L</kbd></div><div><span>刷新网页</span><kbd>Ctrl+R</kbd></div><div><span>Summon</span><kbd>Ctrl+Shift+Space</kbd></div></section></div>}
       {category === 'ABOUT' && <div className="settings-section" data-testid="settings-about"><header><p>Fielora</p><h1>关于</h1></header><section className="settings-card about-card"><img src={fieloraMark} alt="" /><span><strong>Fielora Desktop 0.1.0</strong><small>Windows 11 x64 · Electron 43.4.0 · schema 7</small></span></section></div>}
