@@ -1635,3 +1635,46 @@ Platform 2/2、Core 23/23、真实 stdio MCP 12/12；targeted Clippy
 `-D warnings`、fmt、Core release build、contracts、Docs context manifest 与
 diff check 均 PASS。没有运行与本 Slice 无关的 Desktop E2E、package/portable
 smoke 或 full premerge。
+
+## 84. First File Intelligence Read / Extract Slice
+
+Rich File Read / Extract 继续位于 canonical `Model + Harness + Tools`。新增且
+仅新增一个 built-in `OBSERVE` Tool：`file.extract`；现有 `read_file` 继续负责
+UTF-8 代码/文本。PDF、DOCX、PPTX、XLSX 通过格式 adapter 产生同一 bounded、
+provider-neutral normalized observation；没有 File/PDF/Office Agent、Artifact
+Runtime、UI、schema、migration、credential、网络或新的 Permission/Receipt/
+Verification hierarchy。
+
+Project-relative 输入复用现有 canonical containment，并对打开 handle 与重新准入
+路径做 file identity 对照；source digest 覆盖最终解析的同一 handle bytes。所有内容
+均标记 `UNTRUSTED_PROJECT_CONTENT`。Core pipeline proof 证明 Observe ToolCall 经
+现有 PolicyEngine、ToolExecutor、durable receipt 与 execution-source envelope；
+receipt 不保存正文/原始 PDF/ZIP/XML，解析成功不产生 Verification PASS。
+
+OOXML 在高层 parser 前执行共享 ZIP/XML admission：entry/path/duplicate/encryption/
+macro/size/expanded-total/XML depth/attribute/event/DTD/expected-structure 全部
+fail-closed，external relationship 不跟随。PDF 使用修复过嵌套问题且支持 load/page
+解压上限的 parser。XLSX 只输出值、公式 source 与已有 cached value，绝不求值或
+触发 file/network/shell/DDE。
+
+```text
+FIRST_FILE_INTELLIGENCE_READ_SLICE: IMPLEMENTED
+TOOL: file.extract
+FORMATS: PDF + DOCX + PPTX + XLSX
+AUTHORITY: UNTRUSTED_PROJECT_CONTENT
+TOOL_EFFECT: OBSERVE
+SCHEMA_MIGRATION: NONE
+UI_ARTIFACT_RUNTIME: NOT_IMPLEMENTED
+CHANGE_IMPACT: HIGH
+```
+
+精确架构边界与资源上限记录于非冻结
+`FIELORA_V0.1_FILE_INTELLIGENCE_READ_CANDIDATE.md`。Creation/edit/export、
+preview/render、OCR、图片提取、公式计算、宏及远程文件继续后置。
+
+Targeted final Gate 为 File 11/11、Agent full 56/56（含 Skill/Web）、Core
+24/24、真实 stdio MCP 12/12；targeted Clippy `-D warnings`、fmt、Core release
+build、contracts、Docs context manifest 与 diff check 均 PASS。未安装
+`cargo-audit`，advisory 使用 RustSec primary records 与 exact dependency tree
+人工核对；未运行与本 Slice 无关的 Desktop E2E、package/portable smoke 或
+full premerge。

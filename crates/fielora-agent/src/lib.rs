@@ -5,6 +5,7 @@
 //! its caller owns orchestration, policy decisions, approval lifecycle,
 //! durable receipts, and completion semantics.
 
+mod file;
 pub mod mcp;
 mod skills;
 pub mod web;
@@ -96,6 +97,28 @@ pub enum AgentError {
     FileTooLarge,
     #[error("AGENT_BINARY_FILE_UNSUPPORTED")]
     BinaryFileUnsupported,
+    #[error("FILE_FORMAT_UNSUPPORTED")]
+    FileFormatUnsupported,
+    #[error("FILE_NOT_FOUND")]
+    FileExtractNotFound,
+    #[error("FILE_OUTSIDE_PROJECT")]
+    FileOutsideProject,
+    #[error("FILE_TOO_LARGE")]
+    FileSourceTooLarge,
+    #[error("FILE_FORMAT_MISMATCH")]
+    FileFormatMismatch,
+    #[error("FILE_ENCRYPTED_UNSUPPORTED")]
+    FileEncryptedUnsupported,
+    #[error("FILE_MALFORMED")]
+    FileMalformed,
+    #[error("FILE_ARCHIVE_LIMIT_EXCEEDED")]
+    FileArchiveLimitExceeded,
+    #[error("FILE_STRUCTURE_LIMIT_EXCEEDED")]
+    FileStructureLimitExceeded,
+    #[error("FILE_EXTRACTION_TIMEOUT")]
+    FileExtractionTimeout,
+    #[error("FILE_EXTRACTION_CANCELLED")]
+    FileExtractionCancelled,
     #[error("AGENT_FILE_CHANGED")]
     FileChanged,
     #[error("AGENT_TEXT_MATCH_FAILED")]
@@ -143,6 +166,17 @@ impl AgentError {
             Self::FileNotFound => "AGENT_FILE_NOT_FOUND",
             Self::FileTooLarge => "AGENT_FILE_TOO_LARGE",
             Self::BinaryFileUnsupported => "AGENT_BINARY_FILE_UNSUPPORTED",
+            Self::FileFormatUnsupported => "FILE_FORMAT_UNSUPPORTED",
+            Self::FileExtractNotFound => "FILE_NOT_FOUND",
+            Self::FileOutsideProject => "FILE_OUTSIDE_PROJECT",
+            Self::FileSourceTooLarge => "FILE_TOO_LARGE",
+            Self::FileFormatMismatch => "FILE_FORMAT_MISMATCH",
+            Self::FileEncryptedUnsupported => "FILE_ENCRYPTED_UNSUPPORTED",
+            Self::FileMalformed => "FILE_MALFORMED",
+            Self::FileArchiveLimitExceeded => "FILE_ARCHIVE_LIMIT_EXCEEDED",
+            Self::FileStructureLimitExceeded => "FILE_STRUCTURE_LIMIT_EXCEEDED",
+            Self::FileExtractionTimeout => "FILE_EXTRACTION_TIMEOUT",
+            Self::FileExtractionCancelled => "FILE_EXTRACTION_CANCELLED",
             Self::FileChanged => "AGENT_FILE_CHANGED",
             Self::TextMatchFailed => "AGENT_TEXT_MATCH_FAILED",
             Self::PatchConflict { reason, .. } if reason == "SHA_MISMATCH" => "AGENT_FILE_CHANGED",
@@ -179,6 +213,10 @@ impl AgentError {
             Self::TextMatchFailed => "AGENT_TEXT_MATCH_FAILED: the guarded file hash is current, but the proposed exact text was missing or ambiguous. Use the current read_file line numbers with apply_patches line_edits, or provide a uniquely matching replacement. Do not reread solely to recalculate the same hash.".into(),
             _ => self.code().into(),
         }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled | Self::FileExtractionCancelled)
     }
 }
 
@@ -382,6 +420,12 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
             "Read a UTF-8 project file with optional inclusive line bounds.",
             AgentToolEffect::Observe,
             json!({"type":"object","properties":{"path":{"type":"string"},"line_start":{"type":"integer","minimum":1},"line_end":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}),
+        ),
+        tool(
+            "file.extract",
+            "Extract bounded, untrusted text and metadata from one project-relative PDF, DOCX, PPTX, or XLSX file.",
+            AgentToolEffect::Observe,
+            json!({"type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096}},"required":["path"],"additionalProperties":false}),
         ),
         tool(
             "search_text",
@@ -1431,7 +1475,11 @@ impl<E: ToolExecutor> ToolExecutor for RoutedToolExecutor<E> {
         cancellation: &CommandCancellation,
     ) -> Result<ToolExecution, AgentError> {
         if cancellation.is_cancelled() {
-            return Err(AgentError::Cancelled);
+            return Err(if name == "file.extract" {
+                AgentError::FileExtractionCancelled
+            } else {
+                AgentError::Cancelled
+            });
         }
         let spec = self
             .catalog
@@ -1807,11 +1855,16 @@ impl ToolExecutor for ToolRuntime {
         cancellation: &CommandCancellation,
     ) -> Result<ToolExecution, AgentError> {
         if cancellation.is_cancelled() {
-            return Err(AgentError::Cancelled);
+            return Err(if name == "file.extract" {
+                AgentError::FileExtractionCancelled
+            } else {
+                AgentError::Cancelled
+            });
         }
         match name {
             "list_files" => self.list_files(arguments),
             "read_file" => self.read_file(arguments),
+            "file.extract" => file::extract(self, arguments, cancellation),
             "search_text" => self.search_text(arguments),
             "stat_path" => self.stat_path(arguments),
             "git_read" => self.git_read(arguments, cancellation),
@@ -2301,13 +2354,14 @@ impl ToolRuntime {
         let _: Args = parse_args(arguments)?;
         let capabilities = json!({
             "coding":{"status":"AVAILABLE","tools":["files","exact patch","git read","controlled command","verification"]},
+            "rich_file_read":{"status":"AVAILABLE","tool":"file.extract","formats":["PDF","DOCX","PPTX","XLSX"],"authority":"UNTRUSTED_PROJECT_CONTENT","limitations":["read/extract only","no OCR","no layout rendering","no formula evaluation"]},
             "markdown":{"status":"AVAILABLE","path":"create_file/write_file plus verification"},
             "csv":{"status":"AVAILABLE","path":"bounded UTF-8 file tools; formula-aware XLSX is not implied"},
             "web_research":{"status":"UNSUPPORTED_CAPABILITY","reason":"controlled Browser extraction tool is not installed in this build"},
             "archive":{"status":"UNSUPPORTED_CAPABILITY","reason":"safe zip preview/extraction adapter is not installed in this build"},
-            "docx_pdf":{"status":"UNSUPPORTED_CAPABILITY","reason":"render-and-verify artifact adapter is not installed in this build"},
-            "xlsx_charts":{"status":"UNSUPPORTED_CAPABILITY","reason":"typed workbook adapter is not installed in this build"},
-            "pptx":{"status":"UNSUPPORTED_CAPABILITY","reason":"presentation layout adapter is not installed in this build"},
+            "docx_pdf":{"status":"UNSUPPORTED_CAPABILITY","reason":"creation, editing, rendering, and visual verification remain unsupported; file.extract supports bounded read-only DOCX/PDF text extraction"},
+            "xlsx_charts":{"status":"UNSUPPORTED_CAPABILITY","reason":"creation, editing, charts, and formula evaluation remain unsupported; file.extract supports bounded read-only XLSX cell extraction"},
+            "pptx":{"status":"UNSUPPORTED_CAPABILITY","reason":"creation, editing, rendering, and layout verification remain unsupported; file.extract supports bounded read-only PPTX text extraction"},
             "image_generation":{"status":"UNSUPPORTED_CAPABILITY","reason":"no dedicated image provider adapter is configured"}
         });
         Ok(ToolExecution {

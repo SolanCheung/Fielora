@@ -8,6 +8,9 @@ license.workspace = true
 fielora-contracts = { path = "../fielora-contracts" }
 fielora-platform = { path = "../fielora-platform" }
 futures-util.workspace = true
+lopdf.workspace = true
+office_oxide.workspace = true
+quick-xml.workspace = true
 reqwest.workspace = true
 rmcp.workspace = true
 scraper.workspace = true
@@ -20,3 +23,4 @@ tokio-util = { workspace = true, features = ["codec"] }
 uuid.workspace = true
 windows-sys.workspace = true
 yaml_serde.workspace = true
+zip.workspace = true
