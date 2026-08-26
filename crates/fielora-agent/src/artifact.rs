@@ -8,7 +8,7 @@ use crate::{
     normalize_relative, relative_text, resolve_for_write, sha256,
 };
 use office_oxide::docx::write::DocxWriter;
-use office_oxide::pptx::write::PptxWriter;
+use office_oxide::pptx::write::{PptxWriter, Run, SlideData};
 use office_oxide::{Document, DocumentFormat};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -22,7 +22,8 @@ use zip::ZipArchive;
 
 const ARTIFACT_SCHEMA_VERSION: u16 = 1;
 const ARTIFACT_REVISION: u16 = 1;
-const RENDERER_VERSION: &str = "0.1.0+office_oxide.0.1.8";
+const DOCUMENT_RENDERER_VERSION: &str = "0.1.0+office_oxide.0.1.8";
+const PRESENTATION_RENDERER_VERSION: &str = "0.2.0+office_oxide.0.1.8";
 const MAX_DEFINITION_BYTES: usize = 256 * 1024;
 const MAX_TOTAL_TEXT_BYTES: usize = 128 * 1024;
 const MAX_TEXT_ITEM_BYTES: usize = 16 * 1024;
@@ -42,6 +43,15 @@ const MAX_SLIDE_TEXT_BYTES: usize = 16 * 1024;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TOOL_RESULT_BYTES: usize = 64 * 1024;
 const EXPORT_DEADLINE: Duration = Duration::from_secs(10);
+
+const EMU_PER_POINT: f64 = 12_700.0;
+const PRESENTATION_WIDTH_EMU: i64 = 12_192_000;
+const PRESENTATION_HEIGHT_EMU: i64 = 6_858_000;
+const LATIN_FONT: &str = "Arial";
+const CJK_FONT: &str = "Microsoft YaHei";
+const PRIMARY_TEXT_COLOR: &str = "172033";
+const SECONDARY_TEXT_COLOR: &str = "526273";
+const ACCENT_TEXT_COLOR: &str = "315A80";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -78,6 +88,166 @@ impl ArtifactType {
             Self::Presentation => "fielora.office.pptx",
         }
     }
+
+    fn renderer_version(self) -> &'static str {
+        match self {
+            Self::Document => DOCUMENT_RENDERER_VERSION,
+            Self::Presentation => PRESENTATION_RENDERER_VERSION,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SlideRect {
+    x: i64,
+    y: i64,
+    width: i64,
+    height: i64,
+}
+
+impl SlideRect {
+    fn right(self) -> i64 {
+        self.x + self.width
+    }
+
+    fn bottom(self) -> i64 {
+        self.y + self.height
+    }
+
+    fn contains(self, other: Self) -> bool {
+        other.x >= self.x
+            && other.y >= self.y
+            && other.right() <= self.right()
+            && other.bottom() <= self.bottom()
+    }
+
+    fn overlaps(self, other: Self) -> bool {
+        self.x < other.right()
+            && self.right() > other.x
+            && self.y < other.bottom()
+            && self.bottom() > other.y
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SlideMetrics {
+    slide: SlideRect,
+    margin_left: i64,
+    margin_right: i64,
+    margin_top: i64,
+    margin_bottom: i64,
+    cover_title: SlideRect,
+    cover_subtitle: SlideRect,
+    title: SlideRect,
+    body: SlideRect,
+    left: SlideRect,
+    right: SlideRect,
+    column_gap: i64,
+    column_padding: i64,
+}
+
+impl SlideMetrics {
+    fn widescreen() -> Self {
+        let slide = SlideRect {
+            x: 0,
+            y: 0,
+            width: PRESENTATION_WIDTH_EMU,
+            height: PRESENTATION_HEIGHT_EMU,
+        };
+        let margin_left = 777_240;
+        let margin_right = 777_240;
+        let margin_top = 457_200;
+        let margin_bottom = 618_000;
+        let body = SlideRect {
+            x: margin_left,
+            y: 1_520_000,
+            width: PRESENTATION_WIDTH_EMU - margin_left - margin_right,
+            height: PRESENTATION_HEIGHT_EMU - 1_520_000 - margin_bottom,
+        };
+        let column_gap = 457_200;
+        let column_padding = 95_250;
+        let column_width = (body.width - column_padding * 2 - column_gap) / 2;
+        Self {
+            slide,
+            margin_left,
+            margin_right,
+            margin_top,
+            margin_bottom,
+            cover_title: SlideRect {
+                x: 1_097_280,
+                y: 1_500_000,
+                width: 9_997_440,
+                height: 1_250_000,
+            },
+            cover_subtitle: SlideRect {
+                x: 1_097_280,
+                y: 3_050_000,
+                width: 9_997_440,
+                height: 1_450_000,
+            },
+            title: SlideRect {
+                x: margin_left,
+                y: margin_top,
+                width: PRESENTATION_WIDTH_EMU - margin_left - margin_right,
+                height: 850_000,
+            },
+            body,
+            left: SlideRect {
+                x: body.x + column_padding,
+                y: body.y,
+                width: column_width,
+                height: body.height,
+            },
+            right: SlideRect {
+                x: body.x + column_padding + column_width + column_gap,
+                y: body.y,
+                width: column_width,
+                height: body.height,
+            },
+            column_gap,
+            column_padding,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ContentDensity {
+    Low,
+    Normal,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PresentationTextRole {
+    CoverTitle,
+    CoverSubtitle,
+    SlideTitle,
+    ColumnHeading,
+    Body,
+    BulletMarker,
+    Bullet,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PresentationTextStyle {
+    role: PresentationTextRole,
+    font_size_pt: u16,
+    bold: bool,
+    color: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlannedTextLine {
+    text: String,
+    rect: SlideRect,
+    style: PresentationTextStyle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SlideLayoutPlan {
+    layout: PresentationLayout,
+    density: ContentDensity,
+    lines: Vec<PlannedTextLine>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -413,7 +583,7 @@ where
         "artifact_definition_sha256":definition_sha256,
         "semantic_unit_count":semantic_count,
         "renderer_id":artifact_type.renderer_id(),
-        "renderer_version":RENDERER_VERSION,
+        "renderer_version":artifact_type.renderer_version(),
         "output_format":artifact_type.extension().to_ascii_uppercase(),
         "path":relative_text(&relative),
         "output_bytes":final_bytes.len(),
@@ -665,43 +835,15 @@ fn render(definition: &ArtifactDefinition) -> Result<RenderedArtifact, AgentErro
                 .map_err(|_| AgentError::IoFailed)?;
         }
         ArtifactDefinition::Presentation(presentation) => {
+            let plans = plan_presentation(presentation)?;
             let mut writer = PptxWriter::new();
-            for definition_slide in &presentation.slides {
+            writer.set_presentation_size(
+                PRESENTATION_WIDTH_EMU as u64,
+                PRESENTATION_HEIGHT_EMU as u64,
+            );
+            for plan in &plans {
                 let slide = writer.add_slide();
-                slide.set_title(&definition_slide.title);
-                match definition_slide.layout {
-                    PresentationLayout::Title => {}
-                    PresentationLayout::TitleAndBody => {
-                        render_body_region(slide, &definition_slide.regions[0]);
-                    }
-                    PresentationLayout::TwoColumn => {
-                        let left = definition_slide
-                            .regions
-                            .iter()
-                            .find(|region| region.slot == SlideSlot::Left)
-                            .ok_or(AgentError::ToolArgumentsInvalid)?;
-                        let right = definition_slide
-                            .regions
-                            .iter()
-                            .find(|region| region.slot == SlideSlot::Right)
-                            .ok_or(AgentError::ToolArgumentsInvalid)?;
-                        slide
-                            .add_text_box(
-                                &region_text(left),
-                                640_000,
-                                1_650_000,
-                                5_250_000,
-                                3_900_000,
-                            )
-                            .add_text_box(
-                                &region_text(right),
-                                6_300_000,
-                                1_650_000,
-                                5_250_000,
-                                3_900_000,
-                            );
-                    }
-                }
+                render_presentation_plan(slide, plan);
             }
             writer
                 .write_to(&mut output)
@@ -713,31 +855,471 @@ fn render(definition: &ArtifactDefinition) -> Result<RenderedArtifact, AgentErro
     })
 }
 
-fn render_body_region(slide: &mut office_oxide::pptx::write::SlideData, region: &SlideRegion) {
-    for block in &region.blocks {
-        match block {
-            PresentationBlock::Paragraph { text } => {
-                slide.add_text(text);
+fn plan_presentation(
+    presentation: &PresentationArtifact,
+) -> Result<Vec<SlideLayoutPlan>, AgentError> {
+    let metrics = SlideMetrics::widescreen();
+    if !metrics.slide.contains(metrics.cover_title)
+        || !metrics.slide.contains(metrics.cover_subtitle)
+        || !metrics.slide.contains(metrics.title)
+        || !metrics.slide.contains(metrics.body)
+        || !metrics.body.contains(metrics.left)
+        || !metrics.body.contains(metrics.right)
+        || metrics.title.overlaps(metrics.body)
+        || metrics.left.overlaps(metrics.right)
+        || metrics.right.x - metrics.left.right() != metrics.column_gap
+        || metrics.body.x != metrics.margin_left
+        || metrics.slide.right() - metrics.body.right() != metrics.margin_right
+        || metrics.title.y != metrics.margin_top
+        || metrics.slide.bottom() - metrics.body.bottom() != metrics.margin_bottom
+        || metrics.left.x - metrics.body.x != metrics.column_padding
+        || metrics.body.right() - metrics.right.right() != metrics.column_padding
+    {
+        return Err(AgentError::IoFailed);
+    }
+    presentation
+        .slides
+        .iter()
+        .map(|slide| plan_slide(slide, metrics))
+        .collect()
+}
+
+fn plan_slide(
+    slide: &PresentationSlide,
+    metrics: SlideMetrics,
+) -> Result<SlideLayoutPlan, AgentError> {
+    match slide.layout {
+        PresentationLayout::Title => plan_cover_slide(slide, metrics),
+        PresentationLayout::TitleAndBody => {
+            let region = slide
+                .regions
+                .iter()
+                .find(|region| region.slot == SlideSlot::Body)
+                .ok_or(AgentError::ToolArgumentsInvalid)?;
+            let density = region_density(region, metrics.body, false);
+            let mut lines = fit_text_box(
+                &slide.title,
+                metrics.title,
+                &[28, 27, 26],
+                2,
+                PresentationTextRole::SlideTitle,
+                true,
+                PRIMARY_TEXT_COLOR,
+            )?;
+            for font_size_pt in body_font_candidates(density) {
+                if let Some(mut body) = plan_region(region, metrics.body, *font_size_pt, false) {
+                    lines.append(&mut body);
+                    return Ok(SlideLayoutPlan {
+                        layout: slide.layout,
+                        density,
+                        lines,
+                    });
+                }
             }
-            PresentationBlock::BulletList { items } => {
-                let items = items.iter().map(String::as_str).collect::<Vec<_>>();
-                slide.add_bullet_list(&items);
+            Err(AgentError::PresentationContentOverflow)
+        }
+        PresentationLayout::TwoColumn => {
+            let left = slide
+                .regions
+                .iter()
+                .find(|region| region.slot == SlideSlot::Left)
+                .ok_or(AgentError::ToolArgumentsInvalid)?;
+            let right = slide
+                .regions
+                .iter()
+                .find(|region| region.slot == SlideSlot::Right)
+                .ok_or(AgentError::ToolArgumentsInvalid)?;
+            let density = region_density(left, metrics.left, true).max(region_density(
+                right,
+                metrics.right,
+                true,
+            ));
+            let title = fit_text_box(
+                &slide.title,
+                metrics.title,
+                &[28, 27, 26],
+                2,
+                PresentationTextRole::SlideTitle,
+                true,
+                PRIMARY_TEXT_COLOR,
+            )?;
+            for font_size_pt in body_font_candidates(density) {
+                let Some(mut left_lines) = plan_region(left, metrics.left, *font_size_pt, true)
+                else {
+                    continue;
+                };
+                let Some(mut right_lines) = plan_region(right, metrics.right, *font_size_pt, true)
+                else {
+                    continue;
+                };
+                let mut lines = title.clone();
+                lines.append(&mut left_lines);
+                lines.append(&mut right_lines);
+                return Ok(SlideLayoutPlan {
+                    layout: slide.layout,
+                    density,
+                    lines,
+                });
             }
+            Err(AgentError::PresentationContentOverflow)
         }
     }
 }
 
-fn region_text(region: &SlideRegion) -> String {
-    let mut lines = Vec::new();
-    for block in &region.blocks {
+fn plan_cover_slide(
+    slide: &PresentationSlide,
+    metrics: SlideMetrics,
+) -> Result<SlideLayoutPlan, AgentError> {
+    let mut explicit_lines = slide
+        .title
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let title = explicit_lines
+        .next()
+        .ok_or(AgentError::ToolArgumentsInvalid)?;
+    let subtitle = explicit_lines.collect::<Vec<_>>().join("\n");
+    let mut lines = fit_text_box(
+        title,
+        metrics.cover_title,
+        &[40, 38, 36, 34],
+        2,
+        PresentationTextRole::CoverTitle,
+        true,
+        PRIMARY_TEXT_COLOR,
+    )?;
+    if !subtitle.is_empty() {
+        lines.append(&mut fit_text_box(
+            &subtitle,
+            metrics.cover_subtitle,
+            &[22, 20, 18, 17],
+            3,
+            PresentationTextRole::CoverSubtitle,
+            false,
+            SECONDARY_TEXT_COLOR,
+        )?);
+    }
+    Ok(SlideLayoutPlan {
+        layout: slide.layout,
+        density: ContentDensity::Low,
+        lines,
+    })
+}
+
+fn body_font_candidates(density: ContentDensity) -> &'static [u16] {
+    match density {
+        ContentDensity::Low => &[20, 18, 16, 15],
+        ContentDensity::Normal => &[18, 16, 15],
+        ContentDensity::High => &[16, 15],
+    }
+}
+
+fn region_density(region: &SlideRegion, bounds: SlideRect, column: bool) -> ContentDensity {
+    let bullet_indent = if column { 285_750 } else { 323_850 };
+    let mut lines = 0usize;
+    for (index, block) in region.blocks.iter().enumerate() {
         match block {
-            PresentationBlock::Paragraph { text } => lines.push(text.clone()),
+            PresentationBlock::Paragraph { text } => {
+                let size = if column && index == 0 { 22 } else { 20 };
+                lines += wrap_text(text, bounds.width, size).len();
+            }
             PresentationBlock::BulletList { items } => {
-                lines.extend(items.iter().map(|item| format!("• {item}")));
+                lines += items
+                    .iter()
+                    .map(|item| wrap_text(item, bounds.width - bullet_indent, 20).len())
+                    .sum::<usize>();
             }
         }
     }
-    lines.join("\n")
+    if lines <= 6 {
+        ContentDensity::Low
+    } else if lines <= 11 {
+        ContentDensity::Normal
+    } else {
+        ContentDensity::High
+    }
+}
+
+fn plan_region(
+    region: &SlideRegion,
+    bounds: SlideRect,
+    font_size_pt: u16,
+    column: bool,
+) -> Option<Vec<PlannedTextLine>> {
+    let mut planned = Vec::new();
+    let mut y = bounds.y;
+    let bullet_indent = if column { 285_750 } else { 323_850 };
+    let marker_width = 177_800;
+    for (block_index, block) in region.blocks.iter().enumerate() {
+        match block {
+            PresentationBlock::Paragraph { text } => {
+                let is_column_heading = column && block_index == 0;
+                let paragraph_size = if is_column_heading {
+                    (font_size_pt + 2).min(22)
+                } else {
+                    font_size_pt
+                };
+                let role = if is_column_heading {
+                    PresentationTextRole::ColumnHeading
+                } else {
+                    PresentationTextRole::Body
+                };
+                let style = PresentationTextStyle {
+                    role,
+                    font_size_pt: paragraph_size,
+                    bold: is_column_heading,
+                    color: if is_column_heading {
+                        ACCENT_TEXT_COLOR
+                    } else {
+                        PRIMARY_TEXT_COLOR
+                    },
+                };
+                let wrapped = wrap_text(text, bounds.width, paragraph_size);
+                let line_height = line_height_emu(paragraph_size);
+                for text in wrapped {
+                    let rect = SlideRect {
+                        x: bounds.x,
+                        y,
+                        width: bounds.width,
+                        height: line_height,
+                    };
+                    if !bounds.contains(rect) {
+                        return None;
+                    }
+                    planned.push(PlannedTextLine { text, rect, style });
+                    y += line_height;
+                }
+                y += if is_column_heading {
+                    points_to_emu((font_size_pt as f64) * 0.65)
+                } else {
+                    points_to_emu((font_size_pt as f64) * 0.8)
+                };
+            }
+            PresentationBlock::BulletList { items } => {
+                let bullet_font_size_pt = font_size_pt.saturating_sub(1).max(15);
+                let marker_style = PresentationTextStyle {
+                    role: PresentationTextRole::BulletMarker,
+                    font_size_pt: bullet_font_size_pt,
+                    bold: false,
+                    color: ACCENT_TEXT_COLOR,
+                };
+                let bullet_style = PresentationTextStyle {
+                    role: PresentationTextRole::Bullet,
+                    font_size_pt: bullet_font_size_pt,
+                    bold: false,
+                    color: PRIMARY_TEXT_COLOR,
+                };
+                for item in items {
+                    let wrapped =
+                        wrap_text(item, bounds.width - bullet_indent, bullet_font_size_pt);
+                    let line_height = line_height_emu(bullet_font_size_pt);
+                    let marker_rect = SlideRect {
+                        x: bounds.x,
+                        y,
+                        width: marker_width,
+                        height: line_height,
+                    };
+                    if !bounds.contains(marker_rect) {
+                        return None;
+                    }
+                    planned.push(PlannedTextLine {
+                        text: "•".into(),
+                        rect: marker_rect,
+                        style: marker_style,
+                    });
+                    for text in wrapped {
+                        let rect = SlideRect {
+                            x: bounds.x + bullet_indent,
+                            y,
+                            width: bounds.width - bullet_indent,
+                            height: line_height,
+                        };
+                        if !bounds.contains(rect) {
+                            return None;
+                        }
+                        planned.push(PlannedTextLine {
+                            text,
+                            rect,
+                            style: bullet_style,
+                        });
+                        y += line_height;
+                    }
+                    y += points_to_emu((bullet_font_size_pt as f64) * 0.38);
+                }
+                y += points_to_emu((bullet_font_size_pt as f64) * 0.35);
+            }
+        }
+    }
+    Some(planned)
+}
+
+fn fit_text_box(
+    text: &str,
+    bounds: SlideRect,
+    font_sizes: &[u16],
+    max_lines: usize,
+    role: PresentationTextRole,
+    bold: bool,
+    color: &'static str,
+) -> Result<Vec<PlannedTextLine>, AgentError> {
+    for font_size_pt in font_sizes {
+        let wrapped = wrap_text(text, bounds.width, *font_size_pt);
+        let line_height = line_height_emu(*font_size_pt);
+        if wrapped.is_empty()
+            || wrapped.len() > max_lines
+            || line_height * wrapped.len() as i64 > bounds.height
+        {
+            continue;
+        }
+        let style = PresentationTextStyle {
+            role,
+            font_size_pt: *font_size_pt,
+            bold,
+            color,
+        };
+        return Ok(wrapped
+            .into_iter()
+            .enumerate()
+            .map(|(index, text)| PlannedTextLine {
+                text,
+                rect: SlideRect {
+                    x: bounds.x,
+                    y: bounds.y + line_height * index as i64,
+                    width: bounds.width,
+                    height: line_height,
+                },
+                style,
+            })
+            .collect());
+    }
+    Err(AgentError::PresentationContentOverflow)
+}
+
+fn wrap_text(text: &str, width_emu: i64, font_size_pt: u16) -> Vec<String> {
+    let mut output = Vec::new();
+    for explicit_line in text.lines() {
+        let characters = explicit_line.trim().chars().collect::<Vec<_>>();
+        if characters.is_empty() {
+            continue;
+        }
+        let mut start = 0usize;
+        while start < characters.len() {
+            let mut end = start;
+            let mut measured = 0f64;
+            let mut last_break = None;
+            while end < characters.len() {
+                let next = glyph_width_emu(characters[end], font_size_pt);
+                if measured + next > width_emu as f64 {
+                    break;
+                }
+                measured += next;
+                if is_break_opportunity(characters[end]) {
+                    last_break = Some(end + 1);
+                }
+                end += 1;
+            }
+            if end == start {
+                end += 1;
+            } else if end < characters.len()
+                && let Some(preferred) = last_break
+                && preferred > start
+            {
+                end = preferred;
+            }
+            let line = characters[start..end]
+                .iter()
+                .collect::<String>()
+                .trim()
+                .to_owned();
+            if !line.is_empty() {
+                output.push(line);
+            }
+            start = end;
+            while start < characters.len() && characters[start].is_whitespace() {
+                start += 1;
+            }
+        }
+    }
+    output
+}
+
+fn glyph_width_emu(character: char, font_size_pt: u16) -> f64 {
+    let factor = if is_cjk(character) {
+        1.0
+    } else if character.is_whitespace() {
+        0.32
+    } else if character.is_ascii_uppercase() {
+        0.64
+    } else if character.is_ascii_lowercase() {
+        0.54
+    } else if character.is_ascii_digit() {
+        0.56
+    } else {
+        0.42
+    };
+    font_size_pt as f64 * factor * EMU_PER_POINT
+}
+
+fn is_break_opportunity(character: char) -> bool {
+    character.is_whitespace()
+        || matches!(
+            character,
+            '-' | '/' | '—' | '，' | '。' | '、' | '；' | '：' | ',' | '.' | ';' | ':'
+        )
+}
+
+fn is_cjk(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x3000..=0x30ff | 0x3400..=0x9fff | 0xac00..=0xd7af | 0xf900..=0xfaff | 0xff00..=0xffef
+    )
+}
+
+fn points_to_emu(points: f64) -> i64 {
+    (points * EMU_PER_POINT).ceil() as i64
+}
+
+fn line_height_emu(font_size_pt: u16) -> i64 {
+    points_to_emu(font_size_pt as f64 * 1.28)
+}
+
+fn styled_runs(line: &PlannedTextLine) -> Vec<Run> {
+    let mut groups = Vec::<(bool, String)>::new();
+    for character in line.text.chars() {
+        let cjk = is_cjk(character);
+        if let Some((last_cjk, text)) = groups.last_mut()
+            && *last_cjk == cjk
+        {
+            text.push(character);
+        } else {
+            groups.push((cjk, character.to_string()));
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(cjk, text)| {
+            let mut run = Run::new(text)
+                .font(if cjk { CJK_FONT } else { LATIN_FONT })
+                .font_size(line.style.font_size_pt as f64)
+                .color(line.style.color);
+            if line.style.bold {
+                run = run.bold();
+            }
+            run
+        })
+        .collect()
+}
+
+fn render_presentation_plan(slide: &mut SlideData, plan: &SlideLayoutPlan) {
+    for line in &plan.lines {
+        slide.add_rich_text_box(
+            &styled_runs(line),
+            line.rect.x,
+            line.rect.y,
+            line.rect.width,
+            line.rect.height,
+        );
+    }
 }
 
 fn validate_rendered(definition: &ArtifactDefinition, bytes: &[u8]) -> Result<(), AgentError> {
@@ -765,11 +1347,20 @@ fn validate_rendered(definition: &ArtifactDefinition, bytes: &[u8]) -> Result<()
         return Err(AgentError::IoFailed);
     }
     let plain_text = reopened.plain_text();
-    if definition
-        .expected_text()
-        .iter()
-        .any(|expected| !plain_text.contains(expected))
-    {
+    let missing_semantic_text = match artifact_type {
+        ArtifactType::Document => definition
+            .expected_text()
+            .iter()
+            .any(|expected| !plain_text.contains(expected)),
+        ArtifactType::Presentation => {
+            let compact_plain_text = compact_whitespace(&plain_text);
+            definition
+                .expected_text()
+                .iter()
+                .any(|expected| !compact_plain_text.contains(&compact_whitespace(expected)))
+        }
+    };
+    if missing_semantic_text {
         return Err(AgentError::IoFailed);
     }
     if let ArtifactDefinition::Presentation(presentation) = definition
@@ -778,6 +1369,12 @@ fn validate_rendered(definition: &ArtifactDefinition, bytes: &[u8]) -> Result<()
         return Err(AgentError::IoFailed);
     }
     Ok(())
+}
+
+fn compact_whitespace(text: &str) -> String {
+    text.chars()
+        .filter(|character| !character.is_whitespace())
+        .collect()
 }
 
 #[cfg(test)]
@@ -845,6 +1442,25 @@ mod tests {
         })
     }
 
+    fn presentation_from(arguments: &Value) -> PresentationArtifact {
+        serde_json::from_value(arguments["content"].clone()).unwrap()
+    }
+
+    fn overflow_presentation_args(path: &str) -> Value {
+        let items = (1..=64)
+            .map(|index| format!("Overflow boundary item {index}"))
+            .collect::<Vec<_>>();
+        json!({
+            "type":"presentation",
+            "output_path":path,
+            "content":{"slides":[{
+                "layout":"TITLE_AND_BODY",
+                "title":"Bounded overflow",
+                "regions":[{"slot":"BODY","blocks":[{"kind":"BULLET_LIST","items":items}]}]
+            }]}
+        })
+    }
+
     fn assert_no_temporary_files(root: &Path) {
         let mut pending = vec![root.to_path_buf()];
         while let Some(directory) = pending.pop() {
@@ -857,6 +1473,220 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn presentation_metrics_and_layout_plans_are_deterministic_and_bounded() {
+        let metrics = SlideMetrics::widescreen();
+        assert!(metrics.slide.contains(metrics.cover_title));
+        assert!(metrics.slide.contains(metrics.cover_subtitle));
+        assert!(metrics.slide.contains(metrics.title));
+        assert!(metrics.slide.contains(metrics.body));
+        assert!(!metrics.title.overlaps(metrics.body));
+        assert_eq!(metrics.left.width, metrics.right.width);
+        assert_eq!(metrics.right.x - metrics.left.right(), metrics.column_gap);
+        assert!(!metrics.left.overlaps(metrics.right));
+
+        let presentation = presentation_from(&presentation_args("layout.pptx"));
+        let first = plan_presentation(&presentation).unwrap();
+        let second = plan_presentation(&presentation).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 3);
+        for plan in first {
+            for line in &plan.lines {
+                assert!(metrics.slide.contains(line.rect), "out of bounds: {line:?}");
+            }
+            for (index, line) in plan.lines.iter().enumerate() {
+                for other in plan.lines.iter().skip(index + 1) {
+                    assert!(
+                        !line.rect.overlaps(other.rect),
+                        "overlap: {line:?} / {other:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn presentation_typography_has_hierarchy_fonts_and_readable_floor() {
+        let presentation = presentation_from(&json!({
+            "content":{"slides":[
+                {"layout":"TITLE","title":"Fielora\nAI-native 工作环境","regions":[]},
+                {"layout":"TITLE_AND_BODY","title":"Mixed Typography","regions":[
+                    {"slot":"BODY","blocks":[
+                        {"kind":"PARAGRAPH","text":"Model + Harness + Tools 统一进入现有 pipeline。"},
+                        {"kind":"BULLET_LIST","items":["可读的中英文正文","Provider-neutral execution"]}
+                    ]}
+                ]}
+            ]}
+        }));
+        let plans = plan_presentation(&presentation).unwrap();
+        let cover_title = plans[0]
+            .lines
+            .iter()
+            .find(|line| line.style.role == PresentationTextRole::CoverTitle)
+            .unwrap();
+        let cover_subtitle = plans[0]
+            .lines
+            .iter()
+            .find(|line| line.style.role == PresentationTextRole::CoverSubtitle)
+            .unwrap();
+        assert!(cover_title.style.font_size_pt >= 34);
+        assert!(cover_title.style.font_size_pt > cover_subtitle.style.font_size_pt);
+        assert!(plans[1].lines.iter().any(|line| {
+            line.style.role == PresentationTextRole::SlideTitle && line.style.font_size_pt >= 26
+        }));
+        assert!(plans.iter().flat_map(|plan| &plan.lines).all(|line| {
+            !matches!(
+                line.style.role,
+                PresentationTextRole::Body
+                    | PresentationTextRole::Bullet
+                    | PresentationTextRole::BulletMarker
+            ) || line.style.font_size_pt >= 15
+        }));
+
+        let rendered = render(&ArtifactDefinition::Presentation(presentation)).unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(rendered.bytes)).unwrap();
+        let mut slide_xml = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name("ppt/slides/slide2.xml").unwrap(),
+            &mut slide_xml,
+        )
+        .unwrap();
+        assert!(slide_xml.contains("typeface=\"Arial\""));
+        assert!(slide_xml.contains("typeface=\"Microsoft YaHei\""));
+        assert!(slide_xml.contains("sz=\"2800\""));
+        assert!(slide_xml.contains("<a:off x=\"777240\" y=\"457200\""));
+    }
+
+    #[test]
+    fn presentation_long_titles_fit_boundedly_or_fail_closed() {
+        let metrics = SlideMetrics::widescreen();
+        let fitted = fit_text_box(
+            "A deliberately long presentation title that wraps across the available safe title region",
+            metrics.title,
+            &[28, 27, 26],
+            2,
+            PresentationTextRole::SlideTitle,
+            true,
+            PRIMARY_TEXT_COLOR,
+        )
+        .unwrap();
+        assert_eq!(fitted.len(), 2);
+        assert!(fitted.iter().all(|line| line.style.font_size_pt >= 26));
+        assert_eq!(
+            fit_text_box(
+                &"W".repeat(500),
+                metrics.title,
+                &[28, 27, 26],
+                2,
+                PresentationTextRole::SlideTitle,
+                true,
+                PRIMARY_TEXT_COLOR,
+            ),
+            Err(AgentError::PresentationContentOverflow)
+        );
+    }
+
+    #[test]
+    fn presentation_stress_layout_fits_normal_content_and_rejects_overflow() {
+        let safe = presentation_from(&json!({
+            "content":{"slides":[
+                {"layout":"TITLE_AND_BODY","title":"面向真实工作的 Fielora Presentation Renderer Quality Foundation 与确定性安全边界","regions":[
+                    {"slot":"BODY","blocks":[
+                        {"kind":"PARAGRAPH","text":"长标题在受控字号范围内换行，并与正文保持稳定间距。"}
+                    ]}
+                ]},
+                {"layout":"TITLE_AND_BODY","title":"Ten Normal Bullets","regions":[
+                    {"slot":"BODY","blocks":[
+                        {"kind":"BULLET_LIST","items":[
+                            "Project","Conversation","Model","Harness","Tools",
+                            "PolicyEngine","Approval","Receipt","Artifact","Verification"
+                        ]}
+                    ]}
+                ]},
+                {"layout":"TITLE_AND_BODY","title":"Mixed Long Paragraph","regions":[
+                    {"slot":"BODY","blocks":[
+                        {"kind":"PARAGRAPH","text":"Fielora keeps Model, Harness, and Tools 与真实执行边界分离。Renderer 使用保守且确定性的 CJK / Latin 字符宽度估算，在固定安全区内规划字号、行高与段落间距；内容不会通过无限缩小字号来勉强容纳，执行成功也不会升级为事实 Verification PASS。This mixed paragraph intentionally exercises wrapping across English words, 中文标点、technical identifiers, and a normal presentation-width text region without relying on an external layout process."}
+                    ]}
+                ]},
+                {"layout":"TWO_COLUMN","title":"Unequal Column Density","regions":[
+                    {"slot":"LEFT","blocks":[
+                        {"kind":"PARAGRAPH","text":"Small / 小栏"},
+                        {"kind":"BULLET_LIST","items":["Coding","Files"]}
+                    ]},
+                    {"slot":"RIGHT","blocks":[
+                        {"kind":"PARAGRAPH","text":"Dense / 长栏"},
+                        {"kind":"BULLET_LIST","items":[
+                            "External Tool Provider","MCP stdio transport","Agent Skills lazy loading",
+                            "Web Intelligence with policy","File Intelligence extraction",
+                            "Artifact structural roundtrip","Verification remains separate",
+                            "Future plugins use the same Tool execution path"
+                        ]}
+                    ]}
+                ]}
+            ]}
+        }));
+        let plans = plan_presentation(&safe).unwrap();
+        assert_eq!(plans.len(), 4);
+        assert!(
+            plans[0]
+                .lines
+                .iter()
+                .filter(|line| line.style.role == PresentationTextRole::SlideTitle)
+                .count()
+                >= 2
+        );
+        assert!(
+            plans
+                .iter()
+                .any(|plan| plan.density == ContentDensity::Normal)
+        );
+        let high_density_region = SlideRegion {
+            slot: SlideSlot::Body,
+            blocks: vec![PresentationBlock::BulletList {
+                items: (1..=12).map(|index| format!("Item {index}")).collect(),
+            }],
+        };
+        assert_eq!(
+            region_density(&high_density_region, SlideMetrics::widescreen().body, false),
+            ContentDensity::High
+        );
+        assert!(
+            plan_region(
+                &high_density_region,
+                SlideMetrics::widescreen().body,
+                16,
+                false
+            )
+            .is_some()
+        );
+        let two_column_sizes = plans[3]
+            .lines
+            .iter()
+            .filter(|line| {
+                matches!(
+                    line.style.role,
+                    PresentationTextRole::Bullet | PresentationTextRole::BulletMarker
+                )
+            })
+            .map(|line| line.style.font_size_pt)
+            .collect::<HashSet<_>>();
+        assert_eq!(two_column_sizes.len(), 1);
+
+        let (root, runtime) = fixture_runtime();
+        assert_eq!(
+            runtime.execute(
+                "artifact.export",
+                &overflow_presentation_args("overflow.pptx"),
+                false,
+                &CommandCancellation::default()
+            ),
+            Err(AgentError::PresentationContentOverflow)
+        );
+        assert!(!root.join("overflow.pptx").exists());
+        assert_no_temporary_files(&root);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -891,17 +1721,19 @@ mod tests {
     #[test]
     fn document_and_presentation_export_roundtrip_through_file_extract() {
         let (root, runtime) = fixture_runtime();
-        for (arguments, path, format, expected) in [
+        for (arguments, path, format, renderer_version, expected) in [
             (
                 document_args("exports/report.docx"),
                 "exports/report.docx",
                 "DOCX",
+                DOCUMENT_RENDERER_VERSION,
                 vec!["Document Section", "First item", "Roundtrip", "Present"],
             ),
             (
                 presentation_args("exports/deck.pptx"),
                 "exports/deck.pptx",
                 "PPTX",
+                PRESENTATION_RENDERER_VERSION,
                 vec![
                     "Title and body",
                     "First slide item",
@@ -921,6 +1753,7 @@ mod tests {
             assert_eq!(exported.receipt["kind"], "ARTIFACT_EXPORTED");
             assert_eq!(exported.receipt["structural_reopen"], "STRUCTURAL_VALID");
             assert_eq!(exported.receipt["roundtrip"], "SEMANTIC_CONTENT_PRESENT");
+            assert_eq!(exported.receipt["renderer_version"], renderer_version);
             assert!(exported.receipt.get("verification_eligible").is_none());
             let receipt_text = exported.receipt.to_string();
             assert!(!receipt_text.contains("First item"));

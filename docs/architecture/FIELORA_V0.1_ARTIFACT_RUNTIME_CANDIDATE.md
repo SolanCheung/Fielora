@@ -4,6 +4,8 @@
 
 **Implementation:** `FIRST ONE-SHOT ARTIFACT EXPORT SLICE: IMPLEMENTED / VALIDATED`
 
+**Presentation quality:** `RENDERER QUALITY FOUNDATION: IMPLEMENTED / TARGETED VALIDATED; HUMAN VISUAL GATE PENDING`
+
 **Scope:** Artifact baseline alignment and the smallest backend-only first-slice
 candidate for `Document` and `Presentation`.
 
@@ -55,7 +57,7 @@ Artifact, and normalized extraction cannot promise lossless Office round-trip.
 | Atomic file mutation | `EXISTS` | Rust `atomic_write`, `resolve_for_write`, sensitive-path denial; Artifact passes bounded binary bytes internally | Existing filesystem Tool/backend | Binary create-only export now reuses the primitive; overwrite/update remains deferred |
 | Version/conflict primitive | `PARTIAL` | Aggregate `revision`/`expected_revision`; file SHA guards; create rejects existing paths | Core contracts and filesystem Tool | No Artifact revision; first slice can use revision 1 and create-only conflict control |
 | DOCX writer | `EXISTS / BOUNDED` | Exact `office_oxide 0.1.8`; independent probe and production `artifact.export` adapter | Artifact renderer adapter | Structural/semantic roundtrip is validated; Office visual compatibility is not claimed |
-| PPTX writer | `EXISTS / BOUNDED` | Exact `office_oxide 0.1.8`; fixed TITLE/TITLE_AND_BODY/TWO_COLUMN adapter | Artifact renderer adapter | Structural/semantic roundtrip is validated; general layout and visual compatibility remain unproved |
+| PPTX writer | `EXISTS / BOUNDED` | Exact `office_oxide 0.1.8`; fixed TITLE/TITLE_AND_BODY/TWO_COLUMN adapter with renderer-private typography, geometry, spacing, and bounded fit | Artifact renderer adapter | Structural/semantic roundtrip and deterministic layout bounds are validated; post-quality-slice human visual usability remains pending |
 | Preview/render primitive | `PARTIAL` | Right workspace dock previews UTF-8/Markdown and bounded images; PDF is explicitly unsupported | Desktop workspace presentation | No DOCX/PPTX render, page/slide preview, or Artifact surface |
 | Image/asset references | `PARTIAL` | `WorkspaceAttachmentView.content_ref` for bounded images; profile-scoped `LibraryObject.blob_ref/content_hash` | Desktop attachment runtime and Library | Attachment refs are UI/localStorage-oriented and Library refs are not Project Artifact assets; neither is a Tool-safe Artifact asset contract |
 | Artifact Verification | `PARTIAL` | `artifact.export` structural reopen/semantic-presence self-check plus existing ToolCall receipts, workspace revision, and `file.extract` | Harness Verification & Evidence | Tool self-check exists; factual correctness and visual quality remain unimplemented verification |
@@ -339,6 +341,53 @@ only behind the same pre-implementation writer probe as DOCX. Failure of that
 probe is a STOP condition for Presentation implementation, not permission to
 introduce COM, LibreOffice, Python, Node, or a half-written OOXML generator.
 
+### 7.1 Presentation visual reality and quality foundation
+
+```text
+PRESENTATION VISUAL REALITY — FIRST VERSION: FAIL_MAJOR
+PRESENTATION RENDERER QUALITY SLICE: IMPLEMENTED / TARGETED VALIDATED
+POST-SLICE HUMAN VISUAL GATE: PENDING_HUMAN_REVIEW
+```
+
+The first real PowerPoint visual review found readable structure but major
+layout defects: body text was too small, the canvas was underused, title/body/
+bullet hierarchy was weak, two-column regions were mechanically placed, and
+the cover was concentrated at the upper-left. That result remains the factual
+baseline and is not overwritten by structural evidence.
+
+The quality slice keeps the three existing semantic layouts and adds only a
+renderer-private plan:
+
+- one 16:9 `SlideMetrics` source for cover, title, body, equal columns, and a
+  stable column gap;
+- cover/title/body/column-heading/bullet typography roles with restrained
+  primary, secondary, and accent text colors;
+- Arial Latin runs and Microsoft YaHei CJK runs without bundled or embedded
+  font assets;
+- conservative deterministic CJK/Latin line estimation and explicit line
+  placement because the pinned writer's free text boxes do not wrap;
+- `LOW / NORMAL / HIGH` content density with bounded 20/18/16/15 pt body
+  choices; ordinary body and bullets never fall below 15 pt;
+- deterministic `PRESENTATION_CONTENT_OVERFLOW` before file creation when a
+  title, body, bullet list, or one column cannot fit at the minimum size.
+
+Renderer-plan tests prove stable computation, slide bounds, title/body
+separation, equal non-overlapping columns, typography floors, long-title fit,
+normal stress fit, and overflow rejection. The production `artifact.export`
+probe generated the unchanged eight-slide reality content through the existing
+`WORKSPACE_WRITE` path in 64 ms: 14,344 bytes, PPTX renderer version
+`0.2.0+office_oxide.0.1.8`, structural reopen `STRUCTURAL_VALID`, semantic
+roundtrip `SEMANTIC_CONTENT_PRESENT`, and `file.extract` section count 8.
+No Verification event was created.
+
+The installed Microsoft PowerPoint process did not provide a reliable automated
+visual observation: a fresh open of the retained pre-slice deck eventually
+reported `[Repaired]`, while a fresh open of the post-slice deck remained at a
+generic `PowerPoint` window title without exposing the deck title. This local
+result conflicts with the prior human `PPTX_OPENABILITY: PASS` baseline and
+does not isolate a post-slice regression. Therefore this candidate records no
+new openability or visual PASS; the real checklist remains a human gate.
+
 ## 8. DEPENDENCY_RESEARCH
 
 Read-only snapshot: 2026-08-26. Version/activity/download numbers are ecosystem
@@ -435,8 +484,9 @@ Artifact file saved              != requirement or Goal complete
 The round-trip sanity test may call existing `file.extract` and compare
 required semantic text/counts. That is parser-backed structural evidence, not
 lossless reconstruction and not visual verification. Presentation visual
-quality remains `NOT YET`; a future preview plus screenshot/vision/human check
-must use the existing Harness Verification boundary.
+quality after the renderer change remains `PENDING_HUMAN_REVIEW`;
+layout-plan tests and structural extraction cannot substitute for a
+screenshot/vision/human check at the existing Harness Verification boundary.
 
 Model-, user-, Web-, and extracted-file-derived content keeps its original
 trust limits. Exporting it cannot upgrade it to verified truth. The first slice
@@ -497,6 +547,7 @@ NEW PERMISSION / RECEIPT / VERIFICATION TYPES: NONE
 | Assets | `NONE` | Images/templates/fonts are not accepted |
 | Preview/render | `NONE` | Export only; no preview representation or UI |
 | Visual verification | `NONE / DEFERRED` | Structural validation explicitly cannot claim visual quality |
+| Presentation renderer behavior | `MEDIUM` | Renderer-private geometry, typography, line estimation, bounded fit, and one deterministic overflow code changed; no semantic DTO, schema, permission, or dependency changed |
 
 Overall first-slice Change Impact is `HIGH` because it creates binary Project
 files using a young renderer, even though the architecture and storage deltas

@@ -152,6 +152,8 @@ pub enum AgentError {
     SkillInvalid,
     #[error("AGENT_SKILL_CHANGED")]
     SkillChanged,
+    #[error("PRESENTATION_CONTENT_OVERFLOW")]
+    PresentationContentOverflow,
     #[error("AGENT_IO_FAILED")]
     IoFailed,
 }
@@ -192,6 +194,7 @@ impl AgentError {
             Self::ToolProviderOutcomeUnknown => "AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN",
             Self::SkillInvalid => "AGENT_SKILL_INVALID",
             Self::SkillChanged => "AGENT_SKILL_CHANGED",
+            Self::PresentationContentOverflow => "PRESENTATION_CONTENT_OVERFLOW",
             Self::IoFailed => "AGENT_IO_FAILED",
         }
     }
