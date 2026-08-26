@@ -1678,3 +1678,37 @@ build、contracts、Docs context manifest 与 diff check 均 PASS。未安装
 `cargo-audit`，advisory 使用 RustSec primary records 与 exact dependency tree
 人工核对；未运行与本 Slice 无关的 Desktop E2E、package/portable smoke 或
 full premerge。
+
+## 85. User-configured Local MCP Connection Foundation
+
+技术用户现在可在现有 `PlatformPaths.config_dir/mcp.json` 声明最多八个已安装的
+absolute-path Local stdio MCP Server。配置读取只形成 exact-bytes SHA-256 的
+AgentRun snapshot；不做 executable admission、spawn、discovery、network 或
+credential read。Project 内 `.mcp.json`、`mcp.json`、`.fielora/mcp.json` 不扫描，
+因此打开 repository 不会触发本地进程。
+
+仅新增 built-in `mcp.list_connections`（OBSERVE）与
+`mcp.activate_connection`（PROCESS）。Activation 在现有 Policy/Approval 后验证
+snapshot digest，随后复用既有 `McpStdioToolProvider`、ManagedChild/env_clear/Job
+Object 与 provider-neutral catalog。Run-scoped provider 在下一 Model turn 通过同一
+catalog path 暴露；Run terminal/cancel/discovery failure/Core exit 均由现有 Drop
+链回收。Windows provider 生命周期内持有禁止 write/delete sharing 的只读
+executable handle，使运行文件与 identity digest 绑定；没有 Connection Runtime 或
+daemon。
+
+任意 user-configured MCP Tool 统一使用已有 `DESTRUCTIVE` effect；MCP
+`readOnlyHint/destructiveHint`、名称与描述不能降权。Activation 与 MCP Tool 成功都不
+产生 VerificationReceipt。Receipt 只保存 connection/config/provider/executable
+digest 与既有 MCP source envelope，不保存绝对路径、argv、raw config 或 env。
+
+```text
+USER_LOCAL_MCP_CONNECTION_FOUNDATION: IMPLEMENTED
+CONFIG_SOURCE: USER_APP_CONFIG_ONLY
+PROJECT_MCP_AUTO_IMPORT: FORBIDDEN
+TRANSPORT: LOCAL_STDIO_ONLY
+UNKNOWN_TOOL_EFFECT: DESTRUCTIVE
+CREDENTIALS_REMOTE_UI_INSTALLER: NOT_IMPLEMENTED
+SCHEMA_MIGRATION: NONE
+NEW_DEPENDENCIES: 0
+CHANGE_IMPACT: HIGH
+```

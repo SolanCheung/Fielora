@@ -9,6 +9,7 @@ use fielora_agent::{
 use fielora_contracts::{AgentPermission, AgentPolicyDecision, AgentToolEffect};
 use serde_json::json;
 use std::ffi::OsString;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -31,6 +32,8 @@ fn provider(mode: &str, extra: &[&Path]) -> Arc<McpStdioToolProvider> {
             executable: fixture_executable(),
             arguments,
             working_directory: std::env::current_dir().unwrap(),
+            admission_effect: AgentToolEffect::Observe,
+            source_config_digest: None,
         })
         .unwrap(),
     )
@@ -40,6 +43,45 @@ fn temp_root(label: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("fielora-mcp-{label}-{}", Uuid::now_v7()));
     std::fs::create_dir_all(&root).unwrap();
     root
+}
+
+#[test]
+fn executable_bytes_are_bound_to_provider_identity_and_guarded_for_lifetime() {
+    let root = temp_root("executable-identity");
+    let copied = root.join(format!("copied-server{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(fixture_executable(), &copied).unwrap();
+    let make_provider = || {
+        McpStdioToolProvider::new(McpStdioProviderConfig {
+            config_key: "executable-identity".into(),
+            executable: copied.clone(),
+            arguments: vec![OsString::from("normal")],
+            working_directory: root.clone(),
+            admission_effect: AgentToolEffect::Observe,
+            source_config_digest: Some("a".repeat(64)),
+        })
+        .unwrap()
+    };
+    let first = make_provider();
+    let first_identity = first.identity();
+    #[cfg(windows)]
+    assert!(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&copied)
+            .is_err(),
+        "provider lifetime must deny executable write sharing"
+    );
+    drop(first);
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&copied)
+        .unwrap()
+        .write_all(b"identity-change")
+        .unwrap();
+    let second = make_provider();
+    assert_ne!(second.identity(), first_identity);
+    drop(second);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

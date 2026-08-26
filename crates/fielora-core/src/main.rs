@@ -249,12 +249,13 @@ fn run() -> Result<(), CoreError> {
         .thread_name("fielora-runtime")
         .build()
         .map_err(|error| CoreError::Platform(error.to_string()))?;
-    let agent = AgentCoordinator::new(
+    let agent = AgentCoordinator::with_user_config_root(
         handle.clone(),
         credentials.clone(),
         event_sender.clone(),
         paths.data_dir.join("agent-artifacts"),
         async_runtime.handle().clone(),
+        paths.config_dir.clone(),
     );
     let reconciled = handle
         .reconcile_agent_runs(now_ms())

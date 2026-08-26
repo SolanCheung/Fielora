@@ -8,6 +8,7 @@
 mod artifact;
 mod file;
 pub mod mcp;
+pub mod mcp_connections;
 mod skills;
 pub mod web;
 
@@ -148,6 +149,28 @@ pub enum AgentError {
     ToolProviderClassifiedFailure(ToolProviderFailureKind),
     #[error("AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN")]
     ToolProviderOutcomeUnknown,
+    #[error("MCP_CONNECTION_CONFIG_CHANGED")]
+    McpConnectionConfigChanged,
+    #[error("MCP_CONFIG_NOT_FOUND")]
+    McpConfigNotFound,
+    #[error("MCP_CONFIG_MALFORMED")]
+    McpConfigMalformed,
+    #[error("MCP_CONNECTION_NOT_FOUND")]
+    McpConnectionNotFound,
+    #[error("MCP_CONNECTION_UNSUPPORTED")]
+    McpConnectionUnsupported,
+    #[error("MCP_EXECUTABLE_NOT_FOUND")]
+    McpExecutableNotFound,
+    #[error("MCP_EXECUTABLE_INVALID")]
+    McpExecutableInvalid,
+    #[error("MCP_PROCESS_START_FAILED")]
+    McpProcessStartFailed,
+    #[error("MCP_DISCOVERY_FAILED")]
+    McpDiscoveryFailed,
+    #[error("MCP_DISCOVERY_TIMEOUT")]
+    McpDiscoveryTimeout,
+    #[error("MCP_CATALOG_INVALID")]
+    McpCatalogInvalid,
     #[error("AGENT_SKILL_INVALID")]
     SkillInvalid,
     #[error("AGENT_SKILL_CHANGED")]
@@ -192,6 +215,17 @@ impl AgentError {
             Self::ToolProviderFailed => "AGENT_TOOL_PROVIDER_FAILED",
             Self::ToolProviderClassifiedFailure(kind) => kind.code(),
             Self::ToolProviderOutcomeUnknown => "AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN",
+            Self::McpConnectionConfigChanged => "MCP_CONNECTION_CONFIG_CHANGED",
+            Self::McpConfigNotFound => "CONFIG_NOT_FOUND",
+            Self::McpConfigMalformed => "CONFIG_MALFORMED",
+            Self::McpConnectionNotFound => "CONNECTION_NOT_FOUND",
+            Self::McpConnectionUnsupported => "CONNECTION_UNSUPPORTED",
+            Self::McpExecutableNotFound => "EXECUTABLE_NOT_FOUND",
+            Self::McpExecutableInvalid => "EXECUTABLE_INVALID",
+            Self::McpProcessStartFailed => "PROCESS_START_FAILED",
+            Self::McpDiscoveryFailed => "MCP_DISCOVERY_FAILED",
+            Self::McpDiscoveryTimeout => "MCP_DISCOVERY_TIMEOUT",
+            Self::McpCatalogInvalid => "MCP_CATALOG_INVALID",
             Self::SkillInvalid => "AGENT_SKILL_INVALID",
             Self::SkillChanged => "AGENT_SKILL_CHANGED",
             Self::PresentationContentOverflow => "PRESENTATION_CONTENT_OVERFLOW",
@@ -496,6 +530,18 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
             "Load one focused Agent Skill through bounded ContextCompiler admission by stable name.",
             AgentToolEffect::Observe,
             json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
+        ),
+        tool(
+            "mcp.list_connections",
+            "List bounded metadata and diagnostics for user-configured local MCP stdio connections. This never starts a process.",
+            AgentToolEffect::Observe,
+            json!({"type":"object","properties":{},"additionalProperties":false}),
+        ),
+        tool(
+            "mcp.activate_connection",
+            "Activate one user-configured local MCP stdio connection for this AgentRun after policy and approval.",
+            AgentToolEffect::Process,
+            json!({"type":"object","properties":{"connection_id":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[a-zA-Z0-9._-]+$"}},"required":["connection_id"],"additionalProperties":false}),
         ),
         tool(
             "capability_status",

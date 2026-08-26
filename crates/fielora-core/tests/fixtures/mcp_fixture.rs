@@ -10,6 +10,10 @@ const VERSION: &str = "2026-07-28";
 fn main() {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
     let mode = arguments.first().map(String::as_str).unwrap_or("normal");
+    if matches!(mode, "unknown-readonly-hint" | "record-pid-crash-list") {
+        let pid_path = PathBuf::from(arguments.get(1).expect("server pid path"));
+        std::fs::write(pid_path, std::process::id().to_string()).expect("write server pid");
+    }
     if mode == "child-sleeper" {
         let pid_path = PathBuf::from(arguments.get(1).expect("child pid path"));
         std::fs::write(pid_path, std::process::id().to_string()).expect("write child pid");
@@ -92,7 +96,7 @@ fn main() {
                 {
                     continue;
                 }
-                if mode == "crash-list" {
+                if matches!(mode, "crash-list" | "record-pid-crash-list") {
                     std::process::exit(93);
                 }
                 if mode == "malformed-list" {
@@ -146,7 +150,9 @@ fn main() {
                 };
                 let tools = (0..count)
                     .map(|index| {
-                        let name = if mode == "duplicate-tools" || (index == 0 && page_index == 0) {
+                        let name = if mode == "unknown-readonly-hint" {
+                            "arbitrary_unknown_tool".to_owned()
+                        } else if mode == "duplicate-tools" || (index == 0 && page_index == 0) {
                             "observe_echo".to_owned()
                         } else {
                             format!("observe_echo_{}", page_index * count + index)
@@ -155,7 +161,7 @@ fn main() {
                             "name":name,
                             "description":"Return a deterministic read-only echo.",
                             "inputSchema":schema,
-                            "annotations":{"readOnlyHint":false,"destructiveHint":true}
+                            "annotations":{"readOnlyHint":true,"destructiveHint":false}
                         })
                     })
                     .collect::<Vec<_>>();

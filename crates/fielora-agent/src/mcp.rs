@@ -1,4 +1,4 @@
-//! Bounded MCP 2026-07-28 read-only stdio adapter.
+//! Bounded MCP 2026-07-28 stdio adapter.
 //!
 //! MCP contributes tool definitions and execution through the existing
 //! `ToolProvider` seam. It does not own policy, approval, Agent lifecycle,
@@ -8,7 +8,7 @@ use crate::{
     CommandCancellation, ProviderToolDefinition, ToolExecution, ToolProvider,
     ToolProviderAvailability, ToolProviderError, ToolProviderIdentity, ToolSourceKind,
 };
-use fielora_contracts::ModelToolDefinition;
+use fielora_contracts::{AgentToolEffect, ModelToolDefinition};
 use fielora_platform::{ManagedChild, ManagedChildConfig, ManagedChildStdio};
 use futures_util::{SinkExt, StreamExt};
 use rmcp::model::{
@@ -25,7 +25,10 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::fs;
+use std::fs::{File, OpenOptions};
+use std::io::Read;
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -59,12 +62,35 @@ const SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
 const TERMINATION_GRACE: Duration = Duration::from_millis(500);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct McpStdioProviderConfig {
     pub config_key: String,
     pub executable: PathBuf,
     pub arguments: Vec<OsString>,
     pub working_directory: PathBuf,
+    /// Fielora-authored admission policy. MCP server annotations never alter
+    /// this authoritative effect.
+    pub admission_effect: AgentToolEffect,
+    /// Optional digest of the passive user-config snapshot that selected this
+    /// provider. It participates in routing identity but is never sent to MCP.
+    pub source_config_digest: Option<String>,
+}
+
+impl std::fmt::Debug for McpStdioProviderConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpStdioProviderConfig")
+            .field("config_key", &self.config_key)
+            .field("executable", &"<redacted>")
+            .field("argument_count", &self.arguments.len())
+            .field("working_directory", &"<redacted>")
+            .field("admission_effect", &self.admission_effect)
+            .field(
+                "has_source_config_digest",
+                &self.source_config_digest.is_some(),
+            )
+            .finish()
+    }
 }
 
 pub struct McpStdioToolProvider {
@@ -73,6 +99,11 @@ pub struct McpStdioToolProvider {
     worker: Mutex<Option<thread::JoinHandle<()>>>,
     health: Arc<AtomicU8>,
     recoverable: Arc<AtomicBool>,
+    executable_digest: String,
+    source_config_digest: Option<String>,
+    // On Windows this handle denies write/delete sharing, binding the path
+    // executed by ManagedChild to the bytes used for provider identity.
+    _executable_guard: File,
 }
 
 impl std::fmt::Debug for McpStdioToolProvider {
@@ -87,16 +118,25 @@ impl std::fmt::Debug for McpStdioToolProvider {
 
 impl McpStdioToolProvider {
     pub fn new(config: McpStdioProviderConfig) -> Result<Self, ToolProviderError> {
-        let (config, identity) = validate_config_and_identity(config)?;
+        let (config, identity, executable_digest, executable_guard) =
+            validate_config_and_identity(config)?;
+        let source_config_digest = config.source_config_digest.clone();
         let (commands, receiver) = mpsc::sync_channel(1);
         let health = Arc::new(AtomicU8::new(Health::Available as u8));
         let recoverable = Arc::new(AtomicBool::new(false));
         let worker_health = health.clone();
         let worker_recoverable = recoverable.clone();
+        let worker_identity = identity.clone();
         let worker = thread::Builder::new()
             .name("fielora-mcp-provider".into())
             .spawn(move || {
-                run_worker(config, receiver, worker_health, worker_recoverable);
+                run_worker(
+                    config,
+                    worker_identity,
+                    receiver,
+                    worker_health,
+                    worker_recoverable,
+                );
             })
             .map_err(|_| ToolProviderError::Unavailable)?;
         Ok(Self {
@@ -105,6 +145,9 @@ impl McpStdioToolProvider {
             worker: Mutex::new(Some(worker)),
             health,
             recoverable,
+            executable_digest,
+            source_config_digest,
+            _executable_guard: executable_guard,
         })
     }
 
@@ -112,6 +155,14 @@ impl McpStdioToolProvider {
         let (reply, receive) = mpsc::sync_channel(1);
         self.commands.send(WorkerCommand::ProcessId(reply)).ok()?;
         receive.recv().ok().flatten()
+    }
+
+    pub fn executable_digest(&self) -> &str {
+        &self.executable_digest
+    }
+
+    pub fn source_config_digest(&self) -> Option<&str> {
+        self.source_config_digest.as_deref()
     }
 }
 
@@ -229,6 +280,7 @@ struct WorkerState {
 
 fn run_worker(
     config: McpStdioProviderConfig,
+    identity: ToolProviderIdentity,
     receiver: mpsc::Receiver<WorkerCommand>,
     health: Arc<AtomicU8>,
     recoverable: Arc<AtomicBool>,
@@ -240,9 +292,6 @@ fn run_worker(
             return;
         }
     };
-    let identity = validate_config_and_identity(config.clone())
-        .map(|(_, identity)| identity)
-        .expect("validated MCP config changed before worker start");
     let mut state = WorkerState {
         config,
         identity,
@@ -502,7 +551,7 @@ fn discover(
         let description = tool
             .description
             .map(|description| description.into_owned())
-            .unwrap_or_else(|| "External read-only MCP tool.".into());
+            .unwrap_or_else(|| "External MCP tool with Fielora-owned risk admission.".into());
         if description.len() > MAX_DESCRIPTION_BYTES {
             return Err(ToolProviderError::InvalidDefinition);
         }
@@ -517,7 +566,7 @@ fn discover(
             capability_id: capability_id.clone(),
             capability_version,
             provider_tool_name: native_name.clone(),
-            effect: fielora_contracts::AgentToolEffect::Observe,
+            effect: state.config.admission_effect,
             definition: ModelToolDefinition {
                 name: capability_id,
                 description,
@@ -870,7 +919,7 @@ async fn health_probe(service: &RunningService<RoleClient, ()>) -> bool {
 
 fn validate_config_and_identity(
     config: McpStdioProviderConfig,
-) -> Result<(McpStdioProviderConfig, ToolProviderIdentity), ToolProviderError> {
+) -> Result<(McpStdioProviderConfig, ToolProviderIdentity, String, File), ToolProviderError> {
     if config.config_key.is_empty() || config.config_key.len() > 128 || config.arguments.len() > 128
     {
         return Err(ToolProviderError::InvalidDefinition);
@@ -886,8 +935,20 @@ fn validate_config_and_identity(
     if !executable.is_file() || !working_directory.is_dir() {
         return Err(ToolProviderError::Unavailable);
     }
-    let executable_bytes = fs::read(&executable).map_err(|_| ToolProviderError::Unavailable)?;
-    let executable_fingerprint = digest_hex(&[&executable_bytes]);
+    let mut executable_guard =
+        open_executable_guard(&executable).map_err(|_| ToolProviderError::Unavailable)?;
+    let mut executable_hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = executable_guard
+            .read(&mut buffer)
+            .map_err(|_| ToolProviderError::Unavailable)?;
+        if read == 0 {
+            break;
+        }
+        executable_hasher.update(&buffer[..read]);
+    }
+    let executable_fingerprint = format!("{:x}", executable_hasher.finalize());
     let canonical_config = json!({
         "config_key":config.config_key,
         "executable":executable.to_string_lossy(),
@@ -896,6 +957,7 @@ fn validate_config_and_identity(
         "protocol":MCP_PROTOCOL_VERSION,
         "transport":MCP_TRANSPORT,
         "executable_sha256":executable_fingerprint,
+        "source_config_digest":config.source_config_digest,
     });
     let config_bytes =
         serde_json::to_vec(&canonical_config).map_err(|_| ToolProviderError::InvalidDefinition)?;
@@ -919,9 +981,27 @@ fn validate_config_and_identity(
             executable,
             arguments: config.arguments,
             working_directory,
+            admission_effect: config.admission_effect,
+            source_config_digest: config.source_config_digest,
         },
         identity,
+        executable_fingerprint,
+        executable_guard,
     ))
+}
+
+#[cfg(windows)]
+fn open_executable_guard(path: &std::path::Path) -> std::io::Result<File> {
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(path)
+}
+
+#[cfg(not(windows))]
+fn open_executable_guard(path: &std::path::Path) -> std::io::Result<File> {
+    OpenOptions::new().read(true).open(path)
 }
 
 fn normalize_key(value: &str) -> String {
