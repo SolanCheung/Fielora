@@ -4930,6 +4930,7 @@ fn visible_tool_definitions(
                     "list_files"
                         | "read_file"
                         | "file.extract"
+                        | "artifact.export"
                         | "search_text"
                         | "stat_path"
                         | "git_read"
@@ -4999,6 +5000,7 @@ fn china_compatible_tool_definitions(
                 "list_files"
                     | "read_file"
                     | "file.extract"
+                    | "artifact.export"
                     | "search_text"
                     | "stat_path"
                     | "replace_text"
@@ -5577,6 +5579,9 @@ fn changed_paths_for_run(storage: &StorageHandle, run_id: &AgentRunId) -> HashSe
         })
     {
         if let Some(path) = tool.arguments.get("path").and_then(Value::as_str) {
+            paths.insert(path.to_owned());
+        }
+        if let Some(path) = tool.arguments.get("output_path").and_then(Value::as_str) {
             paths.insert(path.to_owned());
         }
         for key in ["from", "to"] {
@@ -6887,6 +6892,220 @@ mod tests {
             events
                 .iter()
                 .all(|event| event.kind != AgentEventKind::VerificationRecorded)
+        );
+
+        drop(coordinator);
+        drop(storage);
+        drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn artifact_export_uses_existing_write_approval_receipt_and_verification_boundaries() {
+        let root = std::env::temp_dir().join(format!("fielora-core-artifact-{}", Uuid::now_v7()));
+        let workspace = root.join("workspace");
+        let artifacts = root.join("artifacts");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+
+        let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let worker = StorageWorker::start(&paths.database, device, 1).unwrap();
+        let storage = worker.handle();
+        let project = storage
+            .create_project(
+                CreateProjectRequest {
+                    title: "Artifact pipeline".into(),
+                    goal: None,
+                    root_path: workspace.to_string_lossy().into_owned(),
+                },
+                2,
+            )
+            .unwrap();
+        let provider_config = storage
+            .create_provider_config(
+                CreateProviderConfigRequest {
+                    provider_kind: ProviderKind::Openai,
+                    display_name: "Fixture model provider".into(),
+                    base_url: None,
+                    default_model: "fixture-model".into(),
+                    custom_endpoint_acknowledged: false,
+                },
+                3,
+            )
+            .unwrap();
+        storage
+            .set_provider_credential_present(provider_config.view.id.clone(), true, 4)
+            .unwrap();
+        let conversation = storage
+            .create_conversation(
+                CreateConversationRequest {
+                    field_id: project.field_id.clone(),
+                    title: "Artifact pipeline".into(),
+                    provider_config_id: Some(provider_config.view.id.clone()),
+                    model_id: Some("fixture-model".into()),
+                },
+                5,
+            )
+            .unwrap();
+        let created = storage
+            .create_agent_run(
+                StartAgentRunRequest {
+                    field_id: project.field_id.clone(),
+                    conversation_id: conversation.id,
+                    user_message_id: None,
+                    provider_config_id: provider_config.view.id,
+                    model_id: Some("fixture-model".into()),
+                    task: "Export one bounded semantic document.".into(),
+                    permission: AgentPermission::ReadOnly,
+                    max_steps: Some(4),
+                    attachments: None,
+                },
+                6,
+            )
+            .unwrap();
+        let started = storage
+            .append_agent_event(
+                created.run.id.clone(),
+                AgentEventKind::RunStarted,
+                json!({}),
+                AgentProjectionUpdate {
+                    status: Some(AgentRunStatus::Running),
+                    ..Default::default()
+                },
+                7,
+            )
+            .unwrap();
+        let (sender, _receiver) = mpsc::sync_channel(128);
+        let coordinator = AgentCoordinator::new(
+            storage.clone(),
+            Arc::new(WindowsCredentialStore),
+            sender,
+            artifacts.clone(),
+            Handle::current(),
+        );
+        let prepared = PreparedRun {
+            run: started.run,
+            endpoint: ProviderEndpoint {
+                kind: ProviderKind::Openai,
+                base_url: None,
+            },
+            project_root: workspace.canonicalize().unwrap(),
+            secret: SecretBytes::new(b"fixture-model-secret".to_vec()),
+        };
+        let catalog = coordinator.available_tool_catalog().unwrap();
+        let spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "artifact.export")
+            .unwrap();
+        assert_eq!(spec.effect, AgentToolEffect::WorkspaceWrite);
+        let arguments = json!({
+            "type":"document",
+            "output_path":"exports/report.docx",
+            "content":{"blocks":[
+                {"kind":"HEADING","level":1,"text":"Pipeline Proof"},
+                {"kind":"PARAGRAPH","text":"Receipt content must stay bounded."}
+            ]}
+        });
+        let proposed = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                spec,
+                AgentModelToolCall {
+                    id: "artifact-export".into(),
+                    name: "artifact.export".into(),
+                    arguments,
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(proposed.policy_decision, AgentPolicyDecision::Ask);
+        assert!(matches!(
+            coordinator
+                .execute_tool(&prepared, proposed.clone(), false, &test_cancellation())
+                .await,
+            ToolDisposition::Waiting
+        ));
+        assert!(!workspace.join("exports/report.docx").exists());
+
+        let ToolDisposition::Executed(result) = coordinator
+            .execute_tool(&prepared, proposed, true, &test_cancellation())
+            .await
+        else {
+            panic!("approved artifact.export must execute through the existing Tool pipeline")
+        };
+        assert!(result.wrote_workspace);
+        assert!(!result.verification_passed);
+        assert!(workspace.join("exports/report.docx").exists());
+        assert!(matches!(
+            &result.message,
+            AgentModelMessage::ToolResult { content, is_error: false, .. }
+                if content.contains("STRUCTURAL_VALID")
+                    && content.contains("SEMANTIC_CONTENT_PRESENT")
+                    && content.contains("NOT_VERIFIED")
+        ));
+
+        let calls = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap();
+        assert_eq!(calls.len(), 1);
+        let call = &calls[0];
+        assert_eq!(call.status, AgentToolStatus::Completed);
+        assert_eq!(call.effect, AgentToolEffect::WorkspaceWrite);
+        assert_eq!(call.policy_decision, AgentPolicyDecision::Ask);
+        let receipt = call.receipt.as_ref().unwrap();
+        assert_eq!(receipt["kind"], "ARTIFACT_EXPORTED");
+        assert_eq!(receipt["artifact_type"], "DOCUMENT");
+        assert_eq!(receipt["path"], "exports/report.docx");
+        assert_eq!(receipt["structural_reopen"], "STRUCTURAL_VALID");
+        assert_eq!(receipt["roundtrip"], "SEMANTIC_CONTENT_PRESENT");
+        assert_eq!(receipt["execution_source"]["source_kind"], "BUILTIN");
+        assert_eq!(
+            receipt["execution_source"]["provider_id"],
+            "fielora.builtin"
+        );
+        assert!(receipt.get("artifact_definition_sha256").is_some());
+        assert!(receipt.get("output_sha256").is_some());
+        assert!(receipt.get("verification_eligible").is_none());
+        assert!(
+            !receipt
+                .to_string()
+                .contains("Receipt content must stay bounded.")
+        );
+        assert!(
+            workspace_revision_for_run(
+                &storage,
+                &prepared.run.id,
+                &prepared.project_root,
+                &artifacts
+            )
+            .is_some()
+        );
+
+        let events = storage
+            .list_agent_events(ListAgentEventsRequest {
+                run_id: prepared.run.id.clone(),
+                after_sequence: None,
+                limit: Some(100),
+            })
+            .unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| event.kind == AgentEventKind::ApprovalRequested)
+        );
+        assert!(events.iter().all(|event| {
+            !matches!(
+                event.kind,
+                AgentEventKind::VerificationRecorded | AgentEventKind::RunCompleted
+            )
+        }));
+        assert_ne!(
+            storage
+                .get_agent_run(prepared.run.id.clone())
+                .unwrap()
+                .status,
+            AgentRunStatus::Completed
         );
 
         drop(coordinator);

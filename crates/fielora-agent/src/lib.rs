@@ -5,6 +5,7 @@
 //! its caller owns orchestration, policy decisions, approval lifecycle,
 //! durable receipts, and completion semantics.
 
+mod artifact;
 mod file;
 pub mod mcp;
 mod skills;
@@ -572,6 +573,12 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
             "Create a new UTF-8 project file without overwriting an existing path.",
             AgentToolEffect::WorkspaceWrite,
             json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}),
+        ),
+        tool(
+            "artifact.export",
+            "Create one bounded DOCX document or PPTX presentation from Fielora semantic content at a new project-relative output path. This proves structural and semantic roundtrip only, not factual correctness or visual quality.",
+            AgentToolEffect::WorkspaceWrite,
+            artifact::input_schema(),
         ),
         tool(
             "restore_file",
@@ -1865,6 +1872,7 @@ impl ToolExecutor for ToolRuntime {
             "list_files" => self.list_files(arguments),
             "read_file" => self.read_file(arguments),
             "file.extract" => file::extract(self, arguments, cancellation),
+            "artifact.export" => artifact::export(self, arguments, cancellation),
             "search_text" => self.search_text(arguments),
             "stat_path" => self.stat_path(arguments),
             "git_read" => self.git_read(arguments, cancellation),
@@ -2355,13 +2363,14 @@ impl ToolRuntime {
         let capabilities = json!({
             "coding":{"status":"AVAILABLE","tools":["files","exact patch","git read","controlled command","verification"]},
             "rich_file_read":{"status":"AVAILABLE","tool":"file.extract","formats":["PDF","DOCX","PPTX","XLSX"],"authority":"UNTRUSTED_PROJECT_CONTENT","limitations":["read/extract only","no OCR","no layout rendering","no formula evaluation"]},
+            "artifact_export":{"status":"AVAILABLE","tool":"artifact.export","formats":["DOCX","PPTX"],"effect":"WORKSPACE_WRITE","persistence":"REQUEST_SCOPED","verification":"STRUCTURAL_AND_SEMANTIC_ROUNDTRIP_ONLY"},
             "markdown":{"status":"AVAILABLE","path":"create_file/write_file plus verification"},
             "csv":{"status":"AVAILABLE","path":"bounded UTF-8 file tools; formula-aware XLSX is not implied"},
             "web_research":{"status":"UNSUPPORTED_CAPABILITY","reason":"controlled Browser extraction tool is not installed in this build"},
             "archive":{"status":"UNSUPPORTED_CAPABILITY","reason":"safe zip preview/extraction adapter is not installed in this build"},
-            "docx_pdf":{"status":"UNSUPPORTED_CAPABILITY","reason":"creation, editing, rendering, and visual verification remain unsupported; file.extract supports bounded read-only DOCX/PDF text extraction"},
+            "docx_pdf":{"status":"PARTIAL","reason":"bounded one-shot DOCX export and DOCX/PDF extraction are available; PDF export, editing, preview, and visual verification remain unsupported"},
             "xlsx_charts":{"status":"UNSUPPORTED_CAPABILITY","reason":"creation, editing, charts, and formula evaluation remain unsupported; file.extract supports bounded read-only XLSX cell extraction"},
-            "pptx":{"status":"UNSUPPORTED_CAPABILITY","reason":"creation, editing, rendering, and layout verification remain unsupported; file.extract supports bounded read-only PPTX text extraction"},
+            "pptx":{"status":"PARTIAL","reason":"bounded one-shot PPTX export and extraction are available; editing, preview, arbitrary layout, and visual verification remain unsupported"},
             "image_generation":{"status":"UNSUPPORTED_CAPABILITY","reason":"no dedicated image provider adapter is configured"}
         });
         Ok(ToolExecution {
