@@ -7,6 +7,7 @@
 
 pub mod mcp;
 mod skills;
+pub mod web;
 
 pub use skills::{
     CompiledSkillContext, LoadedSkill, SkillCatalog, SkillCatalogEntry, SkillDiagnostic,
@@ -119,6 +120,8 @@ pub enum AgentError {
     ToolProviderDefinitionInvalid,
     #[error("AGENT_TOOL_PROVIDER_FAILED")]
     ToolProviderFailed,
+    #[error("{0}")]
+    ToolProviderClassifiedFailure(ToolProviderFailureKind),
     #[error("AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN")]
     ToolProviderOutcomeUnknown,
     #[error("AGENT_SKILL_INVALID")]
@@ -150,6 +153,7 @@ impl AgentError {
             Self::ToolProviderUnavailable => "AGENT_TOOL_PROVIDER_UNAVAILABLE",
             Self::ToolProviderDefinitionInvalid => "AGENT_TOOL_PROVIDER_DEFINITION_INVALID",
             Self::ToolProviderFailed => "AGENT_TOOL_PROVIDER_FAILED",
+            Self::ToolProviderClassifiedFailure(kind) => kind.code(),
             Self::ToolProviderOutcomeUnknown => "AGENT_TOOL_PROVIDER_OUTCOME_UNKNOWN",
             Self::SkillInvalid => "AGENT_SKILL_INVALID",
             Self::SkillChanged => "AGENT_SKILL_CHANGED",
@@ -264,6 +268,55 @@ pub enum ToolProviderError {
     ProtocolInvalid,
     Timeout,
     OutcomeUnknown,
+    ClassifiedFailure(ToolProviderFailureKind),
+}
+
+/// Stable failure detail for an existing FAILED ToolCall. This does not add a
+/// lifecycle state or grant a provider authority; trusted adapters choose from
+/// this bounded Fielora-owned taxonomy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolProviderFailureKind {
+    CredentialMissing,
+    CredentialRejected,
+    RequestTimeout,
+    DnsFailed,
+    TlsFailed,
+    RateLimited,
+    HttpClientError,
+    HttpServerError,
+    MalformedResponse,
+    OversizedResponse,
+    DestinationRejected,
+    RedirectRejected,
+    UnsupportedContent,
+    NetworkFailed,
+}
+
+impl ToolProviderFailureKind {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::CredentialMissing => "AGENT_TOOL_CREDENTIAL_MISSING",
+            Self::CredentialRejected => "AGENT_TOOL_CREDENTIAL_REJECTED",
+            Self::RequestTimeout => "AGENT_TOOL_REQUEST_TIMEOUT",
+            Self::DnsFailed => "AGENT_TOOL_DNS_FAILED",
+            Self::TlsFailed => "AGENT_TOOL_TLS_FAILED",
+            Self::RateLimited => "AGENT_TOOL_RATE_LIMITED",
+            Self::HttpClientError => "AGENT_TOOL_HTTP_CLIENT_ERROR",
+            Self::HttpServerError => "AGENT_TOOL_HTTP_SERVER_ERROR",
+            Self::MalformedResponse => "AGENT_TOOL_RESPONSE_MALFORMED",
+            Self::OversizedResponse => "AGENT_TOOL_RESPONSE_OVERSIZED",
+            Self::DestinationRejected => "AGENT_TOOL_DESTINATION_REJECTED",
+            Self::RedirectRejected => "AGENT_TOOL_REDIRECT_REJECTED",
+            Self::UnsupportedContent => "AGENT_TOOL_CONTENT_UNSUPPORTED",
+            Self::NetworkFailed => "AGENT_TOOL_NETWORK_FAILED",
+        }
+    }
+}
+
+impl std::fmt::Display for ToolProviderFailureKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.code())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -271,12 +324,15 @@ pub struct ProviderToolDefinition {
     pub capability_id: String,
     pub capability_version: String,
     pub provider_tool_name: String,
+    /// Fielora-authored semantic effect used by the existing PolicyEngine.
+    /// Provider responses never populate this field.
+    pub effect: AgentToolEffect,
     pub definition: ModelToolDefinition,
 }
 
 /// Minimal Tools-side extension seam.
 ///
-/// Providers contribute bounded, read-only definitions in this slice and
+/// Providers contribute bounded definitions with Fielora-authored effects and
 /// execute only after Harness selection, policy, and approval routing. They do
 /// not own Agent lifecycle, permissions, durable receipts, or verification.
 pub trait ToolProvider: Send + Sync {
@@ -509,8 +565,9 @@ fn tool(name: &str, description: &str, effect: AgentToolEffect, input_schema: Va
 }
 
 /// Build the one available-tool catalog from built-ins plus healthy external
-/// providers. Admission is bounded and fail-closed; all external tools are
-/// assigned OBSERVE by Fielora for this first slice.
+/// providers. Admission is bounded and fail-closed; external effects are
+/// explicitly authored by the trusted provider adapter and use the existing
+/// PolicyEngine vocabulary.
 pub fn coding_tool_catalog_with_providers(
     providers: &[Arc<dyn ToolProvider>],
 ) -> Result<Vec<ToolSpec>, AgentError> {
@@ -562,7 +619,7 @@ pub fn coding_tool_catalog_with_providers(
             }
             catalog.push(ToolSpec {
                 definition: discovered.definition,
-                effect: AgentToolEffect::Observe,
+                effect: discovered.effect,
                 source: ToolExecutionSource {
                     capability_id: discovered.capability_id,
                     capability_version: discovered.capability_version,
@@ -613,7 +670,8 @@ fn map_provider_discovery_error(error: ToolProviderError) -> AgentError {
         | ToolProviderError::InteractionUnsupported
         | ToolProviderError::ProtocolInvalid
         | ToolProviderError::Timeout
-        | ToolProviderError::OutcomeUnknown => AgentError::ToolProviderDefinitionInvalid,
+        | ToolProviderError::OutcomeUnknown
+        | ToolProviderError::ClassifiedFailure(_) => AgentError::ToolProviderDefinitionInvalid,
     }
 }
 
@@ -628,6 +686,9 @@ fn map_provider_execution_error(error: ToolProviderError) -> AgentError {
         | ToolProviderError::ProtocolInvalid
         | ToolProviderError::Timeout => AgentError::ToolProviderFailed,
         ToolProviderError::OutcomeUnknown => AgentError::ToolProviderOutcomeUnknown,
+        ToolProviderError::ClassifiedFailure(kind) => {
+            AgentError::ToolProviderClassifiedFailure(kind)
+        }
     }
 }
 
@@ -3413,6 +3474,7 @@ mod tests {
                         } else {
                             format!("lookup.{index}")
                         },
+                        effect: AgentToolEffect::Observe,
                         definition: ModelToolDefinition {
                             name: capability_id,
                             description: "Return one deterministic fixture value.".into(),

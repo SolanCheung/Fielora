@@ -8,7 +8,9 @@ license.workspace = true
 fielora-contracts = { path = "../fielora-contracts" }
 fielora-platform = { path = "../fielora-platform" }
 futures-util.workspace = true
+reqwest.workspace = true
 rmcp.workspace = true
+scraper.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

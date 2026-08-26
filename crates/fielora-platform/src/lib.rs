@@ -1,6 +1,7 @@
 use fielora_contracts::DeviceId;
 use std::ffi::OsString;
 use std::fs;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
@@ -227,8 +228,13 @@ impl Drop for WindowsJob {
     }
 }
 
-#[derive(Debug)]
 pub struct SecretBytes(Vec<u8>);
+
+impl std::fmt::Debug for SecretBytes {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SecretBytes([REDACTED])")
+    }
+}
 
 impl SecretBytes {
     pub fn new(bytes: Vec<u8>) -> Self {
@@ -242,6 +248,54 @@ impl SecretBytes {
 impl Drop for SecretBytes {
     fn drop(&mut self) {
         self.0.fill(0);
+    }
+}
+
+/// Return whether an address is eligible for a direct public-Internet
+/// connection. Private, loopback, link-local, multicast, unspecified,
+/// documentation, benchmarking, transition, and other special-purpose ranges
+/// are fail-closed.
+pub fn is_public_internet_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_unspecified()
+                || octets[0] == 0
+                || octets[0] >= 224
+                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] <= 2)
+                || (octets[0] == 192 && octets[1] == 88 && octets[2] == 99)
+                || (octets[0] == 198 && (octets[1] == 18 || octets[1] == 19))
+                || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+                || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113))
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_public_internet_ip(IpAddr::V4(v4));
+            }
+            let segments = v6.segments();
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || v6.is_multicast()
+                || segments[..6].iter().all(|segment| *segment == 0)
+                || (segments[0] & 0xffc0) == 0xfec0
+                || (segments[0] == 0x0100
+                    && segments[1] == 0
+                    && segments[2] == 0
+                    && segments[3] == 0)
+                || (segments[0] & 0xfff0) == 0x3ff0
+                || (segments[0] == 0x2001
+                    && (matches!(segments[1], 0x0000 | 0x0002 | 0x000d | 0x0db8)
+                        || (segments[1] & 0xfff0) == 0x0010
+                        || (segments[1] & 0xfff0) == 0x0020))
+                || segments[0] == 0x2002)
+        }
     }
 }
 

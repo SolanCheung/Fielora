@@ -517,6 +517,7 @@ fn discover(
             capability_id: capability_id.clone(),
             capability_version,
             provider_tool_name: native_name.clone(),
+            effect: fielora_contracts::AgentToolEffect::Observe,
             definition: ModelToolDefinition {
                 name: capability_id,
                 description,

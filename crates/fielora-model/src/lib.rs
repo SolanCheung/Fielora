@@ -9,6 +9,7 @@ use fielora_contracts::{
     ContextSensitivity, ModelCapabilityProfile, ModelInvocationEvent, ModelInvocationEventKind,
     ModelInvocationRequest, ModelToolDefinition, ModelUsage, ProviderKind, ToolProposal,
 };
+use fielora_platform::is_public_internet_ip;
 use futures_util::StreamExt;
 use reqwest::{Client, StatusCode, Url, redirect::Policy};
 use serde_json::{Value, json};
@@ -1166,7 +1167,11 @@ async fn endpoint_url(
                 .await
                 .map_err(|_| ModelError::CustomEndpointRejected)?
                 .collect::<Vec<_>>();
-            if addresses.is_empty() || addresses.iter().any(|addr| !is_public_ip(addr.ip())) {
+            if addresses.is_empty()
+                || addresses
+                    .iter()
+                    .any(|addr| !is_public_internet_ip(addr.ip()))
+            {
                 return Err(ModelError::CustomEndpointRejected);
             }
             let path = url.path().trim_end_matches('/');
@@ -1261,40 +1266,6 @@ fn provider_terminal(kind: ProviderKind, value: &Value) -> bool {
             value.get("type").and_then(Value::as_str) == Some("message_stop")
         }
         ProviderKind::OpenaiCompatible => false,
-    }
-}
-
-fn is_public_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            let octets = v4.octets();
-            !(v4.is_private()
-                || v4.is_loopback()
-                || v4.is_link_local()
-                || v4.is_broadcast()
-                || v4.is_unspecified()
-                || octets[0] == 0
-                || octets[0] >= 224
-                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
-                || (octets[0] == 192 && octets[1] == 0 && octets[2] <= 2)
-                || (octets[0] == 198 && (octets[1] == 18 || octets[1] == 19))
-                || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
-                || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113))
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_public_ip(IpAddr::V4(v4));
-            }
-            let segments = v6.segments();
-            !(v6.is_loopback()
-                || v6.is_unspecified()
-                || v6.is_unique_local()
-                || v6.is_unicast_link_local()
-                || v6.is_multicast()
-                || (segments[0] == 0x2001
-                    && matches!(segments[1], 0x0000 | 0x0002 | 0x000d | 0x0db8))
-                || segments[0] == 0x2002)
-        }
     }
 }
 
@@ -1555,15 +1526,21 @@ mod tests {
 
     #[test]
     fn private_addresses_are_never_valid_custom_targets() {
-        assert!(!is_public_ip("127.0.0.1".parse().unwrap()));
-        assert!(!is_public_ip("10.0.0.1".parse().unwrap()));
-        assert!(!is_public_ip("100.64.0.1".parse().unwrap()));
-        assert!(!is_public_ip("192.0.2.1".parse().unwrap()));
-        assert!(!is_public_ip("198.51.100.1".parse().unwrap()));
-        assert!(!is_public_ip("203.0.113.1".parse().unwrap()));
-        assert!(!is_public_ip("::1".parse().unwrap()));
-        assert!(!is_public_ip("2001:db8::1".parse().unwrap()));
-        assert!(is_public_ip("1.1.1.1".parse().unwrap()));
+        assert!(!is_public_internet_ip("127.0.0.1".parse().unwrap()));
+        assert!(!is_public_internet_ip("10.0.0.1".parse().unwrap()));
+        assert!(!is_public_internet_ip("100.64.0.1".parse().unwrap()));
+        assert!(!is_public_internet_ip("192.0.2.1".parse().unwrap()));
+        assert!(!is_public_internet_ip("198.51.100.1".parse().unwrap()));
+        assert!(!is_public_internet_ip("203.0.113.1".parse().unwrap()));
+        assert!(!is_public_internet_ip("::1".parse().unwrap()));
+        assert!(!is_public_internet_ip("::1.1.1.1".parse().unwrap()));
+        assert!(!is_public_internet_ip("fec0::1".parse().unwrap()));
+        assert!(!is_public_internet_ip("2001:db8::1".parse().unwrap()));
+        assert!(!is_public_internet_ip("3fff::1".parse().unwrap()));
+        assert!(is_public_internet_ip("1.1.1.1".parse().unwrap()));
+        assert!(is_public_internet_ip(
+            "2606:4700:4700::1111".parse().unwrap()
+        ));
     }
 
     #[tokio::test]

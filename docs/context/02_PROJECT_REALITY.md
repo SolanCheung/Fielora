@@ -1583,3 +1583,55 @@ PORTABLE_CREDENTIAL_BYTES: EXCLUDED
 CLOUD_SYNC_PROVIDER: DISABLED
 CLOUD_SYNC_REQUESTS: 0
 ```
+
+## 83. First Web Intelligence Slice
+
+Web Intelligence 的首个 Slice 继续位于 canonical `Model + Harness + Tools`：
+`WebToolProvider` 通过既有 `ToolProvider` 同时贡献稳定语义 Tool
+`web.search` 与 `web.fetch`，二者显式使用现有 `AgentToolEffect::NETWORK`，
+经同一个 catalog、PolicyEngine/Approval、RoutedToolExecutor、durable
+ToolCall receipt 与 Verification boundary；Core 没有 Search/Web-specific
+AgentCoordinator 分支，也没有新增 Agent、Runtime、Permission、Receipt 或
+Verification hierarchy。
+
+`web.search` 使用 provider-neutral `SearchBackend`，首个 production adapter
+为 `brave.search.v1`。Brave secret 只接受显式注入的 `SecretBytes`；当前 generic
+CredentialStore 虽能安全保存 bounded bytes，但没有非模型 integration 的产品级
+identity/config/activation flow，因此本 Slice 不读取环境变量、不注册产品 credential、
+不新增 UI/schema/migration，并且 live search request 为 0。Agent-facing Tool identity
+不包含 Brave，deterministic backend switch test 证明替换 backend 不改变 Tool definition。
+
+`web.fetch` 固定单 URL/GET、HTTP(S)、80/443、无 userinfo/header/body/cookie/
+Browser session/JS/implicit proxy。每一 hop 先解析 DNS，拒绝任何非公网或 mixed
+answer，再将 reqwest 连接 pin 到已验证 SocketAddr；最多五次 redirect 且每次重走
+scheme/host/DNS/IP gate，credentialed request 不跨 origin。Body 在 stream 中以
+2 MiB fail-close，`Accept-Encoding: identity` 且拒绝其他 encoding；只接受 HTML、
+XHTML 与 plain text。HTML 使用 `scraper/html5ever` 真实 DOM parser，排除 script、
+style、nav、hidden 等 subtree；最终文本受现有 64 KiB provider observation contract
+约束为 48 KiB。
+
+Search snippet 与 fetch text 均明确输出 `UNTRUSTED_WEB_CONTENT`、
+`instruction_authority=false`，且现行 Agent system instruction 已把所有 Tool output
+裁决为 untrusted data。Core integration 证明 NETWORK 请求在批准前不执行；成功
+receipt 由 Core 追加 `fielora.web/HTTPS` execution source，但 HTTP 200/search success
+均不产生 Verification receipt、不改变 Policy，也不完成 AgentRun。
+
+```text
+FIRST_WEB_INTELLIGENCE_SLICE: IMPLEMENTED
+WEB_TOOLS: web.search + web.fetch
+AGENT_ARCHITECTURE: UNCHANGED_MODEL_HARNESS_TOOLS
+TOOL_EFFECT: NETWORK
+SSRF_POLICY: RESOLVE_VALIDATE_PIN_REVALIDATE_REDIRECT
+LIVE_SEARCH_REQUESTS: 0
+LIVE_FETCH_REQUESTS: 0
+PRODUCT_CREDENTIAL_ACTIVATION: DEFERRED
+SCHEMA_MIGRATION: NONE
+UI_BROWSER_RUNTIME: UNCHANGED
+CHANGE_IMPACT: HIGH
+```
+
+Targeted final Gate 为 Web 15/15、Agent 45/45（含 Skill）、Model 17/17、
+Platform 2/2、Core 23/23、真实 stdio MCP 12/12；targeted Clippy
+`-D warnings`、fmt、Core release build、contracts、Docs context manifest 与
+diff check 均 PASS。没有运行与本 Slice 无关的 Desktop E2E、package/portable
+smoke 或 full premerge。
