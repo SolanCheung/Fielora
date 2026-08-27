@@ -14,6 +14,9 @@ test('MCP Settings stays passive while activation belongs to current AgentRun de
   ]);
   assert.match(settings, /id: 'MCP'/);
   assert.match(mcpSettings, /agent\.mcpConnections\(\)/);
+  assert.match(mcpSettings, /credential_binding_count/);
+  assert.match(mcpSettings, /credential_missing_count/);
+  assert.doesNotMatch(mcpSettings, /credential_ref|GITHUB_TOKEN/);
   assert.doesNotMatch(mcpSettings, /activateMcpConnection|spawn|execFile|list_tools/);
   assert.match(turn, /MCP for this run/);
   assert.match(workspace, /activateMcpConnection\(\{ run_id: agentRun\.id, connection_id: connectionId \}\)/);

@@ -11,10 +11,10 @@ use fielora_agent::mcp::{
 use fielora_agent::mcp_connections::{McpConnectionSnapshot, USER_MCP_CONFIG_FILENAME};
 use fielora_agent::{
     AgentError, CommandCancellation, CompiledContext, ContextCompiler, PolicyEngine,
-    RoutedToolExecutor, SkillCatalog, StaticCredentialBinding, ToolExecution, ToolExecutionSource,
-    ToolExecutor, ToolProvider, ToolProviderAvailability, ToolProviderError,
-    ToolReconciliationStatus, ToolRuntime, ToolSpec, coding_tool_catalog,
-    coding_tool_catalog_with_providers,
+    RoutedToolExecutor, SkillCatalog, StaticCredentialBinding, StaticCredentialMediator,
+    StaticCredentialRequirement, ToolExecution, ToolExecutionSource, ToolExecutor, ToolProvider,
+    ToolProviderAvailability, ToolProviderError, ToolReconciliationStatus, ToolRuntime, ToolSpec,
+    coding_tool_catalog, coding_tool_catalog_with_providers,
 };
 use fielora_contracts::*;
 use fielora_field::DomainError;
@@ -23,7 +23,7 @@ use fielora_model::{
     CodingBehaviorProfile, CodingModelFamily, ModelClient, ModelError, ProviderEndpoint,
     coding_behavior_profile,
 };
-use fielora_platform::{CredentialStore, SecretBytes};
+use fielora_platform::{CredentialStore, ManagedChildSecretEnvironment, SecretBytes};
 use fielora_storage::{AgentEventCommit, AgentProjectionUpdate, StorageHandle};
 use futures_util::future::join_all;
 use serde_json::{Value, json};
@@ -92,6 +92,7 @@ struct McpActivationFacts {
     provider_id: String,
     executable_digest: String,
     discovered_tool_count: usize,
+    credential_binding_count: usize,
 }
 
 struct PreparedRun {
@@ -143,6 +144,8 @@ fn mcp_activation_execution(
             "protocol_version":MCP_PROTOCOL_VERSION,
             "executable_digest":facts.executable_digest,
             "discovered_tool_count":facts.discovered_tool_count,
+            "credential_binding_count":facts.credential_binding_count,
+            "credential_state":if facts.credential_binding_count == 0 { "NOT_REQUIRED" } else { "CONFIGURED" },
             "already_active":already_active,
         }),
         observation: json!({
@@ -152,13 +155,42 @@ fn mcp_activation_execution(
             "transport":MCP_TRANSPORT,
             "protocol_version":MCP_PROTOCOL_VERSION,
             "discovered_tool_count":facts.discovered_tool_count,
+            "credential_binding_count":facts.credential_binding_count,
+            "credential_state":if facts.credential_binding_count == 0 { "NOT_REQUIRED" } else { "CONFIGURED" },
             "already_active":already_active,
         })
         .to_string(),
     }
 }
 
-fn mcp_catalog_view(snapshot: &McpConnectionSnapshot) -> McpConnectionCatalogView {
+fn mcp_credential_metadata(
+    credentials: &dyn CredentialStore,
+    connection: &fielora_agent::mcp_connections::McpConnectionDefinition,
+) -> (u32, u32) {
+    let binding_count = connection.credential_environment().len();
+    let missing_count = connection
+        .credential_environment()
+        .iter()
+        .filter(|binding| !credentials.static_exists(binding.credential_ref()))
+        .count();
+    (
+        u32::try_from(binding_count).unwrap_or(u32::MAX),
+        u32::try_from(missing_count).unwrap_or(u32::MAX),
+    )
+}
+
+fn mcp_credential_slot(environment_name: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"mcp-env-slot-v1\0");
+    digest.update(environment_name.to_ascii_lowercase().as_bytes());
+    let digest = format!("{:x}", digest.finalize());
+    format!("env-{}", &digest[..32])
+}
+
+fn mcp_catalog_view(
+    snapshot: &McpConnectionSnapshot,
+    credentials: &dyn CredentialStore,
+) -> McpConnectionCatalogView {
     let status = match snapshot.status() {
         "CONFIGURED" => McpConfigStatus::Configured,
         "CONFIG_NOT_FOUND" => McpConfigStatus::ConfigNotFound,
@@ -167,12 +199,23 @@ fn mcp_catalog_view(snapshot: &McpConnectionSnapshot) -> McpConnectionCatalogVie
     let connections = snapshot
         .connections()
         .iter()
-        .map(|connection| McpConnectionView {
-            connection_id: connection.connection_id().into(),
-            transport: MCP_TRANSPORT.into(),
-            command_path: connection.executable().to_string_lossy().into_owned(),
-            command_argument_count: u32::try_from(connection.arguments().len()).unwrap_or(u32::MAX),
-            credential_support: "UNSUPPORTED".into(),
+        .map(|connection| {
+            let (credential_binding_count, credential_missing_count) =
+                mcp_credential_metadata(credentials, connection);
+            McpConnectionView {
+                connection_id: connection.connection_id().into(),
+                transport: MCP_TRANSPORT.into(),
+                command_path: connection.executable().to_string_lossy().into_owned(),
+                command_argument_count: u32::try_from(connection.arguments().len())
+                    .unwrap_or(u32::MAX),
+                credential_support: if credential_binding_count == 0 {
+                    "NONE".into()
+                } else {
+                    "STATIC_REFERENCE".into()
+                },
+                credential_binding_count,
+                credential_missing_count,
+            }
         })
         .collect::<Vec<_>>();
     McpConnectionCatalogView {
@@ -637,7 +680,10 @@ impl AgentCoordinator {
                 }],
             };
         };
-        mcp_catalog_view(&McpConnectionSnapshot::load(path))
+        mcp_catalog_view(
+            &McpConnectionSnapshot::load(path),
+            self.credentials.as_ref(),
+        )
     }
 
     /// Ephemeral projection of the current Run snapshot and its ordinary
@@ -742,6 +788,20 @@ impl AgentCoordinator {
                     Some("ACTIVATION_IN_PROGRESS".into())
                 };
                 McpRunConnectionView {
+                    credential_binding_count: u32::try_from(
+                        connection.credential_environment().len(),
+                    )
+                    .unwrap_or(u32::MAX),
+                    credential_missing_count: u32::try_from(
+                        connection
+                            .credential_environment()
+                            .iter()
+                            .filter(|binding| {
+                                !self.credentials.static_exists(binding.credential_ref())
+                            })
+                            .count(),
+                    )
+                    .unwrap_or(u32::MAX),
                     connection_id: connection_id.into(),
                     activation_state,
                     activation_available,
@@ -899,8 +959,10 @@ impl AgentCoordinator {
                     "configured":true,
                     "status":if activated { "ACTIVE_FOR_RUN" } else { "CONFIGURED" },
                     "transport":MCP_TRANSPORT,
-                    "credential_required":false,
-                    "credential_support":"UNSUPPORTED",
+                    "credential_required":!connection.credential_environment().is_empty(),
+                    "credential_support":if connection.credential_environment().is_empty() { "NONE" } else { "STATIC_REFERENCE" },
+                    "credential_binding_count":connection.credential_environment().len(),
+                    "credential_missing_count":connection.credential_environment().iter().filter(|binding| !self.credentials.static_exists(binding.credential_ref())).count(),
                 })
             })
             .collect::<Vec<_>>();
@@ -1011,17 +1073,74 @@ impl AgentCoordinator {
             .filter(|path| path.is_absolute())
             .ok_or(AgentError::McpExecutableInvalid)?
             .to_path_buf();
-        let provider = Arc::new(
-            McpStdioToolProvider::new(McpStdioProviderConfig {
-                config_key: connection_id.to_owned(),
-                executable: definition.executable().to_path_buf(),
-                arguments: definition.arguments().iter().map(OsString::from).collect(),
-                working_directory,
-                admission_effect: AgentToolEffect::Destructive,
-                source_config_digest: Some(expected_digest.to_owned()),
+        let provider = McpStdioToolProvider::new(McpStdioProviderConfig {
+            config_key: connection_id.to_owned(),
+            executable: definition.executable().to_path_buf(),
+            arguments: definition.arguments().iter().map(OsString::from).collect(),
+            working_directory,
+            admission_effect: AgentToolEffect::Destructive,
+            source_config_digest: Some(expected_digest.to_owned()),
+        })
+        .map_err(|_| AgentError::McpExecutableInvalid)?;
+        let provider_id = provider.identity().id;
+        let credential_bindings = definition
+            .credential_environment()
+            .iter()
+            .map(|environment| {
+                let requirement = StaticCredentialRequirement::new(
+                    provider_id.clone(),
+                    mcp_credential_slot(environment.environment_name()),
+                )?;
+                StaticCredentialBinding::new(
+                    provider_id.clone(),
+                    requirement,
+                    environment.credential_ref().clone(),
+                )
             })
-            .map_err(|_| AgentError::McpExecutableInvalid)?,
-        );
+            .collect::<Result<Vec<_>, _>>()?;
+        // Validate every reference exists before resolving any bytes, so a
+        // partially configured connection never starts a process or performs
+        // a partial credential grant.
+        if definition
+            .credential_environment()
+            .iter()
+            .any(|environment| !self.credentials.static_exists(environment.credential_ref()))
+        {
+            return Err(AgentError::McpCredentialMissing);
+        }
+        if !credential_bindings.is_empty() {
+            let mediator =
+                StaticCredentialMediator::new(Arc::clone(&self.credentials), &credential_bindings)
+                    .map_err(|_| AgentError::McpCredentialBindingInvalid)?;
+            let secret_environment = definition
+                .credential_environment()
+                .iter()
+                .zip(credential_bindings.iter())
+                .map(|(environment, binding)| {
+                    mediator
+                        .resolve_exact(&provider_id, binding.requirement())
+                        .map(|secret| (OsString::from(environment.environment_name()), secret))
+                        .map_err(|error| match error {
+                            ToolProviderError::ClassifiedFailure(
+                                fielora_agent::ToolProviderFailureKind::CredentialMissing,
+                            ) => AgentError::McpCredentialMissing,
+                            ToolProviderError::ClassifiedFailure(
+                                fielora_agent::ToolProviderFailureKind::CredentialBindingInvalid,
+                            ) => AgentError::McpCredentialBindingInvalid,
+                            _ => AgentError::McpCredentialStoreFailed,
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let secret_environment = ManagedChildSecretEnvironment::new(secret_environment)
+                .map_err(|_| AgentError::McpCredentialBindingInvalid)?;
+            provider
+                .bind_secret_environment(secret_environment)
+                .map_err(|_| AgentError::McpCredentialBindingInvalid)?;
+        }
+        if cancellation.is_cancelled() {
+            return Err(AgentError::Cancelled);
+        }
+        let provider = Arc::new(provider);
         let discovered = provider.discover_tools(32).map_err(|error| match error {
             ToolProviderError::Cancelled => AgentError::Cancelled,
             ToolProviderError::InvalidDefinition => AgentError::McpCatalogInvalid,
@@ -1033,9 +1152,10 @@ impl AgentCoordinator {
             return Err(AgentError::Cancelled);
         }
         let facts = McpActivationFacts {
-            provider_id: provider.identity().id,
+            provider_id,
             executable_digest: provider.executable_digest().to_owned(),
             discovered_tool_count: discovered.len(),
+            credential_binding_count: credential_bindings.len(),
         };
         let provider_for_catalog: Arc<dyn ToolProvider> = provider;
         let mut prospective = self.providers_for_run(run_id);
@@ -6767,7 +6887,7 @@ mod tests {
     };
     use fielora_storage::StorageWorker;
     use office_oxide::docx::write::DocxWriter;
-    use std::io::Cursor;
+    use std::io::{Cursor, Write};
     use std::sync::OnceLock;
     use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc;
@@ -6875,6 +6995,13 @@ mod tests {
         fn delete(&self, target: &str) -> Result<(), CredentialError> {
             self.values.lock().unwrap().remove(target);
             Ok(())
+        }
+
+        fn static_exists(&self, credential_ref: &fielora_platform::CredentialRef) -> bool {
+            self.values
+                .lock()
+                .unwrap()
+                .contains_key(&credential_ref.target_name())
         }
     }
 
@@ -7010,6 +7137,29 @@ mod tests {
             ))
             .canonicalize()
             .unwrap()
+    }
+
+    #[cfg(feature = "mcp-fixture")]
+    fn assert_files_do_not_contain(root: &Path, needles: &[&[u8]]) {
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(path) = pending.pop() {
+            if path.is_dir() {
+                pending.extend(
+                    std::fs::read_dir(&path)
+                        .unwrap()
+                        .map(|entry| entry.unwrap().path()),
+                );
+            } else if path.is_file() {
+                let bytes = std::fs::read(&path).unwrap();
+                for needle in needles {
+                    assert!(
+                        !bytes.windows(needle.len()).any(|window| window == *needle),
+                        "secret sentinel persisted in {}",
+                        path.display()
+                    );
+                }
+            }
+        }
     }
 
     #[cfg(all(feature = "mcp-fixture", windows))]
@@ -8765,13 +8915,29 @@ mod tests {
         let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
         let fixture = mcp_fixture_executable();
         let pid_path = root.join("ui-server.pid");
+        let credential_ref = fielora_platform::CredentialRef::new();
+        let unrelated_credential_ref = fielora_platform::CredentialRef::new();
+        let credential_store = Arc::new(CoreCredentialStore::default());
+        credential_store
+            .put_static(
+                &credential_ref,
+                SecretBytes::new(b"fielora-fixture-secret-v1".to_vec()),
+            )
+            .unwrap();
+        credential_store
+            .put_static(
+                &unrelated_credential_ref,
+                SecretBytes::new(b"fielora-unrelated-secret".to_vec()),
+            )
+            .unwrap();
         std::fs::write(
             paths.config_dir.join(USER_MCP_CONFIG_FILENAME),
             serde_json::to_vec(&json!({
                 "mcpServers":{
                     "fixture-ui":{
                         "command":fixture.to_string_lossy(),
-                        "args":["unknown-readonly-hint",pid_path.to_string_lossy()]
+                        "args":["credential-probe",pid_path.to_string_lossy()],
+                        "env":{"FIELORA_TEST_SECRET":{"credential":credential_ref.as_str()}}
                     }
                 }
             }))
@@ -8820,7 +8986,7 @@ mod tests {
         let (sender, _receiver) = mpsc::sync_channel(256);
         let coordinator = AgentCoordinator::with_user_config_root(
             storage.clone(),
-            Arc::new(WindowsCredentialStore),
+            credential_store.clone(),
             sender,
             artifacts,
             Handle::current(),
@@ -8829,6 +8995,9 @@ mod tests {
         let catalog = coordinator.mcp_connections();
         assert_eq!(catalog.status, McpConfigStatus::Configured);
         assert_eq!(catalog.connection_count, 1);
+        assert_eq!(catalog.connections[0].credential_binding_count, 1);
+        assert_eq!(catalog.connections[0].credential_missing_count, 0);
+        assert!(credential_store.reads.lock().unwrap().is_empty());
         assert!(!pid_path.exists(), "passive query started a process");
 
         let _e2e_environment_guard = e2e_environment_guard().await;
@@ -8863,6 +9032,83 @@ mod tests {
             before.connections[0].activation_state,
             McpRunActivationState::NotActive
         );
+        let denied = coordinator
+            .activate_mcp_connection(ActivateMcpConnectionRequest {
+                run_id: run.id.clone(),
+                connection_id: "fixture-ui".into(),
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while storage.get_agent_run(run.id.clone()).unwrap().status
+            != AgentRunStatus::WaitingApproval
+        {
+            assert!(
+                Instant::now() < deadline,
+                "denial approval was not requested"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let denial = storage
+            .list_agent_events(ListAgentEventsRequest {
+                run_id: run.id.clone(),
+                after_sequence: None,
+                limit: Some(100),
+            })
+            .unwrap()
+            .into_iter()
+            .rev()
+            .find(|event| event.kind == AgentEventKind::ApprovalRequested)
+            .and_then(|event| {
+                serde_json::from_value::<ApprovalView>(event.payload["approval"].clone()).ok()
+            })
+            .unwrap();
+        coordinator
+            .resolve_approval(ResolveAgentApprovalRequest {
+                run_id: run.id.clone(),
+                approval_id: denial.id,
+                nonce: denial.nonce,
+                decision: ApprovalDecision::Deny,
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            let denied_status = storage
+                .list_agent_tool_calls(run.id.clone())
+                .unwrap()
+                .into_iter()
+                .find(|tool| tool.id == denied.id)
+                .unwrap()
+                .status;
+            if denied_status == AgentToolStatus::Denied {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "denied activation did not settle"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        if storage.get_agent_run(run.id.clone()).unwrap().status == AgentRunStatus::Running {
+            coordinator.pause(run.id.clone()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(4);
+            while storage.get_agent_run(run.id.clone()).unwrap().status != AgentRunStatus::Paused {
+                assert!(Instant::now() < deadline, "Run did not pause after denial");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+        assert_eq!(
+            storage
+                .list_agent_tool_calls(run.id.clone())
+                .unwrap()
+                .into_iter()
+                .find(|tool| tool.id == denied.id)
+                .unwrap()
+                .status,
+            AgentToolStatus::Denied
+        );
+        assert!(credential_store.reads.lock().unwrap().is_empty());
+        assert!(!pid_path.exists(), "denied activation started a process");
+
         let proposed = coordinator
             .activate_mcp_connection(ActivateMcpConnectionRequest {
                 run_id: run.id.clone(),
@@ -8873,6 +9119,7 @@ mod tests {
         assert_eq!(proposed.effect, AgentToolEffect::Process);
         assert_eq!(proposed.policy_decision, AgentPolicyDecision::Ask);
         assert!(!pid_path.exists(), "proposal started a process");
+        assert!(credential_store.reads.lock().unwrap().is_empty());
 
         let deadline = Instant::now() + Duration::from_secs(4);
         while storage.get_agent_run(run.id.clone()).unwrap().status
@@ -8882,6 +9129,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(!pid_path.exists(), "approval wait started a process");
+        assert!(credential_store.reads.lock().unwrap().is_empty());
         let waiting = coordinator.mcp_runtime(run.id.clone()).unwrap();
         assert_eq!(
             waiting.connections[0].activation_state,
@@ -8921,16 +9169,51 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(pid_path.exists(), "approved activation did not start MCP");
-        let activation = storage
-            .list_agent_tool_calls(run.id.clone())
-            .unwrap()
-            .into_iter()
-            .find(|tool| tool.id == proposed.id)
-            .unwrap();
+        assert_eq!(
+            credential_store
+                .reads
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|target| **target == credential_ref.target_name())
+                .count(),
+            1
+        );
+        assert_eq!(
+            credential_store
+                .reads
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|target| **target == unrelated_credential_ref.target_name())
+                .count(),
+            0
+        );
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let activation = loop {
+            let activation = storage
+                .list_agent_tool_calls(run.id.clone())
+                .unwrap()
+                .into_iter()
+                .find(|tool| tool.id == proposed.id)
+                .unwrap();
+            if activation.status.is_terminal() {
+                break activation;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "activation receipt did not settle"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
         assert_eq!(activation.status, AgentToolStatus::Completed);
         assert_eq!(
             activation.receipt.as_ref().unwrap()["kind"],
             "MCP_CONNECTION_ACTIVATION"
+        );
+        assert_eq!(
+            activation.receipt.as_ref().unwrap()["credential_binding_count"],
+            1
         );
         let events = storage
             .list_agent_events(ListAgentEventsRequest {
@@ -8947,6 +9230,11 @@ mod tests {
         let durable = serde_json::to_string(&(activation, events)).unwrap();
         assert!(!durable.contains(&fixture.to_string_lossy().to_string()));
         assert!(!durable.contains(&pid_path.to_string_lossy().to_string()));
+        assert!(!durable.contains(credential_ref.as_str()));
+        assert!(!durable.contains(unrelated_credential_ref.as_str()));
+        assert!(!durable.contains("FIELORA_TEST_SECRET"));
+        assert!(!durable.contains("fielora-fixture-secret-v1"));
+        assert!(!durable.contains("fielora-unrelated-secret"));
 
         coordinator.cancel(run.id.clone()).unwrap();
         let deadline = Instant::now() + Duration::from_secs(4);
@@ -8995,13 +9283,22 @@ mod tests {
         let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
         let fixture = mcp_fixture_executable();
         let pid_path = root.join("agent-server.pid");
+        let credential_ref = fielora_platform::CredentialRef::new();
+        let credential_store = Arc::new(CoreCredentialStore::default());
+        credential_store
+            .put_static(
+                &credential_ref,
+                SecretBytes::new(b"fielora-fixture-secret-v1".to_vec()),
+            )
+            .unwrap();
         std::fs::write(
             paths.config_dir.join(USER_MCP_CONFIG_FILENAME),
             serde_json::to_vec(&json!({
                 "mcpServers":{
                     "fixture-local":{
                         "command":fixture.to_string_lossy(),
-                        "args":["unknown-readonly-hint",pid_path.to_string_lossy()]
+                        "args":["credential-probe",pid_path.to_string_lossy()],
+                        "env":{"FIELORA_TEST_SECRET":{"credential":credential_ref.as_str()}}
                     }
                 }
             }))
@@ -9050,7 +9347,7 @@ mod tests {
         let (sender, _receiver) = mpsc::sync_channel(256);
         let coordinator = AgentCoordinator::with_user_config_root(
             storage.clone(),
-            Arc::new(WindowsCredentialStore),
+            credential_store.clone(),
             sender,
             artifacts,
             Handle::current(),
@@ -9097,6 +9394,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
         assert!(!pid_path.exists(), "activation started before approval");
+        assert!(credential_store.reads.lock().unwrap().is_empty());
         let first_approval = storage
             .list_agent_events(ListAgentEventsRequest {
                 run_id: run.id.clone(),
@@ -9131,6 +9429,39 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
         assert!(pid_path.exists(), "approved activation did not start MCP");
+        assert_eq!(
+            credential_store
+                .reads
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|target| **target == credential_ref.target_name())
+                .count(),
+            1
+        );
+        credential_store
+            .put_static(
+                &credential_ref,
+                SecretBytes::new(b"fielora-fixture-secret-v2".to_vec()),
+            )
+            .unwrap();
+        let active_provider = coordinator
+            .providers_for_run(&run.id)
+            .into_iter()
+            .find(|provider| provider.source_kind() == fielora_agent::ToolSourceKind::Mcp)
+            .unwrap();
+        let active_rotation_probe = active_provider
+            .execute(
+                "credential_probe",
+                &json!({"value":"active-rotation"}),
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&active_rotation_probe.observation).unwrap()["matched_v1"],
+            true
+        );
+        drop(active_provider);
         let second_approval = storage
             .list_agent_events(ListAgentEventsRequest {
                 run_id: run.id.clone(),
@@ -9219,7 +9550,7 @@ mod tests {
         );
         assert_eq!(
             called.receipt.as_ref().unwrap()["execution_source"]["provider_tool_name"],
-            "arbitrary_unknown_tool"
+            "credential_probe"
         );
         let events = storage
             .list_agent_events(ListAgentEventsRequest {
@@ -9236,6 +9567,10 @@ mod tests {
         let durable = serde_json::to_string(&(tools, events)).unwrap();
         assert!(!durable.contains(&fixture.to_string_lossy().to_string()));
         assert!(!durable.contains("unknown-readonly-hint"));
+        assert!(!durable.contains(credential_ref.as_str()));
+        assert!(!durable.contains("FIELORA_TEST_SECRET"));
+        assert!(!durable.contains("fielora-fixture-secret-v1"));
+        assert!(!durable.contains("fielora-fixture-secret-v2"));
 
         let pid = std::fs::read_to_string(&pid_path)
             .unwrap()
@@ -9250,9 +9585,197 @@ mod tests {
             "terminal AgentRun leaked MCP process"
         );
 
+        // Rotation applies to the next activation only. A fresh run-scoped
+        // provider resolves v2, then revocation blocks another activation
+        // before any process can start.
+        let rotation_run = AgentRunId::new("credential-rotation-run");
+        let rotation_list = coordinator
+            .execute_mcp_connection_list(&rotation_run)
+            .unwrap();
+        coordinator
+            .execute_mcp_connection_activation(
+                &rotation_run,
+                &json!({
+                    "connection_id":"fixture-local",
+                    "_config_digest":rotation_list.receipt["config_digest"],
+                }),
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        let rotation_provider = coordinator
+            .providers_for_run(&rotation_run)
+            .into_iter()
+            .find(|provider| provider.source_kind() == fielora_agent::ToolSourceKind::Mcp)
+            .unwrap();
+        let rotation_execution = rotation_provider
+            .execute(
+                "credential_probe",
+                &json!({"value":"rotation"}),
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&rotation_execution.observation).unwrap()["matched_v2"],
+            true
+        );
+        let rotated_pid = std::fs::read_to_string(&pid_path)
+            .unwrap()
+            .parse::<u32>()
+            .unwrap();
+        drop(rotation_provider);
+        coordinator.remove_run_mcp_state(&rotation_run.0);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while test_process_exists(rotated_pid) && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!test_process_exists(rotated_pid));
+        credential_store.delete_static(&credential_ref).unwrap();
+        std::fs::remove_file(&pid_path).unwrap();
+        let revoked_run = AgentRunId::new("credential-revoked-run");
+        let revoked_list = coordinator
+            .execute_mcp_connection_list(&revoked_run)
+            .unwrap();
+        assert_eq!(
+            coordinator.execute_mcp_connection_activation(
+                &revoked_run,
+                &json!({
+                    "connection_id":"fixture-local",
+                    "_config_digest":revoked_list.receipt["config_digest"],
+                }),
+                &CommandCancellation::default(),
+            ),
+            Err(AgentError::McpCredentialMissing)
+        );
+        assert!(!pid_path.exists());
+        coordinator.remove_run_mcp_state(&revoked_run.0);
+
+        credential_store
+            .put_static(
+                &credential_ref,
+                SecretBytes::new(b"fielora-fixture-secret-v2".to_vec()),
+            )
+            .unwrap();
+        let missing_second_ref = fielora_platform::CredentialRef::new();
+        std::fs::write(
+            paths.config_dir.join(USER_MCP_CONFIG_FILENAME),
+            serde_json::to_vec(&json!({
+                "mcpServers":{
+                    "fixture-local":{
+                        "command":fixture.to_string_lossy(),
+                        "args":["credential-probe",pid_path.to_string_lossy()],
+                        "env":{
+                            "FIELORA_TEST_SECRET":{"credential":credential_ref.as_str()},
+                            "FIELORA_TEST_SECRET_B":{"credential":missing_second_ref.as_str()}
+                        }
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let reads_before_missing = credential_store.reads.lock().unwrap().len();
+        let partially_missing_run = AgentRunId::new("credential-partially-missing-run");
+        let partially_missing_list = coordinator
+            .execute_mcp_connection_list(&partially_missing_run)
+            .unwrap();
+        assert_eq!(
+            coordinator.execute_mcp_connection_activation(
+                &partially_missing_run,
+                &json!({
+                    "connection_id":"fixture-local",
+                    "_config_digest":partially_missing_list.receipt["config_digest"],
+                }),
+                &CommandCancellation::default(),
+            ),
+            Err(AgentError::McpCredentialMissing)
+        );
+        assert_eq!(
+            credential_store.reads.lock().unwrap().len(),
+            reads_before_missing,
+            "one missing binding must prevent every secret resolution"
+        );
+        assert!(!pid_path.exists());
+        coordinator.remove_run_mcp_state(&partially_missing_run.0);
+
+        assert_files_do_not_contain(
+            &root,
+            &[b"fielora-fixture-secret-v1", b"fielora-fixture-secret-v2"],
+        );
+
         drop(coordinator);
         drop(storage);
         drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "mcp-fixture")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn credential_mcp_discards_stderr_and_redacts_malformed_stdout_payloads() {
+        use fielora_agent::mcp::{McpStdioProviderConfig, McpStdioToolProvider};
+        use fielora_platform::ManagedChildSecretEnvironment;
+
+        let _environment_guard = e2e_environment_guard().await;
+        let root = std::env::temp_dir().join(format!("fielora-mcp-secret-leak-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(&root).unwrap();
+        let fixture = mcp_fixture_executable();
+        let sentinel = format!("fielora-unique-secret-{}", Uuid::now_v7());
+        let make_provider = |mode: &str, pid_path: &Path| {
+            let provider = McpStdioToolProvider::new(McpStdioProviderConfig {
+                config_key: mode.into(),
+                executable: fixture.clone(),
+                arguments: vec![OsString::from(mode), pid_path.as_os_str().to_owned()],
+                working_directory: fixture.parent().unwrap().to_path_buf(),
+                admission_effect: AgentToolEffect::Destructive,
+                source_config_digest: None,
+            })
+            .unwrap();
+            provider
+                .bind_secret_environment(
+                    ManagedChildSecretEnvironment::new(vec![(
+                        OsString::from("FIELORA_TEST_SECRET"),
+                        SecretBytes::new(sentinel.as_bytes().to_vec()),
+                    )])
+                    .unwrap(),
+                )
+                .unwrap();
+            provider
+        };
+
+        let prior_parent = std::env::var_os("FIELORA_PARENT_ENV_SENTINEL");
+        unsafe { std::env::set_var("FIELORA_PARENT_ENV_SENTINEL", "must-not-inherit") };
+        let stderr_pid_path = root.join("stderr.pid");
+        let stderr_provider = make_provider("credential-stderr", &stderr_pid_path);
+        stderr_provider.discover_tools(1).unwrap();
+        let execution = stderr_provider
+            .execute(
+                "credential_probe",
+                &json!({"value":"stderr"}),
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        let observation = serde_json::from_str::<Value>(&execution.observation).unwrap();
+        assert_eq!(observation["present"], true);
+        assert_eq!(observation["parent_environment_inherited"], false);
+        assert!(!execution.observation.contains(&sentinel));
+        drop(stderr_provider);
+
+        let malformed_pid_path = root.join("malformed.pid");
+        let malformed_provider = make_provider("credential-malformed-stdout", &malformed_pid_path);
+        malformed_provider.discover_tools(1).unwrap();
+        let error = malformed_provider
+            .execute(
+                "credential_probe",
+                &json!({"value":"malformed"}),
+                &CommandCancellation::default(),
+            )
+            .unwrap_err();
+        assert!(!format!("{error:?}").contains(&sentinel));
+        drop(malformed_provider);
+        match prior_parent {
+            Some(value) => unsafe { std::env::set_var("FIELORA_PARENT_ENV_SENTINEL", value) },
+            None => unsafe { std::env::remove_var("FIELORA_PARENT_ENV_SENTINEL") },
+        }
+        assert_files_do_not_contain(&root, &[sentinel.as_bytes()]);
         std::fs::remove_dir_all(root).unwrap();
     }
 

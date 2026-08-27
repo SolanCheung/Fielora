@@ -376,11 +376,11 @@ export type McpRunActivationState = "NOT_ACTIVE" | "ACTIVATION_QUEUED" | "AWAITI
 
 export type McpDiagnosticView = { connection_id: string | null, code: string, };
 
-export type McpConnectionView = { connection_id: string, transport: string, command_path: string, command_argument_count: number, credential_support: string, };
+export type McpConnectionView = { connection_id: string, transport: string, command_path: string, command_argument_count: number, credential_support: string, credential_binding_count: number, credential_missing_count: number, };
 
 export type McpConnectionCatalogView = { status: McpConfigStatus, config_digest: string | null, connection_count: number, connections: Array<McpConnectionView>, diagnostics: Array<McpDiagnosticView>, };
 
-export type McpRunConnectionView = { connection_id: string, activation_state: McpRunActivationState, activation_available: boolean, activation_unavailable_reason: string | null, provider_id: string | null, transport: string, protocol_version: string | null, discovered_tool_count: number | null, last_activation_tool_call_id: ToolCallId | null, last_error_code: string | null, };
+export type McpRunConnectionView = { connection_id: string, activation_state: McpRunActivationState, activation_available: boolean, activation_unavailable_reason: string | null, provider_id: string | null, transport: string, protocol_version: string | null, discovered_tool_count: number | null, credential_binding_count: number, credential_missing_count: number, last_activation_tool_call_id: ToolCallId | null, last_error_code: string | null, };
 
 export type McpConnectionRuntimeView = { run_id: AgentRunId, run_status: AgentRunStatus, connections: Array<McpRunConnectionView>, diagnostics: Array<McpDiagnosticView>, };
 

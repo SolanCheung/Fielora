@@ -1826,6 +1826,10 @@ pub struct McpConnectionView {
     #[ts(type = "number")]
     pub command_argument_count: u32,
     pub credential_support: String,
+    #[ts(type = "number")]
+    pub credential_binding_count: u32,
+    #[ts(type = "number")]
+    pub credential_missing_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -1849,6 +1853,10 @@ pub struct McpRunConnectionView {
     pub protocol_version: Option<String>,
     #[ts(type = "number | null")]
     pub discovered_tool_count: Option<u32>,
+    #[ts(type = "number")]
+    pub credential_binding_count: u32,
+    #[ts(type = "number")]
+    pub credential_missing_count: u32,
     pub last_activation_tool_call_id: Option<ToolCallId>,
     pub last_error_code: Option<String>,
 }

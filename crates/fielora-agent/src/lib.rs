@@ -166,6 +166,12 @@ pub enum AgentError {
     McpExecutableInvalid,
     #[error("MCP_PROCESS_START_FAILED")]
     McpProcessStartFailed,
+    #[error("MCP_CREDENTIAL_BINDING_INVALID")]
+    McpCredentialBindingInvalid,
+    #[error("MCP_CREDENTIAL_MISSING")]
+    McpCredentialMissing,
+    #[error("MCP_CREDENTIAL_STORE_FAILED")]
+    McpCredentialStoreFailed,
     #[error("MCP_DISCOVERY_FAILED")]
     McpDiscoveryFailed,
     #[error("MCP_DISCOVERY_TIMEOUT")]
@@ -224,6 +230,9 @@ impl AgentError {
             Self::McpExecutableNotFound => "EXECUTABLE_NOT_FOUND",
             Self::McpExecutableInvalid => "EXECUTABLE_INVALID",
             Self::McpProcessStartFailed => "PROCESS_START_FAILED",
+            Self::McpCredentialBindingInvalid => "MCP_CREDENTIAL_BINDING_INVALID",
+            Self::McpCredentialMissing => "MCP_CREDENTIAL_MISSING",
+            Self::McpCredentialStoreFailed => "MCP_CREDENTIAL_STORE_FAILED",
             Self::McpDiscoveryFailed => "MCP_DISCOVERY_FAILED",
             Self::McpDiscoveryTimeout => "MCP_DISCOVERY_TIMEOUT",
             Self::McpCatalogInvalid => "MCP_CATALOG_INVALID",
@@ -1593,13 +1602,13 @@ pub trait ToolExecutor {
     ) -> Result<ToolExecution, AgentError>;
 }
 
-struct StaticCredentialMediator {
+pub struct StaticCredentialMediator {
     store: Arc<dyn CredentialStore>,
     bindings: HashMap<(String, StaticCredentialRequirement), CredentialRef>,
 }
 
 impl StaticCredentialMediator {
-    fn new(
+    pub fn new(
         store: Arc<dyn CredentialStore>,
         bindings: &[StaticCredentialBinding],
     ) -> Result<Self, AgentError> {
@@ -1624,7 +1633,7 @@ impl StaticCredentialMediator {
         })
     }
 
-    fn resolve_exact(
+    pub fn resolve_exact(
         &self,
         tool_provider_id: &str,
         requirement: &StaticCredentialRequirement,
@@ -4886,6 +4895,13 @@ mod tests {
         fn delete(&self, target: &str) -> Result<(), CredentialError> {
             self.values.lock().unwrap().remove(target);
             Ok(())
+        }
+
+        fn static_exists(&self, credential_ref: &CredentialRef) -> bool {
+            self.values
+                .lock()
+                .unwrap()
+                .contains_key(&credential_ref.target_name())
         }
     }
 

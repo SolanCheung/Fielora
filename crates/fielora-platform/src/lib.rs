@@ -21,7 +21,52 @@ pub struct ManagedChildConfig {
     pub executable: PathBuf,
     pub arguments: Vec<OsString>,
     pub working_directory: PathBuf,
-    pub environment: Vec<(OsString, OsString)>,
+}
+
+/// One-shot secret environment for an explicitly admitted managed child.
+///
+/// This value is intentionally neither Clone nor serializable. Debug output
+/// exposes only its bounded binding count. The child and its descendants are
+/// trusted with these bytes for their process lifetime; this is injection, not
+/// a sandbox or a confidentiality boundary against the child.
+pub struct ManagedChildSecretEnvironment(Vec<(OsString, SecretBytes)>);
+
+impl std::fmt::Debug for ManagedChildSecretEnvironment {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ManagedChildSecretEnvironment")
+            .field("binding_count", &self.0.len())
+            .finish()
+    }
+}
+
+impl ManagedChildSecretEnvironment {
+    pub fn new(bindings: Vec<(OsString, SecretBytes)>) -> Result<Self, ManagedChildError> {
+        if bindings.len() > MAX_MANAGED_PROCESS_ENVIRONMENT
+            || bindings.iter().any(|(key, secret)| {
+                key.is_empty()
+                    || key.to_string_lossy().contains('=')
+                    || key.to_string_lossy().contains('\0')
+                    || secret.expose().is_empty()
+                    || secret.expose().contains(&0)
+                    || std::str::from_utf8(secret.expose()).is_err()
+            })
+            || bindings.iter().enumerate().any(|(index, (key, _))| {
+                bindings[..index].iter().any(|(prior, _)| {
+                    prior
+                        .to_string_lossy()
+                        .eq_ignore_ascii_case(&key.to_string_lossy())
+                })
+            })
+        {
+            return Err(ManagedChildError::InvalidConfiguration);
+        }
+        Ok(Self(bindings))
+    }
+
+    pub fn binding_count(&self) -> usize {
+        self.0.len()
+    }
 }
 
 #[derive(Debug)]
@@ -68,16 +113,25 @@ impl ManagedChild {
     pub fn spawn(
         config: ManagedChildConfig,
     ) -> Result<(Self, ManagedChildStdio), ManagedChildError> {
+        Self::spawn_inner(config, None)
+    }
+
+    pub fn spawn_with_secret_environment(
+        config: ManagedChildConfig,
+        secret_environment: ManagedChildSecretEnvironment,
+    ) -> Result<(Self, ManagedChildStdio), ManagedChildError> {
+        Self::spawn_inner(config, Some(secret_environment))
+    }
+
+    fn spawn_inner(
+        config: ManagedChildConfig,
+        secret_environment: Option<ManagedChildSecretEnvironment>,
+    ) -> Result<(Self, ManagedChildStdio), ManagedChildError> {
         if !config.executable.is_absolute()
             || !config.executable.is_file()
             || !config.working_directory.is_absolute()
             || !config.working_directory.is_dir()
             || config.arguments.len() > MAX_MANAGED_PROCESS_ARGUMENTS
-            || config.environment.len() > MAX_MANAGED_PROCESS_ENVIRONMENT
-            || config
-                .environment
-                .iter()
-                .any(|(key, _)| key.is_empty() || key.to_string_lossy().contains('='))
         {
             return Err(ManagedChildError::InvalidConfiguration);
         }
@@ -87,12 +141,20 @@ impl ManagedChild {
             .args(&config.arguments)
             .current_dir(&config.working_directory)
             .env_clear()
-            .envs(config.environment)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(false);
+        if let Some(secret_environment) = secret_environment.as_ref() {
+            for (key, secret) in &secret_environment.0 {
+                let value = std::str::from_utf8(secret.expose())
+                    .map_err(|_| ManagedChildError::InvalidConfiguration)?;
+                command.env(key, value);
+            }
+        }
         let mut child = command.spawn()?;
+        drop(command);
+        drop(secret_environment);
         #[cfg(windows)]
         let job = match WindowsJob::assign(&child) {
             Ok(job) => job,
@@ -377,9 +439,7 @@ pub trait CredentialStore: Send + Sync {
         self.read(&credential_ref.target_name())
     }
 
-    fn static_exists(&self, credential_ref: &CredentialRef) -> bool {
-        self.exists(&credential_ref.target_name())
-    }
+    fn static_exists(&self, credential_ref: &CredentialRef) -> bool;
 
     fn delete_static(&self, credential_ref: &CredentialRef) -> Result<(), CredentialError> {
         self.delete(&credential_ref.target_name())
@@ -461,6 +521,21 @@ impl CredentialStore for WindowsCredentialStore {
             Ok(())
         }
     }
+
+    fn static_exists(&self, credential_ref: &CredentialRef) -> bool {
+        use std::ptr::null_mut;
+        use windows_sys::Win32::Security::Credentials::{
+            CRED_TYPE_GENERIC, CREDENTIALW, CredFree, CredReadW,
+        };
+        let target = wide(&credential_ref.target_name());
+        let mut raw: *mut CREDENTIALW = null_mut();
+        if unsafe { CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut raw) } == 0 {
+            return false;
+        }
+        // Existence admission deliberately does not inspect or copy the blob.
+        unsafe { CredFree(raw as *const _) };
+        true
+    }
 }
 
 #[cfg(not(windows))]
@@ -473,6 +548,9 @@ impl CredentialStore for WindowsCredentialStore {
     }
     fn delete(&self, _: &str) -> Result<(), CredentialError> {
         Err(CredentialError::Platform)
+    }
+    fn static_exists(&self, _: &CredentialRef) -> bool {
+        false
     }
 }
 
@@ -644,10 +722,38 @@ mod tests {
             self.values.lock().unwrap().remove(target);
             Ok(())
         }
+
+        fn static_exists(&self, credential_ref: &CredentialRef) -> bool {
+            self.values
+                .lock()
+                .unwrap()
+                .contains_key(&credential_ref.target_name())
+        }
     }
 
     fn temporary_root() -> PathBuf {
         std::env::temp_dir().join(format!("fielora-platform-{}", Uuid::now_v7()))
+    }
+
+    #[test]
+    fn managed_child_secret_environment_is_bounded_and_debug_redacted() {
+        let sentinel = "managed-child-secret-sentinel";
+        let environment = ManagedChildSecretEnvironment::new(vec![(
+            OsString::from("FIELORA_TEST_SECRET"),
+            SecretBytes::new(sentinel.as_bytes().to_vec()),
+        )])
+        .unwrap();
+        let debug = format!("{environment:?}");
+        assert_eq!(environment.binding_count(), 1);
+        assert!(!debug.contains(sentinel));
+        assert!(!debug.contains("FIELORA_TEST_SECRET"));
+        assert!(
+            ManagedChildSecretEnvironment::new(vec![
+                (OsString::from("TOKEN"), SecretBytes::new(b"one".to_vec())),
+                (OsString::from("token"), SecretBytes::new(b"two".to_vec())),
+            ])
+            .is_err()
+        );
     }
 
     #[test]

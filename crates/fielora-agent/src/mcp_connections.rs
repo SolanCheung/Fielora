@@ -3,6 +3,7 @@
 //! Loading this file never resolves an executable, starts a process, performs
 //! MCP discovery, reads credentials, or inspects a Project directory.
 
+use fielora_platform::CredentialRef;
 use serde::Deserialize;
 use serde::de::{Deserializer, MapAccess, Visitor};
 use serde_json::Value;
@@ -20,12 +21,41 @@ const MAX_CONNECTION_ID_BYTES: usize = 64;
 const MAX_ARGUMENTS: usize = 32;
 const MAX_ARGUMENT_BYTES: usize = 4096;
 const MAX_TOTAL_ARGUMENT_BYTES: usize = 64 * 1024;
+pub const MAX_CREDENTIAL_ENV_BINDINGS: usize = 16;
+const MAX_ENVIRONMENT_NAME_BYTES: usize = 128;
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct McpCredentialEnvironmentBinding {
+    environment_name: String,
+    credential_ref: CredentialRef,
+}
+
+impl fmt::Debug for McpCredentialEnvironmentBinding {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("McpCredentialEnvironmentBinding")
+            .field("environment_name", &"<redacted>")
+            .field("credential_ref", &"<redacted>")
+            .finish()
+    }
+}
+
+impl McpCredentialEnvironmentBinding {
+    pub fn environment_name(&self) -> &str {
+        &self.environment_name
+    }
+
+    pub fn credential_ref(&self) -> &CredentialRef {
+        &self.credential_ref
+    }
+}
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct McpConnectionDefinition {
     connection_id: String,
     executable: PathBuf,
     arguments: Vec<String>,
+    credential_environment: Vec<McpCredentialEnvironmentBinding>,
 }
 
 impl fmt::Debug for McpConnectionDefinition {
@@ -35,6 +65,10 @@ impl fmt::Debug for McpConnectionDefinition {
             .field("connection_id", &self.connection_id)
             .field("executable", &"<redacted>")
             .field("argument_count", &self.arguments.len())
+            .field(
+                "credential_binding_count",
+                &self.credential_environment.len(),
+            )
             .finish()
     }
 }
@@ -50,6 +84,10 @@ impl McpConnectionDefinition {
 
     pub fn arguments(&self) -> &[String] {
         &self.arguments
+    }
+
+    pub fn credential_environment(&self) -> &[McpCredentialEnvironmentBinding] {
+        &self.credential_environment
     }
 }
 
@@ -186,7 +224,22 @@ struct RawRoot {
     servers: ServerEntries,
 }
 
-struct ServerEntries(Vec<(String, Value)>);
+struct ServerEntries(Vec<(String, RawConnection)>);
+
+enum RawConnection {
+    Object(Vec<(String, RawConnectionField)>),
+    Unsupported,
+}
+
+enum RawConnectionField {
+    Environment(RawEnvironment),
+    Value(Value),
+}
+
+enum RawEnvironment {
+    Object(Vec<(String, Value)>),
+    Unsupported,
+}
 
 impl<'de> Deserialize<'de> for ServerEntries {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -207,7 +260,9 @@ impl<'de> Deserialize<'de> for ServerEntries {
                 A: MapAccess<'de>,
             {
                 let mut entries = Vec::new();
-                while let Some((connection_id, value)) = map.next_entry::<String, Value>()? {
+                while let Some((connection_id, value)) =
+                    map.next_entry::<String, RawConnection>()?
+                {
                     entries.push((connection_id, value));
                 }
                 Ok(ServerEntries(entries))
@@ -218,33 +273,168 @@ impl<'de> Deserialize<'de> for ServerEntries {
     }
 }
 
+impl<'de> Deserialize<'de> for RawConnection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RawConnectionVisitor;
+        impl<'de> Visitor<'de> for RawConnectionVisitor {
+            type Value = RawConnection;
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("an MCP connection object")
+            }
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut fields = Vec::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    let field = if key == "env" {
+                        RawConnectionField::Environment(map.next_value::<RawEnvironment>()?)
+                    } else {
+                        RawConnectionField::Value(map.next_value::<Value>()?)
+                    };
+                    fields.push((key, field));
+                }
+                Ok(RawConnection::Object(fields))
+            }
+            fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(RawConnection::Unsupported)
+            }
+            fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(RawConnection::Unsupported)
+            }
+            fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(RawConnection::Unsupported)
+            }
+            fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(RawConnection::Unsupported)
+            }
+            fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
+                Ok(RawConnection::Unsupported)
+            }
+            fn visit_string<E>(self, _: String) -> Result<Self::Value, E> {
+                Ok(RawConnection::Unsupported)
+            }
+            fn visit_none<E>(self) -> Result<Self::Value, E> {
+                Ok(RawConnection::Unsupported)
+            }
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(RawConnection::Unsupported)
+            }
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                while sequence.next_element::<serde::de::IgnoredAny>()?.is_some() {}
+                Ok(RawConnection::Unsupported)
+            }
+        }
+        deserializer.deserialize_any(RawConnectionVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for RawEnvironment {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RawEnvironmentVisitor;
+        impl<'de> Visitor<'de> for RawEnvironmentVisitor {
+            type Value = RawEnvironment;
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("an MCP credential environment object")
+            }
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut entries = Vec::new();
+                while let Some(entry) = map.next_entry::<String, Value>()? {
+                    entries.push(entry);
+                }
+                Ok(RawEnvironment::Object(entries))
+            }
+            fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(RawEnvironment::Unsupported)
+            }
+            fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(RawEnvironment::Unsupported)
+            }
+            fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(RawEnvironment::Unsupported)
+            }
+            fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(RawEnvironment::Unsupported)
+            }
+            fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
+                Ok(RawEnvironment::Unsupported)
+            }
+            fn visit_string<E>(self, _: String) -> Result<Self::Value, E> {
+                Ok(RawEnvironment::Unsupported)
+            }
+            fn visit_none<E>(self) -> Result<Self::Value, E> {
+                Ok(RawEnvironment::Unsupported)
+            }
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(RawEnvironment::Unsupported)
+            }
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                while sequence.next_element::<serde::de::IgnoredAny>()?.is_some() {}
+                Ok(RawEnvironment::Unsupported)
+            }
+        }
+        deserializer.deserialize_any(RawEnvironmentVisitor)
+    }
+}
+
 fn parse_connection(
     connection_id: &str,
-    value: Value,
+    value: RawConnection,
 ) -> Result<McpConnectionDefinition, &'static str> {
     if !valid_connection_id(connection_id) {
         return Err("CONNECTION_UNSUPPORTED");
     }
-    let object = value.as_object().ok_or("CONNECTION_UNSUPPORTED")?;
-    if object.keys().any(|key| {
-        matches!(
-            key.to_ascii_lowercase().as_str(),
-            "env" | "headers" | "oauth" | "token" | "apikey" | "api_key" | "api-key" | "secret"
-        )
-    }) {
-        return Err("UNAVAILABLE_CREDENTIAL_UNSUPPORTED");
-    }
-    if object
-        .keys()
-        .any(|key| !matches!(key.as_str(), "command" | "args"))
+    let RawConnection::Object(fields) = value else {
+        return Err("CONNECTION_UNSUPPORTED");
+    };
+    let mut seen_fields = HashSet::new();
+    if fields
+        .iter()
+        .any(|(key, _)| !seen_fields.insert(key.clone()))
     {
         return Err("CONFIG_UNSUPPORTED");
     }
-    let command = object
-        .get("command")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or("CONNECTION_UNSUPPORTED")?;
+    if fields.iter().any(|(key, _)| {
+        matches!(
+            key.to_ascii_lowercase().as_str(),
+            "headers" | "oauth" | "token" | "apikey" | "api_key" | "api-key" | "secret"
+        )
+    }) {
+        return Err("CONFIG_SECRET_VALUE_FORBIDDEN");
+    }
+    if fields
+        .iter()
+        .any(|(key, _)| !matches!(key.as_str(), "command" | "args" | "env"))
+    {
+        return Err("CONFIG_UNSUPPORTED");
+    }
+    let field_value = |name: &str| {
+        fields
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value)
+    };
+    let command = match field_value("command") {
+        Some(RawConnectionField::Value(value)) => value.as_str(),
+        _ => None,
+    }
+    .filter(|value| !value.is_empty())
+    .ok_or("CONNECTION_UNSUPPORTED")?;
     let executable = PathBuf::from(command);
     if !executable.is_absolute() {
         return Err("EXECUTABLE_INVALID");
@@ -266,18 +456,20 @@ fn parse_connection(
     {
         return Err("EXECUTABLE_INVALID");
     }
-    let arguments = match object.get("args") {
+    let arguments = match field_value("args") {
         None => Vec::new(),
-        Some(Value::Array(values)) if values.len() <= MAX_ARGUMENTS => values
-            .iter()
-            .map(|value| {
-                value
-                    .as_str()
-                    .filter(|argument| argument.len() <= MAX_ARGUMENT_BYTES)
-                    .map(str::to_owned)
-                    .ok_or("CONNECTION_UNSUPPORTED")
-            })
-            .collect::<Result<Vec<_>, _>>()?,
+        Some(RawConnectionField::Value(Value::Array(values))) if values.len() <= MAX_ARGUMENTS => {
+            values
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|argument| argument.len() <= MAX_ARGUMENT_BYTES)
+                        .map(str::to_owned)
+                        .ok_or("CONNECTION_UNSUPPORTED")
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
         Some(_) => return Err("CONNECTION_UNSUPPORTED"),
     };
     if arguments.iter().map(String::len).sum::<usize>() > MAX_TOTAL_ARGUMENT_BYTES {
@@ -287,13 +479,59 @@ fn parse_connection(
         .iter()
         .any(|argument| argument_looks_secret_bearing(argument))
     {
-        return Err("UNAVAILABLE_CREDENTIAL_UNSUPPORTED");
+        return Err("CONFIG_SECRET_VALUE_FORBIDDEN");
     }
+    let credential_environment = match field_value("env") {
+        None => Vec::new(),
+        Some(RawConnectionField::Environment(RawEnvironment::Object(entries))) => {
+            parse_credential_environment(entries)?
+        }
+        Some(_) => return Err("CONFIG_SECRET_VALUE_FORBIDDEN"),
+    };
     Ok(McpConnectionDefinition {
         connection_id: connection_id.to_owned(),
         executable,
         arguments,
+        credential_environment,
     })
+}
+
+fn parse_credential_environment(
+    entries: &[(String, Value)],
+) -> Result<Vec<McpCredentialEnvironmentBinding>, &'static str> {
+    if entries.len() > MAX_CREDENTIAL_ENV_BINDINGS {
+        return Err("MCP_CREDENTIAL_BINDING_LIMIT");
+    }
+    let mut seen = HashSet::new();
+    let mut bindings = Vec::with_capacity(entries.len());
+    for (environment_name, value) in entries {
+        if environment_name.is_empty()
+            || environment_name.len() > MAX_ENVIRONMENT_NAME_BYTES
+            || !environment_name.is_ascii()
+            || environment_name
+                .bytes()
+                .any(|byte| byte == b'=' || byte == 0)
+        {
+            return Err("MCP_CREDENTIAL_ENV_NAME_INVALID");
+        }
+        if !seen.insert(environment_name.to_ascii_lowercase()) {
+            return Err("MCP_CREDENTIAL_ENV_DUPLICATE");
+        }
+        let object = value.as_object().ok_or("CONFIG_SECRET_VALUE_FORBIDDEN")?;
+        if object.len() != 1 || !object.contains_key("credential") {
+            return Err("CONFIG_SECRET_VALUE_FORBIDDEN");
+        }
+        let credential_ref = object
+            .get("credential")
+            .and_then(Value::as_str)
+            .ok_or("CONFIG_SECRET_VALUE_FORBIDDEN")?;
+        bindings.push(McpCredentialEnvironmentBinding {
+            environment_name: environment_name.clone(),
+            credential_ref: CredentialRef::parse(credential_ref.to_owned())
+                .map_err(|_| "MCP_CREDENTIAL_REF_INVALID")?,
+        });
+    }
+    Ok(bindings)
 }
 
 fn valid_connection_id(value: &str) -> bool {
@@ -379,14 +617,24 @@ mod tests {
     #[test]
     fn valid_config_is_bounded_metadata_only_and_digest_is_exact() {
         let command = absolute_fixture_path();
+        let credential_ref = CredentialRef::new();
         let bytes = serde_json::to_vec(&serde_json::json!({
-            "mcpServers":{"local-example":{"command":command,"args":["--example"]}}
+            "mcpServers":{"local-example":{
+                "command":command,
+                "args":["--example"],
+                "env":{"FIELORA_TEST_SECRET":{"credential":credential_ref.as_str()}}
+            }}
         }))
         .unwrap();
         let path = write_config(&bytes);
         let snapshot = McpConnectionSnapshot::load(&path);
         assert_eq!(snapshot.status(), "CONFIGURED");
         assert_eq!(snapshot.connections().len(), 1);
+        assert_eq!(snapshot.connections()[0].credential_environment().len(), 1);
+        assert_eq!(
+            snapshot.connections()[0].credential_environment()[0].credential_ref(),
+            &credential_ref
+        );
         assert_eq!(snapshot.digest(), Some(digest_hex(&bytes).as_str()));
         assert!(snapshot.current_bytes_match());
         fs::write(&path, b"{}").unwrap();
@@ -418,7 +666,7 @@ mod tests {
     fn connection_failures_do_not_hide_valid_siblings() {
         let command = absolute_fixture_path();
         let bytes = format!(
-            r#"{{"mcpServers":{{"valid":{{"command":{command:?}}},"bad id":{{"command":{command:?}}},"relative":{{"command":"npx"}},"credential":{{"command":{command:?},"env":{{}}}},"remote":{{"command":{command:?},"url":"https://example.com"}},"unknown":{{"command":{command:?},"future":true}}}}}}"#
+            r#"{{"mcpServers":{{"valid":{{"command":{command:?}}},"bad id":{{"command":{command:?}}},"relative":{{"command":"npx"}},"plaintext":{{"command":{command:?},"env":{{"TOKEN":"secret"}}}},"remote":{{"command":{command:?},"url":"https://example.com"}},"unknown":{{"command":{command:?},"future":true}}}}}}"#
         );
         let path = write_config(bytes.as_bytes());
         let snapshot = McpConnectionSnapshot::load(&path);
@@ -434,7 +682,7 @@ mod tests {
             snapshot
                 .diagnostics()
                 .iter()
-                .any(|diagnostic| diagnostic.code == "UNAVAILABLE_CREDENTIAL_UNSUPPORTED")
+                .any(|diagnostic| diagnostic.code == "CONFIG_SECRET_VALUE_FORBIDDEN")
         );
         assert!(
             snapshot
@@ -499,6 +747,62 @@ mod tests {
             let snapshot = McpConnectionSnapshot::load(&path);
             assert!(snapshot.connections().is_empty());
             assert_eq!(snapshot.diagnostics()[0].code, "EXECUTABLE_INVALID");
+            fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn plaintext_invalid_refs_and_environment_bounds_fail_closed() {
+        let command = absolute_fixture_path();
+        let valid_ref = CredentialRef::new();
+        let cases = [
+            (
+                serde_json::json!({"mcpServers":{"x":{"command":command,"env":{"TOKEN":"plaintext"}}}}),
+                "CONFIG_SECRET_VALUE_FORBIDDEN",
+            ),
+            (
+                serde_json::json!({"mcpServers":{"x":{"command":command,"env":{"TOKEN":{"value":"plaintext"}}}}}),
+                "CONFIG_SECRET_VALUE_FORBIDDEN",
+            ),
+            (
+                serde_json::json!({"mcpServers":{"x":{"command":command,"env":{"TOKEN":{"credential":"not-a-ref"}}}}}),
+                "MCP_CREDENTIAL_REF_INVALID",
+            ),
+            (
+                serde_json::json!({"mcpServers":{"x":{"command":command,"env":{"BAD=NAME":{"credential":valid_ref.as_str()}}}}}),
+                "MCP_CREDENTIAL_ENV_NAME_INVALID",
+            ),
+            (
+                serde_json::json!({"mcpServers":{"x":{"command":command,"env":(0..17).map(|index| (format!("TOKEN_{index}"), serde_json::json!({"credential":valid_ref.as_str()}))).collect::<serde_json::Map<_,_>>()}}}),
+                "MCP_CREDENTIAL_BINDING_LIMIT",
+            ),
+        ];
+        for (value, expected) in cases {
+            let path = write_config(&serde_json::to_vec(&value).unwrap());
+            let snapshot = McpConnectionSnapshot::load(&path);
+            assert!(snapshot.connections().is_empty());
+            assert_eq!(snapshot.diagnostics()[0].code, expected);
+            fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn duplicate_environment_names_are_preserved_and_rejected_case_insensitively() {
+        let command = serde_json::to_string(&absolute_fixture_path()).unwrap();
+        let credential_ref = CredentialRef::new();
+        let credential_ref = serde_json::to_string(credential_ref.as_str()).unwrap();
+        for second_name in ["TOKEN", "token"] {
+            let bytes = r#"{"mcpServers":{"x":{"command":COMMAND,"env":{"TOKEN":{"credential":REF},SECOND:{"credential":REF}}}}}"#
+                .replace("COMMAND", &command)
+                .replace("REF", &credential_ref)
+                .replace("SECOND", &serde_json::to_string(second_name).unwrap());
+            let path = write_config(bytes.as_bytes());
+            let snapshot = McpConnectionSnapshot::load(&path);
+            assert!(snapshot.connections().is_empty());
+            assert_eq!(
+                snapshot.diagnostics()[0].code,
+                "MCP_CREDENTIAL_ENV_DUPLICATE"
+            );
             fs::remove_file(path).unwrap();
         }
     }

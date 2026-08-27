@@ -9,7 +9,9 @@ use crate::{
     ToolProviderAvailability, ToolProviderError, ToolProviderIdentity, ToolSourceKind,
 };
 use fielora_contracts::{AgentToolEffect, ModelToolDefinition};
-use fielora_platform::{ManagedChild, ManagedChildConfig, ManagedChildStdio};
+use fielora_platform::{
+    ManagedChild, ManagedChildConfig, ManagedChildSecretEnvironment, ManagedChildStdio,
+};
 use futures_util::{SinkExt, StreamExt};
 use rmcp::model::{
     CallToolRequest, CallToolRequestParams, CallToolResponse, ClientRequest, JsonObject,
@@ -164,6 +166,22 @@ impl McpStdioToolProvider {
     pub fn source_config_digest(&self) -> Option<&str> {
         self.source_config_digest.as_deref()
     }
+
+    /// Bind a one-shot, Fielora-resolved secret environment before the first
+    /// discovery starts the stdio process. The MCP provider never receives a
+    /// CredentialStore or credential reference and cannot change this binding.
+    pub fn bind_secret_environment(
+        &self,
+        environment: ManagedChildSecretEnvironment,
+    ) -> Result<(), ToolProviderError> {
+        let (reply, receive) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::BindSecretEnvironment { environment, reply })
+            .map_err(|_| ToolProviderError::Unavailable)?;
+        receive
+            .recv()
+            .unwrap_or(Err(ToolProviderError::Unavailable))
+    }
 }
 
 impl ToolProvider for McpStdioToolProvider {
@@ -245,6 +263,10 @@ impl Drop for McpStdioToolProvider {
 }
 
 enum WorkerCommand {
+    BindSecretEnvironment {
+        environment: ManagedChildSecretEnvironment,
+        reply: mpsc::SyncSender<Result<(), ToolProviderError>>,
+    },
     Discover {
         limit: usize,
         reply: mpsc::SyncSender<Result<Vec<ProviderToolDefinition>, ToolProviderError>>,
@@ -274,6 +296,8 @@ struct WorkerState {
     admitted_schemas: HashMap<String, Value>,
     started_once: bool,
     restart_used: bool,
+    pending_secret_environment: Option<ManagedChildSecretEnvironment>,
+    credential_environment_bound: bool,
     health: Arc<AtomicU8>,
     recoverable: Arc<AtomicBool>,
 }
@@ -300,11 +324,23 @@ fn run_worker(
         admitted_schemas: HashMap::new(),
         started_once: false,
         restart_used: false,
+        pending_secret_environment: None,
+        credential_environment_bound: false,
         health,
         recoverable,
     };
     while let Ok(command) = receiver.recv() {
         match command {
+            WorkerCommand::BindSecretEnvironment { environment, reply } => {
+                let result = if state.started_once || state.pending_secret_environment.is_some() {
+                    Err(ToolProviderError::InvalidDefinition)
+                } else {
+                    state.credential_environment_bound = environment.binding_count() > 0;
+                    state.pending_secret_environment = Some(environment);
+                    Ok(())
+                };
+                let _ = reply.send(result);
+            }
             WorkerCommand::Discover { limit, reply } => {
                 let result = discover(&mut state, limit);
                 let _ = reply.send(result);
@@ -337,7 +373,7 @@ fn ensure_session(state: &mut WorkerState) -> Result<(), ToolProviderError> {
         return Ok(());
     }
     if state.started_once {
-        if state.restart_used {
+        if state.restart_used || state.credential_environment_bound {
             state
                 .health
                 .store(Health::Unavailable as u8, Ordering::Release);
@@ -348,7 +384,8 @@ fn ensure_session(state: &mut WorkerState) -> Result<(), ToolProviderError> {
     }
     state.started_once = true;
     state.recoverable.store(false, Ordering::Release);
-    match McpSession::start(&state.runtime, &state.config) {
+    let secret_environment = state.pending_secret_environment.take();
+    match McpSession::start(&state.runtime, &state.config, secret_environment) {
         Ok(session) => {
             state.session = Some(session);
             state
@@ -360,9 +397,10 @@ fn ensure_session(state: &mut WorkerState) -> Result<(), ToolProviderError> {
             state
                 .health
                 .store(Health::Unavailable as u8, Ordering::Release);
-            state
-                .recoverable
-                .store(!state.restart_used, Ordering::Release);
+            state.recoverable.store(
+                !state.restart_used && !state.credential_environment_bound,
+                Ordering::Release,
+            );
             Err(error)
         }
     }
@@ -373,9 +411,10 @@ fn mark_fatal(state: &mut WorkerState) {
     state
         .health
         .store(Health::Unavailable as u8, Ordering::Release);
-    state
-        .recoverable
-        .store(!state.restart_used, Ordering::Release);
+    state.recoverable.store(
+        !state.restart_used && !state.credential_environment_bound,
+        Ordering::Release,
+    );
 }
 
 fn retire_session(state: &mut WorkerState) {
@@ -395,16 +434,21 @@ impl McpSession {
     fn start(
         runtime: &Runtime,
         config: &McpStdioProviderConfig,
+        secret_environment: Option<ManagedChildSecretEnvironment>,
     ) -> Result<Self, ToolProviderError> {
         let process_config = ManagedChildConfig {
             executable: config.executable.clone(),
             arguments: config.arguments.clone(),
             working_directory: config.working_directory.clone(),
-            environment: Vec::new(),
         };
         let (process, stdin, stdout, stderr_task) = runtime.block_on(async move {
-            let (process, stdio) =
-                ManagedChild::spawn(process_config).map_err(|_| ToolProviderError::Unavailable)?;
+            let (process, stdio) = match secret_environment {
+                Some(environment) => {
+                    ManagedChild::spawn_with_secret_environment(process_config, environment)
+                }
+                None => ManagedChild::spawn(process_config),
+            }
+            .map_err(|_| ToolProviderError::Unavailable)?;
             let ManagedChildStdio {
                 stdin,
                 stdout,

@@ -2,7 +2,7 @@
 
 **Status:** `DRAFT / CANDIDATE / NOT FROZEN`
 
-**Implementation:** `USER-CONFIGURED LOCAL MCP CONNECTION FOUNDATION: IMPLEMENTED / TARGETED VALIDATION`
+**Implementation:** `USER-CONFIGURED LOCAL MCP + STATIC CREDENTIAL ENV BINDING: IMPLEMENTED / TARGETED VALIDATION`
 
 **Track:** subordinate to `RAPID_DESKTOP_EXECUTION_V0.1.md` and the existing
 `Model + Harness + Tools` Agent architecture
@@ -21,7 +21,10 @@ PlatformPaths.config_dir/mcp.json
   -> mcp.list_connections (OBSERVE)
   -> mcp.activate_connection (PROCESS)
   -> existing PolicyEngine / Approval
-  -> executable admission + existing McpStdioToolProvider
+  -> executable/provider admission
+  -> exact provider + env-slot StaticCredentialMediator binding
+  -> CredentialStore -> SecretBytes
+  -> existing McpStdioToolProvider
   -> existing ManagedChild / env_clear / Job Object
   -> existing provider-neutral Tool catalog
   -> existing RoutedToolExecutor
@@ -44,15 +47,22 @@ Accepted external shape:
   "mcpServers": {
     "local-example": {
       "command": "C:\\absolute\\path\\server.exe",
-      "args": ["--example"]
+      "args": ["--example"],
+      "env": {
+        "EXAMPLE_TOKEN": {
+          "credential": "cred_01234567-89ab-7def-8123-456789abcdef"
+        }
+      }
     }
   }
 }
 ```
 
-Only `command` and optional `args` are accepted. `env`, `headers`, `url`,
-remote/HTTP/OAuth/token/secret/package/install fields, and unknown fields are
-fail-closed diagnostics. Command must be an absolute executable path; PATH
+`command`, optional `args`, and an optional credential-reference-only `env` are
+accepted. Each env value must be exactly `{"credential":"cred_<UUIDv7>"}`;
+plaintext strings, `value`, headers, URL, remote/HTTP/OAuth/token/secret/
+package/install fields, and unknown fields are fail-closed diagnostics. Command
+must be an absolute executable path; PATH
 lookup, command-interpreter files, and shell strings are not admitted.
 
 Bounds are 256 KiB config bytes, eight connections, 1–64 ASCII-safe connection
@@ -60,11 +70,18 @@ identifier bytes, 32 arguments, 4096 bytes per argument, and 64 KiB total
 argument bytes. Duplicate connection identifiers invalidate the whole snapshot;
 an invalid individual definition does not hide valid siblings.
 
+Each connection admits at most 16 credential env bindings. Names are nonempty,
+ASCII, at most 128 bytes, contain neither `=` nor NUL, and are duplicate-checked
+case-insensitively for Windows semantics. Passive read models expose only
+binding and missing counts, never refs, env names, secret derivatives, or raw
+environment.
+
 ## 3. No-auto-run and Project RCE invariant
 
 Config loading reads exact bounded bytes, calculates a SHA-256 digest, and
-parses metadata only. It does not canonicalize or hash an executable, inspect
-credentials, spawn a process, perform MCP discovery, or connect to a network.
+parses metadata only. It may call metadata-only `static_exists` to count missing
+refs, but never resolves secret bytes, canonicalizes or hashes an executable,
+spawns a process, performs MCP discovery, or connects to a network.
 
 Project-controlled `.mcp.json`, `mcp.json`, and `.fielora/mcp.json` are not
 scanned or imported. Opening a cloned Project cannot activate an executable.
@@ -75,8 +92,11 @@ scanned or imported. Opening a cloned Project cannot activate an executable.
 required Approval complete before executable filesystem admission. Activation
 then checks current config bytes against the AgentRun snapshot digest, admits
 the absolute regular file, hashes it, constructs the existing MCP provider,
-starts its existing `ManagedChild`, and performs bounded MCP discovery. Config
-change fails with `MCP_CONNECTION_CONFIG_CHANGED`.
+constructs the provider identity, validates all credential refs, checks all
+existence metadata, resolves every exact provider+env-slot binding, and only
+then starts its existing `ManagedChild` and performs bounded MCP discovery.
+Config change fails with `MCP_CONNECTION_CONFIG_CHANGED`; any missing binding
+fails `MCP_CREDENTIAL_MISSING` before spawn.
 
 Provider identity binds the connection identifier, canonical executable, argv,
 protocol, transport, executable SHA-256, and source config digest. A
@@ -105,14 +125,27 @@ discovery, provider failure, and Core process exit drop the provider and reuse
 the existing MCP/ManagedChild shutdown and Windows Job Object cleanup. No
 durable active flag, daemon, or hot reload exists.
 
-The first Slice does not read CredentialStore or inherit the parent environment.
-Configured `env`, token, headers, and remote authentication are unsupported.
-Raw config bytes, executable paths, argv, and environment are excluded from
-Model Context, receipts, and durable Agent events.
+Passive configuration never reads CredentialStore secret bytes or inherits the
+parent environment. Activation resolves only explicit static refs after Policy/
+Approval and moves `SecretBytes` through a non-Clone, non-serializable, redacted
+one-shot process-environment wrapper. `ManagedChild` retains `env_clear`; secret
+bytes never enter argv. Headers, OAuth, plaintext env, secret substitution, and
+remote authentication remain unsupported. Raw config bytes, executable paths,
+argv, refs, env names, and environment are excluded from Model Context,
+receipts, and durable Agent events.
+
+The host drops `SecretBytes` after spawn and does not cache them in the
+connection/provider/run catalog. OS and process-environment copies are not
+promised compiler-perfect zeroization. The authorized MCP process and its
+descendants possess the secret for that process lifetime and may read, print,
+write, transmit, or return it. Job Object ownership provides cleanup, not a
+secret sandbox. Rotation and revocation affect future activation only; ending
+the current Run/process is required to remove an already granted environment.
 
 Activation receipt provenance is bounded to connection ID, config digest,
-provider ID, STDIO, protocol version, executable digest, and discovered-tool
-count. Downstream calls retain the existing MCP execution-source envelope.
+provider ID, STDIO, protocol version, executable digest, discovered-tool count,
+credential binding count, and configured state. Downstream calls retain the
+existing MCP execution-source envelope and receive no credential metadata.
 
 ## 7. Verification boundary
 
@@ -132,12 +165,14 @@ VerificationReceipt or a workspace-mutation fact.
 Deterministic production-path tests cover passive listing, Process Approval,
 double approval for an unknown tool, next-turn dynamic exposure, annotations
 that cannot downgrade risk, real stdio discovery/call, durable ToolCall receipts,
-TOCTOU, Project-config exclusion, missing executable, failed-discovery cleanup,
-terminal cleanup, no raw config/path/argv persistence, and no VerificationReceipt.
+TOCTOU, Project-config exclusion, exact A/B credential resolution, Policy-before-
+resolve, missing-credential no-spawn, rotation/revocation, failed-discovery and
+terminal cleanup, raw stderr discard, malformed stdout payload redaction, no raw
+config/path/argv/ref/env persistence, and no VerificationReceipt.
 Existing MCP transport cancellation, UNKNOWN, crash, empty-environment, and
 descendant cleanup regression remains authoritative.
 
 Not implemented: UI, config mutation, hot reload, auto-activation, per-tool
 enablement/effect editing, remembered trust, project import, remote transport,
-credentials, installer/package resolution, Marketplace, or community-server
-supply-chain acceptance.
+credential management UI/FIPC, OAuth, installer/package resolution,
+Marketplace, sandbox/signing, or community-server supply-chain acceptance.

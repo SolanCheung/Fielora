@@ -6,13 +6,28 @@ use std::thread;
 use std::time::Duration;
 
 const VERSION: &str = "2026-07-28";
+const CREDENTIAL_ENV: &str = "FIELORA_TEST_SECRET";
+const CREDENTIAL_V1: &str = "fielora-fixture-secret-v1";
+const CREDENTIAL_V2: &str = "fielora-fixture-secret-v2";
 
 fn main() {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
     let mode = arguments.first().map(String::as_str).unwrap_or("normal");
-    if matches!(mode, "unknown-readonly-hint" | "record-pid-crash-list") {
+    if matches!(
+        mode,
+        "unknown-readonly-hint"
+            | "record-pid-crash-list"
+            | "credential-probe"
+            | "credential-stderr"
+            | "credential-malformed-stdout"
+    ) {
         let pid_path = PathBuf::from(arguments.get(1).expect("server pid path"));
         std::fs::write(pid_path, std::process::id().to_string()).expect("write server pid");
+    }
+    if mode == "credential-stderr"
+        && let Ok(secret) = std::env::var(CREDENTIAL_ENV)
+    {
+        eprintln!("credential fixture stderr: {secret}");
     }
     if mode == "child-sleeper" {
         let pid_path = PathBuf::from(arguments.get(1).expect("child pid path"));
@@ -152,6 +167,8 @@ fn main() {
                     .map(|index| {
                         let name = if mode == "unknown-readonly-hint" {
                             "arbitrary_unknown_tool".to_owned()
+                        } else if mode.starts_with("credential-") {
+                            "credential_probe".to_owned()
                         } else if mode == "duplicate-tools" || (index == 0 && page_index == 0) {
                             "observe_echo".to_owned()
                         } else {
@@ -211,6 +228,30 @@ fn main() {
                     continue;
                 }
                 match mode {
+                    "credential-probe" | "credential-stderr" => {
+                        let secret = std::env::var(CREDENTIAL_ENV).ok();
+                        write_result(
+                            &mut writer,
+                            request.get("id"),
+                            json!({
+                                "resultType":"complete",
+                                "content":[{"type":"text","text":"credential probe completed"}],
+                                "structuredContent":{
+                                    "present":secret.is_some(),
+                                    "matched_v1":secret.as_deref() == Some(CREDENTIAL_V1),
+                                    "matched_v2":secret.as_deref() == Some(CREDENTIAL_V2),
+                                    "parent_environment_inherited":std::env::var_os("FIELORA_PARENT_ENV_SENTINEL").is_some()
+                                },
+                                "isError":false
+                            }),
+                        );
+                    }
+                    "credential-malformed-stdout" => {
+                        let secret = std::env::var(CREDENTIAL_ENV).unwrap_or_default();
+                        writeln!(writer, "{{malformed:{secret}")
+                            .expect("write credential-bearing malformed response");
+                        writer.flush().expect("flush malformed response");
+                    }
                     "crash-call" => std::process::exit(94),
                     "invalid-json-call" => {
                         writeln!(writer, "{{not-json").expect("write malformed call response");

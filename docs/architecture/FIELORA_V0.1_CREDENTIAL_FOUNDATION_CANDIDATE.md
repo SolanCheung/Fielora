@@ -2,9 +2,9 @@
 
 **Status:** `DRAFT / CANDIDATE / NOT FROZEN`
 
-**Implementation:** `GENERIC STATIC_SECRET + BRAVE FIRST CONSUMER: IMPLEMENTED / VALIDATED`
+**Implementation:** `GENERIC STATIC_SECRET + BRAVE + LOCAL MCP ENV CONSUMERS: IMPLEMENTED / VALIDATED`
 
-**Baseline:** `cb30e080e3305efaa2c68ce0952c66d381405038`
+**Baseline:** `904dbf2b8e06ccc36addd372f46257619199ddb5`
 
 **Track:** subordinate to `RAPID_DESKTOP_EXECUTION_V0.1.md` and the
 canonical `Model + Harness + Tools` Agent architecture
@@ -14,16 +14,16 @@ canonical `Model + Harness + Tools` Agent architecture
 **Candidate Runtime Change Impact:** `HIGH / SECURITY-SENSITIVE`
 
 This Candidate audits the credential behavior present in Fielora and records
-the implemented, authorized first Slice for a generic static credential binding
-with Brave Search as its first consumer. It does not authorize any subsequent
-Slice, amend a Frozen/Baseline document, define a new Agent runtime, or freeze
-an MCP configuration schema.
+the implemented generic static credential binding with Brave Search and
+user-configured Local STDIO MCP environment injection as bounded consumers. It
+does not authorize any subsequent Slice, amend a Frozen/Baseline document,
+define a new Agent runtime, or freeze an MCP configuration schema.
 
 ## CURRENT_CREDENTIAL_REALITY
 
 ### Existing end-to-end paths
 
-The repository currently has two bounded credential paths:
+The repository currently has three bounded credential paths:
 
 1. Model Provider credentials have a complete Windows product path:
    trusted Renderer write-only input -> FIPC -> Core -> Windows Credential
@@ -34,11 +34,16 @@ The repository currently has two bounded credential paths:
    and supplies one `SecretBytes` value to the selected adapter for that
    execution only. The backend retains no credential. There is deliberately no
    product UI, automatic binding, or durable generic credential registry.
+3. A user-owned Local STDIO MCP definition may bind at most 16 validated
+   environment slots to opaque `CredentialRef` values. After the existing
+   `PROCESS` Policy/Approval gate, Fielora binds the admitted provider identity
+   plus exact environment slot, resolves all secrets, and moves them into a
+   one-shot `ManagedChild` secret environment. The provider receives neither
+   references nor a store handle.
 
-MCP intentionally rejects credential/env configuration. A generic non-model
-credential identity, typed Platform store facade, in-memory composition-time
-binding, and execution-time resolver now exist. Generic metadata storage,
-human ingress/UI, and product-managed bindings remain absent.
+MCP continues to reject plaintext env values, headers, OAuth, remote auth, and
+argv substitution. Generic metadata storage, human credential ingress/UI, and
+product-managed bindings remain absent.
 
 ### Reality audit
 
@@ -56,10 +61,10 @@ does not imply a generic Integration Credential contract.
 | credential read | `PARTIAL` | `CredentialStore::resolve_static`; Harness `StaticCredentialMediator`; model run preparation | Platform; selected execution path | Generic read is restricted to exact Harness mediation and is not exposed to Model/Skill/Provider. No human readback exists by design. |
 | credential update | `PARTIAL` | `CredentialStore::put_static`; `CredWriteW` replacement | Platform | Same-ref replacement is observed by the next execution. No product rotation workflow or durable metadata exists. |
 | credential delete | `PARTIAL` | `CredentialStore::delete_static`; existing model Provider commands | Platform; model Provider settings | Generic typed delete exists and the next bound execution fails closed. No generic human delete surface exists. |
-| existence/query without secret read | `PARTIAL` | default `CredentialStore::exists`; Provider list/get reconciliation | Platform + Model Provider projection | Public view returns only `credential_present`, but default `exists` internally performs `read` and copies the secret. No metadata-only native existence probe. |
+| existence/query without secret read | `EXISTS` | `CredentialStore::static_exists`; `WindowsCredentialStore` | Platform + passive MCP projection | The Windows implementation checks WinCred presence without inspecting or copying the blob. It exposes only binding/missing counts. |
 | Tool Provider credential binding | `EXISTS` | `StaticCredentialRequirement`, `StaticCredentialBinding`, `RoutedToolExecutor` in `crates/fielora-agent/src/lib.rs` | Harness Execution + Tools routing | Exact route/provider/slot binding exists at composition time. Durable product binding management is absent. |
 | execution-time secret injection | `PARTIAL` | `StaticCredentialMediator`; `ToolProvider::execute_with_static_credential`; Brave adapter in `web.rs` | Harness Execution + selected adapter | Generic per-execution injection exists and Brave consumes it. Model preparation remains its separate existing run-scoped path; other consumers are not implemented. |
-| MCP env injection | `ABSENT` | `mcp_connections.rs`, MCP session/`ManagedChild` | MCP Tool provider + Platform process primitive | Config rejects credential/env fields and MCP starts with an empty explicit environment. |
+| MCP env injection | `EXISTS` | `mcp_connections.rs`, `agent_runtime.rs`, `mcp.rs`, `ManagedChildSecretEnvironment` | Harness admission + MCP Tool provider + Platform process primitive | Exact static refs are resolved only after PROCESS Policy/Approval. The authorized process tree can read, propagate, persist, transmit, or return its granted secret; Job Object ownership is not a sandbox. |
 | HTTP Authorization/header injection | `EXISTS` | model HTTP clients; `BraveSearchBackend` in `web.rs` | Selected HTTP adapter | Adapter-local injection exists; Brave receives a sensitive header value only for the current execution. |
 | credential scope | `PARTIAL` | model Provider ownership; exact static route/consumer/slot binding | Model configuration + Harness composition | Exact Brave scope exists. Project/grant hierarchies and human-managed scope are intentionally absent. |
 | credential/provider binding | `PARTIAL` | `provider_configs.credential_ref`; `StaticCredentialBinding` | Model configuration + Harness composition | Exact model and static Tool-provider bindings exist. Static bindings are not durable or product-configurable. |
@@ -73,8 +78,8 @@ does not imply a generic Integration Credential contract.
 | Agent/model secret visibility | `EXISTS` | Context/model request construction | Harness + Model adapter | Managed secret bytes are excluded from prompts and Model-facing Tools. General content DLP for secrets independently present in arbitrary user text/files remains heuristic. |
 | Skill secret visibility | `EXISTS` | Skill admission and ContextCompiler/tool boundaries | Harness Context | Skills receive no CredentialStore API or environment. Untrusted instructions can request a key but cannot obtain a managed secret; general user-file DLP remains partial. |
 | subagent secret inheritance | `EXISTS` | `run_readonly_subagent`, child run preparation and boundary tests | Harness Orchestration | Read-only children inherit no static Tool binding, secret bytes, or environment and cannot resolve the parent static credential. Future authenticated child Tool admission remains separate scope. |
-| credential revocation | `PARTIAL` | Provider delete/remove; `CredentialStore::delete_static` | Human model configuration + Platform | The next Brave execution fails `CREDENTIAL_MISSING`; in-flight HTTP requests and current model runs cannot be recalled. |
-| credential rotation | `PARTIAL` | `CredentialStore::put_static` replacement | Platform | The next Brave execution resolves replacement bytes with no provider cache. Product rotation workflow remains absent. |
+| credential revocation | `PARTIAL` | Provider delete/remove; `CredentialStore::delete_static` | Human model configuration + Platform | The next Brave execution or Local MCP activation fails closed. An active MCP process retains the environment already granted until its Run/process ends. |
+| credential rotation | `PARTIAL` | `CredentialStore::put_static` replacement | Platform | Brave uses replacement bytes on its next execution; Local MCP uses them on its next activation, never by hot-reloading an active process. Product rotation workflow remains absent. |
 | OAuth | `ABSENT` | No implementation | Future Platform/Provider-specific auth | Authorization-code, refresh-token, browser callback, expiry, and consent lifecycle are out of scope. |
 | service account | `ABSENT` | No implementation | Future provider-specific auth | Structured key documents and impersonation/delegation semantics are out of scope. |
 | remote MCP auth | `ABSENT` | MCP config currently Local STDIO only | Future MCP adapter | No remote transport, headers, OAuth, or credential binding. |
@@ -82,7 +87,7 @@ does not imply a generic Integration Credential contract.
 ### Current Windows store facts
 
 - `CredentialStore` accepts an opaque target string and `SecretBytes`; it
-  exposes `store`, `read`, `delete`, and a default `exists`.
+  exposes `store`, `read`, `delete`, and a typed metadata-only `static_exists`.
 - `WindowsCredentialStore` uses `CRED_TYPE_GENERIC`, target names supplied by
   the caller, username `Fielora`, and `CRED_PERSIST_LOCAL_MACHINE` under the
   current Windows user profile.
@@ -93,6 +98,8 @@ does not imply a generic Integration Credential contract.
   invalid size and Platform failures.
 - Native read buffers are released with `CredFree`; the copied Rust buffer is
   wrapped in `SecretBytes`.
+- `static_exists` releases the native WinCred result without inspecting or
+  copying its credential blob into Fielora memory.
 - Enumeration is not exposed. Target syntax/collision is currently a caller
   responsibility.
 - SQLite stores a model-specific reference and `credential_present`, never the
@@ -653,10 +660,11 @@ surface changed.
 
 ## FIRST_SLICE_RECOMMENDATION
 
-`IMPLEMENTED_FIRST_CREDENTIAL_SLICE: GENERIC STATIC_SECRET BINDING + BRAVE SEARCH DETERMINISTIC CONSUMER`
+`IMPLEMENTED_CREDENTIAL_SLICES: GENERIC STATIC_SECRET BINDING + BRAVE SEARCH + LOCAL MCP ENV CONSUMERS`
 
-The previously recommended Slice is implemented and targeted-validated. This
-status does not authorize product activation or a subsequent Slice.
+The Brave and Local MCP consumer Slices are implemented and
+targeted-validated. This status does not authorize product activation or a
+subsequent Slice.
 
 Implemented Slice:
 
@@ -676,8 +684,11 @@ Implemented Slice:
    so the optional live gate remains `BLOCKED_NO_CREDENTIAL` with zero public
    API requests.
 
-No UI, MCP env, generic HTTP Provider, package/dependency, Marketplace,
-credential registry, remote auth, or schema change belongs to this Slice.
+The Local MCP delta reuses the same mediator after PROCESS Policy/Approval,
+injects only exact explicit environment values through `env_clear`, records
+only binding counts, and keeps the authorized provider's tools DESTRUCTIVE. It
+adds no credential management UI, FIPC ingress, package/dependency,
+Marketplace, credential registry, remote auth, schema, or migration.
 
 ## TARGETED_TEST_PLAN
 
@@ -728,14 +739,22 @@ Use a unique sentinel and assert it is absent from:
 
 No secret digest/prefix/last4 may be used as a substitute leak.
 
-### Future MCP, not in the Slice
+### Implemented Local MCP evidence
 
-- ref maps to exactly one explicit environment variable;
+- each ref maps through provider identity plus exactly one derived environment
+  slot to one explicit environment variable;
 - parent environment remains cleared;
 - secret absent from argv, receipt, Agent events, and persisted stderr;
 - process-tree cleanup and failure behavior;
-- explicit acceptance that an admitted server/process tree can access the
-  granted environment.
+- explicit acceptance that an admitted server/process tree can access and
+  propagate the granted environment;
+- policy denial and approval wait resolve zero secrets and start zero process;
+- all refs exist before any resolution, all resolve before spawn, and one
+  missing ref starts no process;
+- active rotation retains v1, a future activation receives v2, and deletion
+  blocks future activation;
+- raw stderr is drained/discarded and credential-bearing malformed stdout is
+  reduced to a bounded protocol failure without payload echo.
 
 Implemented evidence includes:
 
@@ -765,36 +784,34 @@ clippy/release/integration gates passed. No unrelated storage repair was made.
 1. Where should durable generic credential labels and binding metadata live
    once a human management UI is authorized? The First Slice deliberately
    avoids this schema decision.
-2. Should a future `exists` implementation use a metadata-only WinCred probe
-   to avoid copying the blob, or is the current immediate `SecretBytes` drop
-   acceptable within the bounded Windows-first contract?
-3. Should receipts record no auth fact at all or only
+2. Should receipts record no auth fact at all or only
    `authenticated: true`? There is no demonstrated First Slice need to persist
    a credential or binding identifier.
-4. What exact process-tree trust/sandbox statement is acceptable before MCP
-   environment credentials are authorized? `env_clear` alone cannot stop an
-   admitted server from propagating its own environment.
-5. If generic metadata later becomes portable, how should a moved profile show
+3. What sandbox or signing posture is required before credential-aware MCP
+   expands beyond explicitly user-authorized local executables? `env_clear`
+   and Job Object cleanup do not constrain an admitted server.
+4. If generic metadata later becomes portable, how should a moved profile show
    a retained non-secret binding whose OS credential blob is absent?
-6. Is Project-scoped binding ever necessary, or can V0.1 remain user-owned plus
+5. Is Project-scoped binding ever necessary, or can V0.1 remain user-owned plus
    exact provider/connection binding? Do not introduce a grant hierarchy before
    a concrete flow requires it.
-7. Should hardened zeroization be adopted later, given unavoidable copies in
+6. Should hardened zeroization be adopted later, given unavoidable copies in
    Windows APIs, Electron/FIPC, and HTTP libraries? This requires a focused
    defense-in-depth assessment rather than an isolated dependency addition.
-8. When authenticated Tools are deliberately admitted to read-only subagents,
+7. When authenticated Tools are deliberately admitted to read-only subagents,
    what catalog/grant projection is needed while preserving the rule that the
    child never receives underlying bytes?
 
 ## EXPLICIT_NON_SCOPE
 
 - no Credential product activation beyond the internal authorized first Slice;
-- no TypeScript, UI, FIPC, Cargo dependency, schema, or migration change;
+- no credential-management UI, secret FIPC, Cargo dependency, schema, or migration change;
 - no change to Settings, MCP config, Web config, or Frozen/Baseline documents;
 - no Credential/Secret Agent or Runtime;
 - no Model-facing credential Tool;
 - no secret in argv;
-- no MCP environment injection;
+- no plaintext MCP environment, secret argv/substitution, remote MCP auth, or
+  credential-bearing daemon;
 - no OAuth, service account, certificate, SSH key, browser session, or cookie;
 - no Marketplace-global namespace, package manager, Plugin Runtime, or
   credential economy;
