@@ -2,17 +2,20 @@
 
 **Status:** `DRAFT / CANDIDATE / NOT FROZEN`
 
-**Implementation:** `NOT AUTHORIZED`
+**Implementation:** `IMPLEMENTED / VALIDATED`
 
 **Date:** 2026-08-27
 
 **Audited baseline:** `phase/complete-agent-v0.1@70eba951952488e6d9c480fa7e25157887dde5e5`
 
+**Candidate commit:** `9e7642bb85ee2cc43cc70dfcfb3a867eca8c5bcf`
+
 **Database schema:** `9`
 
-This document is a repository-reality alignment and a First Slice candidate.
-It does not implement Artifact composition, change a Frozen/Baseline document,
-add a Tool, add UI, add a dependency, or change persistence.
+This document remains a non-Frozen architecture candidate and now records the
+implemented and targeted-validated First Slice. The implementation does not
+change a Frozen/Baseline document, add a Tool, add UI, add a dependency, or
+change persistence.
 
 ## CURRENT_COMPOSITION_REALITY
 
@@ -20,14 +23,14 @@ add a Tool, add UI, add a dependency, or change persistence.
 
 | Concern | Reality | Current owner / evidence | Composition gap |
 |---|---|---|---|
-| Stable identity | `EXISTS` | `ArtifactId` and `ArtifactRevisionId` in `crates/fielora-contracts/src/lib.rs` | No typed Artifact-to-Artifact reference |
-| Profile ownership | `EXISTS` | `ArtifactView.profile_id`; `StorageHandle` resolves Artifacts under its current `ProfileId` | Reference admission and recursive resolution do not exist |
+| Stable identity | `EXISTS / EXTENDED` | `ArtifactId`, `ArtifactRevisionId`, and exact `ArtifactRefV1` in `crates/fielora-contracts/src/lib.rs` | Broader parent/child contribution kinds remain deferred |
+| Profile ownership | `EXISTS / REUSED` | `ArtifactView.profile_id`; composition exact reads use the current Profile-scoped `StorageHandle` | Cross-Profile resolution intentionally remains indistinguishable from missing |
 | Optional Project association | `EXISTS` | `ArtifactView.project_field_id`; create may associate with the current run Project | Association is provenance, not reference or filesystem authority |
-| Immutable revisions | `EXISTS` | schema-9 `artifact_revisions`; update/delete triggers reject revision mutation/deletion | No dependency graph is derived from revision content |
-| Current pointer and historical read | `EXISTS` | `artifacts.current_revision_id`; `read_artifact(artifact_id, revision_id?)` | No composed read; exact child revisions are not resolved |
+| Immutable revisions | `EXISTS / REUSED` | schema-9 `artifact_revisions`; update/delete triggers reject revision mutation/deletion | Dependency facts are derived transiently from exact semantic revision content |
+| Current pointer and historical read | `EXISTS / REUSED` | `artifacts.current_revision_id`; resolver uses exact `read_artifact(artifact_id, Some(revision_id))` | Model-facing `artifact.read` intentionally remains parent-only |
 | Optimistic concurrency | `EXISTS` | `artifact.update` requires `expected_revision_id`; storage compares current pointer | No child lock is needed for immutable pinned children |
-| Semantic canonicalization and digest | `EXISTS` | closed `ArtifactContentV1`; canonical JSON; SHA-256 integrity check on read | No reference identity/digest commitment exists |
-| ToolCall idempotency | `EXISTS` | one mutation revision per ToolCall; mutation request digest and replay recovery | A future reference participates automatically only if it is in canonical parent content |
+| Semantic canonicalization and digest | `EXISTS / EXTENDED` | closed `ArtifactContentV1`; exact ref/range fields participate in parent canonical JSON and SHA-256 | Child content is not duplicated into the parent |
+| ToolCall idempotency | `EXISTS / REUSED` | one mutation revision per ToolCall; committed replay returns before dependency revalidation | No composition-specific replay state exists |
 | Restart recovery | `EXISTS` | durable ToolCall plus `artifact_mutation_by_tool_call` reconciliation | No separate composition recovery is needed or present |
 | Verification subject | `EXISTS` | `VerificationSubject::ArtifactRevision { artifact_id, revision_id, semantic_sha256 }` | No verification inheritance or dependency provenance |
 | Mutation freshness | `EXISTS` | exact revision subject and current mutation tracking | Child head movement has no defined composition semantics today |
@@ -38,7 +41,7 @@ add a Tool, add UI, add a dependency, or change persistence.
 
 | Type | Current semantic authority | Current renderer/export reality | Composition-relevant fact |
 |---|---|---|---|
-| `DOCUMENT` | title plus ordered `HEADING`, `PARAGRAPH`, `BULLET_LIST`, `TABLE` blocks | `DocxWriter`; `.docx`; structural package reopen plus expected-text check | Table supports at most 64 rows, 16 columns, 4,096 aggregate cells and 16 tables; this is a usable target for a transient Spreadsheet range |
+| `DOCUMENT` | title plus ordered `HEADING`, `PARAGRAPH`, `BULLET_LIST`, `TABLE`, and `SPREADSHEET_RANGE` blocks | `DocxWriter`; `.docx`; structural package reopen plus expected-text/XML entity check | Saved Spreadsheet ranges are materialized transiently into the existing bounded Table path |
 | `PRESENTATION` | slides with `TITLE`, `TITLE_AND_BODY`, or `TWO_COLUMN`; paragraph/bullet blocks only | `PptxWriter`; `.pptx`; deterministic bounded text layout and structural reopen | Production semantic and renderer adapter have no image block or image call |
 | `DIAGRAM` | bounded typed graph, groups, and layout intent | repository-owned static SVG renderer; exact saved revision to `.svg`; independent allowlist reopen | It produces controlled SVG, not a PNG/EMF asset accepted by an Office parent renderer |
 | `SPREADSHEET` | stable sheets, one-based sparse cells, `STRING/DECIMAL/BOOLEAN` literals and closed intent | `XlsxWriter`; exact saved revision to `.xlsx`; independent literal reopen | Formula/calculation/date/merge/chart/import are absent; literal range materialization is unambiguous |
@@ -63,11 +66,11 @@ Additional renderer facts:
 | Generic revision persistence | `EXISTS` | schema 9 stores closed typed canonical JSON in `artifact_revisions.content_json`, bounded to 256 KiB; there are no type-specific Artifact tables |
 | Exact saved export | `EXISTS` | existing `artifact.export` reads one current or explicit historical revision before renderer dispatch |
 | Export receipt | `EXISTS` | existing ToolCall receipt records parent Artifact/revision/digest, renderer, format, output path/bytes/digest, and structural result |
-| Composition receipt | `ABSENT / NOT NEEDED` | Composition facts can extend the existing bounded ToolCall receipt |
+| Composition receipt | `EXISTS AS DELTA` | Existing export ToolCall receipt includes deterministic dependency count, set digest, and bounded exact dependency facts |
 | Generic `ResourceRef` | `EXISTS / NOT SUITABLE` | current enum identifies Field/State/Reference/Relation/Capture/ProviderConfig; it has no revision or digest and should not be overloaded |
-| Artifact reference | `ABSENT` | no `ArtifactRefV1`, expected type, child digest, or parent-specific embed intent |
-| Composition resolver | `ABSENT` | no recursive exact-revision resolver or resolved render snapshot |
-| Dependency graph / cycle check | `ABSENT` | no Artifact revision dependency edges are currently admitted or traversed |
+| Artifact reference | `EXISTS / FIRST SLICE` | `ArtifactRefV1` plus `SpreadsheetRangeEmbedV1`; exact child ID/revision/type/digest and stable sheet/range |
+| Composition resolver | `EXISTS / FIRST SLICE` | bounded Artifact-domain render-preparation service with exact Profile-scoped point-read callback and one frozen snapshot |
+| Dependency graph / cycle check | `EXISTS / BOUNDED` | exact `(ArtifactId, ArtifactRevisionId)` graph validator with active/visited sets, depth/count limits, cycle and historical-self fixtures |
 | Library blob | `EXISTS / SEPARATE` | Library metadata plus content-addressed `LibraryRoot` blobs and tombstone lifecycle | 
 | Artifact asset model | `ABSENT` | no `ArtifactAssetRef`, asset lifecycle, media package admission, or renderer asset bridge |
 | Spreadsheet/Artifact UI | `ABSENT` | generated TypeScript DTOs exist, but there is no Artifact editor, grid, preview, embed UI, or Composition FIPC |
@@ -485,12 +488,12 @@ Do not add `CompositionReceipt`. Extend the existing export ToolCall receipt
 with bounded facts:
 
 ```text
-composition_dependency_count
-composition_dependency_set_sha256
-composition_dependencies[] {
-  artifact_id,
-  revision_id,
-  artifact_type,
+dependency_count
+dependency_set_sha256
+dependencies[] {
+  child_artifact_id,
+  child_revision_id,
+  expected_type,
   semantic_sha256
 }
 ```
@@ -753,7 +756,63 @@ No UI, generic composition Tool, refresh operation, current-reference policy,
 asset system, Library integration, Formula engine, or Diagram composition is
 part of that Slice.
 
-## TARGETED_TEST_PLAN
+## IMPLEMENTATION_REALITY
+
+The implemented First Slice is exactly:
+
+```text
+saved Document revision
+  -> exact pinned Spreadsheet revision/range admission
+  -> bounded immutable dependency snapshot
+  -> transient Document Table
+  -> existing DOCX writer and structural reopen
+  -> existing artifact.export ToolCall receipt with additive provenance
+```
+
+Implemented deltas:
+
+- `ArtifactRefV1`, `SpreadsheetRangeEmbedV1`, and
+  `DocumentBlock::SpreadsheetRange` are closed typed Rust/TypeScript contracts;
+- create/update canonicalization commits the ref and range into the parent
+  semantic digest, then performs exact same-Profile dependency admission before
+  the existing storage transaction;
+- already-committed same-ToolCall replay is returned before reference
+  revalidation and creates no second revision;
+- the resolver has no Model, network, credential, MCP, filesystem, renderer,
+  permission, or mutation authority;
+- export revalidates exact child identity/revision/type/digest, freezes one
+  bounded snapshot, materializes literal values, and invokes the unchanged
+  Document Table renderer path;
+- `artifact.read` remains parent-only and returns the stored reference under
+  `UNTRUSTED_ARTIFACT_CONTENT`; child payload is not automatically projected;
+- the existing export receipt is extended with sorted exact dependency facts,
+  `dependency_count`, and `dependency_set_sha256`; no receipt hierarchy or
+  Verification propagation was added;
+- formula-like strings remain literal, and calculation authority remains
+  `NONE`;
+- schema remains 9, content schema remains 1, migrations remain zero, and no
+  package dependency was added.
+
+Targeted validation completed:
+
+- Rust affected/workspace unit regression: 192 tests plus 4 Office writer
+  probes passed across Agent, Contracts, Core, Storage, Field, Model, and
+  Platform through the Core/Cross development lanes;
+- the production Tool pipeline fixture proved S/R1 -> D/R1, S/R2 child update,
+  D/R1 historical pin stability, D/R2 -> S/R2, parent-only read, mutation-time
+  digest rejection with zero commit, receipt provenance, and exact parent
+  Verification subject retention;
+- DOCX structural reopen and `file.extract` proved CJK, sparse cells, canonical
+  decimal text, deterministic boolean text, formula-like literal text, and XML
+  entity-safe package bytes;
+- contracts generation/current verification, TypeScript typecheck/lint/unit,
+  Core integration, Rust fmt, and Clippy `-D warnings` passed;
+- release Core built successfully and the 12-test Core integration suite passed
+  against the release binary;
+- no UI, Desktop E2E, Browse, package, portable, migration, or full premerge
+  gate was run.
+
+## TARGETED_VALIDATION
 
 ### Contract and canonicalization
 
@@ -850,5 +909,4 @@ part of that Slice.
 
 ## NEXT_DECISION
 
-`A. READY_FOR_ARTIFACT_COMPOSITION_FIRST_SLICE`
-
+`A. ARTIFACT_COMPOSITION_FOUNDATION_SUFFICIENT`

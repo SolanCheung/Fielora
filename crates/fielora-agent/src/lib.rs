@@ -204,6 +204,18 @@ pub enum AgentError {
     ArtifactIdempotencyConflict,
     #[error("ARTIFACT_CONTENT_INVALID")]
     ArtifactContentInvalid,
+    #[error("ARTIFACT_REFERENCE_NOT_FOUND")]
+    ArtifactReferenceNotFound,
+    #[error("ARTIFACT_REFERENCE_TYPE_MISMATCH")]
+    ArtifactReferenceTypeMismatch,
+    #[error("ARTIFACT_REFERENCE_INTEGRITY_FAILED")]
+    ArtifactReferenceIntegrityFailed,
+    #[error("ARTIFACT_REFERENCE_RANGE_INVALID")]
+    ArtifactReferenceRangeInvalid,
+    #[error("ARTIFACT_COMPOSITION_CYCLE")]
+    ArtifactCompositionCycle,
+    #[error("ARTIFACT_COMPOSITION_LIMIT_EXCEEDED")]
+    ArtifactCompositionLimitExceeded,
     #[error("DIAGRAM_LAYOUT_OVERFLOW")]
     DiagramLayoutOverflow,
     #[error("AGENT_IO_FAILED")]
@@ -267,6 +279,12 @@ impl AgentError {
             Self::ArtifactRevisionConflict => "ARTIFACT_REVISION_CONFLICT",
             Self::ArtifactIdempotencyConflict => "ARTIFACT_TOOLCALL_IDEMPOTENCY_CONFLICT",
             Self::ArtifactContentInvalid => "ARTIFACT_CONTENT_INVALID",
+            Self::ArtifactReferenceNotFound => "ARTIFACT_REFERENCE_NOT_FOUND",
+            Self::ArtifactReferenceTypeMismatch => "ARTIFACT_REFERENCE_TYPE_MISMATCH",
+            Self::ArtifactReferenceIntegrityFailed => "ARTIFACT_REFERENCE_INTEGRITY_FAILED",
+            Self::ArtifactReferenceRangeInvalid => "ARTIFACT_REFERENCE_RANGE_INVALID",
+            Self::ArtifactCompositionCycle => "ARTIFACT_COMPOSITION_CYCLE",
+            Self::ArtifactCompositionLimitExceeded => "ARTIFACT_COMPOSITION_LIMIT_EXCEEDED",
             Self::DiagramLayoutOverflow => "DIAGRAM_LAYOUT_OVERFLOW",
             Self::IoFailed => "AGENT_IO_FAILED",
         }

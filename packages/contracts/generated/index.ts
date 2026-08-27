@@ -300,9 +300,13 @@ export type ListLibraryObjectsRequest = { media_kind: LibraryMediaKind | null, i
 
 export type ArtifactType = "DOCUMENT" | "PRESENTATION" | "DIAGRAM" | "SPREADSHEET";
 
+export type ArtifactRefV1 = { artifact_id: ArtifactId, revision_id: ArtifactRevisionId, expected_type: ArtifactType, semantic_sha256: string, };
+
+export type SpreadsheetRangeEmbedV1 = { artifact_ref: ArtifactRefV1, sheet_id: SpreadsheetSheetId, start_row: number, start_column: number, end_row: number, end_column: number, };
+
 export type DocumentArtifact = { title: string | null, blocks: Array<DocumentBlock>, };
 
-export type DocumentBlock = { "kind": "HEADING", level: number, text: string, } | { "kind": "PARAGRAPH", text: string, } | { "kind": "BULLET_LIST", items: Array<string>, } | { "kind": "TABLE", rows: Array<Array<string>>, };
+export type DocumentBlock = { "kind": "HEADING", level: number, text: string, } | { "kind": "PARAGRAPH", text: string, } | { "kind": "BULLET_LIST", items: Array<string>, } | { "kind": "TABLE", rows: Array<Array<string>>, } | { "kind": "SPREADSHEET_RANGE", source: SpreadsheetRangeEmbedV1, };
 
 export type PresentationArtifact = { slides: Array<PresentationSlide>, };
 

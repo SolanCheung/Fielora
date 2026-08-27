@@ -205,6 +205,23 @@ pub(crate) fn reopen(rendered: &RenderedSpreadsheet, bytes: &[u8]) -> Result<(),
     Ok(())
 }
 
+/// Returns the deterministic, calculation-free text representation used when
+/// a literal Spreadsheet cell is projected into another semantic Artifact.
+/// Formula-like strings remain strings; this helper never evaluates content.
+pub(crate) fn display_text(value: &SpreadsheetLiteralV1) -> String {
+    match value {
+        SpreadsheetLiteralV1::String { value } => value.clone(),
+        SpreadsheetLiteralV1::Decimal { value } => value.0.clone(),
+        SpreadsheetLiteralV1::Boolean { value } => {
+            if *value {
+                "TRUE".to_owned()
+            } else {
+                "FALSE".to_owned()
+            }
+        }
+    }
+}
+
 fn admit_local_id(value: &str) -> Result<(), AgentError> {
     let bytes = value.as_bytes();
     if bytes.is_empty()

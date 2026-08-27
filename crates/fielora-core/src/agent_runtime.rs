@@ -277,6 +277,60 @@ fn durable_artifact_mutation_receipt(read: &ArtifactReadView) -> Value {
 }
 
 impl DurableArtifactToolExecutor {
+    fn replay_committed_mutation(
+        &self,
+        request_sha256: &str,
+        semantic_unit_count: usize,
+    ) -> Result<Option<ToolExecution>, AgentError> {
+        let Some(read) = self
+            .storage
+            .artifact_mutation_by_tool_call(self.tool_call_id.clone())
+            .map_err(map_artifact_storage_error)?
+        else {
+            return Ok(None);
+        };
+        let stored = self
+            .storage
+            .artifact_mutation_request_sha256(self.tool_call_id.clone())
+            .map_err(map_artifact_storage_error)?;
+        if stored.as_deref() != Some(request_sha256) {
+            return Err(AgentError::ArtifactIdempotencyConflict);
+        }
+        Ok(Some(ToolExecution {
+            receipt: durable_artifact_mutation_receipt(&read),
+            observation: json!({
+                "artifact_id":read.artifact.artifact_id,
+                "artifact_type":read.artifact.artifact_type,
+                "artifact_revision_id":read.revision.revision_id,
+                "artifact_revision":read.revision.sequence,
+                "artifact_persistence":"DURABLE",
+                "semantic_unit_count":semantic_unit_count,
+            })
+            .to_string(),
+        }))
+    }
+
+    fn resolve_document_composition(
+        &self,
+        content: &ArtifactContentV1,
+    ) -> Result<Option<fielora_agent::artifact::ResolvedDocumentComposition>, AgentError> {
+        let ArtifactContentV1::Document(document) = content else {
+            return Ok(None);
+        };
+        fielora_agent::artifact::resolve_document_composition(
+            document,
+            |artifact_id, revision_id| {
+                self.storage
+                    .read_artifact(artifact_id.clone(), Some(revision_id.clone()))
+                    .map_err(|error| match error {
+                        DomainError::NotFound => AgentError::ArtifactReferenceNotFound,
+                        other => map_artifact_storage_error(other),
+                    })
+            },
+        )
+        .map(Some)
+    }
+
     fn create(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
         let args: CreateArtifactArgs = serde_json::from_value(arguments.clone())
             .map_err(|_| AgentError::ToolArgumentsInvalid)?;
@@ -292,6 +346,12 @@ impl DurableArtifactToolExecutor {
             "project_field_id":project_field_id,
             "semantic_sha256":canonical.semantic_sha256,
         }))?;
+        if let Some(replayed) =
+            self.replay_committed_mutation(&request_sha256, canonical.semantic_unit_count)?
+        {
+            return Ok(replayed);
+        }
+        self.resolve_document_composition(&canonical.content)?;
         let read = self
             .storage
             .create_artifact(CreateArtifactRecord {
@@ -328,6 +388,25 @@ impl DurableArtifactToolExecutor {
             .map_err(|_| AgentError::ToolArgumentsInvalid)?;
         let artifact_id = ArtifactId::new(args.artifact_id);
         let expected_revision_id = ArtifactRevisionId::new(args.expected_revision_id);
+        if let Some(committed) = self
+            .storage
+            .artifact_mutation_by_tool_call(self.tool_call_id.clone())
+            .map_err(map_artifact_storage_error)?
+        {
+            let canonical = fielora_agent::artifact::canonicalize_content(
+                committed.artifact.artifact_type,
+                args.content,
+            )?;
+            let request_sha256 = artifact_mutation_request_sha256(&json!({
+                "operation":"UPDATE",
+                "artifact_id":artifact_id,
+                "expected_revision_id":expected_revision_id,
+                "semantic_sha256":canonical.semantic_sha256,
+            }))?;
+            return self
+                .replay_committed_mutation(&request_sha256, canonical.semantic_unit_count)?
+                .ok_or(AgentError::ArtifactIdempotencyConflict);
+        }
         let current = self
             .storage
             .read_artifact(artifact_id.clone(), None)
@@ -342,6 +421,7 @@ impl DurableArtifactToolExecutor {
             "expected_revision_id":expected_revision_id,
             "semantic_sha256":canonical.semantic_sha256,
         }))?;
+        self.resolve_document_composition(&canonical.content)?;
         let read = self
             .storage
             .update_artifact(UpdateArtifactRecord {
@@ -425,6 +505,18 @@ impl DurableArtifactToolExecutor {
                 args.revision_id.map(ArtifactRevisionId::new),
             )
             .map_err(map_artifact_storage_error)?;
+        if matches!(&read.revision.content, ArtifactContentV1::Document(_)) {
+            let resolved = self
+                .resolve_document_composition(&read.revision.content)?
+                .ok_or(AgentError::ArtifactContentInvalid)?;
+            return fielora_agent::artifact::export_saved_document_composition(
+                &self.runtime,
+                &read,
+                &resolved,
+                &args.output_path,
+                cancellation,
+            );
+        }
         fielora_agent::artifact::export_saved(&self.runtime, &read, &args.output_path, cancellation)
     }
 }
@@ -9565,6 +9657,150 @@ mod tests {
             &artifacts,
         ));
 
+        let document_r1_arguments = json!({
+            "type":"document",
+            "title":"Pinned Spreadsheet composition",
+            "associate_with_current_project":true,
+            "content":{
+                "title":"Pinned Spreadsheet R1",
+                "blocks":[
+                    {"kind":"HEADING","level":1,"text":"Composition 组合"},
+                    {"kind":"SPREADSHEET_RANGE","source":{
+                        "artifact_ref":{
+                            "artifact_id":spreadsheet_id,
+                            "revision_id":spreadsheet_revision_one,
+                            "expected_type":"SPREADSHEET",
+                            "semantic_sha256":spreadsheet_digest_one
+                        },
+                        "sheet_id":"summary",
+                        "start_row":1,
+                        "start_column":1,
+                        "end_row":5,
+                        "end_column":3
+                    }}
+                ]
+            }
+        });
+        let document_create = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                create_spec,
+                AgentModelToolCall {
+                    id: "composition-document-create".into(),
+                    name: "artifact.create".into(),
+                    arguments: document_r1_arguments.clone(),
+                },
+                false,
+            )
+            .unwrap();
+        let document_create_tool_id = document_create.id.clone();
+        let ToolDisposition::Executed(document_created_result) = coordinator
+            .execute_tool(&prepared, document_create, true, &test_cancellation())
+            .await
+        else {
+            panic!("Document composition create must use existing Tool pipeline")
+        };
+        assert!(document_created_result.wrote_workspace);
+        let document_create_receipt = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|tool| tool.id == document_create_tool_id)
+            .unwrap()
+            .receipt
+            .unwrap();
+        let document_id = ArtifactId::new(document_create_receipt["artifact_id"].as_str().unwrap());
+        let document_revision_one = ArtifactRevisionId::new(
+            document_create_receipt["artifact_revision_id"]
+                .as_str()
+                .unwrap(),
+        );
+        let document_digest_one = document_create_receipt["artifact_semantic_sha256"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        storage
+            .record_agent_verification(VerificationReceiptView {
+                id: VerificationReceiptId::new(Uuid::now_v7().to_string()),
+                run_id: prepared.run.id.clone(),
+                tool_call_id: None,
+                check_kind: "ARTIFACT_EXACT_REVISION".into(),
+                outcome: VerificationOutcome::Pass,
+                summary: "Pinned parent R1 verification".into(),
+                artifact_sha256: None,
+                subject: Some(VerificationSubject::ArtifactRevision {
+                    artifact_id: document_id.clone(),
+                    revision_id: document_revision_one.clone(),
+                    semantic_sha256: document_digest_one.clone(),
+                }),
+                exit_code: None,
+                created_at: 53,
+            })
+            .unwrap();
+
+        let document_read = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                read_spec,
+                AgentModelToolCall {
+                    id: "composition-document-read".into(),
+                    name: "artifact.read".into(),
+                    arguments: json!({"artifact_id":document_id}),
+                },
+                false,
+            )
+            .unwrap();
+        let ToolDisposition::Executed(document_read_result) = coordinator
+            .execute_tool(&prepared, document_read, false, &test_cancellation())
+            .await
+        else {
+            panic!("Document composition read must use existing Tool pipeline")
+        };
+        assert!(matches!(
+            document_read_result.message,
+            AgentModelMessage::ToolResult { content, is_error: false, .. }
+                if content.contains("UNTRUSTED_ARTIFACT_CONTENT")
+                    && content.contains("SPREADSHEET_RANGE")
+                    && !content.contains("Revenue 收入")
+        ));
+
+        let invalid_composition_tool = storage
+            .create_agent_tool_call(
+                prepared.run.id.clone(),
+                "artifact.create".into(),
+                AgentToolEffect::WorkspaceWrite,
+                AgentPolicyDecision::Allow,
+                json!({}),
+                54,
+            )
+            .unwrap();
+        let mut invalid_composition_arguments = document_r1_arguments.clone();
+        invalid_composition_arguments["content"]["blocks"][1]["source"]["artifact_ref"]["semantic_sha256"] =
+            json!("0".repeat(64));
+        assert_eq!(
+            DurableArtifactToolExecutor {
+                storage: storage.clone(),
+                runtime: ToolRuntime::new(&prepared.project_root, &artifacts).unwrap(),
+                run_id: prepared.run.id.clone(),
+                conversation_id: conversation.id.clone(),
+                project_field_id: project.field_id.clone(),
+                tool_call_id: invalid_composition_tool.id.clone(),
+            }
+            .execute(
+                "artifact.create",
+                &invalid_composition_arguments,
+                true,
+                &CommandCancellation::default(),
+            ),
+            Err(AgentError::ArtifactReferenceIntegrityFailed)
+        );
+        assert!(
+            storage
+                .artifact_mutation_by_tool_call(invalid_composition_tool.id)
+                .unwrap()
+                .is_none()
+        );
+
         let spreadsheet_update = coordinator
             .propose_tool_call(
                 &prepared.run,
@@ -9654,7 +9890,11 @@ mod tests {
             else {
                 panic!("Spreadsheet historical export must use artifact.export")
             };
-            assert!(result.wrote_workspace);
+            assert!(
+                result.wrote_workspace,
+                "Spreadsheet export failed: {:?}",
+                result.message
+            );
             assert!(workspace.join(output_path).exists());
         }
         let spreadsheet_r1_xlsx =
@@ -9682,6 +9922,171 @@ mod tests {
         assert_eq!(spreadsheet_export_receipt["external_relationship_count"], 0);
         assert_eq!(spreadsheet_export_receipt["macro_part_count"], 0);
         assert!(spreadsheet_export_receipt.get("content").is_none());
+
+        let parent_verification = storage
+            .list_agent_verifications(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|receipt| {
+                matches!(
+                    receipt.subject.as_ref(),
+                    Some(VerificationSubject::ArtifactRevision {
+                        artifact_id,
+                        revision_id,
+                        semantic_sha256,
+                    }) if artifact_id == &document_id
+                        && revision_id == &document_revision_one
+                        && semantic_sha256 == &document_digest_one
+                )
+            });
+        assert!(parent_verification.is_some());
+
+        let document_r2_content = json!({
+            "title":"Pinned Spreadsheet R2",
+            "blocks":[
+                {"kind":"HEADING","level":1,"text":"Composition 组合"},
+                {"kind":"SPREADSHEET_RANGE","source":{
+                    "artifact_ref":{
+                        "artifact_id":spreadsheet_id,
+                        "revision_id":spreadsheet_updated.revision.revision_id,
+                        "expected_type":"SPREADSHEET",
+                        "semantic_sha256":spreadsheet_updated.revision.semantic_sha256
+                    },
+                    "sheet_id":"summary",
+                    "start_row":1,
+                    "start_column":1,
+                    "end_row":5,
+                    "end_column":3
+                }}
+            ]
+        });
+        let document_update = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                update_spec,
+                AgentModelToolCall {
+                    id: "composition-document-update".into(),
+                    name: "artifact.update".into(),
+                    arguments: json!({
+                        "artifact_id":document_id,
+                        "expected_revision_id":document_revision_one,
+                        "content":document_r2_content
+                    }),
+                },
+                false,
+            )
+            .unwrap();
+        let ToolDisposition::Executed(document_updated_result) = coordinator
+            .execute_tool(&prepared, document_update, true, &test_cancellation())
+            .await
+        else {
+            panic!("Document composition update must use existing Tool pipeline")
+        };
+        assert!(document_updated_result.wrote_workspace);
+        let document_updated = storage.read_artifact(document_id.clone(), None).unwrap();
+        assert_eq!(document_updated.revision.sequence, 2);
+
+        let mut document_export_receipts = Vec::new();
+        for (call_id, revision_id, output_path) in [
+            (
+                "composition-document-export-r1",
+                document_revision_one.clone(),
+                "exports/composition-r1.docx",
+            ),
+            (
+                "composition-document-export-r2",
+                document_updated.revision.revision_id.clone(),
+                "exports/composition-r2.docx",
+            ),
+        ] {
+            let export = coordinator
+                .propose_tool_call(
+                    &prepared.run,
+                    export_spec,
+                    AgentModelToolCall {
+                        id: call_id.into(),
+                        name: "artifact.export".into(),
+                        arguments: json!({
+                            "artifact_id":document_id,
+                            "revision_id":revision_id,
+                            "output_path":output_path
+                        }),
+                    },
+                    false,
+                )
+                .unwrap();
+            let export_tool_id = export.id.clone();
+            let ToolDisposition::Executed(result) = coordinator
+                .execute_tool(&prepared, export, true, &test_cancellation())
+                .await
+            else {
+                panic!("Historical composed Document export must use artifact.export")
+            };
+            assert!(
+                result.wrote_workspace,
+                "composition export failed: {:?}",
+                result.message
+            );
+            assert!(!result.verification_passed);
+            let receipt = storage
+                .list_agent_tool_calls(prepared.run.id.clone())
+                .unwrap()
+                .into_iter()
+                .find(|tool| tool.id == export_tool_id)
+                .unwrap()
+                .receipt
+                .unwrap();
+            assert_eq!(receipt["dependency_count"], 1);
+            assert_eq!(receipt["dependencies"].as_array().unwrap().len(), 1);
+            assert_eq!(receipt["dependencies"][0]["expected_type"], "SPREADSHEET");
+            assert!(receipt.get("dependency_set_sha256").is_some());
+            assert!(receipt.get("content").is_none());
+            document_export_receipts.push(receipt);
+        }
+        assert_eq!(
+            document_export_receipts[0]["dependencies"][0]["child_revision_id"],
+            spreadsheet_revision_one.0
+        );
+        assert_eq!(
+            document_export_receipts[1]["dependencies"][0]["child_revision_id"],
+            spreadsheet_updated.revision.revision_id.0
+        );
+        let extraction_runtime = ToolRuntime::new(&prepared.project_root, &artifacts).unwrap();
+        let extracted_r1 = extraction_runtime
+            .execute(
+                "file.extract",
+                &json!({"path":"exports/composition-r1.docx"}),
+                false,
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        let extracted_r2 = extraction_runtime
+            .execute(
+                "file.extract",
+                &json!({"path":"exports/composition-r2.docx"}),
+                false,
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        for expected in [
+            "Composition 组合",
+            "项目",
+            "状态",
+            "R1 初始",
+            "Revenue 收入",
+            "12.34",
+            "TRUE",
+            "=SUM(B2:B3)",
+        ] {
+            assert!(
+                extracted_r1.observation.contains(expected),
+                "missing {expected}"
+            );
+        }
+        assert!(!extracted_r1.observation.contains("Forecast 预测"));
+        assert!(extracted_r2.observation.contains("R2 更新"));
+        assert!(extracted_r2.observation.contains("Forecast 预测"));
+        assert!(extracted_r2.observation.contains("0.985"));
 
         let spreadsheet_stale_tool = storage
             .create_agent_tool_call(

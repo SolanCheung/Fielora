@@ -1341,6 +1341,26 @@ pub struct DocumentArtifact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactRefV1 {
+    pub artifact_id: ArtifactId,
+    pub revision_id: ArtifactRevisionId,
+    pub expected_type: ArtifactType,
+    pub semantic_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SpreadsheetRangeEmbedV1 {
+    pub artifact_ref: ArtifactRefV1,
+    pub sheet_id: SpreadsheetSheetId,
+    pub start_row: u32,
+    pub start_column: u16,
+    pub end_row: u32,
+    pub end_column: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
 #[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DocumentBlock {
@@ -1348,6 +1368,7 @@ pub enum DocumentBlock {
     Paragraph { text: String },
     BulletList { items: Vec<String> },
     Table { rows: Vec<Vec<String>> },
+    SpreadsheetRange { source: SpreadsheetRangeEmbedV1 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

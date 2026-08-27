@@ -163,6 +163,8 @@ fn main() {
         DeleteLibraryObjectRequest::decl(&config),
         ListLibraryObjectsRequest::decl(&config),
         ArtifactType::decl(&config),
+        ArtifactRefV1::decl(&config),
+        SpreadsheetRangeEmbedV1::decl(&config),
         DocumentArtifact::decl(&config),
         DocumentBlock::decl(&config),
         PresentationArtifact::decl(&config),

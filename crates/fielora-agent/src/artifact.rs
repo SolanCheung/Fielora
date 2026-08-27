@@ -8,18 +8,19 @@ use crate::{
     diagram, normalize_relative, relative_text, resolve_for_write, sha256, spreadsheet,
 };
 use fielora_contracts::{
-    ArtifactContentV1, ArtifactReadView, ArtifactType as DurableArtifactType, DiagramArtifactV1,
-    DocumentArtifact, DocumentBlock, PresentationArtifact, PresentationBlock, PresentationLayout,
-    PresentationSlide, SlideRegion, SlideSlot, SpreadsheetArtifactV1,
+    ArtifactContentV1, ArtifactId, ArtifactReadView, ArtifactRevisionId,
+    ArtifactType as DurableArtifactType, DiagramArtifactV1, DocumentArtifact, DocumentBlock,
+    PresentationArtifact, PresentationBlock, PresentationLayout, PresentationSlide, SlideRegion,
+    SlideSlot, SpreadsheetArtifactV1, SpreadsheetRangeEmbedV1,
 };
 use office_oxide::docx::write::DocxWriter;
 use office_oxide::pptx::write::{PptxWriter, Run, SlideData};
 use office_oxide::{Document, DocumentFormat};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -47,6 +48,11 @@ const MAX_ELEMENTS_PER_SLIDE: usize = 32;
 const MAX_SLIDE_TEXT_BYTES: usize = 16 * 1024;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TOOL_RESULT_BYTES: usize = 64 * 1024;
+const MAX_REFERENCES_PER_REVISION: usize = 16;
+const MAX_TRANSITIVE_DEPENDENCIES: usize = 32;
+const MAX_COMPOSITION_DEPTH: usize = 4;
+const MAX_CHILD_SEMANTIC_JSON_BYTES: usize = 1024 * 1024;
+const MAX_RANGE_CELLS: usize = 1_024;
 const EXPORT_DEADLINE: Duration = Duration::from_secs(10);
 
 const EMU_PER_POINT: f64 = 12_700.0;
@@ -309,6 +315,7 @@ impl ArtifactDefinition {
                                     .map(String::as_str),
                             );
                         }
+                        DocumentBlock::SpreadsheetRange { .. } => {}
                     }
                 }
             }
@@ -600,6 +607,41 @@ fn durable_content_schema() -> Value {
         .as_array()
         .cloned()
         .unwrap_or_default();
+    let spreadsheet_range = json!({
+        "type":"object",
+        "properties":{
+            "kind":{"const":"SPREADSHEET_RANGE"},
+            "source":{
+                "type":"object",
+                "properties":{
+                    "artifact_ref":{
+                        "type":"object",
+                        "properties":{
+                            "artifact_id":{"type":"string","minLength":1,"maxLength":128},
+                            "revision_id":{"type":"string","minLength":1,"maxLength":128},
+                            "expected_type":{"const":"SPREADSHEET"},
+                            "semantic_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"}
+                        },
+                        "required":["artifact_id","revision_id","expected_type","semantic_sha256"],
+                        "additionalProperties":false
+                    },
+                    "sheet_id":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[a-z][a-z0-9_-]{0,63}$"},
+                    "start_row":{"type":"integer","minimum":1,"maximum":2000},
+                    "start_column":{"type":"integer","minimum":1,"maximum":256},
+                    "end_row":{"type":"integer","minimum":1,"maximum":2000},
+                    "end_column":{"type":"integer","minimum":1,"maximum":256}
+                },
+                "required":["artifact_ref","sheet_id","start_row","start_column","end_row","end_column"],
+                "additionalProperties":false
+            }
+        },
+        "required":["kind","source"],
+        "additionalProperties":false
+    });
+    variants[0]["properties"]["blocks"]["items"]["oneOf"]
+        .as_array_mut()
+        .expect("Document block schema must remain a oneOf")
+        .push(spreadsheet_range);
     variants.push(diagram_content_schema());
     variants.push(spreadsheet_content_schema());
     json!({"oneOf":variants})
@@ -668,6 +710,258 @@ pub struct CanonicalArtifactContent {
     pub canonical_json: String,
     pub semantic_sha256: String,
     pub semantic_unit_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ArtifactDependencyFact {
+    pub child_artifact_id: ArtifactId,
+    pub child_revision_id: ArtifactRevisionId,
+    pub expected_type: DurableArtifactType,
+    pub semantic_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedDocumentComposition {
+    pub document: DocumentArtifact,
+    pub dependencies: Vec<ArtifactDependencyFact>,
+    pub dependency_set_sha256: String,
+}
+
+/// Resolves exact Artifact revisions into one immutable render-preparation
+/// snapshot. The caller owns profile scoping; this service has no storage,
+/// network, model, permission, or mutation authority.
+pub fn resolve_document_composition<F>(
+    document: &DocumentArtifact,
+    mut read_exact: F,
+) -> Result<ResolvedDocumentComposition, AgentError>
+where
+    F: FnMut(&ArtifactId, &ArtifactRevisionId) -> Result<ArtifactReadView, AgentError>,
+{
+    let references = document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            DocumentBlock::SpreadsheetRange { source } => Some(source),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if references.len() > MAX_REFERENCES_PER_REVISION {
+        return Err(AgentError::ArtifactCompositionLimitExceeded);
+    }
+
+    let mut snapshot = BTreeMap::new();
+    let mut dependencies = BTreeMap::new();
+    for source in &references {
+        admit_spreadsheet_range(source)?;
+        let reference = &source.artifact_ref;
+        if reference.expected_type != DurableArtifactType::Spreadsheet {
+            return Err(AgentError::ArtifactReferenceTypeMismatch);
+        }
+        let node = (
+            reference.artifact_id.0.clone(),
+            reference.revision_id.0.clone(),
+        );
+        if !snapshot.contains_key(&node) {
+            if snapshot.len() >= MAX_TRANSITIVE_DEPENDENCIES {
+                return Err(AgentError::ArtifactCompositionLimitExceeded);
+            }
+            let child = read_exact(&reference.artifact_id, &reference.revision_id)?;
+            validate_exact_dependency(reference, &child)?;
+            snapshot.insert(node.clone(), child);
+        }
+        dependencies.insert(
+            node,
+            ArtifactDependencyFact {
+                child_artifact_id: reference.artifact_id.clone(),
+                child_revision_id: reference.revision_id.clone(),
+                expected_type: reference.expected_type,
+                semantic_sha256: reference.semantic_sha256.clone(),
+            },
+        );
+    }
+
+    let graph = snapshot
+        .keys()
+        .cloned()
+        .map(|node| (node, Vec::new()))
+        .collect::<BTreeMap<_, _>>();
+    let roots = references
+        .iter()
+        .map(|source| {
+            (
+                source.artifact_ref.artifact_id.0.clone(),
+                source.artifact_ref.revision_id.0.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    validate_dependency_graph(&graph, &roots)?;
+
+    let mut blocks = Vec::with_capacity(document.blocks.len());
+    for block in &document.blocks {
+        match block {
+            DocumentBlock::SpreadsheetRange { source } => {
+                let node = (
+                    source.artifact_ref.artifact_id.0.clone(),
+                    source.artifact_ref.revision_id.0.clone(),
+                );
+                let child = snapshot
+                    .get(&node)
+                    .ok_or(AgentError::ArtifactReferenceNotFound)?;
+                blocks.push(DocumentBlock::Table {
+                    rows: materialize_spreadsheet_range(source, child)?,
+                });
+            }
+            other => blocks.push(other.clone()),
+        }
+    }
+    let document = DocumentArtifact {
+        title: document.title.clone(),
+        blocks,
+    };
+    validate_definition(&ArtifactDefinition::Document(document.clone())).map_err(|error| {
+        if error == AgentError::ToolArgumentsInvalid {
+            AgentError::ArtifactCompositionLimitExceeded
+        } else {
+            error
+        }
+    })?;
+
+    let dependencies = dependencies.into_values().collect::<Vec<_>>();
+    let encoded = serde_json::to_vec(&dependencies).map_err(|_| AgentError::IoFailed)?;
+    Ok(ResolvedDocumentComposition {
+        document,
+        dependencies,
+        dependency_set_sha256: sha256(&encoded),
+    })
+}
+
+fn validate_dependency_graph(
+    graph: &BTreeMap<(String, String), Vec<(String, String)>>,
+    roots: &[(String, String)],
+) -> Result<(), AgentError> {
+    fn visit(
+        node: &(String, String),
+        graph: &BTreeMap<(String, String), Vec<(String, String)>>,
+        depth: usize,
+        active: &mut BTreeSet<(String, String)>,
+        visited: &mut BTreeSet<(String, String)>,
+    ) -> Result<(), AgentError> {
+        if depth > MAX_COMPOSITION_DEPTH {
+            return Err(AgentError::ArtifactCompositionLimitExceeded);
+        }
+        if active.contains(node) {
+            return Err(AgentError::ArtifactCompositionCycle);
+        }
+        if visited.contains(node) {
+            return Ok(());
+        }
+        if visited.len() >= MAX_TRANSITIVE_DEPENDENCIES {
+            return Err(AgentError::ArtifactCompositionLimitExceeded);
+        }
+        active.insert(node.clone());
+        for child in graph.get(node).into_iter().flatten() {
+            visit(child, graph, depth + 1, active, visited)?;
+        }
+        active.remove(node);
+        visited.insert(node.clone());
+        Ok(())
+    }
+
+    let mut active = BTreeSet::new();
+    let mut visited = BTreeSet::new();
+    for root in roots {
+        visit(root, graph, 1, &mut active, &mut visited)?;
+    }
+    Ok(())
+}
+
+fn admit_spreadsheet_range(source: &SpreadsheetRangeEmbedV1) -> Result<(), AgentError> {
+    let rows = source
+        .end_row
+        .checked_sub(source.start_row)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(AgentError::ArtifactReferenceRangeInvalid)?;
+    let columns = source
+        .end_column
+        .checked_sub(source.start_column)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(AgentError::ArtifactReferenceRangeInvalid)?;
+    let cells = usize::try_from(rows)
+        .ok()
+        .and_then(|rows| rows.checked_mul(usize::from(columns)))
+        .ok_or(AgentError::ArtifactReferenceRangeInvalid)?;
+    if source.start_row == 0
+        || source.start_column == 0
+        || source.end_row > 2_000
+        || source.end_column > 256
+        || rows as usize > MAX_TABLE_ROWS
+        || usize::from(columns) > MAX_TABLE_COLUMNS
+        || cells > MAX_RANGE_CELLS
+    {
+        return Err(AgentError::ArtifactReferenceRangeInvalid);
+    }
+    Ok(())
+}
+
+fn validate_exact_dependency(
+    reference: &fielora_contracts::ArtifactRefV1,
+    child: &ArtifactReadView,
+) -> Result<(), AgentError> {
+    if child.artifact.artifact_id != reference.artifact_id
+        || child.revision.artifact_id != reference.artifact_id
+        || child.revision.revision_id != reference.revision_id
+    {
+        return Err(AgentError::ArtifactReferenceNotFound);
+    }
+    if child.artifact.artifact_type != reference.expected_type
+        || child.revision.content.artifact_type() != reference.expected_type
+    {
+        return Err(AgentError::ArtifactReferenceTypeMismatch);
+    }
+    if child.revision.semantic_sha256 != reference.semantic_sha256 {
+        return Err(AgentError::ArtifactReferenceIntegrityFailed);
+    }
+    let canonical_json = serde_json::to_vec(&child.revision.content)
+        .map_err(|_| AgentError::ArtifactContentInvalid)?;
+    if canonical_json.len() > MAX_CHILD_SEMANTIC_JSON_BYTES
+        || sha256(&canonical_json) != child.revision.semantic_sha256
+    {
+        return Err(AgentError::ArtifactReferenceIntegrityFailed);
+    }
+    Ok(())
+}
+
+fn materialize_spreadsheet_range(
+    source: &SpreadsheetRangeEmbedV1,
+    child: &ArtifactReadView,
+) -> Result<Vec<Vec<String>>, AgentError> {
+    let ArtifactContentV1::Spreadsheet(workbook) = &child.revision.content else {
+        return Err(AgentError::ArtifactReferenceTypeMismatch);
+    };
+    let sheet = workbook
+        .sheets
+        .iter()
+        .find(|sheet| sheet.sheet_id == source.sheet_id)
+        .ok_or(AgentError::ArtifactReferenceRangeInvalid)?;
+    let cells = sheet
+        .cells
+        .iter()
+        .map(|cell| {
+            (
+                (cell.row, cell.column),
+                spreadsheet::display_text(&cell.value),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut rows = Vec::new();
+    for row in source.start_row..=source.end_row {
+        let mut values = Vec::new();
+        for column in source.start_column..=source.end_column {
+            values.push(cells.get(&(row, column)).cloned().unwrap_or_default());
+        }
+        rows.push(values);
+    }
+    Ok(rows)
 }
 
 pub fn canonicalize_content(
@@ -804,6 +1098,42 @@ pub fn export_saved(
         "visual_compatibility":"NOT_VERIFIED"
     })
     .to_string();
+    Ok(execution)
+}
+
+pub fn export_saved_document_composition(
+    runtime: &ToolRuntime,
+    artifact: &ArtifactReadView,
+    resolved: &ResolvedDocumentComposition,
+    output_path: &str,
+    cancellation: &CommandCancellation,
+) -> Result<ToolExecution, AgentError> {
+    if !matches!(artifact.revision.content, ArtifactContentV1::Document(_)) {
+        return Err(AgentError::ArtifactContentInvalid);
+    }
+    let mut transient = artifact.clone();
+    transient.revision.content = ArtifactContentV1::Document(resolved.document.clone());
+    let mut execution = export_saved(runtime, &transient, output_path, cancellation)?;
+    let receipt = execution
+        .receipt
+        .as_object_mut()
+        .ok_or(AgentError::IoFailed)?;
+    receipt.insert(
+        "dependency_count".into(),
+        json!(resolved.dependencies.len()),
+    );
+    receipt.insert(
+        "dependency_set_sha256".into(),
+        json!(resolved.dependency_set_sha256),
+    );
+    receipt.insert("dependencies".into(), json!(resolved.dependencies));
+    if serde_json::to_vec(&execution.receipt)
+        .map_err(|_| AgentError::IoFailed)?
+        .len()
+        > MAX_TOOL_RESULT_BYTES
+    {
+        return Err(AgentError::IoFailed);
+    }
     Ok(execution)
 }
 
@@ -1252,6 +1582,34 @@ fn validate_definition(definition: &ArtifactDefinition) -> Result<(), AgentError
                             admit_text_allow_empty(cell, &mut text_bytes)?;
                         }
                     }
+                    DocumentBlock::SpreadsheetRange { source } => {
+                        tables += 1;
+                        let reference = &source.artifact_ref;
+                        if reference.artifact_id.0.is_empty()
+                            || reference.artifact_id.0.len() > 128
+                            || reference.revision_id.0.is_empty()
+                            || reference.revision_id.0.len() > 128
+                            || reference.semantic_sha256.len() != 64
+                            || !reference
+                                .semantic_sha256
+                                .bytes()
+                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                            || tables > MAX_TABLES
+                        {
+                            return Err(AgentError::ToolArgumentsInvalid);
+                        }
+                        if admit_spreadsheet_range(source).is_ok() {
+                            let rows = usize::try_from(source.end_row - source.start_row + 1)
+                                .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+                            let columns = usize::from(source.end_column - source.start_column + 1);
+                            cells = cells
+                                .checked_add(rows * columns)
+                                .ok_or(AgentError::ToolArgumentsInvalid)?;
+                            if cells > MAX_TABLE_CELLS {
+                                return Err(AgentError::ToolArgumentsInvalid);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1384,6 +1742,9 @@ fn render(definition: &ArtifactDefinition) -> Result<RenderedArtifact, AgentErro
                             .map(|row| row.iter().map(String::as_str).collect::<Vec<_>>())
                             .collect::<Vec<_>>();
                         writer.add_table(&rows);
+                    }
+                    DocumentBlock::SpreadsheetRange { .. } => {
+                        return Err(AgentError::ArtifactContentInvalid);
                     }
                 }
             }
@@ -1897,6 +2258,17 @@ fn validate_rendered(definition: &ArtifactDefinition, bytes: &[u8]) -> Result<()
     for name in required {
         archive.by_name(name).map_err(|_| AgentError::IoFailed)?;
     }
+    let document_xml = if artifact_type == ArtifactType::Document {
+        let mut xml = String::new();
+        archive
+            .by_name("word/document.xml")
+            .map_err(|_| AgentError::IoFailed)?
+            .read_to_string(&mut xml)
+            .map_err(|_| AgentError::IoFailed)?;
+        Some(xml)
+    } else {
+        None
+    };
     drop(archive);
     let reopened = Document::from_reader(Cursor::new(bytes.to_vec()), artifact_type.format())
         .map_err(|_| AgentError::IoFailed)?;
@@ -1905,10 +2277,12 @@ fn validate_rendered(definition: &ArtifactDefinition, bytes: &[u8]) -> Result<()
     }
     let plain_text = reopened.plain_text();
     let missing_semantic_text = match artifact_type {
-        ArtifactType::Document => definition
-            .expected_text()
-            .iter()
-            .any(|expected| !plain_text.contains(expected)),
+        ArtifactType::Document => definition.expected_text().iter().any(|expected| {
+            !plain_text.contains(expected)
+                && !document_xml
+                    .as_deref()
+                    .is_some_and(|xml| xml.contains(&escape_xml_text(expected)))
+        }),
         ArtifactType::Presentation => {
             let compact_plain_text = compact_whitespace(&plain_text);
             definition
@@ -1926,6 +2300,13 @@ fn validate_rendered(definition: &ArtifactDefinition, bytes: &[u8]) -> Result<()
         return Err(AgentError::IoFailed);
     }
     Ok(())
+}
+
+fn escape_xml_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn compact_whitespace(text: &str) -> String {
@@ -1965,6 +2346,263 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let runtime = ToolRuntime::new(&root, &root.join("tool-artifacts")).unwrap();
         (root, runtime)
+    }
+
+    fn spreadsheet_revision_fixture() -> ArtifactReadView {
+        let artifact_id = ArtifactId::new("spreadsheet-child");
+        let revision_id = ArtifactRevisionId::new("spreadsheet-r1");
+        let canonical = canonicalize_content(
+            DurableArtifactType::Spreadsheet,
+            json!({
+                "title":"Composition fixture",
+                "sheets":[{"sheet_id":"summary","name":"概览","cells":[
+                    {"row":1,"column":1,"value":{"kind":"STRING","value":"项目 & <状态>"}},
+                    {"row":1,"column":2,"value":{"kind":"DECIMAL","value":"0012.3400"}},
+                    {"row":2,"column":1,"value":{"kind":"BOOLEAN","value":true}},
+                    {"row":2,"column":2,"value":{"kind":"STRING","value":"=SUM(B2:B3)"}}
+                ]}]
+            }),
+        )
+        .unwrap();
+        ArtifactReadView {
+            artifact: ArtifactView {
+                artifact_id: artifact_id.clone(),
+                profile_id: ProfileId::new("profile"),
+                artifact_type: DurableArtifactType::Spreadsheet,
+                title: Some("Composition fixture".into()),
+                project_field_id: None,
+                current_revision_id: revision_id.clone(),
+                created_from_conversation_id: None,
+                created_by_agent_run_id: None,
+                updated_by_device: DeviceId::new("device"),
+                created_at: 1,
+                updated_at: 1,
+            },
+            revision: ArtifactRevisionView {
+                revision_id,
+                artifact_id,
+                sequence: 1,
+                parent_revision_id: None,
+                mutation_kind: ArtifactMutationKind::Create,
+                content_schema_version: 1,
+                semantic_sha256: canonical.semantic_sha256,
+                content: canonical.content,
+                created_from_conversation_id: None,
+                created_by_agent_run_id: None,
+                created_by_tool_call_id: ToolCallId::new("tool"),
+                created_at: 1,
+            },
+        }
+    }
+
+    fn spreadsheet_range_document(child: &ArtifactReadView) -> DocumentArtifact {
+        DocumentArtifact {
+            title: Some("Pinned child".into()),
+            blocks: vec![DocumentBlock::SpreadsheetRange {
+                source: SpreadsheetRangeEmbedV1 {
+                    artifact_ref: fielora_contracts::ArtifactRefV1 {
+                        artifact_id: child.artifact.artifact_id.clone(),
+                        revision_id: child.revision.revision_id.clone(),
+                        expected_type: DurableArtifactType::Spreadsheet,
+                        semantic_sha256: child.revision.semantic_sha256.clone(),
+                    },
+                    sheet_id: fielora_contracts::SpreadsheetSheetId::new("summary"),
+                    start_row: 1,
+                    start_column: 1,
+                    end_row: 3,
+                    end_column: 3,
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn spreadsheet_range_resolution_is_exact_sparse_literal_and_deterministic() {
+        let child = spreadsheet_revision_fixture();
+        let document = spreadsheet_range_document(&child);
+        let resolved = resolve_document_composition(&document, |artifact_id, revision_id| {
+            assert_eq!(artifact_id, &child.artifact.artifact_id);
+            assert_eq!(revision_id, &child.revision.revision_id);
+            Ok(child.clone())
+        })
+        .unwrap();
+        assert_eq!(resolved.dependencies.len(), 1);
+        assert_eq!(resolved.dependency_set_sha256.len(), 64);
+        assert_eq!(
+            resolved.document.blocks,
+            vec![DocumentBlock::Table {
+                rows: vec![
+                    vec!["项目 & <状态>".into(), "12.34".into(), "".into()],
+                    vec!["TRUE".into(), "=SUM(B2:B3)".into(), "".into()],
+                    vec!["".into(), "".into(), "".into()],
+                ]
+            }]
+        );
+        let repeated = resolve_document_composition(&document, |_, _| Ok(child.clone())).unwrap();
+        assert_eq!(resolved, repeated);
+        let definition = ArtifactDefinition::Document(resolved.document.clone());
+        let rendered = render(&definition).unwrap();
+        let reopened =
+            Document::from_reader(Cursor::new(rendered.bytes.clone()), DocumentFormat::Docx)
+                .unwrap();
+        let plain_text = reopened.plain_text();
+        for expected in ["项目", "状态", "12.34", "TRUE", "=SUM(B2:B3)"] {
+            assert!(
+                plain_text.contains(expected),
+                "missing {expected}: {plain_text:?}"
+            );
+        }
+        let mut archive = ZipArchive::new(Cursor::new(&rendered.bytes)).unwrap();
+        let mut document_xml = String::new();
+        archive
+            .by_name("word/document.xml")
+            .unwrap()
+            .read_to_string(&mut document_xml)
+            .unwrap();
+        assert!(document_xml.contains("项目 &amp; &lt;状态&gt;"));
+        validate_rendered(&definition, &rendered.bytes).unwrap();
+    }
+
+    #[test]
+    fn spreadsheet_range_resolution_fails_closed_on_reference_mismatch() {
+        let child = spreadsheet_revision_fixture();
+        let mut wrong_digest = spreadsheet_range_document(&child);
+        let DocumentBlock::SpreadsheetRange { source } = &mut wrong_digest.blocks[0] else {
+            unreachable!()
+        };
+        source.artifact_ref.semantic_sha256 = "0".repeat(64);
+        assert_eq!(
+            resolve_document_composition(&wrong_digest, |_, _| Ok(child.clone())),
+            Err(AgentError::ArtifactReferenceIntegrityFailed)
+        );
+
+        let mut wrong_type = spreadsheet_range_document(&child);
+        let DocumentBlock::SpreadsheetRange { source } = &mut wrong_type.blocks[0] else {
+            unreachable!()
+        };
+        source.artifact_ref.expected_type = DurableArtifactType::Document;
+        assert_eq!(
+            resolve_document_composition(&wrong_type, |_, _| Ok(child.clone())),
+            Err(AgentError::ArtifactReferenceTypeMismatch)
+        );
+
+        let mut wrong_range = spreadsheet_range_document(&child);
+        let DocumentBlock::SpreadsheetRange { source } = &mut wrong_range.blocks[0] else {
+            unreachable!()
+        };
+        source.end_row = 65;
+        assert_eq!(
+            resolve_document_composition(&wrong_range, |_, _| Ok(child.clone())),
+            Err(AgentError::ArtifactReferenceRangeInvalid)
+        );
+        assert_eq!(
+            resolve_document_composition(&spreadsheet_range_document(&child), |_, _| {
+                Err(AgentError::ArtifactReferenceNotFound)
+            }),
+            Err(AgentError::ArtifactReferenceNotFound)
+        );
+    }
+
+    #[test]
+    fn spreadsheet_reference_identity_and_range_are_parent_digest_authority() {
+        let child = spreadsheet_revision_fixture();
+        let base = serde_json::to_value(spreadsheet_range_document(&child)).unwrap();
+        let baseline = canonicalize_content(DurableArtifactType::Document, base.clone()).unwrap();
+        for (path, replacement) in [
+            (
+                &["blocks", "0", "source", "artifact_ref", "artifact_id"][..],
+                json!("other-artifact"),
+            ),
+            (
+                &["blocks", "0", "source", "artifact_ref", "revision_id"][..],
+                json!("other-revision"),
+            ),
+            (
+                &["blocks", "0", "source", "artifact_ref", "expected_type"][..],
+                json!("DOCUMENT"),
+            ),
+            (
+                &["blocks", "0", "source", "artifact_ref", "semantic_sha256"][..],
+                json!("0".repeat(64)),
+            ),
+            (
+                &["blocks", "0", "source", "sheet_id"][..],
+                json!("other-sheet"),
+            ),
+            (&["blocks", "0", "source", "end_row"][..], json!(4)),
+        ] {
+            let mut changed = base.clone();
+            let mut target = &mut changed;
+            for segment in &path[..path.len() - 1] {
+                target = if let Ok(index) = segment.parse::<usize>() {
+                    &mut target[index]
+                } else {
+                    &mut target[*segment]
+                };
+            }
+            target[path[path.len() - 1]] = replacement;
+            let canonical = canonicalize_content(DurableArtifactType::Document, changed).unwrap();
+            assert_ne!(canonical.semantic_sha256, baseline.semantic_sha256);
+        }
+
+        let mut unknown = base;
+        unknown["blocks"][0]["source"]["unexpected"] = json!(true);
+        assert_eq!(
+            canonicalize_content(DurableArtifactType::Document, unknown),
+            Err(AgentError::ArtifactContentInvalid)
+        );
+    }
+
+    #[test]
+    fn exact_revision_dependency_graph_detects_cycles_and_bounds_depth() {
+        let a1 = ("artifact-a".into(), "r1".into());
+        let a2 = ("artifact-a".into(), "r2".into());
+        let cycle = BTreeMap::from([
+            (a1.clone(), vec![a2.clone()]),
+            (a2.clone(), vec![a1.clone()]),
+        ]);
+        assert_eq!(
+            validate_dependency_graph(&cycle, std::slice::from_ref(&a1)),
+            Err(AgentError::ArtifactCompositionCycle)
+        );
+
+        let historical_self =
+            BTreeMap::from([(a2.clone(), vec![a1.clone()]), (a1.clone(), Vec::new())]);
+        assert_eq!(
+            validate_dependency_graph(&historical_self, std::slice::from_ref(&a2)),
+            Ok(())
+        );
+
+        let nodes = (0..=MAX_COMPOSITION_DEPTH)
+            .map(|index| ("artifact".into(), format!("r{index}")))
+            .collect::<Vec<_>>();
+        let too_deep = nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                (
+                    node.clone(),
+                    nodes.get(index + 1).cloned().into_iter().collect(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            validate_dependency_graph(&too_deep, std::slice::from_ref(&nodes[0])),
+            Err(AgentError::ArtifactCompositionLimitExceeded)
+        );
+
+        let too_many_roots = (0..=MAX_TRANSITIVE_DEPENDENCIES)
+            .map(|index| (format!("artifact-{index}"), "r1".into()))
+            .collect::<Vec<_>>();
+        let too_many = too_many_roots
+            .iter()
+            .cloned()
+            .map(|node| (node, Vec::new()))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            validate_dependency_graph(&too_many, &too_many_roots),
+            Err(AgentError::ArtifactCompositionLimitExceeded)
+        );
     }
 
     fn document_args(path: &str) -> Value {
@@ -2317,6 +2955,16 @@ mod tests {
         assert!(schema.contains("TWO_COLUMN"));
         assert!(!schema.contains("\"x\""));
         assert!(!schema.contains("\"template\""));
+        assert!(!schema.contains("SPREADSHEET_RANGE"));
+        let create_schema = tools
+            .iter()
+            .find(|tool| tool.definition.name == "artifact.create")
+            .unwrap()
+            .definition
+            .input_schema
+            .to_string();
+        assert!(create_schema.contains("SPREADSHEET_RANGE"));
+        assert!(create_schema.contains("SPREADSHEET"));
         assert_eq!(
             PolicyEngine.decide(AgentPermission::ReadOnly, spec, &document_args("out.docx")),
             AgentPolicyDecision::Ask
