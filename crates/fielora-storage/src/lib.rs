@@ -5289,7 +5289,6 @@ mod tests {
     fn incompatible_legacy_rows_roll_back_migration_0002() {
         let root = temporary_root();
         let paths = PlatformPaths::from_root(root.clone()).unwrap();
-        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
         let mut connection = open_connection(&paths.database).unwrap();
         connection.execute_batch("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,checksum TEXT NOT NULL,applied_at INTEGER NOT NULL);").unwrap();
         connection.execute_batch(MIGRATION_0001).unwrap();
@@ -5299,10 +5298,17 @@ mod tests {
                 params![MIGRATION_0001_NAME, migration_checksum(MIGRATION_0001)],
             )
             .unwrap();
-        let user = bootstrap_records(&mut connection, &device, 1).unwrap();
+        // This fixture intentionally remains at schema 1. Production bootstrap
+        // runs only after all migrations and now writes the profile introduced
+        // by migration 0007, so seed only the schema-1 principal required by
+        // the incompatible legacy object.
+        let transaction = connection.transaction().unwrap();
+        let user = ensure_principal(&transaction, "LOCAL_USER", LOCAL_USER_NAME, 1).unwrap();
+        transaction.commit().unwrap();
         let field = Uuid::now_v7().to_string();
+        let object = Uuid::now_v7().to_string();
         connection.execute("INSERT INTO fields(id,owner_principal_id,title,lifecycle_status,revision,created_at,updated_at) VALUES(?1,?2,'legacy','ACTIVE',1,1,1)",params![field,user.0]).unwrap();
-        connection.execute("INSERT INTO field_objects(id,field_id,owner_principal_id,object_kind,title,external_ref_type,external_ref_id,metadata_json,created_at,updated_at) VALUES(?1,?2,?3,'LEGACY','legacy',NULL,NULL,'{}',1,1)",params![Uuid::now_v7().to_string(),field,user.0]).unwrap();
+        connection.execute("INSERT INTO field_objects(id,field_id,owner_principal_id,object_kind,title,external_ref_type,external_ref_id,metadata_json,created_at,updated_at) VALUES(?1,?2,?3,'LEGACY','legacy',NULL,NULL,'{}',1,1)",params![object,field,user.0]).unwrap();
         assert!(matches!(
             apply_migrations(&mut connection, 2),
             Err(StorageError::MigrationIncompatibleData)
@@ -5321,7 +5327,22 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((version2, transient), (0, 0));
+        let phase02_columns: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('field_objects') WHERE name IN ('created_by','source_activity_id','lifecycle_status','revision')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let legacy_kind: String = connection
+            .query_row(
+                "SELECT object_kind FROM field_objects WHERE id=?1",
+                [object],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!((version2, transient, phase02_columns), (0, 0, 0));
+        assert_eq!(legacy_kind, "LEGACY");
         drop(connection);
         fs::remove_dir_all(root).unwrap();
     }
