@@ -6922,7 +6922,7 @@ mod tests {
     };
     use fielora_storage::StorageWorker;
     use office_oxide::docx::write::DocxWriter;
-    use std::io::{Cursor, Write};
+    use std::io::Cursor;
     use std::sync::OnceLock;
     use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc;
