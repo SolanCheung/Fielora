@@ -9,8 +9,14 @@ mod artifact;
 mod file;
 pub mod mcp;
 pub mod mcp_connections;
+mod plugins;
 mod skills;
 pub mod web;
+
+pub use plugins::{
+    PluginContributions, PluginEngines, PluginError, PluginManifest,
+    PluginSkillContributionSnapshot, PluginSnapshot, PluginSourceKind, PluginTrust,
+};
 
 pub use skills::{
     CompiledSkillContext, LoadedSkill, SkillCatalog, SkillCatalogEntry, SkillDiagnostic,
@@ -182,6 +188,10 @@ pub enum AgentError {
     SkillInvalid,
     #[error("AGENT_SKILL_CHANGED")]
     SkillChanged,
+    #[error("PLUGIN_CHANGED")]
+    PluginChanged,
+    #[error("PLUGIN_ADMISSION_FAILED")]
+    PluginAdmissionFailed,
     #[error("PRESENTATION_CONTENT_OVERFLOW")]
     PresentationContentOverflow,
     #[error("AGENT_IO_FAILED")]
@@ -238,6 +248,8 @@ impl AgentError {
             Self::McpCatalogInvalid => "MCP_CATALOG_INVALID",
             Self::SkillInvalid => "AGENT_SKILL_INVALID",
             Self::SkillChanged => "AGENT_SKILL_CHANGED",
+            Self::PluginChanged => "PLUGIN_CHANGED",
+            Self::PluginAdmissionFailed => "PLUGIN_ADMISSION_FAILED",
             Self::PresentationContentOverflow => "PRESENTATION_CONTENT_OVERFLOW",
             Self::IoFailed => "AGENT_IO_FAILED",
         }
@@ -324,7 +336,7 @@ impl ToolExecutionSource {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ToolSpec {
     pub definition: ModelToolDefinition,
     pub effect: AgentToolEffect,

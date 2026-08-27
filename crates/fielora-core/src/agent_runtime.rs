@@ -77,6 +77,7 @@ pub struct AgentCoordinator {
     input_attachments: Arc<Mutex<HashMap<String, Vec<AgentInputAttachment>>>>,
     tool_providers: Arc<Vec<Arc<dyn ToolProvider>>>,
     static_credential_bindings: Arc<Vec<StaticCredentialBinding>>,
+    local_unpacked_plugin_roots: Arc<Vec<PathBuf>>,
     user_mcp_config_path: Option<PathBuf>,
     run_mcp_states: Arc<Mutex<HashMap<String, RunMcpState>>>,
 }
@@ -600,6 +601,14 @@ impl AgentCoordinator {
         )
     }
 
+    /// Supplies an explicit, already user/test-selected set of local unpacked
+    /// Plugin roots. This does not scan, persist, install, or activate code.
+    #[allow(dead_code)] // Deliberately dormant until a trusted caller supplies explicit roots.
+    pub fn with_local_unpacked_plugin_roots(mut self, plugin_roots: Vec<PathBuf>) -> Self {
+        self.local_unpacked_plugin_roots = Arc::new(plugin_roots);
+        self
+    }
+
     fn build(
         storage: StorageHandle,
         credentials: Arc<dyn CredentialStore>,
@@ -622,6 +631,7 @@ impl AgentCoordinator {
             input_attachments: Arc::new(Mutex::new(HashMap::new())),
             tool_providers: Arc::new(tool_providers),
             static_credential_bindings: Arc::new(static_credential_bindings),
+            local_unpacked_plugin_roots: Arc::new(Vec::new()),
             user_mcp_config_path: None,
             run_mcp_states: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -629,6 +639,19 @@ impl AgentCoordinator {
 
     fn available_tool_catalog(&self) -> Result<Vec<ToolSpec>, AgentError> {
         coding_tool_catalog_with_providers(self.tool_providers.as_slice())
+    }
+
+    #[cfg(test)]
+    fn discover_skill_catalog(&self, project_root: &Path) -> Result<SkillCatalog, AgentError> {
+        if self.local_unpacked_plugin_roots.is_empty() {
+            SkillCatalog::discover(project_root)
+        } else {
+            SkillCatalog::discover_with_local_unpacked_plugins(
+                project_root,
+                self.local_unpacked_plugin_roots.as_slice(),
+            )
+            .map_err(|_| AgentError::PluginAdmissionFailed)
+        }
     }
 
     fn providers_for_run(&self, run_id: &AgentRunId) -> Vec<Arc<dyn ToolProvider>> {
@@ -1897,19 +1920,31 @@ impl AgentCoordinator {
             (catalog, true)
         } else {
             let root = prepared.project_root.clone();
-            let catalog =
-                match tokio::task::spawn_blocking(move || SkillCatalog::discover(&root)).await {
-                    Ok(Ok(catalog)) => catalog,
-                    _ => {
-                        fail_run(
-                            &self.storage,
-                            &self.sender,
-                            run_id,
-                            "AGENT_SKILL_DISCOVERY_FAILED",
-                        );
-                        return;
-                    }
-                };
+            let plugin_roots = Arc::clone(&self.local_unpacked_plugin_roots);
+            let catalog = match tokio::task::spawn_blocking(move || {
+                if plugin_roots.is_empty() {
+                    SkillCatalog::discover(&root)
+                } else {
+                    SkillCatalog::discover_with_local_unpacked_plugins(
+                        &root,
+                        plugin_roots.as_slice(),
+                    )
+                    .map_err(|_| AgentError::PluginAdmissionFailed)
+                }
+            })
+            .await
+            {
+                Ok(Ok(catalog)) => catalog,
+                _ => {
+                    fail_run(
+                        &self.storage,
+                        &self.sender,
+                        run_id,
+                        "AGENT_SKILL_DISCOVERY_FAILED",
+                    );
+                    return;
+                }
+            };
             self.skill_catalogs
                 .lock()
                 .unwrap()
@@ -8617,6 +8652,121 @@ mod tests {
                 .all(|event| event.kind != AgentEventKind::VerificationRecorded)
         );
         assert!(!workspace.join("SKILL_SCRIPT_EXECUTED").exists());
+
+        drop(coordinator);
+        drop(storage);
+        drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn explicit_declarative_plugin_root_enters_existing_skill_pipeline_without_activation() {
+        let root =
+            std::env::temp_dir().join(format!("fielora-core-plugin-skill-{}", Uuid::now_v7()));
+        let workspace = root.join("workspace");
+        let artifacts = root.join("artifacts");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::write(workspace.join("README.md"), "declarative Plugin probe\n").unwrap();
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("fielora-agent")
+            .join("tests")
+            .join("fixtures")
+            .join("plugin-fixture")
+            .canonicalize()
+            .unwrap();
+        let fixture_files_before = walk_files(&fixture)
+            .into_iter()
+            .map(|path| {
+                let digest = format!("{:x}", Sha256::digest(std::fs::read(&path).unwrap()));
+                (path.strip_prefix(&fixture).unwrap().to_path_buf(), digest)
+            })
+            .collect::<Vec<_>>();
+
+        let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let worker = StorageWorker::start(&paths.database, device, 1).unwrap();
+        let storage = worker.handle();
+        let credentials = Arc::new(CoreCredentialStore::default());
+        let (sender, _receiver) = mpsc::sync_channel(32);
+        let coordinator = AgentCoordinator::new(
+            storage.clone(),
+            credentials.clone(),
+            sender,
+            artifacts.clone(),
+            Handle::current(),
+        )
+        .with_local_unpacked_plugin_roots(vec![fixture.clone()]);
+
+        let catalog_before = coordinator.available_tool_catalog().unwrap();
+        let skill_catalog = coordinator
+            .discover_skill_catalog(&workspace.canonicalize().unwrap())
+            .unwrap();
+        let catalog_after = coordinator.available_tool_catalog().unwrap();
+        assert_eq!(catalog_after, catalog_before);
+        assert_eq!(skill_catalog.plugin_snapshots().len(), 1);
+        assert!(
+            skill_catalog
+                .tier_one_metadata()
+                .iter()
+                .any(|entry| entry["name"] == "fixture-plugin-skill"
+                    && entry["source_kind"] == "PLUGIN"
+                    && entry["trust"] == "UNTRUSTED_LOCAL_PLUGIN")
+        );
+        assert!(
+            !skill_catalog
+                .snapshot_manifest()
+                .to_string()
+                .contains("FIELORA_DECLARATIVE_PLUGIN_SKILL_BODY_SENTINEL_7F3E2A")
+        );
+        assert!(credentials.reads.lock().unwrap().is_empty());
+        assert!(coordinator.run_mcp_states.lock().unwrap().is_empty());
+
+        let runtime =
+            ToolRuntime::with_skill_catalog(&workspace, &artifacts, skill_catalog).unwrap();
+        let cancellation = CommandCancellation::default();
+        let listed = runtime
+            .execute("list_skills", &json!({}), false, &cancellation)
+            .unwrap();
+        assert!(listed.observation.contains("fixture-plugin-skill"));
+        assert!(
+            !listed
+                .observation
+                .contains("FIELORA_DECLARATIVE_PLUGIN_SKILL_BODY_SENTINEL_7F3E2A")
+        );
+        let loaded = runtime
+            .execute(
+                "load_skill",
+                &json!({"name":"fixture-plugin-skill"}),
+                false,
+                &cancellation,
+            )
+            .unwrap();
+        assert_eq!(loaded.receipt["kind"], "SKILL_LOADED");
+        assert_eq!(loaded.receipt["source_kind"], "PLUGIN");
+        assert_eq!(loaded.receipt["plugin_id"], "fixture.plugin");
+        assert!(
+            loaded
+                .observation
+                .contains("FIELORA_DECLARATIVE_PLUGIN_SKILL_BODY_SENTINEL_7F3E2A")
+        );
+        assert!(loaded.receipt.get("verification_passed").is_none());
+        assert!(credentials.reads.lock().unwrap().is_empty());
+        assert!(coordinator.run_mcp_states.lock().unwrap().is_empty());
+        assert_eq!(
+            coordinator.available_tool_catalog().unwrap(),
+            catalog_before
+        );
+        let fixture_files_after = walk_files(&fixture)
+            .into_iter()
+            .map(|path| {
+                let digest = format!("{:x}", Sha256::digest(std::fs::read(&path).unwrap()));
+                (path.strip_prefix(&fixture).unwrap().to_path_buf(), digest)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(fixture_files_after, fixture_files_before);
+        assert!(!workspace.join("PLUGIN_INSTRUCTION_EXECUTED").exists());
 
         drop(coordinator);
         drop(storage);

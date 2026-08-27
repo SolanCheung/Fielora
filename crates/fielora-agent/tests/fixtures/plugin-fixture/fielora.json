@@ -1,0 +1,14 @@
+{
+  "id": "fixture.plugin",
+  "name": "Fielora Declarative Plugin Fixture",
+  "version": "1.0.0",
+  "publisher": "fixture",
+  "engines": {
+    "fielora": ">=0.1"
+  },
+  "contributes": {
+    "skills": [
+      "skills/fixture-plugin-skill"
+    ]
+  }
+}
