@@ -11,6 +11,8 @@ use uuid::{Uuid, Version};
 
 pub const MAX_CREDENTIAL_BYTES: usize = 2048;
 
+const STATIC_CREDENTIAL_TARGET_PREFIX: &str = "Fielora/credential/";
+
 const MAX_MANAGED_PROCESS_ARGUMENTS: usize = 128;
 const MAX_MANAGED_PROCESS_ENVIRONMENT: usize = 128;
 
@@ -251,6 +253,47 @@ impl Drop for SecretBytes {
     }
 }
 
+/// Stable, non-secret identity for one generic static credential.
+///
+/// The opaque reference is safe to compare and persist in future trusted
+/// configuration, but it never contains or derives from the credential bytes.
+/// Existing model Provider targets remain separate and unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CredentialRef(String);
+
+impl CredentialRef {
+    pub fn new() -> Self {
+        Self(format!("cred_{}", Uuid::now_v7()))
+    }
+
+    pub fn parse(value: impl Into<String>) -> Result<Self, CredentialError> {
+        let value = value.into();
+        let uuid = value
+            .strip_prefix("cred_")
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .filter(|uuid| uuid.get_version() == Some(Version::SortRand))
+            .ok_or(CredentialError::InvalidReference)?;
+        if value != format!("cred_{uuid}") {
+            return Err(CredentialError::InvalidReference);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn target_name(&self) -> String {
+        format!("{STATIC_CREDENTIAL_TARGET_PREFIX}{}", self.0)
+    }
+}
+
+impl Default for CredentialRef {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Return whether an address is eligible for a direct public-Internet
 /// connection. Private, loopback, link-local, multicast, unspecified,
 /// documentation, benchmarking, transition, and other special-purpose ranges
@@ -301,6 +344,8 @@ pub fn is_public_internet_ip(ip: IpAddr) -> bool {
 
 #[derive(Debug, Error)]
 pub enum CredentialError {
+    #[error("credential reference is invalid")]
+    InvalidReference,
     #[error("credential not found")]
     NotFound,
     #[error("credential is empty or exceeds the 2048-byte bound")]
@@ -315,6 +360,29 @@ pub trait CredentialStore: Send + Sync {
     fn delete(&self, target: &str) -> Result<(), CredentialError>;
     fn exists(&self, target: &str) -> bool {
         self.read(target).is_ok()
+    }
+
+    fn put_static(
+        &self,
+        credential_ref: &CredentialRef,
+        secret: SecretBytes,
+    ) -> Result<(), CredentialError> {
+        self.store(&credential_ref.target_name(), secret)
+    }
+
+    fn resolve_static(
+        &self,
+        credential_ref: &CredentialRef,
+    ) -> Result<SecretBytes, CredentialError> {
+        self.read(&credential_ref.target_name())
+    }
+
+    fn static_exists(&self, credential_ref: &CredentialRef) -> bool {
+        self.exists(&credential_ref.target_name())
+    }
+
+    fn delete_static(&self, credential_ref: &CredentialRef) -> Result<(), CredentialError> {
+        self.delete(&credential_ref.target_name())
     }
 }
 
@@ -542,6 +610,41 @@ impl DeviceIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct MemoryCredentialStore {
+        values: Mutex<HashMap<String, Vec<u8>>>,
+    }
+
+    impl CredentialStore for MemoryCredentialStore {
+        fn store(&self, target: &str, secret: SecretBytes) -> Result<(), CredentialError> {
+            if secret.expose().is_empty() || secret.expose().len() > MAX_CREDENTIAL_BYTES {
+                return Err(CredentialError::InvalidSize);
+            }
+            self.values
+                .lock()
+                .unwrap()
+                .insert(target.to_owned(), secret.expose().to_vec());
+            Ok(())
+        }
+
+        fn read(&self, target: &str) -> Result<SecretBytes, CredentialError> {
+            self.values
+                .lock()
+                .unwrap()
+                .get(target)
+                .cloned()
+                .map(SecretBytes::new)
+                .ok_or(CredentialError::NotFound)
+        }
+
+        fn delete(&self, target: &str) -> Result<(), CredentialError> {
+            self.values.lock().unwrap().remove(target);
+            Ok(())
+        }
+    }
 
     fn temporary_root() -> PathBuf {
         std::env::temp_dir().join(format!("fielora-platform-{}", Uuid::now_v7()))
@@ -576,5 +679,104 @@ mod tests {
         assert_eq!(paths.library_dir, library);
         assert_eq!(paths.cache_dir, cache);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generic_static_credentials_use_an_opaque_isolated_namespace() {
+        let store = MemoryCredentialStore::default();
+        let credential_ref = CredentialRef::new();
+        let parsed = CredentialRef::parse(credential_ref.as_str()).unwrap();
+        assert_eq!(parsed, credential_ref);
+        assert!(credential_ref.as_str().starts_with("cred_"));
+        assert_eq!(
+            credential_ref.target_name(),
+            format!("Fielora/credential/{}", credential_ref.as_str())
+        );
+        assert!(
+            !credential_ref
+                .target_name()
+                .starts_with("Fielora/provider/")
+        );
+        for invalid in [
+            "provider-name",
+            "cred_not-a-uuid",
+            "Fielora/provider/0195f5f5-1111-7111-8111-111111111111",
+            "cred_0195f5f5-1111-4111-8111-111111111111",
+        ] {
+            assert!(matches!(
+                CredentialRef::parse(invalid),
+                Err(CredentialError::InvalidReference)
+            ));
+        }
+
+        store
+            .put_static(&credential_ref, SecretBytes::new(b"version-one".to_vec()))
+            .unwrap();
+        assert!(store.static_exists(&credential_ref));
+        assert_eq!(
+            store.resolve_static(&credential_ref).unwrap().expose(),
+            b"version-one"
+        );
+        store
+            .put_static(&credential_ref, SecretBytes::new(b"version-two".to_vec()))
+            .unwrap();
+        assert_eq!(
+            store.resolve_static(&credential_ref).unwrap().expose(),
+            b"version-two"
+        );
+        store.delete_static(&credential_ref).unwrap();
+        assert!(!store.static_exists(&credential_ref));
+        assert!(matches!(
+            store.resolve_static(&credential_ref),
+            Err(CredentialError::NotFound)
+        ));
+        assert_eq!(
+            format!("{:?}", SecretBytes::new(b"never-print-me".to_vec())),
+            "SecretBytes([REDACTED])"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_static_credential_round_trip_replaces_and_deletes() {
+        struct Cleanup(CredentialRef);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = WindowsCredentialStore.delete_static(&self.0);
+            }
+        }
+
+        let credential_ref = CredentialRef::new();
+        let _cleanup = Cleanup(credential_ref.clone());
+        let first = format!("first-{}", Uuid::now_v7());
+        let second = format!("second-{}", Uuid::now_v7());
+        WindowsCredentialStore
+            .put_static(&credential_ref, SecretBytes::new(first.as_bytes().to_vec()))
+            .unwrap();
+        assert!(WindowsCredentialStore.static_exists(&credential_ref));
+        assert_eq!(
+            WindowsCredentialStore
+                .resolve_static(&credential_ref)
+                .unwrap()
+                .expose(),
+            first.as_bytes()
+        );
+        WindowsCredentialStore
+            .put_static(
+                &credential_ref,
+                SecretBytes::new(second.as_bytes().to_vec()),
+            )
+            .unwrap();
+        assert_eq!(
+            WindowsCredentialStore
+                .resolve_static(&credential_ref)
+                .unwrap()
+                .expose(),
+            second.as_bytes()
+        );
+        WindowsCredentialStore
+            .delete_static(&credential_ref)
+            .unwrap();
+        assert!(!WindowsCredentialStore.static_exists(&credential_ref));
     }
 }

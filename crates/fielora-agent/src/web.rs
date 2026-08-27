@@ -5,9 +5,9 @@
 //! completion. All remote material returned here is untrusted Tool data.
 
 use super::{
-    CommandCancellation, ProviderToolDefinition, ToolExecution, ToolProvider,
-    ToolProviderAvailability, ToolProviderError, ToolProviderFailureKind, ToolProviderIdentity,
-    ToolSourceKind,
+    CommandCancellation, ProviderToolDefinition, StaticCredentialRequirement, ToolExecution,
+    ToolProvider, ToolProviderAvailability, ToolProviderError, ToolProviderFailureKind,
+    ToolProviderIdentity, ToolSourceKind,
 };
 use fielora_contracts::{AgentToolEffect, ModelToolDefinition};
 use fielora_platform::{SecretBytes, is_public_internet_ip};
@@ -153,11 +153,27 @@ pub struct SearchBackendResponse {
 pub trait SearchBackend: Send + Sync {
     fn provider_id(&self) -> &'static str;
 
+    fn required_static_credential(&self) -> Option<StaticCredentialRequirement> {
+        None
+    }
+
     fn search(
         &self,
         request: &WebSearchRequest,
         cancellation: &CommandCancellation,
     ) -> Result<SearchBackendResponse, WebFailure>;
+
+    fn search_with_static_credential(
+        &self,
+        request: &WebSearchRequest,
+        credential: Option<SecretBytes>,
+        cancellation: &CommandCancellation,
+    ) -> Result<SearchBackendResponse, WebFailure> {
+        if credential.is_some() {
+            return Err(WebFailure::InvalidInput);
+        }
+        self.search(request, cancellation)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,11 +212,11 @@ impl WebToolProvider {
         }
     }
 
-    /// Construct the first production adapter from explicitly injected secret
-    /// bytes. No environment or CredentialStore lookup occurs in this layer.
-    pub fn with_brave(secret: SecretBytes) -> Result<Self, WebFailure> {
+    /// Construct the production Brave adapter without retaining secret bytes.
+    /// Exact credential resolution occurs later at the routed execution seam.
+    pub fn with_brave() -> Result<Self, WebFailure> {
         let http = Arc::new(SafePublicHttpClient::production()?);
-        let search_backend = Arc::new(BraveSearchBackend::new(secret, http.clone())?);
+        let search_backend = Arc::new(BraveSearchBackend::new(http.clone()));
         let fetcher = Arc::new(PublicWebFetcher::new(http));
         Ok(Self::new(search_backend, fetcher))
     }
@@ -208,13 +224,18 @@ impl WebToolProvider {
     fn execute_search(
         &self,
         arguments: &Value,
+        credential: Option<SecretBytes>,
         cancellation: &CommandCancellation,
     ) -> Result<ToolExecution, WebFailure> {
         let arguments: SearchArguments =
             serde_json::from_value(arguments.clone()).map_err(|_| WebFailure::InvalidInput)?;
         let request = arguments.validate()?;
         ensure_not_cancelled(cancellation)?;
-        let response = self.search_backend.search(&request, cancellation)?;
+        let response = self.search_backend.search_with_static_credential(
+            &request,
+            credential,
+            cancellation,
+        )?;
         ensure_not_cancelled(cancellation)?;
         if response.results.len() > request.count || response.results.len() > MAX_RESULTS {
             return Err(WebFailure::MalformedResponse);
@@ -401,6 +422,16 @@ impl ToolProvider for WebToolProvider {
         ])
     }
 
+    fn required_static_credential(
+        &self,
+        provider_tool_name: &str,
+    ) -> Option<StaticCredentialRequirement> {
+        match provider_tool_name {
+            "search" => self.search_backend.required_static_credential(),
+            _ => None,
+        }
+    }
+
     fn execute(
         &self,
         provider_tool_name: &str,
@@ -408,8 +439,24 @@ impl ToolProvider for WebToolProvider {
         cancellation: &CommandCancellation,
     ) -> Result<ToolExecution, ToolProviderError> {
         let result = match provider_tool_name {
-            "search" => self.execute_search(arguments, cancellation),
+            "search" => self.execute_search(arguments, None, cancellation),
             "fetch" => self.execute_fetch(arguments, cancellation),
+            _ => return Err(ToolProviderError::InvalidDefinition),
+        };
+        result.map_err(WebFailure::provider_error)
+    }
+
+    fn execute_with_static_credential(
+        &self,
+        provider_tool_name: &str,
+        arguments: &Value,
+        credential: Option<SecretBytes>,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, ToolProviderError> {
+        let result = match provider_tool_name {
+            "search" => self.execute_search(arguments, credential, cancellation),
+            "fetch" if credential.is_none() => self.execute_fetch(arguments, cancellation),
+            "fetch" => Err(WebFailure::InvalidInput),
             _ => return Err(ToolProviderError::InvalidDefinition),
         };
         result.map_err(WebFailure::provider_error)
@@ -581,19 +628,12 @@ fn truncate_utf8(value: &str, max_bytes: usize) -> String {
 // ---- Search backend -----------------------------------------------------
 
 pub struct BraveSearchBackend {
-    secret: SecretBytes,
     http: Arc<dyn WebHttpClient>,
 }
 
 impl BraveSearchBackend {
-    fn new(secret: SecretBytes, http: Arc<dyn WebHttpClient>) -> Result<Self, WebFailure> {
-        if secret.expose().is_empty() {
-            return Err(WebFailure::CredentialMissing);
-        }
-        if secret.expose().len() > fielora_platform::MAX_CREDENTIAL_BYTES {
-            return Err(WebFailure::InvalidInput);
-        }
-        Ok(Self { secret, http })
+    fn new(http: Arc<dyn WebHttpClient>) -> Self {
+        Self { http }
     }
 }
 
@@ -602,12 +642,35 @@ impl SearchBackend for BraveSearchBackend {
         BRAVE_SEARCH_PROVIDER_ID
     }
 
+    fn required_static_credential(&self) -> Option<StaticCredentialRequirement> {
+        Some(
+            StaticCredentialRequirement::new(BRAVE_SEARCH_PROVIDER_ID, "subscription_token")
+                .expect("Brave static credential constants must remain valid"),
+        )
+    }
+
     fn search(
         &self,
         request: &WebSearchRequest,
         cancellation: &CommandCancellation,
     ) -> Result<SearchBackendResponse, WebFailure> {
+        self.search_with_static_credential(request, None, cancellation)
+    }
+
+    fn search_with_static_credential(
+        &self,
+        request: &WebSearchRequest,
+        credential: Option<SecretBytes>,
+        cancellation: &CommandCancellation,
+    ) -> Result<SearchBackendResponse, WebFailure> {
         ensure_not_cancelled(cancellation)?;
+        let secret = credential.ok_or(WebFailure::CredentialMissing)?;
+        if secret.expose().is_empty() {
+            return Err(WebFailure::CredentialMissing);
+        }
+        if secret.expose().len() > fielora_platform::MAX_CREDENTIAL_BYTES {
+            return Err(WebFailure::InvalidInput);
+        }
         let mut url = Url::parse("https://api.search.brave.com/res/v1/web/search")
             .map_err(|_| WebFailure::Unavailable)?;
         {
@@ -622,7 +685,7 @@ impl SearchBackend for BraveSearchBackend {
             }
         }
         let mut token =
-            HeaderValue::from_bytes(self.secret.expose()).map_err(|_| WebFailure::InvalidInput)?;
+            HeaderValue::from_bytes(secret.expose()).map_err(|_| WebFailure::InvalidInput)?;
         token.set_sensitive(true);
         let response = self.http.get(
             url,
@@ -1293,6 +1356,7 @@ mod tests {
         collections::VecDeque,
         sync::atomic::{AtomicUsize, Ordering},
     };
+    use uuid::Uuid;
 
     #[derive(Clone)]
     struct FixtureSearchBackend {
@@ -1572,6 +1636,7 @@ mod tests {
 
     struct FixtureHttpClient {
         responses: Mutex<VecDeque<Result<RawHttpResponse, WebFailure>>>,
+        expected_tokens: Option<Mutex<VecDeque<Vec<u8>>>>,
         calls: AtomicUsize,
     }
 
@@ -1579,6 +1644,18 @@ mod tests {
         fn new(responses: Vec<Result<RawHttpResponse, WebFailure>>) -> Self {
             Self {
                 responses: Mutex::new(responses.into()),
+                expected_tokens: None,
+                calls: AtomicUsize::new(0),
+            }
+        }
+
+        fn expecting_tokens(
+            tokens: Vec<Vec<u8>>,
+            responses: Vec<Result<RawHttpResponse, WebFailure>>,
+        ) -> Self {
+            Self {
+                responses: Mutex::new(responses.into()),
+                expected_tokens: Some(Mutex::new(tokens.into())),
                 calls: AtomicUsize::new(0),
             }
         }
@@ -1587,13 +1664,29 @@ mod tests {
     impl WebHttpClient for FixtureHttpClient {
         fn get(
             &self,
-            _: Url,
-            _: Vec<(HeaderName, HeaderValue)>,
+            url: Url,
+            headers: Vec<(HeaderName, HeaderValue)>,
             _: bool,
             _: Duration,
             cancellation: &CommandCancellation,
         ) -> Result<RawHttpResponse, WebFailure> {
             ensure_not_cancelled(cancellation)?;
+            if let Some(expected_tokens) = &self.expected_tokens {
+                let expected = expected_tokens.lock().unwrap().pop_front().unwrap();
+                assert!(
+                    !url.as_str()
+                        .as_bytes()
+                        .windows(expected.len())
+                        .any(|value| value == expected)
+                );
+                let token = headers
+                    .iter()
+                    .find(|(name, _)| name.as_str() == "x-subscription-token")
+                    .map(|(_, value)| value)
+                    .expect("the Brave adapter must inject its token only as a header");
+                assert_eq!(token.as_bytes(), expected);
+                assert!(token.is_sensitive());
+            }
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.responses.lock().unwrap().pop_front().unwrap()
         }
@@ -1614,7 +1707,7 @@ mod tests {
 
     #[test]
     fn brave_adapter_normalizes_json_and_classifies_failures_without_leaking_secret() {
-        let secret = "brave-test-secret-never-output";
+        let secret = format!("brave-sentinel-{}-{}", Uuid::now_v7(), Uuid::now_v7());
         let body = json!({"web":{"results":[{
             "title":"MCP",
             "url":"https://modelcontextprotocol.io/",
@@ -1622,25 +1715,28 @@ mod tests {
             "age":"2026-01-01"
         }]}})
         .to_string();
-        let http = Arc::new(FixtureHttpClient::new(vec![Ok(raw_response(
-            200,
-            Some("application/json; charset=utf-8"),
-            body,
-        ))]));
-        let backend =
-            BraveSearchBackend::new(SecretBytes::new(secret.as_bytes().to_vec()), http).unwrap();
+        let http = Arc::new(FixtureHttpClient::expecting_tokens(
+            vec![secret.as_bytes().to_vec()],
+            vec![Ok(raw_response(
+                200,
+                Some("application/json; charset=utf-8"),
+                body,
+            ))],
+        ));
+        let backend = BraveSearchBackend::new(http);
         let provider = WebToolProvider::new(Arc::new(backend), Arc::new(FixtureFetcher::success()));
         let execution = provider
-            .execute(
+            .execute_with_static_credential(
                 "search",
                 &json!({"query":"MCP"}),
+                Some(SecretBytes::new(secret.as_bytes().to_vec())),
                 &CommandCancellation::default(),
             )
             .unwrap();
         assert_eq!(execution.receipt["provider_id"], BRAVE_SEARCH_PROVIDER_ID);
         assert!(execution.observation.contains("modelcontextprotocol.io"));
-        assert!(!execution.observation.contains(secret));
-        assert!(!execution.receipt.to_string().contains(secret));
+        assert!(!execution.observation.contains(&secret));
+        assert!(!execution.receipt.to_string().contains(&secret));
         assert_eq!(
             format!("{:?}", SecretBytes::new(secret.as_bytes().to_vec())),
             "SecretBytes([REDACTED])"
@@ -1649,6 +1745,10 @@ mod tests {
         for (response, expected) in [
             (
                 Ok(raw_response(401, Some("application/json"), b"{}".to_vec())),
+                WebFailure::CredentialRejected,
+            ),
+            (
+                Ok(raw_response(403, Some("application/json"), b"{}".to_vec())),
                 WebFailure::CredentialRejected,
             ),
             (
@@ -1671,27 +1771,38 @@ mod tests {
             (Err(WebFailure::Dns), WebFailure::Dns),
             (Err(WebFailure::Tls), WebFailure::Tls),
         ] {
-            let http = Arc::new(FixtureHttpClient::new(vec![response]));
-            let backend =
-                BraveSearchBackend::new(SecretBytes::new(b"secret".to_vec()), http).unwrap();
+            let http = Arc::new(FixtureHttpClient::expecting_tokens(
+                vec![b"fixture-secret".to_vec()],
+                vec![response],
+            ));
+            let backend = BraveSearchBackend::new(http);
             assert_eq!(
-                backend.search(
+                backend.search_with_static_credential(
                     &WebSearchRequest {
                         query: "x".into(),
                         count: 1,
                         country: None,
                         search_lang: None
                     },
+                    Some(SecretBytes::new(b"fixture-secret".to_vec())),
                     &CommandCancellation::default()
                 ),
                 Err(expected)
             );
         }
-        let missing = BraveSearchBackend::new(
-            SecretBytes::new(Vec::new()),
-            Arc::new(FixtureHttpClient::new(vec![])),
+        let backend = BraveSearchBackend::new(Arc::new(FixtureHttpClient::new(vec![])));
+        assert_eq!(
+            backend.search(
+                &WebSearchRequest {
+                    query: "x".into(),
+                    count: 1,
+                    country: None,
+                    search_lang: None,
+                },
+                &CommandCancellation::default(),
+            ),
+            Err(WebFailure::CredentialMissing)
         );
-        assert!(matches!(missing, Err(WebFailure::CredentialMissing)));
     }
 
     #[test]
