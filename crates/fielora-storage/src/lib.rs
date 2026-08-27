@@ -5721,6 +5721,26 @@ mod tests {
         })
     }
 
+    fn diagram_artifact_content(label: &str) -> ArtifactContentV1 {
+        ArtifactContentV1::Diagram(DiagramArtifactV1 {
+            title: Some("Storage Diagram".into()),
+            description: None,
+            layout: DiagramLayoutIntentV1 {
+                strategy: DiagramLayoutStrategy::LayeredAuto,
+                direction: DiagramLayoutDirection::LeftToRight,
+            },
+            nodes: vec![DiagramNodeV1 {
+                node_id: DiagramNodeId::new("storage_node"),
+                label: label.into(),
+                description: None,
+                semantic_kind: DiagramNodeKind::Generic,
+                presentation: None,
+            }],
+            edges: vec![],
+            groups: vec![],
+        })
+    }
+
     fn canonical_artifact(content: &ArtifactContentV1) -> (String, String) {
         let json = serde_json::to_string(content).unwrap();
         let digest = format!("{:x}", Sha256::digest(json.as_bytes()));
@@ -6398,7 +6418,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_9_accepts_bounded_future_type_tokens_while_domain_reads_fail_closed() {
+    fn schema_9_accepts_typed_diagram_and_bounded_future_tokens_while_unknown_reads_fail_closed() {
         let root = temporary_root();
         let worker = start(&root, 1);
         let handle = worker.handle();
@@ -6505,11 +6525,27 @@ mod tests {
             handle.read_artifact(future_artifact_id, None).unwrap_err(),
             DomainError::Validation("ARTIFACT_TYPE_UNSUPPORTED".into())
         );
-        assert!(serde_json::from_str::<ArtifactType>("\"DIAGRAM\"").is_err());
+        assert_eq!(
+            serde_json::from_str::<ArtifactType>("\"DIAGRAM\"").unwrap(),
+            ArtifactType::Diagram
+        );
         assert_eq!(
             serde_json::from_str::<ArtifactType>("\"DOCUMENT\"").unwrap(),
             ArtifactType::Document
         );
+        let stored_diagram = create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Diagram,
+            diagram_artifact_content("Schema nine"),
+            "Diagram fixture",
+            30,
+        );
+        assert_eq!(stored_diagram.artifact.artifact_type, ArtifactType::Diagram);
+        assert!(matches!(
+            stored_diagram.revision.content,
+            ArtifactContentV1::Diagram(_)
+        ));
         drop(worker);
         fs::remove_dir_all(root).unwrap();
     }

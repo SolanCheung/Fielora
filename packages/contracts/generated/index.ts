@@ -298,7 +298,7 @@ export type DeleteLibraryObjectRequest = { library_object_id: LibraryObjectId, e
 
 export type ListLibraryObjectsRequest = { media_kind: LibraryMediaKind | null, include_deleted: boolean, limit: number | null, };
 
-export type ArtifactType = "DOCUMENT" | "PRESENTATION";
+export type ArtifactType = "DOCUMENT" | "PRESENTATION" | "DIAGRAM";
 
 export type DocumentArtifact = { title: string | null, blocks: Array<DocumentBlock>, };
 
@@ -316,7 +316,43 @@ export type SlideSlot = "BODY" | "LEFT" | "RIGHT";
 
 export type PresentationBlock = { "kind": "PARAGRAPH", text: string, } | { "kind": "BULLET_LIST", items: Array<string>, };
 
-export type ArtifactContentV1 = { "type": "DOCUMENT", "content": DocumentArtifact } | { "type": "PRESENTATION", "content": PresentationArtifact };
+export type DiagramNodeId = string;
+
+export type DiagramEdgeId = string;
+
+export type DiagramGroupId = string;
+
+export type DiagramArtifactV1 = { title: string | null, description: string | null, layout: DiagramLayoutIntentV1, nodes: Array<DiagramNodeV1>, edges: Array<DiagramEdgeV1>, groups: Array<DiagramGroupV1>, };
+
+export type DiagramLayoutIntentV1 = { strategy: DiagramLayoutStrategy, direction: DiagramLayoutDirection, };
+
+export type DiagramLayoutStrategy = "LAYERED_AUTO";
+
+export type DiagramLayoutDirection = "LEFT_TO_RIGHT" | "TOP_TO_BOTTOM";
+
+export type DiagramNodeV1 = { node_id: DiagramNodeId, label: string, description: string | null, semantic_kind: DiagramNodeKind, presentation: DiagramNodePresentationIntentV1 | null, };
+
+export type DiagramNodeKind = "GENERIC" | "PERSON" | "SYSTEM" | "SERVICE" | "DATABASE" | "PROCESS" | "DOCUMENT";
+
+export type DiagramNodePresentationIntentV1 = { shape: DiagramNodeShape, emphasis: DiagramEmphasis, };
+
+export type DiagramNodeShape = "AUTO" | "RECTANGLE" | "ROUNDED_RECT" | "ELLIPSE";
+
+export type DiagramEmphasis = "NORMAL" | "EMPHASIS";
+
+export type DiagramEdgeV1 = { edge_id: DiagramEdgeId, source_node_id: DiagramNodeId, target_node_id: DiagramNodeId, label: string | null, relation_kind: DiagramRelationKind, direction: DiagramEdgeDirection, presentation: DiagramEdgePresentationIntentV1 | null, };
+
+export type DiagramRelationKind = "RELATION" | "FLOW" | "DEPENDS_ON" | "CONTAINS";
+
+export type DiagramEdgeDirection = "FORWARD" | "BIDIRECTIONAL" | "NONE";
+
+export type DiagramEdgePresentationIntentV1 = { emphasis: DiagramEmphasis, };
+
+export type DiagramGroupV1 = { group_id: DiagramGroupId, label: string, semantic_kind: DiagramGroupKind, member_node_ids: Array<DiagramNodeId>, };
+
+export type DiagramGroupKind = "BOUNDARY" | "LAYER" | "CLUSTER";
+
+export type ArtifactContentV1 = { "type": "DOCUMENT", "content": DocumentArtifact } | { "type": "PRESENTATION", "content": PresentationArtifact } | { "type": "DIAGRAM", "content": DiagramArtifactV1 };
 
 export type ArtifactMutationKind = "CREATE" | "UPDATE";
 

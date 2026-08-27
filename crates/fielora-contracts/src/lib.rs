@@ -48,6 +48,9 @@ typed_id!(LibraryObjectId);
 typed_id!(SyncChangeId);
 typed_id!(ArtifactId);
 typed_id!(ArtifactRevisionId);
+typed_id!(DiagramNodeId);
+typed_id!(DiagramEdgeId);
+typed_id!(DiagramGroupId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ProtocolVersion {
@@ -1324,6 +1327,7 @@ pub struct ListLibraryObjectsRequest {
 pub enum ArtifactType {
     Document,
     Presentation,
+    Diagram,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1393,11 +1397,154 @@ pub enum PresentationBlock {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct DiagramArtifactV1 {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub layout: DiagramLayoutIntentV1,
+    pub nodes: Vec<DiagramNodeV1>,
+    pub edges: Vec<DiagramEdgeV1>,
+    pub groups: Vec<DiagramGroupV1>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct DiagramLayoutIntentV1 {
+    pub strategy: DiagramLayoutStrategy,
+    pub direction: DiagramLayoutDirection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DiagramLayoutStrategy {
+    LayeredAuto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DiagramLayoutDirection {
+    LeftToRight,
+    TopToBottom,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct DiagramNodeV1 {
+    pub node_id: DiagramNodeId,
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub semantic_kind: DiagramNodeKind,
+    #[serde(default)]
+    pub presentation: Option<DiagramNodePresentationIntentV1>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DiagramNodeKind {
+    Generic,
+    Person,
+    System,
+    Service,
+    Database,
+    Process,
+    Document,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct DiagramNodePresentationIntentV1 {
+    pub shape: DiagramNodeShape,
+    pub emphasis: DiagramEmphasis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DiagramNodeShape {
+    Auto,
+    Rectangle,
+    RoundedRect,
+    Ellipse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DiagramEmphasis {
+    Normal,
+    Emphasis,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct DiagramEdgeV1 {
+    pub edge_id: DiagramEdgeId,
+    pub source_node_id: DiagramNodeId,
+    pub target_node_id: DiagramNodeId,
+    #[serde(default)]
+    pub label: Option<String>,
+    pub relation_kind: DiagramRelationKind,
+    pub direction: DiagramEdgeDirection,
+    #[serde(default)]
+    pub presentation: Option<DiagramEdgePresentationIntentV1>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DiagramRelationKind {
+    Relation,
+    Flow,
+    DependsOn,
+    Contains,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DiagramEdgeDirection {
+    Forward,
+    Bidirectional,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct DiagramEdgePresentationIntentV1 {
+    pub emphasis: DiagramEmphasis,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct DiagramGroupV1 {
+    pub group_id: DiagramGroupId,
+    pub label: String,
+    pub semantic_kind: DiagramGroupKind,
+    pub member_node_ids: Vec<DiagramNodeId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DiagramGroupKind {
+    Boundary,
+    Layer,
+    Cluster,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", content = "content", rename_all = "SCREAMING_SNAKE_CASE")]
 #[ts(tag = "type", content = "content", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ArtifactContentV1 {
     Document(DocumentArtifact),
     Presentation(PresentationArtifact),
+    Diagram(DiagramArtifactV1),
 }
 
 impl ArtifactContentV1 {
@@ -1405,6 +1552,7 @@ impl ArtifactContentV1 {
         match self {
             Self::Document(_) => ArtifactType::Document,
             Self::Presentation(_) => ArtifactType::Presentation,
+            Self::Diagram(_) => ArtifactType::Diagram,
         }
     }
 }

@@ -6,6 +6,7 @@
 //! durable receipts, and completion semantics.
 
 pub mod artifact;
+mod diagram;
 mod file;
 pub mod mcp;
 pub mod mcp_connections;
@@ -202,6 +203,8 @@ pub enum AgentError {
     ArtifactIdempotencyConflict,
     #[error("ARTIFACT_CONTENT_INVALID")]
     ArtifactContentInvalid,
+    #[error("DIAGRAM_LAYOUT_OVERFLOW")]
+    DiagramLayoutOverflow,
     #[error("AGENT_IO_FAILED")]
     IoFailed,
 }
@@ -263,6 +266,7 @@ impl AgentError {
             Self::ArtifactRevisionConflict => "ARTIFACT_REVISION_CONFLICT",
             Self::ArtifactIdempotencyConflict => "ARTIFACT_TOOLCALL_IDEMPOTENCY_CONFLICT",
             Self::ArtifactContentInvalid => "ARTIFACT_CONTENT_INVALID",
+            Self::DiagramLayoutOverflow => "DIAGRAM_LAYOUT_OVERFLOW",
             Self::IoFailed => "AGENT_IO_FAILED",
         }
     }

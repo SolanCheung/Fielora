@@ -1723,11 +1723,12 @@ Durable Artifact 的 schema-8 `artifacts.artifact_type` 原先使用
 `artifact_revisions`、revision/recovery/idempotency、Tool/Receipt/Verification 和
 Profile schema 均不变。
 
-Storage extensibility 不产生 semantic authority。Production `ArtifactType`、
-`ArtifactContentV1` 和所有 Model-facing Artifact Tool schema 仍只接受
-Document/Presentation；当前 reader 遇到 `FUTURE_ARTIFACT` 等未知 canonical
-token 时稳定返回 `ARTIFACT_TYPE_UNSUPPORTED`，没有 arbitrary JSON fallback、
-类型降级、静默跳过或数据删除。Diagram/Spreadsheet 均未实现。
+Storage extensibility 不产生 semantic authority。该 repair 完成时 Production
+`ArtifactType`、`ArtifactContentV1` 和 Model-facing Artifact Tool schema 仍只接受
+Document/Presentation；此历史状态已由下述 Diagram First Slice additive
+supersede。当前 reader 遇到 `FUTURE_ARTIFACT` 等仍未知的 canonical token 时继续
+稳定返回 `ARTIFACT_TYPE_UNSUPPORTED`，没有 arbitrary JSON fallback、类型降级、
+静默跳过或数据删除。Spreadsheet 仍未实现。
 
 真实 schema-8 fixture 覆盖 Document、Presentation、多 revision 与 Artifact
 Verification subject。迁移到 schema 9 后 Artifact/Revision IDs、current pointer、
@@ -1739,14 +1740,64 @@ provenance、FK 与 index 保持；注入 table replacement 后故障证明 regi
 CURRENT_DATABASE_SCHEMA: 9
 MIGRATION_0009: artifact_type_extensibility
 SQLITE_ARTIFACT_TYPE: BOUNDED_CANONICAL_TOKEN
-DOMAIN_ARTIFACT_TYPE: CLOSED_DOCUMENT_PRESENTATION
+DOMAIN_ARTIFACT_TYPE_AT_REPAIR: CLOSED_DOCUMENT_PRESENTATION
 UNKNOWN_TYPE: ARTIFACT_TYPE_UNSUPPORTED
 CONTENT_SCHEMA_VERSION: 1_UNCHANGED
-DIAGRAM_SPREADSHEET_IMPLEMENTATION: NONE
+DIAGRAM_SPREADSHEET_IMPLEMENTATION_AT_REPAIR: NONE
+CURRENT_STATE: SUPERSEDED_BY_SECTION_87
 NEW_DEPENDENCIES: 0
 CORE_AND_CROSS_DEVELOPMENT_GATES: PASS
 RUST_WORKSPACE_TESTS: 177_PASS
 DESKTOP_TYPESCRIPT_TESTS: 176_PASS
 CORE_INTEGRATION: 12_PASS
 FULL_PREMERGE_BROWSER_E2E_PACKAGED: NOT_RUN
+```
+
+## 87. Diagram Artifact First Implementation Slice
+
+Durable Artifact Core 现在 additive 支持第三个 closed typed Artifact：`DIAGRAM`。
+`ArtifactType::Diagram` 与 `ArtifactContentV1::Diagram(DiagramArtifactV1)` 只增加
+bounded nodes/edges/one-level groups、stable local IDs、closed semantic/style intent
+及 `LAYERED_AUTO` direction；不接受 arbitrary JSON、raw SVG/XML/Mermaid/CSS、
+manual geometry 或 operation DSL。Document/Presentation representation 和
+`content_schema_version=1` 保持不变。
+
+Diagram create/read/update 完整复用现有 Artifact/Profile/Project ownership、schema-9
+`artifacts`/`artifact_revisions`、immutable revision、current pointer CAS、ToolCall
+idempotency、restart recovery、Policy/Approval、durable ToolCall receipt、exact
+Artifact-revision Verification subject 与 mutation freshness。没有 Diagram Tool、
+Agent、Runtime、revision/receipt/verification hierarchy、table 或 migration；数据库
+schema 继续为 9，0001–0009 未修改。
+
+`FIELORA_BOUNDED_LAYERED_V1` 是 repository-owned bounded renderer adapter：先做
+weak components 与 SCC condensation/rank，再按 stable local ID、exclusive one-level
+group band 与 fixed CJK/Latin width estimate 确定 placement，支持 cycle、self-edge、
+parallel/cross-edge 和 disconnected graph。相同 canonical revision、renderer
+`fielora.diagram.svg@0.1.0`、theme `LIGHT_NEUTRAL_V1` 产生相同 layout digest 和
+SVG bytes；不可读文本或 viewBox 超过 16384/axis 时稳定
+`DIAGRAM_LAYOUT_OVERFLOW`。
+
+只有 saved Diagram revision 可通过现有 `artifact.export` 导出 Project-relative
+`.svg`；inline Diagram export 不支持。受控 writer 只生成 static allowlist vocabulary，
+无 script/style/foreignObject/image/use/animation/href/event/URL/raw attribute。最终
+bytes 在写前与 atomic write 后都由既有 direct `quick-xml 0.41` 独立 parse，验证
+root/namespace、elements/attributes、finite/bounded geometry、node/edge/group counts
+及 rendered text。Receipt 只记录 Artifact/revision/digest、renderer/layout/viewBox/
+counts/output digest，不保存完整 semantic content 或 SVG；export success 不生成
+Verification PASS，`artifact.read` 继续标记 `UNTRUSTED_ARTIFACT_CONTENT`。
+
+```text
+DIAGRAM_ARTIFACT_FIRST_SLICE: IMPLEMENTED / TARGETED_VALIDATED
+ARCHITECTURE: MODEL + HARNESS + EXISTING_ARTIFACT_TOOLS
+ARTIFACT_TYPES: DOCUMENT + PRESENTATION + DIAGRAM
+DIAGRAM_SOURCE: CLOSED_TYPED_SEMANTIC_GRAPH
+LAYOUT: FIELORA_BOUNDED_LAYERED_V1
+RENDERER: fielora.diagram.svg@0.1.0
+DIAGRAM_INLINE_EXPORT: NOT_SUPPORTED
+CONTENT_AUTHORITY: UNTRUSTED_ARTIFACT_CONTENT
+CURRENT_DATABASE_SCHEMA: 9
+NEW_MIGRATION: 0
+NEW_DEPENDENCIES: 0
+UI_FIPC_PNG_MERMAID_COMPOSITION_SPREADSHEET: NOT_IMPLEMENTED
+CHANGE_IMPACT: HIGH
 ```

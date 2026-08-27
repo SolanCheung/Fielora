@@ -5,12 +5,12 @@
 
 use crate::{
     AgentError, CommandCancellation, ToolExecution, ToolRuntime, atomic_write, deny_sensitive,
-    normalize_relative, relative_text, resolve_for_write, sha256,
+    diagram, normalize_relative, relative_text, resolve_for_write, sha256,
 };
 use fielora_contracts::{
-    ArtifactContentV1, ArtifactReadView, ArtifactType as DurableArtifactType, DocumentArtifact,
-    DocumentBlock, PresentationArtifact, PresentationBlock, PresentationLayout, PresentationSlide,
-    SlideRegion, SlideSlot,
+    ArtifactContentV1, ArtifactReadView, ArtifactType as DurableArtifactType, DiagramArtifactV1,
+    DocumentArtifact, DocumentBlock, PresentationArtifact, PresentationBlock, PresentationLayout,
+    PresentationSlide, SlideRegion, SlideSlot,
 };
 use office_oxide::docx::write::DocxWriter;
 use office_oxide::pptx::write::{PptxWriter, Run, SlideData};
@@ -432,6 +432,97 @@ fn legacy_input_schema() -> Value {
     })
 }
 
+fn diagram_content_schema() -> Value {
+    let local_id = json!({
+        "type":"string",
+        "minLength":1,
+        "maxLength":64,
+        "pattern":"^[a-z][a-z0-9_-]{0,63}$"
+    });
+    let emphasis = json!({"type":"string","enum":["NORMAL","EMPHASIS"]});
+    let node = json!({
+        "type":"object",
+        "properties":{
+            "node_id":local_id.clone(),
+            "label":{"type":"string","minLength":1,"maxLength":120},
+            "description":{"type":"string","minLength":1,"maxLength":1024},
+            "semantic_kind":{"type":"string","enum":["GENERIC","PERSON","SYSTEM","SERVICE","DATABASE","PROCESS","DOCUMENT"]},
+            "presentation":{
+                "type":"object",
+                "properties":{
+                    "shape":{"type":"string","enum":["AUTO","RECTANGLE","ROUNDED_RECT","ELLIPSE"]},
+                    "emphasis":emphasis.clone()
+                },
+                "required":["shape","emphasis"],
+                "additionalProperties":false
+            }
+        },
+        "required":["node_id","label","semantic_kind"],
+        "additionalProperties":false
+    });
+    let edge = json!({
+        "type":"object",
+        "properties":{
+            "edge_id":local_id.clone(),
+            "source_node_id":local_id.clone(),
+            "target_node_id":local_id.clone(),
+            "label":{"type":"string","minLength":1,"maxLength":120},
+            "relation_kind":{"type":"string","enum":["RELATION","FLOW","DEPENDS_ON","CONTAINS"]},
+            "direction":{"type":"string","enum":["FORWARD","BIDIRECTIONAL","NONE"]},
+            "presentation":{
+                "type":"object",
+                "properties":{"emphasis":emphasis},
+                "required":["emphasis"],
+                "additionalProperties":false
+            }
+        },
+        "required":["edge_id","source_node_id","target_node_id","relation_kind","direction"],
+        "additionalProperties":false
+    });
+    let group = json!({
+        "type":"object",
+        "properties":{
+            "group_id":local_id.clone(),
+            "label":{"type":"string","minLength":1,"maxLength":120},
+            "semantic_kind":{"type":"string","enum":["BOUNDARY","LAYER","CLUSTER"]},
+            "member_node_ids":{"type":"array","minItems":1,"maxItems":64,"items":local_id}
+        },
+        "required":["group_id","label","semantic_kind","member_node_ids"],
+        "additionalProperties":false
+    });
+    json!({
+        "type":"object",
+        "properties":{
+            "title":{"type":"string","minLength":1,"maxLength":120},
+            "description":{"type":"string","minLength":1,"maxLength":1024},
+            "layout":{
+                "type":"object",
+                "properties":{
+                    "strategy":{"const":"LAYERED_AUTO"},
+                    "direction":{"type":"string","enum":["LEFT_TO_RIGHT","TOP_TO_BOTTOM"]}
+                },
+                "required":["strategy","direction"],
+                "additionalProperties":false
+            },
+            "nodes":{"type":"array","minItems":1,"maxItems":64,"items":node},
+            "edges":{"type":"array","maxItems":128,"items":edge},
+            "groups":{"type":"array","maxItems":16,"items":group}
+        },
+        "required":["layout","nodes","edges","groups"],
+        "additionalProperties":false
+    })
+}
+
+fn durable_content_schema() -> Value {
+    let legacy = legacy_input_schema();
+    let mut variants = legacy["properties"]["content"]["oneOf"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    variants.push(diagram_content_schema());
+    json!({"oneOf":variants})
+}
+
 pub fn input_schema() -> Value {
     json!({
         "oneOf":[
@@ -451,13 +542,12 @@ pub fn input_schema() -> Value {
 }
 
 pub fn create_input_schema() -> Value {
-    let legacy = legacy_input_schema();
     json!({
         "type":"object",
         "properties":{
-            "type":legacy["properties"]["type"].clone(),
+            "type":{"type":"string","enum":["document","presentation","diagram"]},
             "title":{"type":"string","minLength":1,"maxLength":512},
-            "content":legacy["properties"]["content"].clone(),
+            "content":durable_content_schema(),
             "associate_with_current_project":{"type":"boolean"}
         },
         "required":["type","content"],
@@ -466,13 +556,12 @@ pub fn create_input_schema() -> Value {
 }
 
 pub fn update_input_schema() -> Value {
-    let legacy = legacy_input_schema();
     json!({
         "type":"object",
         "properties":{
             "artifact_id":{"type":"string","minLength":1,"maxLength":128},
             "expected_revision_id":{"type":"string","minLength":1,"maxLength":128},
-            "content":legacy["properties"]["content"].clone()
+            "content":durable_content_schema()
         },
         "required":["artifact_id","expected_revision_id","content"],
         "additionalProperties":false
@@ -510,6 +599,23 @@ pub fn canonicalize_content(
         DurableArtifactType::Presentation => serde_json::from_value(content)
             .map(ArtifactDefinition::Presentation)
             .map_err(|_| AgentError::ArtifactContentInvalid)?,
+        DurableArtifactType::Diagram => {
+            let mut diagram: DiagramArtifactV1 =
+                serde_json::from_value(content).map_err(|_| AgentError::ArtifactContentInvalid)?;
+            let facts = diagram::canonicalize(&mut diagram)?;
+            let content = ArtifactContentV1::Diagram(diagram);
+            let canonical_json =
+                serde_json::to_string(&content).map_err(|_| AgentError::ArtifactContentInvalid)?;
+            if canonical_json.len() > MAX_DEFINITION_BYTES {
+                return Err(AgentError::ArtifactContentInvalid);
+            }
+            return Ok(CanonicalArtifactContent {
+                semantic_sha256: sha256(canonical_json.as_bytes()),
+                content,
+                canonical_json,
+                semantic_unit_count: facts.node_count + facts.edge_count + facts.group_count,
+            });
+        }
     };
     validate_definition(&definition).map_err(|_| AgentError::ArtifactContentInvalid)?;
     let semantic_unit_count = definition.semantic_count();
@@ -537,6 +643,9 @@ pub fn export_saved(
     output_path: &str,
     cancellation: &CommandCancellation,
 ) -> Result<ToolExecution, AgentError> {
+    if matches!(&artifact.revision.content, ArtifactContentV1::Diagram(_)) {
+        return export_saved_diagram(runtime, artifact, output_path, cancellation);
+    }
     let (artifact_type, content) = match &artifact.revision.content {
         ArtifactContentV1::Document(value) => (
             "document",
@@ -546,6 +655,7 @@ pub fn export_saved(
             "presentation",
             serde_json::to_value(value).map_err(|_| AgentError::ArtifactContentInvalid)?,
         ),
+        ArtifactContentV1::Diagram(_) => unreachable!("Diagram export is dispatched above"),
     };
     let mut execution = export(
         runtime,
@@ -587,6 +697,121 @@ pub fn export_saved(
     })
     .to_string();
     Ok(execution)
+}
+
+fn export_saved_diagram(
+    runtime: &ToolRuntime,
+    artifact: &ArtifactReadView,
+    output_path: &str,
+    cancellation: &CommandCancellation,
+) -> Result<ToolExecution, AgentError> {
+    let guard = ExportGuard::new(cancellation);
+    guard.check()?;
+    validate_output_extension(output_path, "svg")?;
+    let relative = normalize_relative(output_path)?;
+    deny_sensitive(&relative)?;
+    let target = resolve_for_write(&runtime.root, &relative)?;
+    if target.exists() {
+        return Err(AgentError::FileChanged);
+    }
+    let ArtifactContentV1::Diagram(diagram_content) = &artifact.revision.content else {
+        return Err(AgentError::ArtifactContentInvalid);
+    };
+    let mut canonical_diagram = diagram_content.clone();
+    let semantic = diagram::canonicalize(&mut canonical_diagram)?;
+    let canonical_content = ArtifactContentV1::Diagram(canonical_diagram.clone());
+    let canonical_json = serde_json::to_string(&canonical_content)
+        .map_err(|_| AgentError::ArtifactContentInvalid)?;
+    if canonical_json.len() > MAX_DEFINITION_BYTES
+        || sha256(canonical_json.as_bytes()) != artifact.revision.semantic_sha256
+    {
+        return Err(AgentError::ArtifactContentInvalid);
+    }
+    let rendered = diagram::render(&canonical_diagram)?;
+    guard.check()?;
+    if rendered.bytes.is_empty() || rendered.bytes.len() > 2 * 1024 * 1024 {
+        return Err(AgentError::FileTooLarge);
+    }
+
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|_| AgentError::IoFailed)?;
+    }
+    let target = resolve_for_write(&runtime.root, &relative)?;
+    if target.exists() {
+        return Err(AgentError::FileChanged);
+    }
+    guard.check()?;
+    atomic_write(&target, &rendered.bytes, true)?;
+    let final_bytes = fs::read(&target).map_err(|_| AgentError::IoFailed)?;
+    let final_check = if final_bytes.len() == rendered.bytes.len()
+        && sha256(&final_bytes) == sha256(&rendered.bytes)
+    {
+        diagram::reopen(&rendered, &final_bytes)
+    } else {
+        Err(AgentError::IoFailed)
+    };
+    if let Err(error) = final_check {
+        let _ = fs::remove_file(&target);
+        return Err(error);
+    }
+
+    let output_sha256 = sha256(&final_bytes);
+    let receipt = json!({
+        "kind":"ARTIFACT_EXPORTED",
+        "artifact_id":artifact.artifact.artifact_id,
+        "artifact_persistence":"DURABLE",
+        "artifact_type":"DIAGRAM",
+        "artifact_revision_id":artifact.revision.revision_id,
+        "exported_revision_id":artifact.revision.revision_id,
+        "artifact_revision":artifact.revision.sequence,
+        "artifact_semantic_sha256":artifact.revision.semantic_sha256,
+        "content_schema_version":artifact.revision.content_schema_version,
+        "semantic_unit_count":semantic.node_count + semantic.edge_count + semantic.group_count,
+        "node_count":semantic.node_count,
+        "edge_count":semantic.edge_count,
+        "group_count":semantic.group_count,
+        "layout_engine_id":diagram::LAYOUT_ENGINE_ID,
+        "layout_sha256":rendered.facts.layout_sha256,
+        "renderer_id":diagram::RENDERER_ID,
+        "renderer_version":diagram::RENDERER_VERSION,
+        "theme_profile":diagram::THEME_PROFILE,
+        "output_format":"SVG",
+        "view_box_width":rendered.facts.view_box_width,
+        "view_box_height":rendered.facts.view_box_height,
+        "path":relative_text(&relative),
+        "output_bytes":final_bytes.len(),
+        "output_sha256":output_sha256,
+        "static_svg_security":"PASS",
+        "structural_reopen":"STRUCTURAL_VALID",
+        "roundtrip":"SEMANTIC_CONTENT_PRESENT",
+    });
+    let observation = serde_json::to_string(&json!({
+        "artifact_id":artifact.artifact.artifact_id,
+        "artifact_revision_id":artifact.revision.revision_id,
+        "artifact_revision":artifact.revision.sequence,
+        "artifact_persistence":"DURABLE",
+        "artifact_type":"DIAGRAM",
+        "path":relative_text(&relative),
+        "output_bytes":final_bytes.len(),
+        "output_sha256":output_sha256,
+        "structural_reopen":"STRUCTURAL_VALID",
+        "roundtrip":"SEMANTIC_CONTENT_PRESENT",
+        "visual_compatibility":"NOT_VERIFIED",
+    }))
+    .map_err(|_| AgentError::IoFailed)?;
+    if serde_json::to_vec(&receipt)
+        .map_err(|_| AgentError::IoFailed)?
+        .len()
+        > MAX_TOOL_RESULT_BYTES
+        || observation.len() > MAX_TOOL_RESULT_BYTES
+    {
+        let _ = fs::remove_file(&target);
+        return Err(AgentError::IoFailed);
+    }
+    Ok(ToolExecution {
+        receipt,
+        observation,
+    })
 }
 
 pub(super) fn export(
@@ -735,14 +960,18 @@ fn parse_definition(
 }
 
 fn validate_output_path(args: &ExportArgs) -> Result<(), AgentError> {
-    if args.output_path.len() > 4_096
-        || args.output_path.contains("://")
-        || Path::new(&args.output_path)
+    validate_output_extension(&args.output_path, args.artifact_type.extension())
+}
+
+fn validate_output_extension(output_path: &str, extension: &str) -> Result<(), AgentError> {
+    if output_path.len() > 4_096
+        || output_path.contains("://")
+        || Path::new(output_path)
             .extension()
-            .and_then(|extension| extension.to_str())
+            .and_then(|value| value.to_str())
             .map(str::to_ascii_lowercase)
             .as_deref()
-            != Some(args.artifact_type.extension())
+            != Some(extension)
     {
         return Err(AgentError::ToolArgumentsInvalid);
     }
@@ -1548,6 +1777,32 @@ mod tests {
         })
     }
 
+    fn diagram_content(label: &str) -> Value {
+        json!({
+            "title":"Fielora Architecture 架构",
+            "description":"A bounded deterministic Diagram.",
+            "layout":{"strategy":"LAYERED_AUTO","direction":"LEFT_TO_RIGHT"},
+            "nodes":[
+                {"node_id":"model","label":"Model 模型","semantic_kind":"SYSTEM","presentation":{"shape":"RECTANGLE","emphasis":"EMPHASIS"}},
+                {"node_id":"context","label":"Context 上下文","semantic_kind":"PROCESS"},
+                {"node_id":"execution","label":label,"semantic_kind":"SERVICE"},
+                {"node_id":"artifact","label":"Artifact","semantic_kind":"DOCUMENT"},
+                {"node_id":"detached","label":"Detached","semantic_kind":"GENERIC"}
+            ],
+            "edges":[
+                {"edge_id":"e_model_context","source_node_id":"model","target_node_id":"context","label":"calls","relation_kind":"FLOW","direction":"FORWARD"},
+                {"edge_id":"e_context_execution","source_node_id":"context","target_node_id":"execution","relation_kind":"DEPENDS_ON","direction":"FORWARD"},
+                {"edge_id":"e_execution_artifact","source_node_id":"execution","target_node_id":"artifact","relation_kind":"FLOW","direction":"BIDIRECTIONAL"},
+                {"edge_id":"e_cross","source_node_id":"model","target_node_id":"artifact","relation_kind":"RELATION","direction":"NONE"}
+            ],
+            "groups":[
+                {"group_id":"reasoning","label":"Reasoning","semantic_kind":"LAYER","member_node_ids":["model"]},
+                {"group_id":"harness","label":"Harness 执行层","semantic_kind":"BOUNDARY","member_node_ids":["context","execution"]},
+                {"group_id":"tools","label":"Tools","semantic_kind":"CLUSTER","member_node_ids":["artifact"]}
+            ]
+        })
+    }
+
     fn presentation_from(arguments: &Value) -> PresentationArtifact {
         serde_json::from_value(arguments["content"].clone()).unwrap()
     }
@@ -2139,9 +2394,9 @@ mod tests {
     }
 
     #[test]
-    fn saved_document_and_presentation_exports_pin_exact_semantic_revisions() {
+    fn saved_document_presentation_and_diagram_exports_pin_exact_semantic_revisions() {
         let (root, runtime) = fixture_runtime();
-        let cases = [
+        let cases = vec![
             (
                 DurableArtifactType::Document,
                 document_args("unused.docx")["content"].clone(),
@@ -2151,6 +2406,11 @@ mod tests {
                 DurableArtifactType::Presentation,
                 presentation_args("unused.pptx")["content"].clone(),
                 "saved-presentation.pptx",
+            ),
+            (
+                DurableArtifactType::Diagram,
+                diagram_content("Execution 执行"),
+                "saved-diagram.svg",
             ),
         ];
         for (artifact_type, content, output_path) in cases {
@@ -2210,6 +2470,13 @@ mod tests {
                 canonical.semantic_sha256
             );
             assert!(root.join(output_path).is_file());
+            if artifact_type == DurableArtifactType::Diagram {
+                assert_eq!(execution.receipt["renderer_id"], diagram::RENDERER_ID);
+                assert_eq!(execution.receipt["output_format"], "SVG");
+                assert_eq!(execution.receipt["static_svg_security"], "PASS");
+                assert_eq!(execution.receipt["node_count"], 5);
+                assert!(!execution.receipt.to_string().contains("Execution 执行"));
+            }
             assert_eq!(
                 export_saved(
                     &runtime,
@@ -2258,5 +2525,30 @@ mod tests {
             ),
             Err(AgentError::ArtifactContentInvalid)
         );
+
+        let diagram = diagram_content("Execution 执行");
+        let first = canonicalize_content(DurableArtifactType::Diagram, diagram.clone()).unwrap();
+        let mut reordered = diagram;
+        reordered["nodes"].as_array_mut().unwrap().reverse();
+        reordered["edges"].as_array_mut().unwrap().reverse();
+        reordered["groups"].as_array_mut().unwrap().reverse();
+        for group in reordered["groups"].as_array_mut().unwrap() {
+            group["member_node_ids"].as_array_mut().unwrap().reverse();
+        }
+        let second = canonicalize_content(DurableArtifactType::Diagram, reordered).unwrap();
+        assert_eq!(first.canonical_json, second.canonical_json);
+        assert_eq!(first.semantic_sha256, second.semantic_sha256);
+        assert_eq!(first.semantic_unit_count, 12);
+        assert!(matches!(first.content, ArtifactContentV1::Diagram(_)));
+
+        let mut invalid = diagram_content("Execution");
+        invalid["edges"][0]["target_node_id"] = json!("missing");
+        assert_eq!(
+            canonicalize_content(DurableArtifactType::Diagram, invalid),
+            Err(AgentError::ArtifactContentInvalid)
+        );
+
+        assert!(create_input_schema().to_string().contains("diagram"));
+        assert!(!legacy_input_schema().to_string().contains("diagram"));
     }
 }

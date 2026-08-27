@@ -144,6 +144,7 @@ struct DurableArtifactToolExecutor {
 enum ArtifactToolType {
     Document,
     Presentation,
+    Diagram,
 }
 
 impl From<ArtifactToolType> for ArtifactType {
@@ -151,6 +152,7 @@ impl From<ArtifactToolType> for ArtifactType {
         match value {
             ArtifactToolType::Document => Self::Document,
             ArtifactToolType::Presentation => Self::Presentation,
+            ArtifactToolType::Diagram => Self::Diagram,
         }
     }
 }
@@ -7569,6 +7571,40 @@ mod tests {
         }
     }
 
+    fn diagram_artifact_content(execution_label: &str, include_plugin: bool) -> Value {
+        let mut nodes = vec![
+            json!({"node_id":"model","label":"Model 模型","semantic_kind":"SYSTEM"}),
+            json!({"node_id":"context","label":"Context 上下文","semantic_kind":"PROCESS"}),
+            json!({"node_id":"execution","label":execution_label,"semantic_kind":"SERVICE","presentation":{"shape":"ROUNDED_RECT","emphasis":"EMPHASIS"}}),
+            json!({"node_id":"artifact","label":"Artifact","semantic_kind":"DOCUMENT"}),
+            json!({"node_id":"verification","label":"Verification","semantic_kind":"PROCESS"}),
+            json!({"node_id":"detached","label":"Detached","semantic_kind":"GENERIC"}),
+        ];
+        let mut edges = vec![
+            json!({"edge_id":"e_model_context","source_node_id":"model","target_node_id":"context","relation_kind":"FLOW","direction":"FORWARD"}),
+            json!({"edge_id":"e_context_execution","source_node_id":"context","target_node_id":"execution","relation_kind":"DEPENDS_ON","direction":"FORWARD"}),
+            json!({"edge_id":"e_execution_artifact","source_node_id":"execution","target_node_id":"artifact","relation_kind":"FLOW","direction":"FORWARD"}),
+            json!({"edge_id":"e_artifact_verification","source_node_id":"artifact","target_node_id":"verification","relation_kind":"FLOW","direction":"FORWARD"}),
+            json!({"edge_id":"e_cross","source_node_id":"context","target_node_id":"artifact","relation_kind":"RELATION","direction":"NONE"}),
+        ];
+        if include_plugin {
+            nodes.push(json!({"node_id":"plugin","label":"Plugin","semantic_kind":"SERVICE"}));
+            edges.push(json!({"edge_id":"e_plugin_execution","source_node_id":"plugin","target_node_id":"execution","relation_kind":"DEPENDS_ON","direction":"FORWARD"}));
+        }
+        json!({
+            "title":"Fielora Architecture 架构",
+            "description":"Durable Diagram Core inheritance fixture.",
+            "layout":{"strategy":"LAYERED_AUTO","direction":"LEFT_TO_RIGHT"},
+            "nodes":nodes,
+            "edges":edges,
+            "groups":[
+                {"group_id":"reasoning","label":"Reasoning","semantic_kind":"LAYER","member_node_ids":["model"]},
+                {"group_id":"harness","label":"Harness","semantic_kind":"BOUNDARY","member_node_ids":["context","execution","verification"]},
+                {"group_id":"tools","label":"Tools 工具","semantic_kind":"CLUSTER","member_node_ids":["artifact"]}
+            ]
+        })
+    }
+
     async fn e2e_environment_guard() -> tokio::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
@@ -8954,7 +8990,7 @@ mod tests {
                     user_message_id: None,
                     provider_config_id: provider.view.id,
                     model_id: Some("fixture-model".into()),
-                    task: "Persist and export a semantic Artifact".into(),
+                    task: "Persist and export a semantic Diagram Artifact".into(),
                     permission: AgentPermission::ReadOnly,
                     max_steps: Some(12),
                     attachments: None,
@@ -9004,10 +9040,10 @@ mod tests {
                     id: "durable-create".into(),
                     name: "artifact.create".into(),
                     arguments: json!({
-                        "type":"document",
-                        "title":"Durable proof",
+                        "type":"diagram",
+                        "title":"Durable Diagram proof",
                         "associate_with_current_project":true,
-                        "content":{"blocks":[{"kind":"PARAGRAPH","text":"immutable revision one"}]}
+                        "content":diagram_artifact_content("Execution R1", false)
                     }),
                 },
                 false,
@@ -9073,9 +9109,9 @@ mod tests {
         assert!(!read_result.wrote_workspace);
         assert!(matches!(
             read_result.message,
-            AgentModelMessage::ToolResult { content, is_error: false, .. }
-                if content.contains("UNTRUSTED_ARTIFACT_CONTENT")
-                    && content.contains("immutable revision one")
+                AgentModelMessage::ToolResult { content, is_error: false, .. }
+                    if content.contains("UNTRUSTED_ARTIFACT_CONTENT")
+                    && content.contains("Execution R1")
         ));
 
         let revision_before_update = workspace_revision_for_run(
@@ -9155,7 +9191,7 @@ mod tests {
                     arguments: json!({
                         "artifact_id":artifact_id,
                         "expected_revision_id":revision_one,
-                        "content":{"blocks":[{"kind":"PARAGRAPH","text":"immutable revision two"}]}
+                        "content":diagram_artifact_content("Execution R2", true)
                     }),
                 },
                 false,
@@ -9177,6 +9213,7 @@ mod tests {
         ));
         let updated = storage.read_artifact(artifact_id.clone(), None).unwrap();
         assert_eq!(updated.revision.sequence, 2);
+        assert_eq!(updated.artifact.artifact_type, ArtifactType::Diagram);
         let old = storage
             .read_artifact(artifact_id.clone(), Some(revision_one.clone()))
             .unwrap();
@@ -9204,7 +9241,7 @@ mod tests {
                     arguments: json!({
                         "artifact_id":artifact_id,
                         "revision_id":revision_one,
-                        "output_path":"exports/revision-one.docx"
+                        "output_path":"exports/revision-one.svg"
                     }),
                 },
                 false,
@@ -9217,7 +9254,10 @@ mod tests {
             panic!("saved revision export must use artifact.export")
         };
         assert!(exported.wrote_workspace);
-        assert!(workspace.join("exports/revision-one.docx").exists());
+        assert!(workspace.join("exports/revision-one.svg").exists());
+        let revision_one_svg = std::fs::read(workspace.join("exports/revision-one.svg")).unwrap();
+        assert!(String::from_utf8_lossy(&revision_one_svg).contains("Execution R1"));
+        assert!(!String::from_utf8_lossy(&revision_one_svg).contains("Execution R2"));
         let export_call = storage
             .list_agent_tool_calls(prepared.run.id.clone())
             .unwrap()
@@ -9229,12 +9269,92 @@ mod tests {
         assert_eq!(export_receipt["artifact_revision_id"], revision_one.0);
         assert_eq!(export_receipt["artifact_persistence"], "DURABLE");
         assert_eq!(export_receipt["artifact_semantic_sha256"], digest_one);
+        assert_eq!(export_receipt["artifact_type"], "DIAGRAM");
+        assert_eq!(export_receipt["renderer_id"], "fielora.diagram.svg");
+        assert_eq!(export_receipt["static_svg_security"], "PASS");
+        assert!(export_receipt.get("verification_eligible").is_none());
+        assert!(!export_receipt.to_string().contains("Execution R1"));
         assert!(
             storage
                 .list_agent_verifications(prepared.run.id.clone())
                 .unwrap()
                 .len()
                 == 1
+        );
+
+        let current_export = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                export_spec,
+                AgentModelToolCall {
+                    id: "saved-export-current".into(),
+                    name: "artifact.export".into(),
+                    arguments: json!({
+                        "artifact_id":artifact_id,
+                        "revision_id":updated.revision.revision_id,
+                        "output_path":"exports/revision-two.svg"
+                    }),
+                },
+                false,
+            )
+            .unwrap();
+        let ToolDisposition::Executed(current_exported) = coordinator
+            .execute_tool(&prepared, current_export, true, &test_cancellation())
+            .await
+        else {
+            panic!("current Diagram revision export must use artifact.export")
+        };
+        assert!(current_exported.wrote_workspace);
+        let revision_two_svg = std::fs::read(workspace.join("exports/revision-two.svg")).unwrap();
+        assert!(String::from_utf8_lossy(&revision_two_svg).contains("Execution R2"));
+        assert_ne!(revision_one_svg, revision_two_svg);
+        assert_eq!(
+            storage
+                .list_agent_verifications(prepared.run.id.clone())
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let stale_tool = storage
+            .create_agent_tool_call(
+                prepared.run.id.clone(),
+                "artifact.update".into(),
+                AgentToolEffect::WorkspaceWrite,
+                AgentPolicyDecision::Allow,
+                json!({}),
+                25,
+            )
+            .unwrap();
+        let stale_arguments = json!({
+            "artifact_id":artifact_id,
+            "expected_revision_id":revision_one,
+            "content":diagram_artifact_content("stale replacement", false)
+        });
+        let stale_executor = DurableArtifactToolExecutor {
+            storage: storage.clone(),
+            runtime: ToolRuntime::new(&prepared.project_root, &artifacts).unwrap(),
+            run_id: prepared.run.id.clone(),
+            conversation_id: conversation.id.clone(),
+            project_field_id: project.field_id.clone(),
+            tool_call_id: stale_tool.id,
+        };
+        assert_eq!(
+            stale_executor.execute(
+                "artifact.update",
+                &stale_arguments,
+                true,
+                &CommandCancellation::default(),
+            ),
+            Err(AgentError::ArtifactRevisionConflict)
+        );
+        assert_eq!(
+            storage
+                .read_artifact(artifact_id.clone(), None)
+                .unwrap()
+                .revision
+                .revision_id,
+            updated.revision.revision_id
         );
 
         // Simulate commit-before-ToolCall-receipt: the storage transaction is
@@ -9272,7 +9392,7 @@ mod tests {
         let recovery_arguments = json!({
             "artifact_id":artifact_id,
             "expected_revision_id":updated.revision.revision_id,
-            "content":{"blocks":[{"kind":"PARAGRAPH","text":"committed before receipt"}]}
+            "content":diagram_artifact_content("committed before receipt", true)
         });
         let recovery_tool = storage
             .create_agent_tool_call(
@@ -9310,6 +9430,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(committed.receipt["artifact_persistence"], "DURABLE");
+        let replayed = DurableArtifactToolExecutor {
+            storage: storage.clone(),
+            runtime: ToolRuntime::new(&prepared.project_root, &artifacts).unwrap(),
+            run_id: recovery_run.id.clone(),
+            conversation_id: conversation.id.clone(),
+            project_field_id: project.field_id.clone(),
+            tool_call_id: recovery_tool.id.clone(),
+        }
+        .execute(
+            "artifact.update",
+            &recovery_arguments,
+            true,
+            &CommandCancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            replayed.receipt["artifact_revision_id"],
+            committed.receipt["artifact_revision_id"]
+        );
         assert!(
             storage
                 .list_agent_tool_calls(recovery_run.id.clone())

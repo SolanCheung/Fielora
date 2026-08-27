@@ -2,23 +2,24 @@
 
 **Status:** `DRAFT / CANDIDATE / NOT FROZEN`
 
-**Implementation:** `NOT AUTHORIZED`
+**Implementation:** `FIRST SLICE IMPLEMENTED / TARGETED VALIDATED`
 
-**Scope:** Current-reality alignment and the smallest bounded candidate for a
-durable Diagram Artifact using the existing Artifact, Tool, Policy, receipt,
-export, and Verification paths.
+**Scope:** Factual alignment and bounded architecture record for the implemented
+durable Diagram Artifact first slice using the existing Artifact, Tool, Policy,
+receipt, export, and Verification paths.
 
-This remains a non-authorizing architecture Candidate. Its factual alignment
-records the separate schema-9 Artifact type storage repair; it does not modify
-Frozen/Baseline specifications, the Rapid Desktop route, Diagram product code,
-contracts, UI, dependencies, layout, or renderers.
+This remains a non-Frozen architecture Candidate. The separately authorized
+first slice adds typed Diagram contracts, bounded validation/canonicalization,
+the repository-owned deterministic layout, controlled SVG export, and targeted
+evidence. It does not modify Frozen/Baseline specifications, the Rapid Desktop
+route, UI/FIPC, dependencies, or Storage migrations.
 
 ## Decision summary
 
 ```text
 Diagram
   = a typed, renderer-neutral semantic graph
-  = one future ArtifactContentV1 variant
+  = one ArtifactContentV1 variant
   != SVG, Mermaid, canvas state, or presentation geometry
 
 Diagram create/update/read/export
@@ -32,19 +33,18 @@ SVG
   != the Diagram source of truth
 ```
 
-The preferred first implementation shape is a backend-only vertical slice:
-typed Diagram content, bounded graph validation, deterministic in-process
-layout, and static SVG export through the existing saved `artifact.export`
-path. It must not add a Diagram runtime, Diagram agent, parallel store,
-permission engine, receipt hierarchy, or verification engine.
+The implemented shape is the backend-only vertical slice proposed here: typed
+Diagram content, bounded graph validation, deterministic in-process layout,
+and static SVG export through the existing saved `artifact.export` path. It
+adds no Diagram runtime, Diagram agent, parallel store, permission engine,
+receipt hierarchy, or verification engine.
 
 The separate schema-9 storage repair resolved the Core extensibility blocker.
 Migration 0008 remains immutable; forward migration 0009 replaces only its
 closed persisted type list with a bounded canonical token. The production
-domain and Model-facing schemas remain closed to Document/Presentation, so no
-Diagram behavior is implemented or exposed. The proposed Diagram slice is
-ready for an explicit implementation authorization, but this Candidate does
-not grant that authorization.
+domain and Model-facing durable Artifact schemas are now closed to
+Document/Presentation/Diagram; arbitrary and future unknown types still fail
+closed. Diagram was separately authorized and implemented without schema 10.
 
 ## CURRENT_DIAGRAM_REALITY
 
@@ -54,22 +54,22 @@ not grant that authorization.
 |---|---|---|---|---|
 | Durable Artifact identity | `EXISTS` | `ArtifactId`, `ArtifactRevisionId`, Artifact/revision views in `crates/fielora-contracts/src/lib.rs` | Existing Artifact Core | Reusable unchanged for Diagram |
 | Immutable Artifact revisions | `EXISTS` | `artifacts` and `artifact_revisions` from migration 0008, retained by schema 9 | Existing StorageWorker / Artifact repository | Reusable unchanged for Diagram |
-| Artifact typed content | `PARTIAL` | `ArtifactContentV1::{Document, Presentation}` in `crates/fielora-contracts/src/lib.rs` | Artifact contract | No Diagram variant or graph vocabulary |
-| Artifact type storage admission | `EXISTS / EXTENSIBLE` | `0009_artifact_type_extensibility.sql` | SQLite structural invariant | DB admits 1..32-byte `[A-Z][A-Z0-9_]*` tokens; current Domain intentionally still rejects `DIAGRAM` until its typed implementation |
-| Artifact create/read/update | `EXISTS / TWO TYPES` | Durable Artifact Tool execution in `crates/fielora-core/src/agent_runtime.rs` and `crates/fielora-agent/src/artifact.rs` | Existing Tool pipeline + Artifact Core | Plumbing is reusable; schemas, typed parsing, canonicalization, and dispatch are closed to two types |
-| Artifact export | `EXISTS / TWO FORMATS` | `artifact.export` in `crates/fielora-agent/src/artifact.rs` | Existing Artifact Tool adapter | Saved-revision export dispatch supports DOCX/PPTX only |
-| Diagram semantic model | `ABSENT` | No production Diagram contract | None | Need bounded typed nodes, edges, groups, and layout intent |
-| Stable element identity | `ABSENT` | No Diagram-local ID types | None | Need revision-stable local node/edge/group IDs |
-| Graph validation | `ABSENT` | No Diagram validator | None | Need duplicates, references, cycles, grouping, and aggregate-bound rules |
-| Diagram canonicalization | `ABSENT` | Existing canonicalizer handles Document/Presentation only | Artifact contract/adapter | Need order-independent canonical graph rules and digest tests |
-| Diagram layout engine | `ABSENT` | No graph-layout dependency or production layout abstraction | None | Need a bounded deterministic layout decision |
+| Artifact typed content | `EXISTS / THREE TYPES` | `ArtifactContentV1::{Document, Presentation, Diagram}` in `crates/fielora-contracts/src/lib.rs` | Artifact contract | Closed typed union; future unknown types still reject |
+| Artifact type storage admission | `EXISTS / EXTENSIBLE` | `0009_artifact_type_extensibility.sql` | SQLite structural invariant | DB admits `DIAGRAM` through the existing bounded canonical token; schema remains 9 |
+| Artifact create/read/update | `EXISTS / THREE TYPES` | Durable Artifact Tool execution in `crates/fielora-core/src/agent_runtime.rs` and `crates/fielora-agent/src/artifact.rs` | Existing Tool pipeline + Artifact Core | Diagram uses the same create/read/update path and full-replacement update semantics |
+| Artifact export | `EXISTS / THREE FORMATS` | `artifact.export` in `crates/fielora-agent/src/artifact.rs` | Existing Artifact Tool adapter | Saved Diagram revisions dispatch to controlled SVG; inline Diagram export remains deferred |
+| Diagram semantic model | `EXISTS` | Typed Diagram DTOs in `crates/fielora-contracts/src/lib.rs` | Artifact contract | Bounded closed nodes, edges, groups, layout, and presentation intent |
+| Stable element identity | `EXISTS` | `DiagramNodeId`, `DiagramEdgeId`, `DiagramGroupId` | Diagram contract | Diagram-local, canonical, revision-stable; not SVG or global authority |
+| Graph validation | `EXISTS` | `crates/fielora-agent/src/diagram.rs` | Diagram Artifact adapter | Fail-closed duplicates/references/groups/bounds; cycles/self/parallel/disconnected admitted |
+| Diagram canonicalization | `EXISTS` | `diagram::canonicalize` through existing `artifact::canonicalize_content` | Existing Artifact digest boundary | Arrays and members sort by stable local ID; derived geometry excluded |
+| Diagram layout engine | `EXISTS / BOUNDED` | `FIELORA_BOUNDED_LAYERED_V1` in `crates/fielora-agent/src/diagram.rs` | Artifact renderer adapter | Deterministic SCC/rank/component/group placement; quality deliberately bounded |
 | Mermaid parser/renderer | `ABSENT` | No Mermaid dependency or admission path | None | Not required and not selected for the first slice |
-| SVG renderer | `ABSENT` | No Artifact SVG renderer | None | Need controlled static SVG generation and structural security validation |
-| SVG export path | `PARTIAL` | Existing contained atomic/no-overwrite Project file export is format-neutral around type-specific renderer dispatch | Project filesystem + Artifact Tool | Additive Diagram-to-SVG dispatch is possible after typed Diagram authorization |
+| SVG renderer | `EXISTS / STATIC` | `fielora.diagram.svg@0.1.0` in `crates/fielora-agent/src/diagram.rs` | Artifact renderer adapter | Controlled vocabulary only; no input SVG/XML/CSS/URL |
+| SVG export path | `EXISTS / SAVED REVISION` | Existing contained atomic/no-overwrite Project file export plus Diagram dispatch | Project filesystem + Artifact Tool | Final bytes are independently reparsed before success; no inline Diagram mode |
 | Safe in-app SVG preview | `ABSENT` | Workspace image preview admits raster formats; SVG is treated as text or system-openable file | Desktop Workspace / Library | Browser rendering is not an Artifact preview contract; no UI is authorized |
 | Diagram UI/editor | `ABSENT` | No Artifact Diagram surface or FIPC consumer | None | Explicitly deferred |
 | Diagram Verification | `PARTIAL / REUSABLE` | Existing exact `ARTIFACT_REVISION` subject, semantic digest, and Verification Receipt | Existing Harness Verification | Identity boundary is sufficient; no Diagram-specific truth authority exists or is needed |
-| Diagram receipts | `PARTIAL / REUSABLE` | Durable ToolCall receipts and saved export evidence | Existing Harness ledger | Add compact Diagram/render metadata to the existing receipt only; do not create a receipt hierarchy |
+| Diagram receipts | `EXISTS / REUSED` | Existing durable ToolCall receipt with compact Diagram/render facts | Existing Harness ledger | No full semantic content/SVG and no new receipt hierarchy |
 | Diagram composition | `ABSENT` | No typed Artifact-to-Artifact composition reference | None | Future Document/Presentation embedding needs a separate bounded reference contract |
 
 ### Architecture-smell audit
@@ -111,8 +111,8 @@ stable Artifact identity, immutable revisions, optimistic conflict handling,
 typed content, saved export, receipts, recovery, and exact-revision
 Verification subjects. Diagram is a credible next type because it exercises
 graph semantics and a non-Office renderer without requiring a second lifecycle.
-Storage admission is now type-extensible; Diagram must still earn explicit
-typed Domain/Tool/renderer implementation authorization.
+Storage admission is type-extensible; the implemented typed Domain/Tool/
+renderer branch supplies Diagram semantics without changing Artifact lifecycle.
 
 ## ARTIFACT_CORE_REUSE
 
@@ -122,8 +122,8 @@ typed Domain/Tool/renderer implementation authorization.
 | ArtifactId / ArtifactRevisionId | `REUSE` | None |
 | Immutable revision and current-pointer CAS | `REUSE` | None |
 | Mutation idempotency and restart recovery | `REUSE` | None |
-| `artifact.create/read/update/export` execution pipeline | `EXTEND` | Admit Diagram in existing strict tagged schemas and renderer dispatch |
-| Artifact semantic-content union | `EXTEND` | Add one closed `Diagram` variant after schema authorization |
+| `artifact.create/read/update/export` execution pipeline | `EXTENDED / IMPLEMENTED` | Diagram is admitted in existing strict tagged schemas and saved renderer dispatch |
+| Artifact semantic-content union | `EXTENDED / IMPLEMENTED` | One closed `Diagram` variant added; content schema version remains 1 |
 | Persistence tables | `REUSE` | No new Diagram table |
 | Persisted Artifact type constraint | `REUSE` | Schema 9 already admits bounded canonical future tokens; no Diagram-specific migration |
 | Policy / Approval / ToolExecutor | `REUSE` | No Diagram permission |
@@ -134,7 +134,7 @@ typed Domain/Tool/renderer implementation authorization.
 | Diagram validator/layout/SVG adapter | `NEW / BOUNDED` | Pure in-process modules behind existing Artifact Tool execution |
 | UI/FIPC | `NONE` | Not required for the backend proof |
 
-The candidate preserves the canonical architecture:
+The implementation preserves the canonical architecture:
 
 ```text
 Model
@@ -150,7 +150,7 @@ Model
 
 ## TYPE_MODEL
 
-The logical additive contract candidate is:
+The implemented additive contract is:
 
 ```text
 ArtifactType
@@ -165,6 +165,7 @@ ArtifactContentV1
 
 DiagramArtifactV1 {
   title?: BoundedText,
+  description?: BoundedText,
   layout: DiagramLayoutIntentV1,
   nodes: DiagramNodeV1[],
   edges: DiagramEdgeV1[],
@@ -172,7 +173,7 @@ DiagramArtifactV1 {
 }
 ```
 
-`content_schema_version` remains `1` in this candidate. The version identifies
+`content_schema_version` remains `1`. The version identifies
 the closed V1 representation of each tagged Artifact content variant; adding a
 new tagged variant does not alter the representation of existing Document or
 Presentation V1 values. The database schema version is a distinct concern and
@@ -193,7 +194,7 @@ DiagramEdgeId
 DiagramGroupId
 ```
 
-Candidate lexical form: `^[a-z][a-z0-9_-]{0,63}$` after strict ASCII
+Implemented lexical form: `^[a-z][a-z0-9_-]{0,63}$` after strict ASCII
 validation. The identifiers are unique within one Diagram Artifact and remain
 stable when an element survives across revisions.
 
@@ -222,7 +223,7 @@ DiagramNodeV1 {
 }
 
 DiagramNodeKind
-  = GENERIC | ACTOR | SYSTEM | COMPONENT | PROCESS | DATA_STORE | DOCUMENT
+  = GENERIC | PERSON | SYSTEM | SERVICE | DATABASE | PROCESS | DOCUMENT
 ```
 
 ### Edges
@@ -259,9 +260,8 @@ DiagramGroupKind
   = BOUNDARY | LAYER | CLUSTER
 ```
 
-These enum values are Candidate vocabulary, not Frozen API. They should be
-accepted only if implementation review confirms that every value has stable
-semantic meaning independent of a particular SVG shape.
+These enum values are implemented Candidate vocabulary, not Frozen API. Every
+value is closed and independent of a particular SVG shape.
 
 ## SEMANTIC_VS_VISUAL
 
@@ -271,17 +271,16 @@ graph.
 | Persisted semantic content | Optional persisted intent | Renderer-owned output |
 |---|---|---|
 | Element IDs, labels, descriptions | Node shape family | x/y/width/height |
-| Node semantic kind | Normal/emphasized/muted emphasis | Font metrics and wrapping |
-| Edge endpoints, relation kind, direction | Normal/emphasized/muted edge emphasis | Paths, bends, arrowhead geometry |
+| Node semantic kind | Normal/emphasis plus closed shape intent | Font metrics and wrapping |
+| Edge endpoints, relation kind, direction | Normal/emphasis edge intent | Paths, bends, arrowhead geometry |
 | Group membership and semantic kind | Layout direction | Colors, stroke widths, padding |
-| Explicit layout strategy | Normal/wide size intent | SVG DOM organization and IDs |
+| Explicit layout strategy | None beyond the closed V1 fields | SVG DOM organization and IDs |
 
-Candidate presentation vocabulary:
+Implemented presentation vocabulary:
 
 ```text
-DiagramNodeShape = AUTO | RECTANGLE | ROUNDED_RECTANGLE | ELLIPSE
-DiagramEmphasis = NORMAL | EMPHASIZED | MUTED
-DiagramNodeSizeIntent = NORMAL | WIDE
+DiagramNodeShape = AUTO | RECTANGLE | ROUNDED_RECT | ELLIPSE
+DiagramEmphasis = NORMAL | EMPHASIS
 ```
 
 No raw color, CSS, font family, font file, arbitrary numeric coordinate, SVG
@@ -383,7 +382,7 @@ Explicitly prohibited:
 - `href`, `xlink:href`, event-handler attributes, external resource references,
   `data:`, `file:`, HTTP(S), raw CSS, embedded fonts, filters, and arbitrary XML.
 
-The first candidate renderer identity is logically:
+The implemented renderer identity is:
 
 ```text
 renderer_id = fielora.diagram.svg
@@ -391,8 +390,7 @@ renderer_version = 0.1.0
 theme_profile = LIGHT_NEUTRAL_V1
 ```
 
-Those values are not Frozen until implementation authorization and contract
-review. PNG raster export is deferred.
+These remain Candidate rather than Frozen values. PNG raster export is deferred.
 
 ## CANONICALIZATION
 
@@ -628,7 +626,7 @@ fixtures, and an explicitly scoped human-open review without product UI.
 
 ## DEPENDENCY_IMPACT
 
-`FIRST_SLICE_NEW_DEPENDENCY: NONE PROPOSED`
+`FIRST_SLICE_NEW_DEPENDENCY: NONE`
 
 Repository reality contains no current Graphviz, Dagre, ELK, Mermaid,
 Cytoscape, React Flow, D3 graph-layout, `usvg`, or `resvg` production
@@ -636,10 +634,9 @@ dependency. The candidate intentionally uses a bounded internal layout proof
 and static SVG generation so dependency choice does not dominate the semantic
 validation.
 
-Existing `quick-xml 0.41` is relevant to controlled XML work but must still be
-reviewed at implementation time for the exact writer/parser APIs, entity/DTD
-behavior, and error bounds. Existing transitive XML packages do not count as
-approved production dependencies.
+Existing direct `quick-xml 0.41` is reused only to independently parse final SVG
+bytes and enforce root/namespace, vocabulary, attribute, count, text-presence,
+DTD/entity/PI, size, and viewBox rules. No dependency was added.
 
 If the bounded algorithm cannot meet the accepted fixture quality/bounds, stop
 and return to architecture review. Do not silently grow it into a general
@@ -675,23 +672,23 @@ PROFILE_SCHEMA_CHANGE: NO
 
 Storage extensibility does not grant semantic authority. The current Rust
 `ArtifactType`, `ArtifactContentV1`, Tool schemas, canonicalization, and content
-schema version remain closed to Document/Presentation. A structurally valid but
-unknown persisted token fails closed as `ARTIFACT_TYPE_UNSUPPORTED`; there is
-no `UnknownArtifact(JSON)` fallback. Diagram implementation can now add the
-typed `DIAGRAM + DiagramArtifactV1` pair without a type-specific database
-migration. Encoding Diagram as `PRESENTATION`, using raw untyped JSON, or
-disabling checks remains prohibited.
+schema version are closed to Document/Presentation/Diagram. A structurally
+valid but unknown persisted token fails closed as `ARTIFACT_TYPE_UNSUPPORTED`;
+there is no `UnknownArtifact(JSON)` fallback. The typed
+`DIAGRAM + DiagramArtifactV1` pair required no type-specific database migration.
+Encoding Diagram as `PRESENTATION`, using raw untyped JSON, or disabling checks
+remains prohibited.
 
 ## SECURITY_BLOCKERS
 
 | Blocker / risk | Classification | Candidate disposition |
 |---|---|---|
-| Storage admission for `DIAGRAM` | `RESOLVED IN SCHEMA 9` | Bounded canonical token storage; Domain remains closed until Diagram authorization |
+| Storage admission for `DIAGRAM` | `PASS / SCHEMA 9` | Bounded canonical token storage plus closed typed Domain support |
 | No safe in-app SVG preview | `NON-BLOCKING FOR BACKEND SLICE` | Export only; no UI or Browser reuse claim |
-| SVG active-content/external-reference risk | `MUST PASS BEFORE IMPLEMENTATION ACCEPTANCE` | Controlled generator plus independent allowlist parser; no raw SVG input |
-| Layout resource exhaustion | `MUST PASS BEFORE IMPLEMENTATION ACCEPTANCE` | Strict graph/text/output/viewBox bounds and deterministic overflow |
-| Graph instruction injection | `MUST PASS BEFORE IMPLEMENTATION ACCEPTANCE` | Treat text as untrusted data and XML-escape it; no execution side effects |
-| Renderer common-mode validation | `RISK` | Independent structural/static checks and adversarial fixtures |
+| SVG active-content/external-reference risk | `TARGETED GATE PASS` | Controlled generator plus independent allowlist parser; no raw SVG input |
+| Layout resource exhaustion | `TARGETED GATE PASS` | Strict graph/text/output/viewBox bounds and deterministic overflow |
+| Graph instruction injection | `TARGETED GATE PASS` | Text remains untrusted escaped data; load/render has no execution side effects |
+| Renderer common-mode validation | `TARGETED GATE PASS` | Final saved bytes are independently reparsed with adversarial fixtures |
 
 No security fact justifies a second runtime, sandbox process, credential path,
 network capability, or new permission class for this bounded static renderer.
@@ -700,7 +697,7 @@ network capability, or new permission class for this bounded static renderer.
 
 | Area | Candidate impact | Reason |
 |---|---|---|
-| Frozen/Baseline architecture | `NONE` | This is a non-authorizing Candidate |
+| Frozen/Baseline architecture | `NONE` | No Frozen/Baseline document changed |
 | Artifact semantic contract | `MEDIUM-HIGH` | Adds a closed typed graph variant and local identity vocabulary |
 | Database schema/migration | `NONE FOR DIAGRAM` | Schema 9 already admits bounded future type tokens |
 | Artifact repository/revisions | `LOW` | Existing generic rows and revision semantics are reusable |
@@ -709,28 +706,28 @@ network capability, or new permission class for this bounded static renderer.
 | Receipts/Verification | `LOW` | Compact metadata delta only; exact revision subject reused |
 | Layout engine | `MEDIUM-HIGH` | New deterministic graph algorithm with explicit quality limits |
 | SVG renderer/security | `HIGH` | New file format and active-content exclusion boundary |
-| Dependency graph | `NONE PROPOSED` | No package addition in first candidate |
+| Dependency graph | `NONE` | Existing direct quick-xml reused; no package addition |
 | UI/FIPC | `NONE` | Explicitly deferred |
 | Product route | `NONE` | Subordinate Artifact architecture track; no new phase |
 
 Overall Diagram implementation Change Impact remains `HIGH` because typed graph
 semantics, deterministic layout, and SVG export create a new security-sensitive
 representation. It no longer includes a Diagram-specific schema migration.
-That impact still requires a separately authorized implementation slice and
-targeted Core/Storage/security evidence. It does not justify altering the
-canonical `Model + Harness + Tools` architecture.
+The separately authorized implementation and targeted Core/Storage/security
+evidence are complete. The canonical `Model + Harness + Tools` architecture is
+unchanged.
 
-## FIRST_SLICE_RECOMMENDATION
+## FIRST_SLICE_IMPLEMENTATION
 
 | Option | Verdict |
 |---|---|
 | A. Semantic Diagram type only, no export | Too weak: proves persistence but not a useful representation |
 | B. Request-scoped Diagram-to-SVG only | Reject: bypasses the durable Artifact goal and does not prove revision identity |
-| C. Durable Diagram CRUD plus deterministic saved SVG export | **Recommended after explicit Diagram implementation authorization** |
+| C. Durable Diagram CRUD plus deterministic saved SVG export | **Implemented and targeted validated** |
 | D. Diagram UI/editor plus runtime | Reject: far beyond the foundation proof |
 | E. Mermaid/SVG import and round-trip | Reject: parser/security/fidelity scope dominates the first proof |
 
-Recommended future slice:
+Implemented first slice:
 
 ```text
 FIRST_DIAGRAM_ARTIFACT_SLICE
@@ -751,12 +748,14 @@ Credential = 0
 Model request required by tests = 0
 New Agent/runtime = 0
 New Diagram tables = 0
-New dependency = 0 proposed
+New dependency = 0
+Diagram inline export = NOT SUPPORTED
 ```
 
-Do not begin that slice until Diagram implementation is explicitly authorized.
+The slice does not activate UI, PNG, Mermaid, composition, Spreadsheet, a new
+runtime, or a new migration.
 
-## TARGETED_TEST_PLAN
+## TARGETED_VALIDATION
 
 ### Contract and canonicalization
 
@@ -774,8 +773,8 @@ Do not begin that slice until Diagram implementation is explicitly authorized.
 - reuse the existing schema-8 to schema-9 preservation/rollback evidence;
 - prove `DIAGRAM` passes the schema-9 bounded canonical token constraint without
   any new migration;
-- prove the pre-Diagram app still returns `ARTIFACT_TYPE_UNSUPPORTED` for that
-  token, while the authorized Diagram build admits only its typed content;
+- prove the Diagram build admits only its typed content while any other bounded
+  future token still returns `ARTIFACT_TYPE_UNSUPPORTED`;
 - prove Diagram create/update conflict, idempotent replay, immutable revisions,
   historical read, recovery, and profile/project scoping reuse existing rules;
 - prove no Diagram table, generic JSON fallback, or content-schema bump appears.
@@ -816,9 +815,32 @@ Do not begin that slice until Diagram implementation is explicitly authorized.
 - existing Document/Presentation Artifact, Storage migration, recovery,
   contracts, Agent/Core integration, docs, and `git diff --check` stay green.
 
-For this Candidate document only, validation is limited to docs/contracts and
-diff checks. Full premerge, Desktop E2E, packaged smoke, and the Rust workspace
-suite are neither required nor authorized.
+Implementation validation runs the affected Agent renderer/Artifact suite,
+Diagram Core inheritance test, schema-9 Storage suite, contract generation and
+current check, existing Core/Cross development lanes, affected Clippy with
+`-D warnings`, release Core build, docs context audit, fmt, and diff checks.
+Full premerge, Browser/Desktop visual E2E, packaged, and portable smoke remain
+explicitly not run.
+
+### Recorded implementation evidence
+
+| Gate | Result |
+|---|---|
+| Diagram renderer tests | `PASS` — 7/7 |
+| Agent library and Office writer regression | `PASS` — 103/103 + 3/3 |
+| Core durable Artifact inheritance | `PASS` — Diagram create/read/update/export, R1/R2 historical export, conflict, idempotent replay, commit-before-receipt recovery, restart durability, revision-bound verification, and freshness are covered in the existing Core test |
+| Storage schema-9 regression | `PASS` — 22/22; typed `DIAGRAM` round-trips and an unknown bounded future token still fails closed |
+| Core development lane | `PASS` — fmt, Rust suites, and Clippy |
+| Cross development lane | `PASS` — context audit, generated contracts, TypeScript typecheck/lint, 176/176 Desktop unit tests, Rust suites, Clippy, and 12/12 Core integration tests |
+| Generated contract current check | `PASS` |
+| Core release build | `PASS` |
+| Migration and dependency diff | `PASS` — schema remains 9; zero migration or dependency-file changes |
+| Diff hygiene | `PASS` — `git diff --check` |
+
+The existing `ts-rs` generator emits its known informational warning that it
+does not interpret Serde's `deny_unknown_fields` attribute. Rust/Serde runtime
+deserialization still owns and enforces that fail-closed rule; generated
+TypeScript contracts match the Rust source.
 
 ## OPEN_QUESTIONS
 
@@ -827,19 +849,18 @@ suite are neither required nor authorized.
    authority; unknown tokens fail `ARTIFACT_TYPE_UNSUPPORTED`.
 2. Are the proposed V1 semantic enum values minimal and stable enough, or
    should `CONTAINS` remain solely group membership rather than an edge kind?
-3. Is one-level exclusive group membership sufficient for the first real user
-   flow, or should groups be removed entirely from the first implementation to
-   reduce layout risk?
-4. Must first-slice SVG bytes be byte-identical, or is deterministic geometry
-   plus recorded actual output digest sufficient? If byte identity is promised,
-   XML attribute order and numeric formatting must be contracted and tested.
-5. Which output accessibility facts are required in V1: `<title>`/`<desc>`,
-   role metadata, reading order, and contrast profile?
-6. Is `LIGHT_NEUTRAL_V1` sufficient, or must export profile selection exist
-   before the first implementation? Raw color/theme input remains out of scope.
-7. Does the bounded in-house layout pass agreed representative quality
-   fixtures? Failure must trigger a renderer dependency review, not ad hoc
-   algorithm expansion.
+3. One-level exclusive groups are implemented. Nested groups and more complex
+   cluster behavior require a future semantic/layout review.
+4. First-slice SVG bytes are byte-identical for the same canonical revision,
+   renderer version, and theme. Any future renderer/profile choice needs an
+   explicit provenance contract.
+5. V1 exports exact `<title>`/`<desc>` plus `role=img` and a visible title.
+   Richer accessibility reading-order work remains open.
+6. `LIGHT_NEUTRAL_V1` is the only implemented profile. User-selectable themes
+   and raw color remain out of scope.
+7. The bounded layout passes the representative architecture, cycle,
+   self/parallel/cross-edge, disconnected, group, CJK, and overflow fixtures.
+   Larger or higher-fidelity layouts still require dependency review.
 8. When composition is authorized, should references always pin a revision, or
    may an explicit current-with-freshness policy exist?
 9. Safe in-app SVG preview and Diagram editing remain separate UI/security
@@ -847,8 +868,8 @@ suite are neither required nor authorized.
 
 ## NEXT_DECISION
 
-`A. READY_FOR_DIAGRAM_ARTIFACT_FIRST_SLICE`
+`A. READY_FOR_SPREADSHEET_ARTIFACT`
 
-The Artifact type storage blocker is repaired without implementing Diagram.
-The recommended Diagram slice is architecturally ready for a separate explicit
-authorization; this Candidate remains `NOT AUTHORIZED` and `NOT IMPLEMENTED`.
+The Diagram first slice is implemented and targeted validated on schema 9.
+This Candidate remains `DRAFT / CANDIDATE / NOT FROZEN`; the decision does not
+authorize Spreadsheet implementation.
