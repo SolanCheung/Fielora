@@ -8,9 +8,10 @@
 durable Diagram Artifact using the existing Artifact, Tool, Policy, receipt,
 export, and Verification paths.
 
-This document is architecture analysis only. It does not modify Frozen or
-Baseline specifications, the Rapid Desktop route, product code, contracts,
-storage, migrations, UI, dependencies, renderers, or tests.
+This remains a non-authorizing architecture Candidate. Its factual alignment
+records the separate schema-9 Artifact type storage repair; it does not modify
+Frozen/Baseline specifications, the Rapid Desktop route, Diagram product code,
+contracts, UI, dependencies, layout, or renderers.
 
 ## Decision summary
 
@@ -37,12 +38,13 @@ layout, and static SVG export through the existing saved `artifact.export`
 path. It must not add a Diagram runtime, Diagram agent, parallel store,
 permission engine, receipt hierarchy, or verification engine.
 
-That slice is **not currently ready for implementation**. Migration 0008 has a
-database `CHECK` constraint that admits only `DOCUMENT` and `PRESENTATION`.
-Adding a Rust enum variant alone cannot persist a durable `DIAGRAM` Artifact.
-A forward schema migration decision is therefore required before the durable
-slice can be authorized. This candidate does not create that migration and
-does not weaken, bypass, or rewrite migration 0008.
+The separate schema-9 storage repair resolved the Core extensibility blocker.
+Migration 0008 remains immutable; forward migration 0009 replaces only its
+closed persisted type list with a bounded canonical token. The production
+domain and Model-facing schemas remain closed to Document/Presentation, so no
+Diagram behavior is implemented or exposed. The proposed Diagram slice is
+ready for an explicit implementation authorization, but this Candidate does
+not grant that authorization.
 
 ## CURRENT_DIAGRAM_REALITY
 
@@ -51,9 +53,9 @@ does not weaken, bypass, or rewrite migration 0008.
 | Item | Status | Current module / file | Existing semantic owner | Gap |
 |---|---|---|---|---|
 | Durable Artifact identity | `EXISTS` | `ArtifactId`, `ArtifactRevisionId`, Artifact/revision views in `crates/fielora-contracts/src/lib.rs` | Existing Artifact Core | Reusable unchanged for Diagram |
-| Immutable Artifact revisions | `EXISTS` | `artifacts` and `artifact_revisions` in `crates/fielora-storage/migrations/0008_durable_artifacts.sql` | Existing StorageWorker / Artifact repository | Generic JSON storage is reusable, but the persisted type constraint excludes Diagram |
+| Immutable Artifact revisions | `EXISTS` | `artifacts` and `artifact_revisions` from migration 0008, retained by schema 9 | Existing StorageWorker / Artifact repository | Reusable unchanged for Diagram |
 | Artifact typed content | `PARTIAL` | `ArtifactContentV1::{Document, Presentation}` in `crates/fielora-contracts/src/lib.rs` | Artifact contract | No Diagram variant or graph vocabulary |
-| Artifact type admission | `BLOCKED` | `artifact_type IN ('DOCUMENT', 'PRESENTATION')` in migration 0008 | SQLite schema invariant | A durable Diagram requires a forward migration; a code-only delta cannot pass storage admission |
+| Artifact type storage admission | `EXISTS / EXTENSIBLE` | `0009_artifact_type_extensibility.sql` | SQLite structural invariant | DB admits 1..32-byte `[A-Z][A-Z0-9_]*` tokens; current Domain intentionally still rejects `DIAGRAM` until its typed implementation |
 | Artifact create/read/update | `EXISTS / TWO TYPES` | Durable Artifact Tool execution in `crates/fielora-core/src/agent_runtime.rs` and `crates/fielora-agent/src/artifact.rs` | Existing Tool pipeline + Artifact Core | Plumbing is reusable; schemas, typed parsing, canonicalization, and dispatch are closed to two types |
 | Artifact export | `EXISTS / TWO FORMATS` | `artifact.export` in `crates/fielora-agent/src/artifact.rs` | Existing Artifact Tool adapter | Saved-revision export dispatch supports DOCX/PPTX only |
 | Diagram semantic model | `ABSENT` | No production Diagram contract | None | Need bounded typed nodes, edges, groups, and layout intent |
@@ -63,7 +65,7 @@ does not weaken, bypass, or rewrite migration 0008.
 | Diagram layout engine | `ABSENT` | No graph-layout dependency or production layout abstraction | None | Need a bounded deterministic layout decision |
 | Mermaid parser/renderer | `ABSENT` | No Mermaid dependency or admission path | None | Not required and not selected for the first slice |
 | SVG renderer | `ABSENT` | No Artifact SVG renderer | None | Need controlled static SVG generation and structural security validation |
-| SVG export path | `PARTIAL` | Existing contained atomic/no-overwrite Project file export is format-neutral around type-specific renderer dispatch | Project filesystem + Artifact Tool | Additive Diagram-to-SVG dispatch is possible after type/schema admission |
+| SVG export path | `PARTIAL` | Existing contained atomic/no-overwrite Project file export is format-neutral around type-specific renderer dispatch | Project filesystem + Artifact Tool | Additive Diagram-to-SVG dispatch is possible after typed Diagram authorization |
 | Safe in-app SVG preview | `ABSENT` | Workspace image preview admits raster formats; SVG is treated as text or system-openable file | Desktop Workspace / Library | Browser rendering is not an Artifact preview contract; no UI is authorized |
 | Diagram UI/editor | `ABSENT` | No Artifact Diagram surface or FIPC consumer | None | Explicitly deferred |
 | Diagram Verification | `PARTIAL / REUSABLE` | Existing exact `ARTIFACT_REVISION` subject, semantic digest, and Verification Receipt | Existing Harness Verification | Identity boundary is sufficient; no Diagram-specific truth authority exists or is needed |
@@ -109,8 +111,8 @@ stable Artifact identity, immutable revisions, optimistic conflict handling,
 typed content, saved export, receipts, recovery, and exact-revision
 Verification subjects. Diagram is a credible next type because it exercises
 graph semantics and a non-Office renderer without requiring a second lifecycle.
-The type must still earn admission through a forward storage compatibility
-decision.
+Storage admission is now type-extensible; Diagram must still earn explicit
+typed Domain/Tool/renderer implementation authorization.
 
 ## ARTIFACT_CORE_REUSE
 
@@ -123,7 +125,7 @@ decision.
 | `artifact.create/read/update/export` execution pipeline | `EXTEND` | Admit Diagram in existing strict tagged schemas and renderer dispatch |
 | Artifact semantic-content union | `EXTEND` | Add one closed `Diagram` variant after schema authorization |
 | Persistence tables | `REUSE` | No new Diagram table |
-| Persisted Artifact type constraint | `EXTEND / BLOCKED` | Forward migration required; migration 0008 remains immutable |
+| Persisted Artifact type constraint | `REUSE` | Schema 9 already admits bounded canonical future tokens; no Diagram-specific migration |
 | Policy / Approval / ToolExecutor | `REUSE` | No Diagram permission |
 | ToolCall receipt | `EXTEND MINIMALLY` | Record type, graph counts, renderer/version, viewBox, and output digest in existing receipt |
 | Artifact revision Verification subject | `REUSE` | Exact ArtifactId + RevisionId + semantic digest remains authoritative |
@@ -174,7 +176,8 @@ DiagramArtifactV1 {
 the closed V1 representation of each tagged Artifact content variant; adding a
 new tagged variant does not alter the representation of existing Document or
 Presentation V1 values. The database schema version is a distinct concern and
-must advance through a forward migration before `DIAGRAM` can persist.
+already advances independently to schema 9; adding the typed `DIAGRAM` variant
+requires no Diagram-specific migration.
 
 Unknown Artifact types, Diagram semantic kinds, layout strategies, directions,
 and style intents fail closed. Raw JSON objects do not bypass the tagged typed
@@ -646,43 +649,44 @@ assessment.
 
 ## SCHEMA_MIGRATION_IMPACT
 
-This is the decisive current-reality blocker.
+The previously identified Core extensibility blocker is repaired in schema 9.
 
 ```sql
 artifact_type TEXT NOT NULL
-  CHECK (artifact_type IN ('DOCUMENT', 'PRESENTATION'))
+  CHECK (
+    length(CAST(artifact_type AS BLOB)) BETWEEN 1 AND 32 AND
+    artifact_type GLOB '[A-Z]*' AND
+    artifact_type NOT GLOB '*[^A-Z0-9_]*'
+  )
 ```
 
-The constraint is in released migration
-`crates/fielora-storage/migrations/0008_durable_artifacts.sql`. SQLite validates
-it on every inserted Artifact row. Therefore:
+Forward migration `0009_artifact_type_extensibility` rebuilds only the Artifact
+envelope table and preserves migration 0008, all existing Document/Presentation
+rows, immutable revisions, current pointers, provenance, indexes, foreign keys,
+Verification subjects, and Profile schema version 1. Therefore:
 
 ```text
-DB_SCHEMA_CHANGE_REQUIRED: YES
-NEW_FORWARD_MIGRATION: REQUIRED FOR DURABLE DIAGRAM
+DIAGRAM-SPECIFIC DB SCHEMA CHANGE REQUIRED: NO
+NEW_DIAGRAM_MIGRATION: 0
 MODIFY_MIGRATION_0008: FORBIDDEN
 NEW_DIAGRAM_TABLES: NO
 PROFILE_SCHEMA_CHANGE: NO
 ```
 
-Architecture review must choose one future forward-compatible storage policy:
-
-1. Keep the database-level closed Artifact type enum and perform an explicit
-   forward migration whenever a new Artifact type is admitted; or
-2. Use one forward migration to replace the SQL closed list with a bounded
-   generic type-token constraint, while the closed Rust enum and typed content
-   union remain the semantic authority and unknown values still fail closed.
-
-This Candidate does not choose migration mechanics, author SQL, increment a
-schema number, or weaken existing database validation. Encoding Diagram as
-`PRESENTATION`, omitting the type, using raw untyped JSON, or disabling check
-constraints is not an acceptable workaround.
+Storage extensibility does not grant semantic authority. The current Rust
+`ArtifactType`, `ArtifactContentV1`, Tool schemas, canonicalization, and content
+schema version remain closed to Document/Presentation. A structurally valid but
+unknown persisted token fails closed as `ARTIFACT_TYPE_UNSUPPORTED`; there is
+no `UnknownArtifact(JSON)` fallback. Diagram implementation can now add the
+typed `DIAGRAM + DiagramArtifactV1` pair without a type-specific database
+migration. Encoding Diagram as `PRESENTATION`, using raw untyped JSON, or
+disabling checks remains prohibited.
 
 ## SECURITY_BLOCKERS
 
 | Blocker / risk | Classification | Candidate disposition |
 |---|---|---|
-| Storage constraint excludes `DIAGRAM` | `IMPLEMENTATION BLOCKER` | Requires an authorized forward migration decision |
+| Storage admission for `DIAGRAM` | `RESOLVED IN SCHEMA 9` | Bounded canonical token storage; Domain remains closed until Diagram authorization |
 | No safe in-app SVG preview | `NON-BLOCKING FOR BACKEND SLICE` | Export only; no UI or Browser reuse claim |
 | SVG active-content/external-reference risk | `MUST PASS BEFORE IMPLEMENTATION ACCEPTANCE` | Controlled generator plus independent allowlist parser; no raw SVG input |
 | Layout resource exhaustion | `MUST PASS BEFORE IMPLEMENTATION ACCEPTANCE` | Strict graph/text/output/viewBox bounds and deterministic overflow |
@@ -698,7 +702,7 @@ network capability, or new permission class for this bounded static renderer.
 |---|---|---|
 | Frozen/Baseline architecture | `NONE` | This is a non-authorizing Candidate |
 | Artifact semantic contract | `MEDIUM-HIGH` | Adds a closed typed graph variant and local identity vocabulary |
-| Database schema/migration | `HIGH / REQUIRED` | Existing SQL type invariant excludes Diagram |
+| Database schema/migration | `NONE FOR DIAGRAM` | Schema 9 already admits bounded future type tokens |
 | Artifact repository/revisions | `LOW` | Existing generic rows and revision semantics are reusable |
 | Tool schemas/dispatch | `MEDIUM` | Existing operations gain one strict type/format branch |
 | Policy/Approval/ToolExecutor | `NONE` | Existing effects and pipeline remain authoritative |
@@ -709,11 +713,12 @@ network capability, or new permission class for this bounded static renderer.
 | UI/FIPC | `NONE` | Explicitly deferred |
 | Product route | `NONE` | Subordinate Artifact architecture track; no new phase |
 
-Overall implementation Change Impact is `HIGH` because the durable type needs a
-forward migration and SVG export creates a new security-sensitive representation.
-That impact requires a separate authorized implementation slice and targeted
-Core/Storage/security evidence. It does not justify altering the canonical
-`Model + Harness + Tools` architecture.
+Overall Diagram implementation Change Impact remains `HIGH` because typed graph
+semantics, deterministic layout, and SVG export create a new security-sensitive
+representation. It no longer includes a Diagram-specific schema migration.
+That impact still requires a separately authorized implementation slice and
+targeted Core/Storage/security evidence. It does not justify altering the
+canonical `Model + Harness + Tools` architecture.
 
 ## FIRST_SLICE_RECOMMENDATION
 
@@ -721,7 +726,7 @@ Core/Storage/security evidence. It does not justify altering the canonical
 |---|---|
 | A. Semantic Diagram type only, no export | Too weak: proves persistence but not a useful representation |
 | B. Request-scoped Diagram-to-SVG only | Reject: bypasses the durable Artifact goal and does not prove revision identity |
-| C. Durable Diagram CRUD plus deterministic saved SVG export | **Recommended after migration decision** |
+| C. Durable Diagram CRUD plus deterministic saved SVG export | **Recommended after explicit Diagram implementation authorization** |
 | D. Diagram UI/editor plus runtime | Reject: far beyond the foundation proof |
 | E. Mermaid/SVG import and round-trip | Reject: parser/security/fidelity scope dominates the first proof |
 
@@ -730,8 +735,8 @@ Recommended future slice:
 ```text
 FIRST_DIAGRAM_ARTIFACT_SLICE
 
-1. authorized forward storage migration admits DIAGRAM
-2. ArtifactType / ArtifactContentV1 gains DiagramArtifactV1
+1. ArtifactType / ArtifactContentV1 gains DiagramArtifactV1
+2. existing schema-9 bounded type storage accepts DIAGRAM
 3. existing artifact.create/read/update handles bounded Diagram content
 4. existing saved artifact.export maps exact Diagram revision to static SVG
 5. FIELORA_BOUNDED_LAYERED_V1 supplies deterministic derived geometry
@@ -749,8 +754,7 @@ New Diagram tables = 0
 New dependency = 0 proposed
 ```
 
-Do not begin that slice until the database policy/migration is reviewed and
-explicitly authorized.
+Do not begin that slice until Diagram implementation is explicitly authorized.
 
 ## TARGETED_TEST_PLAN
 
@@ -767,14 +771,14 @@ explicitly authorized.
 
 ### Storage and migration
 
-- prove a schema-8 database upgrades through the authorized forward migration
-  without changing existing Document/Presentation rows or revisions;
-- prove fresh database creation includes the forward schema and check;
-- prove unknown type tokens still fail closed according to the selected DB
-  policy;
+- reuse the existing schema-8 to schema-9 preservation/rollback evidence;
+- prove `DIAGRAM` passes the schema-9 bounded canonical token constraint without
+  any new migration;
+- prove the pre-Diagram app still returns `ARTIFACT_TYPE_UNSUPPORTED` for that
+  token, while the authorized Diagram build admits only its typed content;
 - prove Diagram create/update conflict, idempotent replay, immutable revisions,
   historical read, recovery, and profile/project scoping reuse existing rules;
-- run migration compatibility against real pre-Diagram fixtures.
+- prove no Diagram table, generic JSON fallback, or content-schema bump appears.
 
 ### Graph validation and layout
 
@@ -818,9 +822,9 @@ suite are neither required nor authorized.
 
 ## OPEN_QUESTIONS
 
-1. Should the forward migration preserve a SQL-level closed Artifact type list,
-   or move to a bounded generic token while Rust's closed union stays semantic
-   authority?
+1. **Resolved by schema 9:** SQLite stores a bounded canonical token while
+   Rust's closed `ArtifactType`/`ArtifactContentV1` union remains semantic
+   authority; unknown tokens fail `ARTIFACT_TYPE_UNSUPPORTED`.
 2. Are the proposed V1 semantic enum values minimal and stable enough, or
    should `CONTAINS` remain solely group membership rather than an edge kind?
 3. Is one-level exclusive group membership sufficient for the first real user
@@ -843,9 +847,8 @@ suite are neither required nor authorized.
 
 ## NEXT_DECISION
 
-`C. ARTIFACT_CORE_EXTENSION_PROBLEM_FOUND`
+`A. READY_FOR_DIAGRAM_ARTIFACT_FIRST_SLICE`
 
-The problem is specifically the database-level closed Artifact type constraint,
-not the Artifact identity/revision architecture. Resolve and authorize a
-forward migration policy before authorizing the recommended first Diagram
-Artifact slice.
+The Artifact type storage blocker is repaired without implementing Diagram.
+The recommended Diagram slice is architecturally ready for a separate explicit
+authorization; this Candidate remains `NOT AUTHORIZED` and `NOT IMPLEMENTED`.

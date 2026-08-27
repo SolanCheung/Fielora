@@ -29,6 +29,7 @@ const MIGRATION_0005: &str = include_str!("../migrations/0005_desktop_foundation
 const MIGRATION_0006: &str = include_str!("../migrations/0006_complete_agent.sql");
 const MIGRATION_0007: &str = include_str!("../migrations/0007_library_storage_profile.sql");
 const MIGRATION_0008: &str = include_str!("../migrations/0008_durable_artifacts.sql");
+const MIGRATION_0009: &str = include_str!("../migrations/0009_artifact_type_extensibility.sql");
 const MIGRATION_0001_NAME: &str = "core";
 const MIGRATION_0002_NAME: &str = "phase02_reality";
 const MIGRATION_0004_NAME: &str = "phase04_entry";
@@ -36,6 +37,7 @@ const MIGRATION_0005_NAME: &str = "desktop_foundation";
 const MIGRATION_0006_NAME: &str = "complete_agent";
 const MIGRATION_0007_NAME: &str = "library_storage_profile";
 const MIGRATION_0008_NAME: &str = "durable_artifacts";
+const MIGRATION_0009_NAME: &str = "artifact_type_extensibility";
 const MIGRATION_0002_FROZEN_SHA256: &str =
     "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9";
 const MIGRATION_0004_FROZEN_SHA256: &str =
@@ -44,7 +46,7 @@ const MIGRATION_0005_FROZEN_SHA256: &str =
     "b7e1e586b47e50389502677e172741d69463e9518ed32211dfafe0dc910c1547";
 const MIGRATION_0006_FROZEN_SHA256: &str =
     "5257959801424a13426259ce10c9ed2d5037795ec7a3a207171c568bc80dbaae";
-const SCHEMA_VERSION: u32 = 8;
+const SCHEMA_VERSION: u32 = 9;
 const LOCAL_USER_NAME: &str = "Local user";
 const SYSTEM_NAME: &str = "Fielora system";
 
@@ -2238,11 +2240,45 @@ fn validate_artifact_write_request(
     Ok(())
 }
 
-fn artifact_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactView> {
-    Ok(ArtifactView {
+struct PersistedArtifactRow {
+    artifact_id: ArtifactId,
+    profile_id: ProfileId,
+    artifact_type: String,
+    title: Option<String>,
+    project_field_id: Option<FieldId>,
+    current_revision_id: ArtifactRevisionId,
+    created_from_conversation_id: Option<ConversationId>,
+    created_by_agent_run_id: Option<AgentRunId>,
+    updated_by_device: DeviceId,
+    created_at: i64,
+    updated_at: i64,
+}
+
+impl PersistedArtifactRow {
+    fn into_view(self) -> Result<ArtifactView, DomainError> {
+        let artifact_type = serde_json::from_value(Value::String(self.artifact_type))
+            .map_err(|_| DomainError::Validation("ARTIFACT_TYPE_UNSUPPORTED".into()))?;
+        Ok(ArtifactView {
+            artifact_id: self.artifact_id,
+            profile_id: self.profile_id,
+            artifact_type,
+            title: self.title,
+            project_field_id: self.project_field_id,
+            current_revision_id: self.current_revision_id,
+            created_from_conversation_id: self.created_from_conversation_id,
+            created_by_agent_run_id: self.created_by_agent_run_id,
+            updated_by_device: self.updated_by_device,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        })
+    }
+}
+
+fn artifact_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PersistedArtifactRow> {
+    Ok(PersistedArtifactRow {
         artifact_id: ArtifactId::new(row.get::<_, String>(0)?),
         profile_id: ProfileId::new(row.get::<_, String>(1)?),
-        artifact_type: parse_wire(row.get(2)?)?,
+        artifact_type: row.get(2)?,
         title: row.get(3)?,
         project_field_id: row.get::<_, Option<String>>(4)?.map(FieldId::new),
         current_revision_id: ArtifactRevisionId::new(row.get::<_, String>(5)?),
@@ -2283,11 +2319,12 @@ fn get_artifact(
     profile_id: &ProfileId,
     artifact_id: &ArtifactId,
 ) -> Result<ArtifactView, DomainError> {
-    connection.query_row(
+    let persisted = connection.query_row(
         "SELECT id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at FROM artifacts WHERE id=?1 AND profile_id=?2",
         params![artifact_id.0,profile_id.0],
         artifact_from_row,
-    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)?;
+    persisted.into_view()
 }
 
 fn get_artifact_revision(
@@ -2976,6 +3013,7 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     let checksum_0006 = frozen_migration_checksum(MIGRATION_0006);
     let checksum_0007 = migration_checksum(MIGRATION_0007);
     let checksum_0008 = migration_checksum(MIGRATION_0008);
+    let checksum_0009 = migration_checksum(MIGRATION_0009);
     if checksum_0002 != MIGRATION_0002_FROZEN_SHA256 {
         return Err(StorageError::MigrationChecksum { version: 2 });
     }
@@ -3087,8 +3125,65 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
         )?;
         transaction.commit()?;
     }
+    verify_applied_migration(connection, 9, MIGRATION_0009_NAME, &checksum_0009)?;
+    if !migration_exists(connection, 9)? {
+        apply_artifact_type_extensibility_migration(
+            connection,
+            now,
+            MIGRATION_0009,
+            &checksum_0009,
+        )?;
+    }
     validate_schema(connection)?;
     Ok(())
+}
+
+fn apply_artifact_type_extensibility_migration(
+    connection: &mut Connection,
+    now: i64,
+    migration_sql: &str,
+    checksum: &str,
+) -> Result<(), StorageError> {
+    // SQLite cannot alter an existing CHECK constraint. Rebuilding this parent
+    // table requires foreign-key enforcement to be disabled for this connection
+    // outside the transaction. The transaction, foreign_key_check, schema gate,
+    // and unconditional re-enable preserve atomicity and fail closed.
+    connection.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let foreign_keys: i64 = connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+    if foreign_keys != 0 {
+        return Err(StorageError::OpenGate(
+            "migration 0009 could not suspend foreign keys".into(),
+        ));
+    }
+
+    let migration_result = (|| {
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if transaction.execute_batch(migration_sql).is_err() {
+            return Err(StorageError::MigrationIncompatibleData);
+        }
+        transaction.execute(
+            "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (9, ?1, ?2, ?3)",
+            params![MIGRATION_0009_NAME, checksum, now],
+        )?;
+        validate_schema(&transaction)?;
+        transaction.commit()?;
+        Ok(())
+    })();
+
+    let restore_result = connection.execute_batch("PRAGMA foreign_keys = ON;");
+    if let Err(error) = migration_result {
+        restore_result?;
+        return Err(error);
+    }
+    restore_result?;
+    let foreign_keys: i64 = connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+    if foreign_keys != 1 {
+        return Err(StorageError::OpenGate(
+            "migration 0009 did not restore foreign keys".into(),
+        ));
+    }
+    validate_schema(connection)
 }
 
 fn migration_exists(connection: &Connection, version: u32) -> Result<bool, StorageError> {
@@ -3298,11 +3393,11 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
         return Err(StorageError::OpenGate("foreign_key_check failed".into()));
     }
     let migrations: i64 = connection.query_row(
-        "SELECT COUNT(*) FROM schema_migrations WHERE version IN (1,2,4,5,6,7,8)",
+        "SELECT COUNT(*) FROM schema_migrations WHERE version IN (1,2,4,5,6,7,8,9)",
         [],
         |row| row.get(0),
     )?;
-    if migrations != 7 || migration_exists(connection, 3)? {
+    if migrations != 8 || migration_exists(connection, 3)? {
         return Err(StorageError::OpenGate(
             "migration registry incomplete".into(),
         ));
@@ -3465,6 +3560,16 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
                 "POLICY_DECISION IN ('ALLOW', 'ASK', 'DENY')",
                 "JSON_VALID(ARGUMENTS_JSON)",
                 "RECEIPT_JSON IS NULL OR JSON_VALID(RECEIPT_JSON)",
+            ],
+        ),
+        (
+            "artifacts",
+            vec![
+                "LENGTH(CAST(ARTIFACT_TYPE AS BLOB)) BETWEEN 1 AND 32",
+                "ARTIFACT_TYPE GLOB '[A-Z]*'",
+                "ARTIFACT_TYPE NOT GLOB '*[^A-Z0-9_]*'",
+                "LENGTH(TITLE) BETWEEN 1 AND 512",
+                "CREATED_AT <= UPDATED_AT",
             ],
         ),
     ] {
@@ -5538,6 +5643,77 @@ mod tests {
         }
     }
 
+    fn apply_schema_through_8(connection: &mut Connection, now: i64) {
+        apply_schema_through_7(connection, now);
+        let transaction = connection.transaction().unwrap();
+        transaction.execute_batch(MIGRATION_0008).unwrap();
+        transaction
+            .execute(
+                "INSERT INTO schema_migrations(version,name,checksum,applied_at) VALUES(8,?1,?2,?3)",
+                params![
+                    MIGRATION_0008_NAME,
+                    migration_checksum(MIGRATION_0008),
+                    now
+                ],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+    }
+
+    fn start_pre_migrated_worker(
+        mut connection: Connection,
+        database_path: PathBuf,
+        device: DeviceIdentity,
+        now: i64,
+    ) -> StorageWorker {
+        let local_user = bootstrap_records(&mut connection, &device, now).unwrap();
+        let profile_id = connection
+            .query_row(
+                "SELECT profile_id FROM profiles WHERE singleton_key=1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map(ProfileId::new)
+            .unwrap();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(64);
+        let worker = std::thread::Builder::new()
+            .name("fielora-storage-test-v8".into())
+            .spawn(move || run_worker(connection, receiver))
+            .unwrap();
+        StorageWorker {
+            handle: StorageHandle {
+                sender,
+                local_user,
+                device_id: device.id,
+                profile_id,
+                database_path,
+            },
+            worker: Some(worker),
+        }
+    }
+
+    fn presentation_artifact_content(text: &str) -> ArtifactContentV1 {
+        ArtifactContentV1::Presentation(PresentationArtifact {
+            slides: vec![PresentationSlide {
+                layout: PresentationLayout::TitleAndBody,
+                title: "Durable presentation".into(),
+                regions: vec![SlideRegion {
+                    slot: SlideSlot::Body,
+                    blocks: vec![PresentationBlock::Paragraph { text: text.into() }],
+                }],
+            }],
+        })
+    }
+
+    fn query_json_rows(connection: &Connection, sql: &str) -> Vec<String> {
+        let mut statement = connection.prepare(sql).unwrap();
+        statement
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<String>, _>>()
+            .unwrap()
+    }
+
     fn artifact_content(text: &str) -> ArtifactContentV1 {
         ArtifactContentV1::Document(DocumentArtifact {
             title: Some("Durable document".into()),
@@ -5650,6 +5826,43 @@ mod tests {
                 None,
                 now + 1,
             )
+            .unwrap()
+    }
+
+    fn create_artifact_fixture(
+        handle: &StorageHandle,
+        context: (&ProjectView, &ConversationView, &AgentRunView),
+        artifact_type: ArtifactType,
+        content: ArtifactContentV1,
+        title: &str,
+        now: i64,
+    ) -> ArtifactReadView {
+        let (project, conversation, run) = context;
+        let tool = artifact_tool(
+            handle,
+            run.id.clone(),
+            "artifact.create",
+            AgentToolEffect::WorkspaceWrite,
+            now,
+        );
+        let (canonical_content_json, semantic_sha256) = canonical_artifact(&content);
+        handle
+            .create_artifact(CreateArtifactRecord {
+                artifact_type,
+                title: Some(title.into()),
+                project_field_id: Some(project.field_id.clone()),
+                conversation_id: conversation.id.clone(),
+                run_id: run.id.clone(),
+                tool_call_id: tool.id,
+                content,
+                canonical_content_json,
+                semantic_sha256,
+                mutation_request_sha256: format!(
+                    "{:x}",
+                    Sha256::digest(format!("{title}-{now}").as_bytes())
+                ),
+                now: now + 2,
+            })
             .unwrap()
     }
 
@@ -5794,7 +6007,7 @@ mod tests {
             frozen_migration_checksum(MIGRATION_0006),
             MIGRATION_0006_FROZEN_SHA256
         );
-        assert_eq!(schema_version(), 8);
+        assert_eq!(schema_version(), 9);
     }
 
     #[test]
@@ -5825,7 +6038,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!((profile_before, version), (profile_after, 8));
+        assert_eq!((profile_before, version), (profile_after, 9));
         drop(connection);
         fs::remove_dir_all(&root).unwrap();
 
@@ -5863,6 +6076,442 @@ mod tests {
         assert_eq!((version8, revisions, subject_columns), (0, 0, 0));
         drop(rollback);
         fs::remove_dir_all(rollback_root).unwrap();
+    }
+
+    #[test]
+    fn migration_0009_preserves_artifacts_revisions_verification_indexes_and_foreign_keys() {
+        let root = temporary_root();
+        let paths = PlatformPaths::from_root(root.clone()).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let mut connection = open_connection(&paths.database).unwrap();
+        apply_schema_through_8(&mut connection, 1);
+        let worker =
+            start_pre_migrated_worker(connection, paths.database.clone(), device.clone(), 2);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 10);
+
+        let document_r1 = create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Document,
+            artifact_content("document revision one"),
+            "Document fixture",
+            20,
+        );
+        let update_tool = artifact_tool(
+            &handle,
+            run.id.clone(),
+            "artifact.update",
+            AgentToolEffect::WorkspaceWrite,
+            30,
+        );
+        let document_v2 = artifact_content("document revision two");
+        let (document_v2_json, document_v2_digest) = canonical_artifact(&document_v2);
+        let document_r2 = handle
+            .update_artifact(UpdateArtifactRecord {
+                artifact_id: document_r1.artifact.artifact_id.clone(),
+                expected_revision_id: document_r1.revision.revision_id.clone(),
+                conversation_id: conversation.id.clone(),
+                run_id: run.id.clone(),
+                tool_call_id: update_tool.id.clone(),
+                content: document_v2,
+                canonical_content_json: document_v2_json,
+                semantic_sha256: document_v2_digest,
+                mutation_request_sha256: format!(
+                    "{:x}",
+                    Sha256::digest(b"migration-0009-document-update")
+                ),
+                now: 32,
+            })
+            .unwrap();
+        let presentation = create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Presentation,
+            presentation_artifact_content("presentation revision one"),
+            "Presentation fixture",
+            40,
+        );
+        let verification = VerificationReceiptView {
+            id: VerificationReceiptId::new(Uuid::now_v7().to_string()),
+            run_id: run.id.clone(),
+            tool_call_id: Some(update_tool.id),
+            check_kind: "ARTIFACT_MIGRATION_FIXTURE".into(),
+            outcome: VerificationOutcome::Pass,
+            summary: "Exact migrated revision fixture".into(),
+            artifact_sha256: None,
+            subject: Some(VerificationSubject::ArtifactRevision {
+                artifact_id: document_r2.artifact.artifact_id.clone(),
+                revision_id: document_r2.revision.revision_id.clone(),
+                semantic_sha256: document_r2.revision.semantic_sha256.clone(),
+            }),
+            exit_code: None,
+            created_at: 45,
+        };
+        handle
+            .record_agent_verification(verification.clone())
+            .unwrap();
+        drop(worker);
+
+        let mut connection = open_connection(&paths.database).unwrap();
+        let artifacts_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at) FROM artifacts ORDER BY id",
+        );
+        let revisions_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,artifact_id,sequence,parent_revision_id,mutation_kind,content_schema_version,content_json,semantic_sha256,mutation_request_sha256,created_from_conversation_id,created_by_agent_run_id,created_by_tool_call_id,created_at) FROM artifact_revisions ORDER BY artifact_id,sequence",
+        );
+        let verification_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,run_id,tool_call_id,check_kind,outcome,summary,artifact_sha256,exit_code,created_at,subject_kind,subject_artifact_id,subject_revision_id,subject_sha256) FROM agent_verification_receipts ORDER BY id",
+        );
+        let artifact_fks_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,seq,\"table\",\"from\",\"to\",on_update,on_delete,match) FROM pragma_foreign_key_list('artifacts') ORDER BY id,seq",
+        );
+        let revision_fks_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,seq,\"table\",\"from\",\"to\",on_update,on_delete,match) FROM pragma_foreign_key_list('artifact_revisions') ORDER BY id,seq",
+        );
+        let artifact_indexes_before = query_json_rows(
+            &connection,
+            "SELECT json_array(name,sql) FROM sqlite_master WHERE type='index' AND tbl_name='artifacts' AND sql IS NOT NULL ORDER BY name",
+        );
+
+        apply_migrations(&mut connection, 50).unwrap();
+
+        let version: i64 = connection
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let migration_name: String = connection
+            .query_row(
+                "SELECT name FROM schema_migrations WHERE version=9",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!((version, migration_name.as_str()), (9, MIGRATION_0009_NAME));
+        assert_eq!(
+            artifacts_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at) FROM artifacts ORDER BY id",
+            )
+        );
+        assert_eq!(
+            revisions_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,artifact_id,sequence,parent_revision_id,mutation_kind,content_schema_version,content_json,semantic_sha256,mutation_request_sha256,created_from_conversation_id,created_by_agent_run_id,created_by_tool_call_id,created_at) FROM artifact_revisions ORDER BY artifact_id,sequence",
+            )
+        );
+        assert_eq!(
+            verification_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,run_id,tool_call_id,check_kind,outcome,summary,artifact_sha256,exit_code,created_at,subject_kind,subject_artifact_id,subject_revision_id,subject_sha256) FROM agent_verification_receipts ORDER BY id",
+            )
+        );
+        assert_eq!(
+            artifact_fks_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,seq,\"table\",\"from\",\"to\",on_update,on_delete,match) FROM pragma_foreign_key_list('artifacts') ORDER BY id,seq",
+            )
+        );
+        assert_eq!(
+            revision_fks_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,seq,\"table\",\"from\",\"to\",on_update,on_delete,match) FROM pragma_foreign_key_list('artifact_revisions') ORDER BY id,seq",
+            )
+        );
+        assert_eq!(
+            artifact_indexes_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(name,sql) FROM sqlite_master WHERE type='index' AND tbl_name='artifacts' AND sql IS NOT NULL ORDER BY name",
+            )
+        );
+        let foreign_key_violations: i64 = connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
+        drop(connection);
+
+        let reopened = StorageWorker::start(&paths.database, device, 60).unwrap();
+        let reopened_handle = reopened.handle();
+        assert_eq!(
+            reopened_handle
+                .read_artifact(document_r2.artifact.artifact_id.clone(), None)
+                .unwrap(),
+            document_r2
+        );
+        assert_eq!(
+            reopened_handle
+                .read_artifact(presentation.artifact.artifact_id.clone(), None)
+                .unwrap(),
+            presentation
+        );
+        assert_eq!(
+            reopened_handle
+                .list_agent_verifications(run.id.clone())
+                .unwrap(),
+            vec![verification]
+        );
+
+        let update_tool = artifact_tool(
+            &reopened_handle,
+            run.id,
+            "artifact.update",
+            AgentToolEffect::WorkspaceWrite,
+            70,
+        );
+        let document_v3 = artifact_content("document revision three");
+        let (document_v3_json, document_v3_digest) = canonical_artifact(&document_v3);
+        let updated = reopened_handle
+            .update_artifact(UpdateArtifactRecord {
+                artifact_id: document_r2.artifact.artifact_id.clone(),
+                expected_revision_id: document_r2.revision.revision_id.clone(),
+                conversation_id: conversation.id,
+                run_id: update_tool.run_id,
+                tool_call_id: update_tool.id,
+                content: document_v3,
+                canonical_content_json: document_v3_json,
+                semantic_sha256: document_v3_digest,
+                mutation_request_sha256: format!(
+                    "{:x}",
+                    Sha256::digest(b"migration-0009-post-migration-update")
+                ),
+                now: 72,
+            })
+            .unwrap();
+        assert_eq!(updated.revision.sequence, 3);
+        assert_eq!(
+            reopened_handle
+                .read_artifact(
+                    document_r1.artifact.artifact_id,
+                    Some(document_r1.revision.revision_id),
+                )
+                .unwrap()
+                .revision
+                .content,
+            document_r1.revision.content
+        );
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn migration_0009_rolls_back_table_data_registry_and_foreign_key_state_on_failure() {
+        let root = temporary_root();
+        let paths = PlatformPaths::from_root(root.clone()).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let mut connection = open_connection(&paths.database).unwrap();
+        apply_schema_through_8(&mut connection, 1);
+        let worker = start_pre_migrated_worker(connection, paths.database.clone(), device, 2);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 10);
+        create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Document,
+            artifact_content("rollback survivor"),
+            "Rollback fixture",
+            20,
+        );
+        drop(worker);
+
+        let mut connection = open_connection(&paths.database).unwrap();
+        let artifacts_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,profile_id,artifact_type,current_revision_id,updated_by_device,created_at,updated_at) FROM artifacts ORDER BY id",
+        );
+        let revisions_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,artifact_id,sequence,content_json,semantic_sha256) FROM artifact_revisions ORDER BY id",
+        );
+        let failing_migration =
+            format!("{MIGRATION_0009}\nSELECT * FROM migration_0009_forced_failure;");
+        assert!(matches!(
+            apply_artifact_type_extensibility_migration(
+                &mut connection,
+                30,
+                &failing_migration,
+                &migration_checksum(&failing_migration),
+            ),
+            Err(StorageError::MigrationIncompatibleData)
+        ));
+        let version9: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version=9",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let replacement_table: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='artifacts_v9'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let artifact_sql: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='artifacts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let foreign_keys: i64 = connection
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+        let foreign_key_violations: i64 = connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!((version9, replacement_table, foreign_keys), (0, 0, 1));
+        assert!(artifact_sql.contains("'DOCUMENT', 'PRESENTATION'"));
+        assert_eq!(foreign_key_violations, 0);
+        assert_eq!(
+            artifacts_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,profile_id,artifact_type,current_revision_id,updated_by_device,created_at,updated_at) FROM artifacts ORDER BY id",
+            )
+        );
+        assert_eq!(
+            revisions_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,artifact_id,sequence,content_json,semantic_sha256) FROM artifact_revisions ORDER BY id",
+            )
+        );
+        drop(connection);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn schema_9_accepts_bounded_future_type_tokens_while_domain_reads_fail_closed() {
+        let root = temporary_root();
+        let worker = start(&root, 1);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 10);
+
+        let mut connection = open_connection(&handle.database_path).unwrap();
+        connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        let transaction = connection.transaction().unwrap();
+        for (index, token) in [
+            "DOCUMENT",
+            "PRESENTATION",
+            "DIAGRAM",
+            "SPREADSHEET",
+            "FUTURE_ARTIFACT",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                transaction
+                    .execute(
+                        "INSERT INTO artifacts(id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at) VALUES(?1,'profile',?2,NULL,NULL,'revision',NULL,NULL,'device',1,1)",
+                        params![format!("valid-{index}"), token],
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+        let invalid_tokens = vec![
+            String::new(),
+            "document".into(),
+            "1DOCUMENT".into(),
+            "_DOCUMENT".into(),
+            "DOC TYPE".into(),
+            "DOC/TYPE".into(),
+            "DOC.TYPE".into(),
+            "DOC-TYPE".into(),
+            "DÍAGRAM".into(),
+            "A".repeat(33),
+        ];
+        for (index, token) in invalid_tokens.into_iter().enumerate() {
+            assert!(
+                transaction
+                    .execute(
+                        "INSERT INTO artifacts(id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at) VALUES(?1,'profile',?2,NULL,NULL,'revision',NULL,NULL,'device',1,1)",
+                        params![format!("invalid-{index}"), token],
+                    )
+                    .is_err()
+            );
+        }
+        transaction.rollback().unwrap();
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .unwrap();
+
+        let future_artifact_id = ArtifactId::new(Uuid::now_v7().to_string());
+        let future_revision_id = ArtifactRevisionId::new(Uuid::now_v7().to_string());
+        let future_tool = artifact_tool(
+            &handle,
+            run.id.clone(),
+            "artifact.create",
+            AgentToolEffect::WorkspaceWrite,
+            20,
+        );
+        let future_content = artifact_content("future test-owned payload");
+        let (future_json, future_digest) = canonical_artifact(&future_content);
+        let future_mutation_digest = format!("{:x}", Sha256::digest(b"future-artifact"));
+        let transaction = connection.transaction().unwrap();
+        transaction
+            .execute(
+                "INSERT INTO artifacts(id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at) VALUES(?1,?2,'FUTURE_ARTIFACT','Future fixture',?3,?4,?5,?6,?7,22,22)",
+                params![
+                    future_artifact_id.0,
+                    handle.profile_id.0,
+                    project.field_id.0,
+                    future_revision_id.0,
+                    conversation.id.0,
+                    run.id.0,
+                    handle.device_id.0,
+                ],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                "INSERT INTO artifact_revisions(id,artifact_id,sequence,parent_revision_id,mutation_kind,content_schema_version,content_json,semantic_sha256,mutation_request_sha256,created_from_conversation_id,created_by_agent_run_id,created_by_tool_call_id,created_at) VALUES(?1,?2,1,NULL,'CREATE',1,?3,?4,?5,?6,?7,?8,22)",
+                params![
+                    future_revision_id.0,
+                    future_artifact_id.0,
+                    future_json,
+                    future_digest,
+                    future_mutation_digest,
+                    conversation.id.0,
+                    run.id.0,
+                    future_tool.id.0,
+                ],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+        drop(connection);
+
+        assert_eq!(
+            handle.read_artifact(future_artifact_id, None).unwrap_err(),
+            DomainError::Validation("ARTIFACT_TYPE_UNSUPPORTED".into())
+        );
+        assert!(serde_json::from_str::<ArtifactType>("\"DIAGRAM\"").is_err());
+        assert_eq!(
+            serde_json::from_str::<ArtifactType>("\"DOCUMENT\"").unwrap(),
+            ArtifactType::Document
+        );
+        drop(worker);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

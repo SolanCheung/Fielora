@@ -1712,3 +1712,41 @@ SCHEMA_MIGRATION: NONE
 NEW_DEPENDENCIES: 0
 CHANGE_IMPACT: HIGH
 ```
+
+## 86. Artifact Type Storage Extensibility Repair
+
+Durable Artifact 的 schema-8 `artifacts.artifact_type` 原先使用
+`DOCUMENT/PRESENTATION` closed SQL CHECK，导致每个未来 typed Artifact 都必须
+增加一次数据库迁移。Forward migration
+`0009_artifact_type_extensibility` 只重建 `artifacts` envelope：数据库现在验证
+1..32-byte ASCII uppercase `[A-Z][A-Z0-9_]*` canonical token；0001–0008、
+`artifact_revisions`、revision/recovery/idempotency、Tool/Receipt/Verification 和
+Profile schema 均不变。
+
+Storage extensibility 不产生 semantic authority。Production `ArtifactType`、
+`ArtifactContentV1` 和所有 Model-facing Artifact Tool schema 仍只接受
+Document/Presentation；当前 reader 遇到 `FUTURE_ARTIFACT` 等未知 canonical
+token 时稳定返回 `ARTIFACT_TYPE_UNSUPPORTED`，没有 arbitrary JSON fallback、
+类型降级、静默跳过或数据删除。Diagram/Spreadsheet 均未实现。
+
+真实 schema-8 fixture 覆盖 Document、Presentation、多 revision 与 Artifact
+Verification subject。迁移到 schema 9 后 Artifact/Revision IDs、current pointer、
+content schema version 1、canonical content/digest、Profile/Project/Conversation
+provenance、FK 与 index 保持；注入 table replacement 后故障证明 registry 不推进、
+旧表/数据恢复、无 partial replacement table 且 foreign keys 恢复 ON。
+
+```text
+CURRENT_DATABASE_SCHEMA: 9
+MIGRATION_0009: artifact_type_extensibility
+SQLITE_ARTIFACT_TYPE: BOUNDED_CANONICAL_TOKEN
+DOMAIN_ARTIFACT_TYPE: CLOSED_DOCUMENT_PRESENTATION
+UNKNOWN_TYPE: ARTIFACT_TYPE_UNSUPPORTED
+CONTENT_SCHEMA_VERSION: 1_UNCHANGED
+DIAGRAM_SPREADSHEET_IMPLEMENTATION: NONE
+NEW_DEPENDENCIES: 0
+CORE_AND_CROSS_DEVELOPMENT_GATES: PASS
+RUST_WORKSPACE_TESTS: 177_PASS
+DESKTOP_TYPESCRIPT_TESTS: 176_PASS
+CORE_INTEGRATION: 12_PASS
+FULL_PREMERGE_BROWSER_E2E_PACKAGED: NOT_RUN
+```

@@ -10,9 +10,10 @@ Document and Presentation Artifacts.
 
 This candidate does not modify Frozen architecture documents, the canonical
 Agent architecture, the Rapid Desktop route, FIPC, or UI. Its authorized Core
-First Slice is now implemented as additive schema 8 and production Tool/domain
-behavior. The legacy request-scoped `artifact.export` remains supported beside
-the new durable mode.
+First Slice is implemented as additive schema 8 and production Tool/domain
+behavior. Schema 9 subsequently repaired Artifact type storage extensibility
+without changing the typed domain. The legacy request-scoped `artifact.export`
+remains supported beside the new durable mode.
 
 ## Decision summary
 
@@ -48,7 +49,7 @@ list/history UI, and all Artifact UI remain unimplemented.
 |---|---|
 | Identity / ownership | UUIDv7-backed `ArtifactId` and `ArtifactRevisionId`; every Artifact query is scoped by the current `ProfileId`; optional Project association reuses `FieldId` |
 | Semantic contract | Closed `ArtifactContentV1::{Document, Presentation}` using the existing strict renderer-neutral DTOs and validators; schema version 1; canonical typed JSON <= 256 KiB |
-| Persistence | Additive `0008_durable_artifacts.sql`; database schema 8; `artifacts` plus immutable `artifact_revisions`; Profile schema remains 1 |
+| Persistence | `0008_durable_artifacts.sql` introduced `artifacts` plus immutable `artifact_revisions`; `0009_artifact_type_extensibility.sql` changed only the persisted type CHECK; current database schema 9; Profile schema remains 1 |
 | Revision / conflict | Revision 1 on create; append-only N+1 update; opaque revision identity plus diagnostic sequence; required `expected_revision_id`; stale updates fail closed |
 | Atomicity | Artifact envelope + R1 and revision insert + current-pointer CAS commit in one existing `StorageWorker` transaction; immutable update/delete triggers |
 | Idempotency / recovery | Unique `created_by_tool_call_id` and `mutation_request_sha256`; exact replay returns the committed mutation; mismatched replay fails closed; existing resume reconciler reconstructs a compact ToolCall receipt after commit-before-receipt restart |
@@ -86,6 +87,37 @@ Core/Desktop tests (`7` after the additive migration made production schema
 aligned to schema 8; the complete Cross lane then passed. No Browser E2E,
 packaged smoke, full premerge, or UI Gate was run because this Slice adds no UI
 or FIPC consumer and its authorization explicitly requires targeted validation.
+
+## ARTIFACT_TYPE_STORAGE_EXTENSIBILITY_REALITY
+
+Schema 9 separates storage extensibility from semantic authority:
+
+```text
+SQLite artifact_type
+  = non-empty ASCII uppercase token
+  = [A-Z][A-Z0-9_]*
+  = at most 32 bytes
+
+Production Artifact domain
+  = closed typed ArtifactType
+  = DOCUMENT | PRESENTATION in the current product
+
+Unknown canonical persisted type
+  -> ARTIFACT_TYPE_UNSUPPORTED
+  -> no panic, fallback, deletion, arbitrary JSON, or type coercion
+```
+
+Migration `0009_artifact_type_extensibility` is a forward table rebuild; it
+does not modify migration 0008 or `artifact_revisions`. Targeted schema-8
+fixtures prove preservation of Document/Presentation Artifact IDs, revision
+IDs, current pointers, content schema version 1, canonical content, semantic
+digests, Profile/Project/Conversation provenance, Verification subjects,
+indexes, and foreign keys. An injected failure after table replacement proves
+the transaction restores the original table/data and does not record schema 9.
+
+This policy means a future typed Artifact variant does not require a
+type-specific database migration. It does not allow the Model, Tool schema, or
+stored token to invent semantic types.
 
 The following `CURRENT_ARTIFACT_REALITY` tables are retained as the historical
 pre-implementation audit that justified this Slice. The table above is the
@@ -604,8 +636,8 @@ input or Artifact ownership.
 ## SCHEMA_CHANGE_IMPACT
 
 ```text
-CURRENT_SCHEMA_VERSION: 8
-IMPLEMENTED_MIGRATION: 0008_durable_artifacts
+CURRENT_SCHEMA_VERSION: 9
+IMPLEMENTED_MIGRATIONS: 0008_durable_artifacts + 0009_artifact_type_extensibility
 PROFILE_SCHEMA_VERSION: 1 (UNCHANGED)
 STORAGE_CHANGE: IMPLEMENTED / TARGETED VALIDATED
 ```
@@ -616,7 +648,7 @@ Candidate tables, adjusted to current SQLite/typed-ID conventions:
 artifacts
   id                         TEXT PK                    -- ArtifactId / UUIDv7
   profile_id                 TEXT NOT NULL FK profiles  -- durable owner
-  artifact_type              TEXT NOT NULL              -- DOCUMENT | PRESENTATION
+  artifact_type              TEXT NOT NULL              -- bounded canonical token
   title                      TEXT?
   current_revision_id        TEXT NOT NULL               -- deferred composite FK
   project_field_id           TEXT? FK fields SET NULL
@@ -655,10 +687,13 @@ Required indexes/invariants:
   revision of the same Artifact;
 - type/content schema pair is admitted by the typed domain validator.
 
-Migration 0008 uses a deferred composite foreign key from
+Migration 0008 established the tables and deferred composite foreign key from
 `(current_revision_id, artifact_id)` to the same Artifact's revision. Targeted
 migration and transaction-failure tests prove no committed Artifact can be left
-without its selected revision.
+without its selected revision. Migration 0009 preserves that relation and all
+existing indexes while replacing only the closed type enumeration with a
+1..32-byte `[A-Z][A-Z0-9_]*` token constraint. The Rust `ArtifactType` and
+`ArtifactContentV1` remain closed and authoritative.
 
 The same migration may add nullable Artifact subject columns to the existing
 `agent_verification_receipts`; it must not create another evidence table. There
@@ -678,9 +713,12 @@ Library blobs remain separate because the First Slice has no Artifact assets.
 ```text
 PRECEDING_STORAGE_REPAIR: PASS
 MIGRATION_0002_ROLLBACK_REGRESSION: PASS
-FRESH_DATABASE_TO_SCHEMA_8: PASS
-SCHEMA_7_TO_SCHEMA_8: PASS
+FRESH_DATABASE_TO_SCHEMA_9: PASS
+SCHEMA_7_TO_SCHEMA_8_TO_SCHEMA_9: PASS
+SCHEMA_8_TO_SCHEMA_9_DATA_PRESERVATION: PASS
 MIGRATION_0008_FAILURE_ROLLBACK: PASS
+MIGRATION_0009_FAILURE_ROLLBACK: PASS
+UNKNOWN_CANONICAL_TYPE_FAIL_CLOSED: PASS
 ```
 
 The baseline repair remains in its separate preceding commit. This Slice does
@@ -865,8 +903,10 @@ required to prove the First Slice. Hard delete is explicitly absent.
    covers both Project-file and durable Fielora work-product mutation. The First
    Slice adds no effect/permission enum; a later generic name requires separate
    compatibility review.
-3. **Resolved for First Slice:** database schema is 8; Profile schema remains 1
+3. **Resolved and extended:** database schema is 9; Profile schema remains 1
    because Artifacts are SQLite state, not a new Profile serialized payload.
+   SQLite admits bounded future type tokens while the application domain stays
+   closed typed and rejects unknown tokens with `ARTIFACT_TYPE_UNSUPPORTED`.
 4. **Resolved for First Slice:** sync journal participation is deferred until
    Artifact sync semantics are authorized. No sync claim or network behavior is
    implied by local persistence.
