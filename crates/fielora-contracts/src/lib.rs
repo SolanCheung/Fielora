@@ -51,6 +51,7 @@ typed_id!(ArtifactRevisionId);
 typed_id!(DiagramNodeId);
 typed_id!(DiagramEdgeId);
 typed_id!(DiagramGroupId);
+typed_id!(SpreadsheetSheetId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ProtocolVersion {
@@ -1328,6 +1329,7 @@ pub enum ArtifactType {
     Document,
     Presentation,
     Diagram,
+    Spreadsheet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1539,12 +1541,95 @@ pub enum DiagramGroupKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SpreadsheetArtifactV1 {
+    #[serde(default)]
+    pub title: Option<String>,
+    pub sheets: Vec<SpreadsheetSheetV1>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SpreadsheetSheetV1 {
+    pub sheet_id: SpreadsheetSheetId,
+    pub name: String,
+    pub cells: Vec<SpreadsheetCellV1>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SpreadsheetCellV1 {
+    pub row: u32,
+    pub column: u16,
+    pub value: SpreadsheetLiteralV1,
+    #[serde(default)]
+    pub format: Option<SpreadsheetFormatIntentV1>,
+    #[serde(default)]
+    pub presentation: Option<SpreadsheetCellPresentationIntentV1>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
+#[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SpreadsheetLiteralV1 {
+    String { value: String },
+    Decimal { value: SpreadsheetDecimalV1 },
+    Boolean { value: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SpreadsheetDecimalV1(pub String);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SpreadsheetFormatIntentV1 {
+    General,
+    Text,
+    Integer,
+    #[serde(rename = "DECIMAL_2")]
+    #[ts(rename = "DECIMAL_2")]
+    Decimal2,
+    #[serde(rename = "PERCENT_2")]
+    #[ts(rename = "PERCENT_2")]
+    Percent2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SpreadsheetCellPresentationIntentV1 {
+    pub emphasis: SpreadsheetCellEmphasis,
+    pub alignment: SpreadsheetCellAlignment,
+    pub wrap: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SpreadsheetCellEmphasis {
+    Normal,
+    Header,
+    Total,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SpreadsheetCellAlignment {
+    Auto,
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", content = "content", rename_all = "SCREAMING_SNAKE_CASE")]
 #[ts(tag = "type", content = "content", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ArtifactContentV1 {
     Document(DocumentArtifact),
     Presentation(PresentationArtifact),
     Diagram(DiagramArtifactV1),
+    Spreadsheet(SpreadsheetArtifactV1),
 }
 
 impl ArtifactContentV1 {
@@ -1553,6 +1638,7 @@ impl ArtifactContentV1 {
             Self::Document(_) => ArtifactType::Document,
             Self::Presentation(_) => ArtifactType::Presentation,
             Self::Diagram(_) => ArtifactType::Diagram,
+            Self::Spreadsheet(_) => ArtifactType::Spreadsheet,
         }
     }
 }

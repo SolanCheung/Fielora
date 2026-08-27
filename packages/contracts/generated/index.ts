@@ -298,7 +298,7 @@ export type DeleteLibraryObjectRequest = { library_object_id: LibraryObjectId, e
 
 export type ListLibraryObjectsRequest = { media_kind: LibraryMediaKind | null, include_deleted: boolean, limit: number | null, };
 
-export type ArtifactType = "DOCUMENT" | "PRESENTATION" | "DIAGRAM";
+export type ArtifactType = "DOCUMENT" | "PRESENTATION" | "DIAGRAM" | "SPREADSHEET";
 
 export type DocumentArtifact = { title: string | null, blocks: Array<DocumentBlock>, };
 
@@ -321,6 +321,8 @@ export type DiagramNodeId = string;
 export type DiagramEdgeId = string;
 
 export type DiagramGroupId = string;
+
+export type SpreadsheetSheetId = string;
 
 export type DiagramArtifactV1 = { title: string | null, description: string | null, layout: DiagramLayoutIntentV1, nodes: Array<DiagramNodeV1>, edges: Array<DiagramEdgeV1>, groups: Array<DiagramGroupV1>, };
 
@@ -352,7 +354,25 @@ export type DiagramGroupV1 = { group_id: DiagramGroupId, label: string, semantic
 
 export type DiagramGroupKind = "BOUNDARY" | "LAYER" | "CLUSTER";
 
-export type ArtifactContentV1 = { "type": "DOCUMENT", "content": DocumentArtifact } | { "type": "PRESENTATION", "content": PresentationArtifact } | { "type": "DIAGRAM", "content": DiagramArtifactV1 };
+export type SpreadsheetArtifactV1 = { title: string | null, sheets: Array<SpreadsheetSheetV1>, };
+
+export type SpreadsheetSheetV1 = { sheet_id: SpreadsheetSheetId, name: string, cells: Array<SpreadsheetCellV1>, };
+
+export type SpreadsheetCellV1 = { row: number, column: number, value: SpreadsheetLiteralV1, format: SpreadsheetFormatIntentV1 | null, presentation: SpreadsheetCellPresentationIntentV1 | null, };
+
+export type SpreadsheetLiteralV1 = { "kind": "STRING", value: string, } | { "kind": "DECIMAL", value: SpreadsheetDecimalV1, } | { "kind": "BOOLEAN", value: boolean, };
+
+export type SpreadsheetDecimalV1 = string;
+
+export type SpreadsheetFormatIntentV1 = "GENERAL" | "TEXT" | "INTEGER" | "DECIMAL_2" | "PERCENT_2";
+
+export type SpreadsheetCellPresentationIntentV1 = { emphasis: SpreadsheetCellEmphasis, alignment: SpreadsheetCellAlignment, wrap: boolean, };
+
+export type SpreadsheetCellEmphasis = "NORMAL" | "HEADER" | "TOTAL";
+
+export type SpreadsheetCellAlignment = "AUTO" | "LEFT" | "CENTER" | "RIGHT";
+
+export type ArtifactContentV1 = { "type": "DOCUMENT", "content": DocumentArtifact } | { "type": "PRESENTATION", "content": PresentationArtifact } | { "type": "DIAGRAM", "content": DiagramArtifactV1 } | { "type": "SPREADSHEET", "content": SpreadsheetArtifactV1 };
 
 export type ArtifactMutationKind = "CREATE" | "UPDATE";
 

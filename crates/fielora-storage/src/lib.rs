@@ -5741,6 +5741,25 @@ mod tests {
         })
     }
 
+    fn spreadsheet_artifact_content(value: &str) -> ArtifactContentV1 {
+        ArtifactContentV1::Spreadsheet(SpreadsheetArtifactV1 {
+            title: Some("Storage Spreadsheet".into()),
+            sheets: vec![SpreadsheetSheetV1 {
+                sheet_id: SpreadsheetSheetId::new("storage_sheet"),
+                name: "Storage Sheet".into(),
+                cells: vec![SpreadsheetCellV1 {
+                    row: 1,
+                    column: 1,
+                    value: SpreadsheetLiteralV1::String {
+                        value: value.into(),
+                    },
+                    format: None,
+                    presentation: None,
+                }],
+            }],
+        })
+    }
+
     fn canonical_artifact(content: &ArtifactContentV1) -> (String, String) {
         let json = serde_json::to_string(content).unwrap();
         let digest = format!("{:x}", Sha256::digest(json.as_bytes()));
@@ -6533,6 +6552,10 @@ mod tests {
             serde_json::from_str::<ArtifactType>("\"DOCUMENT\"").unwrap(),
             ArtifactType::Document
         );
+        assert_eq!(
+            serde_json::from_str::<ArtifactType>("\"SPREADSHEET\"").unwrap(),
+            ArtifactType::Spreadsheet
+        );
         let stored_diagram = create_artifact_fixture(
             &handle,
             (&project, &conversation, &run),
@@ -6546,6 +6569,31 @@ mod tests {
             stored_diagram.revision.content,
             ArtifactContentV1::Diagram(_)
         ));
+        let stored_spreadsheet = create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Spreadsheet,
+            spreadsheet_artifact_content("Schema nine Spreadsheet"),
+            "Spreadsheet fixture",
+            40,
+        );
+        assert_eq!(
+            stored_spreadsheet.artifact.artifact_type,
+            ArtifactType::Spreadsheet
+        );
+        assert!(matches!(
+            stored_spreadsheet.revision.content,
+            ArtifactContentV1::Spreadsheet(_)
+        ));
+        assert_eq!(stored_spreadsheet.revision.content_schema_version, 1);
+        let mut foreign_profile = handle.clone();
+        foreign_profile.profile_id = ProfileId::new(Uuid::now_v7().to_string());
+        assert_eq!(
+            foreign_profile
+                .read_artifact(stored_spreadsheet.artifact.artifact_id, None)
+                .unwrap_err(),
+            DomainError::NotFound
+        );
         drop(worker);
         fs::remove_dir_all(root).unwrap();
     }

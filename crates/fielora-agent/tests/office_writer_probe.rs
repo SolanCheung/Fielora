@@ -2,10 +2,12 @@ use fielora_agent::{CommandCancellation, ToolExecutor, ToolRuntime};
 use office_oxide::create::create_from_ir_to_writer;
 use office_oxide::docx::write::DocxWriter;
 use office_oxide::pptx::write::PptxWriter;
+use office_oxide::xlsx::write::{CellData, CellStyle, NumberFormat, XlsxWriter};
+use office_oxide::xlsx::{Cell, CellValue, XlsxDocument};
 use office_oxide::{Document, DocumentFormat, DocumentIR};
 use serde_json::{Value, json};
 use std::fs;
-use std::io::{Cursor, Error, Seek, SeekFrom, Write};
+use std::io::{Cursor, Error, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use zip::ZipArchive;
@@ -80,6 +82,73 @@ fn pptx_bytes() -> Vec<u8> {
     let mut output = Cursor::new(Vec::new());
     writer.write_to(&mut output).expect("render PPTX");
     output.into_inner()
+}
+
+fn xlsx_bytes() -> Vec<u8> {
+    let mut writer = XlsxWriter::new();
+    {
+        let mut sheet = writer.add_sheet("Probe A");
+        sheet.set_cell(0, 0, CellData::String("文本 safe".into()));
+        sheet.set_cell_styled(
+            1,
+            2,
+            CellData::Number(42.5),
+            CellStyle::new().number_format(NumberFormat::Decimal2),
+        );
+        sheet.set_cell(3, 4, CellData::Boolean(true));
+        sheet.set_cell(5, 6, CellData::String("=SUM(A1:A2)".into()));
+    }
+    {
+        let mut sheet = writer.add_sheet("Probe B");
+        sheet.set_cell(0, 0, CellData::String("Summary 中英".into()));
+    }
+    let mut output = Cursor::new(Vec::new());
+    writer.write_to(&mut output).expect("render XLSX");
+    output.into_inner()
+}
+
+fn xlsx_cell(document: &XlsxDocument, sheet: usize, row: u32, column: u32) -> &Cell {
+    document.worksheets[sheet]
+        .rows
+        .iter()
+        .flat_map(|row| &row.cells)
+        .find(|cell| cell.reference.row == row && cell.reference.col == column)
+        .unwrap_or_else(|| panic!("missing XLSX cell sheet={sheet} row={row} column={column}"))
+}
+
+fn assert_safe_xlsx_package(bytes: &[u8]) {
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("valid XLSX ZIP package");
+    let mut formula_count = 0usize;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).expect("read XLSX package entry");
+        let name = entry.name().replace('\\', "/");
+        let folded = name.to_ascii_lowercase();
+        assert!(
+            !folded.contains("vbaproject")
+                && !folded.contains("externallinks")
+                && !folded.contains("connections")
+                && !folded.contains("querytables")
+                && !folded.contains("embeddings")
+                && !folded.contains("activex")
+                && !folded.contains("drawings")
+                && !folded.contains("media"),
+            "unsafe or out-of-scope XLSX package part: {name}"
+        );
+        if folded.ends_with(".rels") || folded.ends_with(".xml") {
+            let mut xml = String::new();
+            entry.read_to_string(&mut xml).expect("read XLSX XML");
+            assert!(
+                !xml.contains("TargetMode=\"External\"") && !xml.contains("TargetMode='External'"),
+                "external XLSX relationship in {name}"
+            );
+            if folded.starts_with("xl/worksheets/") {
+                formula_count += xml.matches("<f>").count()
+                    + xml.matches("<f ").count()
+                    + xml.matches("<formula").count();
+            }
+        }
+    }
+    assert_eq!(formula_count, 0, "writer probe must contain zero formulas");
 }
 
 #[test]
@@ -161,6 +230,86 @@ fn pptx_writer_probe_structural_and_semantic_roundtrip() {
         first_extract["result_sha256"],
         second_extract["result_sha256"]
     );
+    fs::remove_dir_all(root).expect("clean probe root");
+}
+
+#[test]
+fn xlsx_writer_probe_multisheet_typed_literals_and_safe_reopen() {
+    let root = probe_root();
+    let first = xlsx_bytes();
+    let second = xlsx_bytes();
+    assert!(!first.is_empty());
+    assert_package_parts(
+        &first,
+        &[
+            "[Content_Types].xml",
+            "_rels/.rels",
+            "xl/workbook.xml",
+            "xl/styles.xml",
+            "xl/worksheets/sheet1.xml",
+            "xl/worksheets/sheet2.xml",
+        ],
+    );
+    assert_safe_xlsx_package(&first);
+    assert_safe_xlsx_package(&second);
+
+    let reopened =
+        XlsxDocument::from_reader(Cursor::new(first.clone())).expect("office_oxide reopens XLSX");
+    assert_eq!(reopened.worksheets.len(), 2);
+    assert_eq!(reopened.worksheets[0].name, "Probe A");
+    assert_eq!(reopened.worksheets[1].name, "Probe B");
+    assert!(reopened.chart_text.is_empty());
+    assert!(reopened.embedded_fonts.is_empty());
+    assert!(
+        reopened
+            .worksheets
+            .iter()
+            .all(|sheet| sheet.hyperlinks.is_empty()
+                && sheet.merged_cells.is_empty()
+                && sheet.images.is_empty()
+                && sheet.text_shapes.is_empty())
+    );
+
+    assert!(matches!(
+        &xlsx_cell(&reopened, 0, 0, 0).value,
+        CellValue::String(value) if value == "文本 safe"
+    ));
+    assert!(matches!(
+        xlsx_cell(&reopened, 0, 1, 2).value,
+        CellValue::Number(value) if value == 42.5
+    ));
+    assert!(matches!(
+        xlsx_cell(&reopened, 0, 3, 4).value,
+        CellValue::Boolean(true)
+    ));
+    let formula_like = xlsx_cell(&reopened, 0, 5, 6);
+    assert!(matches!(
+        &formula_like.value,
+        CellValue::String(value) if value == "=SUM(A1:A2)"
+    ));
+    assert!(formula_like.formula.is_none());
+    assert!(matches!(
+        &xlsx_cell(&reopened, 1, 0, 0).value,
+        CellValue::String(value) if value == "Summary 中英"
+    ));
+    assert!(
+        reopened
+            .worksheets
+            .iter()
+            .flat_map(|sheet| &sheet.rows)
+            .flat_map(|row| &row.cells)
+            .all(|cell| cell.formula.is_none())
+    );
+
+    let first_extract = extract(&root, "first.xlsx", &first);
+    let second_extract = extract(&root, "second.xlsx", &second);
+    assert_eq!(first_extract["content"]["format"], "XLSX");
+    assert_eq!(first_extract["content"]["metadata"]["sheet_count"], 2);
+    assert_eq!(
+        first_extract["result_sha256"],
+        second_extract["result_sha256"]
+    );
+    eprintln!("XLSX_BYTE_IDENTICAL={}", first == second);
     fs::remove_dir_all(root).expect("clean probe root");
 }
 

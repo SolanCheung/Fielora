@@ -2,12 +2,13 @@
 
 **Status:** `DRAFT / CANDIDATE / NOT FROZEN`
 
-**Implementation:** `NOT AUTHORIZED / NOT IMPLEMENTED`
+**Implementation:** `FIRST SLICE IMPLEMENTED / TARGETED VALIDATED`
 
-**Scope:** Current-reality alignment and a bounded first-slice candidate for a
-durable Spreadsheet Artifact on the existing Artifact Core. This document does
-not modify a Frozen/Baseline specification, authorize implementation, add a UI,
-add a migration, or add a dependency.
+**Scope:** Current-reality alignment, the implemented bounded first slice, and
+remaining candidate boundaries for a durable Spreadsheet Artifact on the
+existing Artifact Core. This remains a Candidate rather than a Frozen/Baseline
+specification. The implemented slice adds no UI, migration, dependency, formula
+engine, or new Runtime.
 
 ## Decision summary
 
@@ -18,7 +19,7 @@ Spreadsheet Artifact
   != XLSX bytes, CSV text, HTML table, Excel process state, or arbitrary script
 
 Spreadsheet semantic model
-  -> Fielora-owned calculation semantics
+  -> literal-only calculation authority (`NONE`)
   -> renderer adapter
   -> XLSX representation
   -> future lossy CSV representation
@@ -30,22 +31,19 @@ Spreadsheet create/read/update/export
   -> existing exact-revision Verification boundary
 ```
 
-The current repository does **not** contain a Spreadsheet Artifact. It contains
-a bounded, read-only `file.extract` path for existing XLSX files and an
-exact-pinned `office_oxide 0.1.8` dependency whose public API includes an XLSX
-writer. The writer API is dependency capability, not production export proof.
-No Fielora Spreadsheet contract, validator, canonicalizer, calculation engine,
-renderer adapter, saved export branch, structural roundtrip gate, preview, or
-editor currently exists.
+The repository now contains the implemented literal-only first slice: a typed
+Spreadsheet Artifact contract, bounded validator/canonicalizer, saved-revision
+XLSX renderer, independent final-byte package/semantic reopen, and integration
+through the existing Artifact Tools, Policy/Approval, Storage, receipts,
+recovery, and exact-revision Verification boundary. It reuses the exact-pinned
+`office_oxide 0.1.8` writer after a repository-owned writer qualification.
 
-The recommended first implementation slice is intentionally literal-only. It
-would add a typed durable workbook made of bounded sheets and literal cells and
-would export an exact saved revision to XLSX through the existing Artifact Tool
-path. Formula input would fail closed in that slice. Formula support requires a
-separate Change Impact because the current writer serializes formula source but
-does not serialize a cached result or declare recalculation behavior. Excel or
-another Office process must not become Fielora's calculation authority by
-accident.
+Formula and calculation remain absent and fail closed. Formula-like values are
+admitted only through the explicit `STRING` literal variant and reopen as exact
+text. Formula support still requires a separate Change Impact because the
+current writer serializes formula source without a cached result or declared
+recalculation behavior. Excel or another Office process is not calculation or
+semantic authority.
 
 ## CURRENT_SPREADSHEET_REALITY
 
@@ -53,16 +51,16 @@ accident.
 
 | Item | Status | Current module / file | Existing semantic owner | Gap |
 |---|---|---|---|---|
-| `ArtifactType` | `EXISTS / THREE TYPES` | `crates/fielora-contracts/src/lib.rs` | Artifact contract | Closed to `DOCUMENT`, `PRESENTATION`, and `DIAGRAM`; no `SPREADSHEET` Domain value |
-| `ArtifactContentV1` | `EXISTS / THREE VARIANTS` | `crates/fielora-contracts/src/lib.rs` | Artifact contract | No typed workbook variant and no arbitrary JSON fallback |
-| Generated TypeScript Artifact contracts | `EXISTS` | `packages/contracts/generated/index.ts` | Rust contracts + `ts-rs` generation | Generated union also has only the three current types; Serde `deny_unknown_fields` remains a Rust runtime rule and is not represented by `ts-rs` |
-| Durable create/read/update | `EXISTS / REUSABLE` | `crates/fielora-core/src/agent_runtime.rs`, `crates/fielora-agent/src/artifact.rs` | Existing Artifact Core through the Tool pipeline | Type and canonicalization dispatch need one additive Spreadsheet branch |
-| Saved exact-revision export | `EXISTS / REUSABLE` | `artifact.export` in `crates/fielora-agent/src/artifact.rs` | Existing Artifact Tool adapter | Document/DOCX and Presentation/PPTX use the Office adapter; Diagram/SVG has its own branch; no XLSX branch |
+| `ArtifactType` | `EXISTS / FOUR TYPES` | `crates/fielora-contracts/src/lib.rs` | Artifact contract | Includes additive `SPREADSHEET`; existing serialized tokens are unchanged |
+| `ArtifactContentV1` | `EXISTS / FOUR VARIANTS` | `crates/fielora-contracts/src/lib.rs` | Artifact contract | Includes typed `SpreadsheetArtifactV1`; no arbitrary JSON fallback |
+| Generated TypeScript Artifact contracts | `EXISTS / CURRENT` | `packages/contracts/generated/index.ts` | Rust contracts + `ts-rs` generation | Spreadsheet DTOs and union variant are generated; Serde `deny_unknown_fields` remains a Rust runtime rule not represented by `ts-rs` |
+| Durable create/read/update | `EXISTS / SPREADSHEET ENABLED` | `crates/fielora-core/src/agent_runtime.rs`, `crates/fielora-agent/src/artifact.rs` | Existing Artifact Core through the Tool pipeline | Spreadsheet uses one additive typed canonicalization branch; no type-specific lifecycle |
+| Saved exact-revision export | `EXISTS / SPREADSHEET XLSX ENABLED` | `artifact.export` in `crates/fielora-agent/src/artifact.rs`, `crates/fielora-agent/src/spreadsheet.rs` | Existing Artifact Tool adapter | Exact saved Spreadsheet revisions export through the `.xlsx` branch; inline Spreadsheet export remains absent by design |
 | Inline export | `PARTIAL` | `crates/fielora-agent/src/artifact.rs` | Existing request-scoped Artifact export | Inline export remains Document/Presentation-only and is not needed for the Spreadsheet first slice |
 | Revision and conflict | `EXISTS / REUSABLE` | Artifact repository in `crates/fielora-storage/src/lib.rs` | Existing immutable Artifact revision aggregate | Reuse exact `expected_revision_id`; do not create cell- or sheet-specific revision storage |
-| Canonicalization and semantic digest | `EXISTS / PER TYPE` | `artifact::canonicalize_content`; Diagram delegates to `diagram::canonicalize` | Existing Artifact digest boundary | Spreadsheet needs its own typed canonicalizer, then returns through the same boundary |
+| Canonicalization and semantic digest | `EXISTS / SPREADSHEET ENABLED` | `artifact::canonicalize_content`; Spreadsheet delegates to `spreadsheet::canonicalize` | Existing Artifact digest boundary | Sheets sort by stable ID, cells by coordinate, decimals normalize, then use the same canonical JSON/SHA-256 boundary |
 | Tool-call idempotency | `EXISTS / REUSABLE` | Core mutation request digest plus Storage unique constraints | Existing Tool/Artifact Core | Reuse canonical Spreadsheet semantic digest; no Spreadsheet idempotency layer |
-| Commit-before-receipt recovery | `EXISTS / REUSABLE` | Artifact recovery in Core/Storage | Existing Artifact Core | Must be inherited unchanged and covered by a Spreadsheet fixture |
+| Commit-before-receipt recovery | `EXISTS / REUSED AND TESTED` | Artifact recovery in Core/Storage | Existing Artifact Core | Spreadsheet commit-before-receipt recovery and idempotent replay use the unchanged mechanism |
 | Verification subject | `EXISTS / REUSABLE` | `ARTIFACT_REVISION` subject in Artifact/Verification contracts and schema 8 | Existing Harness Verification | Formula calculation or XLSX reopen must not create a second subject type |
 | Verification freshness | `EXISTS / REUSABLE` | Exact revision ID + semantic SHA binding | Existing Harness Verification | An older verified revision must remain stale after Spreadsheet update |
 | Content authority | `EXISTS / REUSABLE` | `artifact.read` returns `UNTRUSTED_ARTIFACT_CONTENT` | Existing Harness/Tool observation boundary | Spreadsheet cells and formulas remain untrusted content, not facts |
@@ -87,10 +85,10 @@ accident.
 | Chart writing | `ABSENT FOR PRODUCT` | No Fielora renderer and no chart writer use in the repository | None | Exclude charts from the first slice |
 | External relationships | `EXISTS / SAFE READ POLICY` | OOXML admission warns `EXTERNAL_RELATIONSHIPS_IGNORED`; parser does not follow them | File Intelligence security boundary | Authored Spreadsheet export must prove it emits zero external relationships |
 | Macro rejection | `EXISTS / READ PATH` | `.xlsm`/`.xltm`, `vbaProject`, encryption, malformed OOXML and unsafe archive paths reject | File Intelligence security boundary | Export must also prove zero macro/encryption parts; there is no macro-capable Artifact model |
-| XLSX write API | `PARTIAL / UNQUALIFIED` | `office_oxide::xlsx::write::XlsxWriter` | Third-party dependency | Can emit sheets, literal cells, formula source, styles, widths, merges, images, and text shapes; no Fielora renderer adapter or production evidence |
+| XLSX write API | `EXISTS / QUALIFIED LITERAL SUBSET` | `office_oxide::xlsx::write::XlsxWriter`, writer probe, `spreadsheet.rs` | Third-party dependency behind Fielora renderer adapter | Qualified only for bounded multi-sheet string/decimal/boolean cells and closed styles; formula/merge/image/drawing APIs remain disabled |
 | Formula cached-result write | `ABSENT` | `CellData::Formula(String)` writes `<f>` only | `office_oxide` writer | No `<v>` cached result and no observed `calcPr`/forced-recalculation API; formula-bearing export is not qualified |
-| XLSX structural reopen | `PARTIAL` | `file.extract` parses existing XLSX; tests use the writer only to create a read fixture | File Intelligence tests | No production writer -> final-byte reopen -> semantic comparison gate exists |
-| XLSX deterministic bytes | `UNPROVEN` | Writer uses OPC/ZIP output with mostly ordered inputs; no Fielora byte-stability test | None | Must be measured with representative first-slice fixtures before claiming determinism |
+| XLSX structural reopen | `EXISTS / PRODUCTION` | `spreadsheet.rs` package validator plus targeted `file.extract` writer probe | Artifact renderer adapter | Final bytes are independently reopened for required parts, relationships, sheet order/name, coordinates, literal types/values, formula absence, and package bounds |
+| XLSX deterministic bytes | `OBSERVED / NOT CONTRACTUAL` | Writer probe and Spreadsheet renderer tests | Test evidence only | Representative same-input renders are byte-identical; acceptance remains semantic determinism + exact output digest, not ZIP-byte identity |
 
 ### Existing renderer/export pattern
 
@@ -99,11 +97,11 @@ accident.
 | DOCX writer | `EXISTS / PRODUCTION` | Document branch in `crates/fielora-agent/src/artifact.rs` | Artifact renderer adapter | Reusable adapter structure, not workbook semantics |
 | PPTX writer | `EXISTS / PRODUCTION` | Presentation branch in `artifact.rs` | Artifact renderer adapter | Reusable adapter structure, not workbook semantics |
 | Diagram SVG writer | `EXISTS / PRODUCTION` | `crates/fielora-agent/src/diagram.rs` plus saved export dispatch | Artifact renderer adapter | Demonstrates a type-owned renderer without a new runtime |
-| Renderer identity/version | `EXISTS` | compact export receipts include renderer ID/version | Existing ToolCall receipt | Spreadsheet needs one renderer ID/version and calculation-mode metadata, not a new receipt hierarchy |
+| Renderer identity/version | `EXISTS / SPREADSHEET ENABLED` | compact export receipts include `fielora.spreadsheet.xlsx` and `0.1.0+office_oxide.0.1.8` | Existing ToolCall receipt | Calculation authority is explicitly `NONE`; no new receipt hierarchy |
 | Output path safety | `EXISTS` | Project-relative containment, sensitive-path rejection, create-only atomic write | Project filesystem + Artifact Tool | Reuse unchanged for `.xlsx` |
 | Final-byte validation | `EXISTS / PER FORMAT` | render in memory -> validate package -> atomic write -> reread/hash -> reopen | Artifact renderer adapter | Add XLSX package and semantic reopen checks |
 | Structural validation authority | `EXISTS / LIMITED` | Existing DOCX/PPTX/SVG success means structural/semantic roundtrip only | Existing Verification boundary | XLSX reopen cannot mean calculation truth, business truth, or visual quality |
-| Export metadata/catalog | `PARTIAL / STALE` | `artifact.export` text and capability inspection still list DOCX/PPTX while saved Diagram/SVG exists | Tool catalog metadata | Later implementation must factually align existing formats and add XLSX; this audit does not fix it |
+| Export metadata/catalog | `EXISTS / ALIGNED` | `artifact.export` description and capability inspection | Existing Tool catalog | Lists current DOCX/PPTX/SVG/XLSX support and marks XLSX as literal-only; no UI capability added |
 
 ### Storage, contracts, and Desktop
 
@@ -114,7 +112,7 @@ accident.
 | Unknown type fail-closed | `EXISTS` | Storage decode rejects a bounded future token as `ARTIFACT_TYPE_UNSUPPORTED` | Rust Artifact contract | Must continue after adding the one typed Spreadsheet token |
 | Generic revision content storage | `EXISTS` | `artifact_revisions.content_json`, schema version 1, 256 KiB bound | Artifact Core | No type-specific table is needed or allowed for the first slice |
 | Typed DTO convention | `EXISTS` | Rust structs/tagged enums, Serde unknown-field denial, generated TypeScript | Contracts | Spreadsheet should use closed tagged values and validator-owned bounds; arbitrary maps/JSON are rejected |
-| Numeric DTO convention | `PARTIAL` | Existing contracts use primitive bounded integers and validators | Contracts | Binary floating-point is unsuitable as canonical Spreadsheet source; a canonical decimal token is proposed |
+| Numeric DTO convention | `EXISTS / SPREADSHEET TOKEN` | Existing contracts plus `SpreadsheetDecimalV1` | Contracts | Spreadsheet persists a bounded canonical decimal token and performs checked conversion only at render time |
 | Desktop spreadsheet preview/editor | `ABSENT` | No workbook/sheet/cell surface | None | Explicitly out of scope |
 | Desktop table primitive | `PARTIAL / NOT REUSABLE AS EDITOR` | `MarkdownMessage.tsx` renders a read-only HTML table | Conversation renderer | It is not a virtualized grid, workbook model, editor, or Artifact consumer |
 
@@ -182,9 +180,9 @@ There is no `spreadsheet.create`, `spreadsheet.calculate`, or
 
 ## SEMANTIC_MODEL_CANDIDATE
 
-The following is a contract candidate, not implemented Rust or generated
-TypeScript. Names may change during review, but the ownership and bounds must
-not be weakened.
+The following contract is implemented by the first slice in Rust and generated
+TypeScript. It remains a Candidate for future evolution; the ownership and
+bounds must not be weakened without a separate review.
 
 ```text
 SpreadsheetArtifactV1
@@ -197,14 +195,14 @@ SpreadsheetSheetV1
   cells: Vec<SpreadsheetCellV1>             // sparse, order-insensitive
 
 SpreadsheetCellV1
-  row: u32                                  // zero-based semantic coordinate
-  column: u16                               // zero-based semantic coordinate
+  row: u32                                  // one-based semantic coordinate
+  column: u16                               // one-based semantic coordinate
   value: SpreadsheetLiteralV1
   format: Option<SpreadsheetFormatIntentV1>
   presentation: Option<SpreadsheetCellPresentationIntentV1>
 
 SpreadsheetLiteralV1
-  TEXT { value: String }
+  STRING { value: String }
   DECIMAL { value: SpreadsheetDecimalV1 }
   BOOLEAN { value: bool }
 
@@ -247,7 +245,7 @@ typed literal; presentation-only empty cells are deferred.
 
 The canonical `content_json` remains subject to the existing 256 KiB Storage
 and Artifact-definition limit and 128 KiB total text limit. Tighter semantic
-bounds are proposed:
+bounds are implemented:
 
 | Dimension | Candidate bound |
 |---|---:|
@@ -319,7 +317,8 @@ Artifact canonicalization result. The candidate rules are:
    duplicate visible names;
 4. sort sparse cells by `(row, column)` and reject duplicate coordinates;
 5. normalize decimal lexical form and explicit default presentation intent;
-6. preserve admitted text bytes except for one documented newline policy;
+6. preserve admitted UTF-8 text bytes, including tab/CR/LF, while rejecting
+   other control characters;
 7. serialize the typed `ArtifactContentV1::Spreadsheet` to canonical JSON;
 8. compute the existing semantic SHA-256 over those canonical bytes.
 
@@ -421,8 +420,9 @@ new permission, receipt, Verification, or Agent runtime.
 
 `office_oxide 0.1.8` is already an exact-pinned direct workspace dependency and
 is used by production Artifact DOCX/PPTX writing and File Intelligence reading.
-Its XLSX writer is the first backend candidate because it adds no dependency.
-It is not yet accepted as the production Spreadsheet renderer.
+Its XLSX writer is the implemented first-slice backend because it adds no
+dependency and passed the bounded writer qualification below. This acceptance
+is limited to the literal-only subset.
 
 The source audit confirms writer APIs for:
 
@@ -433,8 +433,8 @@ The source audit confirms writer APIs for:
 - column widths and merged ranges;
 - page setup, images, and text shapes.
 
-Only literal cells, small closed styles/formats, and derived widths are proposed
-for the first slice. Formula strings, merges, page setup, images, drawings,
+Only literal cells and small closed styles/formats are implemented for the
+first slice. Formula strings, merges, page setup, images, drawings,
 embedded fonts, and shapes remain disabled even though the dependency exposes
 them.
 
@@ -444,7 +444,7 @@ them.
 ArtifactContentV1::Spreadsheet
   -> Spreadsheet validator/canonicalizer
   -> literal calculation mode (`LITERAL_ONLY`, formula count = 0)
-  -> `fielora.artifact.xlsx`
+  -> `fielora.spreadsheet.xlsx`
   -> exact-pinned `office_oxide 0.1.8`
   -> bounded in-memory XLSX bytes
   -> package/security/semantic reopen
@@ -456,20 +456,20 @@ ArtifactContentV1::Spreadsheet
 Proposed renderer provenance:
 
 ```text
-renderer_id = fielora.artifact.xlsx
+renderer_id = fielora.spreadsheet.xlsx
 renderer_version = 0.1.0+office_oxide.0.1.8
-calculation_mode = LITERAL_ONLY
-calculation_engine_id = NONE
+calculation_authority = NONE
 formula_count = 0
 ```
 
-### Pre-implementation writer qualification
+### Writer qualification result
 
-Before product code is changed, one repository-owned targeted probe should
-render representative in-memory fixtures twice and prove:
+The repository-owned targeted probe renders representative in-memory fixtures
+twice and proves:
 
 - non-empty bounded XLSX bytes;
-- byte-identical output for the same canonical workbook and renderer version;
+- observed byte-identical output for the same fixture (recorded as evidence,
+  not made an Artifact semantic requirement);
 - valid ZIP/OPC structure and required parts;
 - exact sheet count/order/name and CJK/Latin text reopen;
 - exact sparse coordinate/type/value reopen for text, decimal, and boolean;
@@ -479,10 +479,10 @@ render representative in-memory fixtures twice and prove:
 - no time, random, environment, network, filesystem-read, or process input;
 - failure leaves no final file.
 
-If byte determinism or exact literal semantic reopen cannot be proven with the
-current backend, implementation must stop and return
-`SPREADSHEET_XLSX_BACKEND_GAP`. The Candidate does not authorize a dependency
-change, an Excel process fallback, or a custom parallel Artifact writer runtime.
+The gate passed with the existing dependency. The production adapter does not
+rely on byte identity: canonical JSON/digest is semantic authority, while each
+generated file receives its own output digest and semantic reopen. No Excel
+process, dependency change, or parallel writer runtime was introduced.
 
 ### Structural reopen model
 
@@ -493,9 +493,10 @@ with exact semantic checks:
 2. required `[Content_Types].xml`, `_rels/.rels`, `xl/workbook.xml`,
    `xl/styles.xml`, and each declared worksheet part;
 3. macro/encryption/external-relationship/DTD rejection;
-4. bounded `XlsxDocument::from_reader` reopen;
+4. independent bounded `quick_xml` parsing of the controlled generated subset;
 5. exact sheet order/name and sparse coordinate/type/value comparison;
-6. intended number-format/style comparison for each styled cell;
+6. closed number-format/presentation intent-to-writer mapping plus style-index
+   presence on reopened styled cells;
 7. formula count exactly zero;
 8. final written bytes equal rendered size/hash and independently pass the same
    reopen checks.
@@ -537,7 +538,7 @@ The existing export receipt may add compact fields:
 - renderer ID/version and `output_format = XLSX`;
 - output relative path, size, and SHA-256;
 - sheet and non-empty-cell counts;
-- formula count `0`, calculation mode `LITERAL_ONLY`;
+- formula count `0`, calculation authority `NONE`;
 - structural reopen `true` and final-byte check `true`.
 
 It must not contain full cell content, full workbook JSON, raw XLSX/XML, or any
@@ -608,7 +609,7 @@ must not be smuggled in as a free-form string field.
 | Domain contracts | `HIGH` | Closed Rust/TS Artifact unions and typed DTOs change; unknown fields/types must remain fail-closed |
 | Storage/schema | `LOW` | Schema remains 9; existing generic Artifact rows admit the token; no table/migration |
 | Tool pipeline | `MEDIUM` | Existing four Tools gain one typed type/format dispatch; effects and approval unchanged |
-| Renderer/export | `HIGH` | XLSX writer is dependency-visible but product-unqualified; determinism and semantic reopen are blockers |
+| Renderer/export | `HIGH / VALIDATED FIRST SLICE` | Existing XLSX writer is qualified only for the bounded literal subset; package security and semantic reopen are enforced |
 | Formula/security | `HIGH / DEFERRED` | Calculation authority and formula injection are major boundaries; first slice rejects formulas |
 | Verification/evidence | `LOW` | Reuse exact Artifact-revision binding; add compact provenance only |
 | Recovery/idempotency | `LOW` | Existing semantics reused, with new fixtures |
@@ -616,13 +617,13 @@ must not be smuggled in as a free-form string field.
 | Dependency/build | `NONE` | No dependency addition or version change |
 | Rapid Desktop route | `NONE` | Subordinate Artifact track; no phase/version change |
 
-## FIRST_SLICE_CANDIDATE
+## FIRST_SLICE_IMPLEMENTED
 
 ### Recommended scope
 
 `FIRST_DURABLE_LITERAL_SPREADSHEET_ARTIFACT_SLICE`
 
-Implement only after separate authorization:
+The authorized first slice implements only:
 
 - the typed literal-only Spreadsheet DTOs and `SPREADSHEET` Artifact variant;
 - bounded validation, stable sheet identity, sparse-cell canonicalization, and
@@ -659,7 +660,7 @@ Explicitly exclude:
 | Canonicalization | Sheet and cell input ordering are non-semantic; stable digest |
 | Decimal | Canonical token and XLSX numeric reopen match admitted precision policy |
 | XLSX writer | Exact-pinned existing dependency; no new dependency/process/network/file read |
-| Determinism | Same canonical revision + renderer version -> same XLSX bytes |
+| Determinism | Same semantic workbook -> same canonical JSON/digest; ZIP-byte identity is observed but not required |
 | Security | Zero formula/macro/external rel/link/drawing/object/code path |
 | Structural reopen | Required parts and exact literal workbook semantics pass independently |
 | Tool path | Existing create/read/update/export effects and Policy/Approval/ToolExecutor path |
@@ -679,8 +680,8 @@ Stop implementation if any of these is true:
 - a new Spreadsheet-specific create/update/export Tool is required;
 - XLSX bytes, raw OOXML, arbitrary formula text, or external application state
   must become source of truth;
-- the current writer cannot produce deterministic bounded literal workbooks or
-  exact semantic reopen without a dependency/runtime expansion;
+- the current writer cannot produce bounded literal workbooks or exact semantic
+  reopen without a dependency/runtime expansion;
 - string input cannot be guaranteed to remain literal text;
 - renderer/package validation requires network, external file reads, an Office
   process, shell, script, macro, or plugin;
@@ -690,10 +691,10 @@ Stop implementation if any of these is true:
 - a Frozen/Baseline architecture document or schema 9 must change;
 - UI is required to prove the backend Artifact semantics.
 
-## TARGETED_VALIDATION_CANDIDATE
+## TARGETED_VALIDATION
 
-For a later authorized implementation, run only affected gates plus current
-Artifact regressions:
+For this implementation, run only affected gates plus current Artifact
+regressions:
 
 - Spreadsheet contract, validation, canonicalization, decimal, renderer,
   package-security, and structural-reopen unit tests;
@@ -706,20 +707,61 @@ Artifact regressions:
 - docs/context audit and `git diff --check`.
 
 Do not run Browser/Desktop E2E, packaged/portable smoke, or full premerge for
-this docs-only Candidate. The known unrelated Browse startup timeout is not a
-Spreadsheet issue and must not be repaired here.
+this backend-only Slice. The known unrelated Browse startup timeout is not a
+Spreadsheet issue and is not repaired here.
+
+### Recorded implementation evidence
+
+- writer Gate: the existing `office_oxide 0.1.8` writer produced two bounded
+  sheets with string/number/boolean sparse cells, reopened through the existing
+  XLSX read/extract path, emitted no formula/macro/external relationship, and
+  produced byte-identical output in the representative probe;
+- production semantic Gate: CJK/Latin and XML-special text, decimals, booleans,
+  sparse coordinates, closed style intents, and formula-like strings reopened
+  through the independent bounded package parser with exact literal semantics;
+- Artifact Gate: the existing coordinator/Policy/Approval/ToolExecutor path
+  created, read, updated, and historically exported R1/R2; ToolCall replay was
+  idempotent, stale CAS failed, commit-before-receipt recovery survived restart,
+  exact-revision Verification became stale after mutation, and read content
+  remained `UNTRUSTED_ARTIFACT_CONTENT`;
+- Storage Gate: schema 9 accepted the typed `SPREADSHEET` token/content through
+  generic Artifact rows while profile isolation, immutable revisions, unknown
+  future-token fail-closed behavior, and `content_schema_version=1` remained;
+- regressions: Agent 110/110, Office writer probes 4/4, Core 28/28, Storage
+  22/22, Desktop TypeScript 176/176, and Core integration 12/12 passed through
+  the repository Core/Cross lanes; Rust fmt, workspace Clippy `-D warnings`,
+  contracts current, docs/context manifest, and release Core build passed;
+- scope: migrations/dependencies/UI/FIPC/Formula/Calculator/import/chart/new
+  Runtime changes are zero. Browser/Desktop visual E2E, packaged/portable smoke,
+  and full premerge were not run by design.
+
+### Known first-slice limitations
+
+- no Spreadsheet preview or visual-quality claim exists;
+- style reopen proves the closed semantic intent maps to the expected writer
+  style and the final cell references a style; it does not claim arbitrary Excel
+  style fidelity;
+- the independent production parser is used for exact XML-special literal
+  checks because the current general XLSX extraction parser is not the semantic
+  authority for authored Spreadsheet revisions;
+- ZIP bytes happen to be stable for the current fixtures but byte identity is
+  not guaranteed as part of the Artifact contract;
+- formulas, calculation, dates, merges, charts, import/reconciliation, CSV, and
+  editing remain outside this slice.
 
 ## OPEN_QUESTIONS
 
-1. Is literal-only sufficiently valuable for the first implementation slice,
-   or must a separately reviewed typed formula/calculation slice precede it?
-2. Does the exact `office_oxide 0.1.8` writer produce byte-identical output and
-   exact style/value reopen for the proposed representative fixtures? Current
-   repository evidence does not answer this.
-3. Is 15 significant decimal digits the right Fielora/Excel interoperability
+1. Literal-only has been accepted and implemented as the first slice. Whether
+   formulas provide enough next value to justify their security/semantic cost
+   remains open.
+2. Representative `office_oxide 0.1.8` output is byte-identical in the current
+   probe, but byte identity remains non-contractual. Full visual/style fidelity
+   outside the closed intent mapping is not claimed.
+3. Is 15 significant decimal digits the right long-term Fielora/Excel interoperability
    boundary, and what exact rounding rule is required for future arithmetic?
-4. Which newline normalization rule should cell text use while preserving
-   meaningful leading/trailing whitespace?
+4. The first slice preserves admitted UTF-8 bytes and tab/CR/LF. A future
+   cross-format newline-normalization policy, if needed, requires a contract
+   delta rather than a renderer rewrite.
 5. Before formula support, what exact blank/text coercion, error propagation,
    range, cycle, rounding, and comparison rules form the Fielora calculator?
 6. Formula-bearing XLSX needs a deliberate cached-result/recalculation policy.
@@ -735,9 +777,8 @@ Spreadsheet issue and must not be repaired here.
 
 ## NEXT_DECISION
 
-`REVIEW_FIRST_DURABLE_LITERAL_SPREADSHEET_ARTIFACT_SLICE`
+`FIRST_DURABLE_LITERAL_SPREADSHEET_ARTIFACT_SLICE_IMPLEMENTED`
 
-The repository is ready for candidate review, not implementation. The first
-implementation should be authorized only if literal-only scope is accepted and
-the existing XLSX writer passes the targeted pre-implementation qualification.
-Formula/calculation remains a separately gated high-impact delta.
+The bounded literal-only implementation and writer qualification are complete
+under this Candidate. Formula/calculation remains a separately gated
+high-impact delta; no next Spreadsheet feature is authorized by this status.

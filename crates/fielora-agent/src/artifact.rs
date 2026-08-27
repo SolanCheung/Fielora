@@ -5,12 +5,12 @@
 
 use crate::{
     AgentError, CommandCancellation, ToolExecution, ToolRuntime, atomic_write, deny_sensitive,
-    diagram, normalize_relative, relative_text, resolve_for_write, sha256,
+    diagram, normalize_relative, relative_text, resolve_for_write, sha256, spreadsheet,
 };
 use fielora_contracts::{
     ArtifactContentV1, ArtifactReadView, ArtifactType as DurableArtifactType, DiagramArtifactV1,
     DocumentArtifact, DocumentBlock, PresentationArtifact, PresentationBlock, PresentationLayout,
-    PresentationSlide, SlideRegion, SlideSlot,
+    PresentationSlide, SlideRegion, SlideSlot, SpreadsheetArtifactV1,
 };
 use office_oxide::docx::write::DocxWriter;
 use office_oxide::pptx::write::{PptxWriter, Run, SlideData};
@@ -513,6 +513,87 @@ fn diagram_content_schema() -> Value {
     })
 }
 
+fn spreadsheet_content_schema() -> Value {
+    let sheet_id = json!({
+        "type":"string",
+        "minLength":1,
+        "maxLength":64,
+        "pattern":"^[a-z][a-z0-9_-]{0,63}$"
+    });
+    let literal = json!({
+        "oneOf":[
+            {
+                "type":"object",
+                "properties":{
+                    "kind":{"const":"STRING"},
+                    "value":{"type":"string","minLength":1,"maxLength":1024}
+                },
+                "required":["kind","value"],
+                "additionalProperties":false
+            },
+            {
+                "type":"object",
+                "properties":{
+                    "kind":{"const":"DECIMAL"},
+                    "value":{"type":"string","minLength":1,"maxLength":32,"pattern":"^-?[0-9]+(?:\\.[0-9]+)?$"}
+                },
+                "required":["kind","value"],
+                "additionalProperties":false
+            },
+            {
+                "type":"object",
+                "properties":{
+                    "kind":{"const":"BOOLEAN"},
+                    "value":{"type":"boolean"}
+                },
+                "required":["kind","value"],
+                "additionalProperties":false
+            }
+        ]
+    });
+    let presentation = json!({
+        "type":"object",
+        "properties":{
+            "emphasis":{"type":"string","enum":["NORMAL","HEADER","TOTAL"]},
+            "alignment":{"type":"string","enum":["AUTO","LEFT","CENTER","RIGHT"]},
+            "wrap":{"type":"boolean"}
+        },
+        "required":["emphasis","alignment","wrap"],
+        "additionalProperties":false
+    });
+    let cell = json!({
+        "type":"object",
+        "properties":{
+            "row":{"type":"integer","minimum":1,"maximum":2000},
+            "column":{"type":"integer","minimum":1,"maximum":256},
+            "value":literal,
+            "format":{"type":"string","enum":["GENERAL","TEXT","INTEGER","DECIMAL_2","PERCENT_2"]},
+            "presentation":presentation
+        },
+        "required":["row","column","value"],
+        "additionalProperties":false
+    });
+    let sheet = json!({
+        "type":"object",
+        "properties":{
+            "sheet_id":sheet_id,
+            "name":{"type":"string","minLength":1,"maxLength":31},
+            "cells":{"type":"array","maxItems":4096,"items":cell}
+        },
+        "required":["sheet_id","name","cells"],
+        "additionalProperties":false
+    });
+    json!({
+        "type":"object",
+        "properties":{
+            "title":{"type":"string","minLength":1,"maxLength":120},
+            "sheets":{"type":"array","minItems":1,"maxItems":32,"items":sheet}
+        },
+        "required":["sheets"],
+        "additionalProperties":false
+    })
+}
+
 fn durable_content_schema() -> Value {
     let legacy = legacy_input_schema();
     let mut variants = legacy["properties"]["content"]["oneOf"]
@@ -520,6 +601,7 @@ fn durable_content_schema() -> Value {
         .cloned()
         .unwrap_or_default();
     variants.push(diagram_content_schema());
+    variants.push(spreadsheet_content_schema());
     json!({"oneOf":variants})
 }
 
@@ -545,7 +627,7 @@ pub fn create_input_schema() -> Value {
     json!({
         "type":"object",
         "properties":{
-            "type":{"type":"string","enum":["document","presentation","diagram"]},
+            "type":{"type":"string","enum":["document","presentation","diagram","spreadsheet"]},
             "title":{"type":"string","minLength":1,"maxLength":512},
             "content":durable_content_schema(),
             "associate_with_current_project":{"type":"boolean"}
@@ -616,6 +698,23 @@ pub fn canonicalize_content(
                 semantic_unit_count: facts.node_count + facts.edge_count + facts.group_count,
             });
         }
+        DurableArtifactType::Spreadsheet => {
+            let mut workbook: SpreadsheetArtifactV1 =
+                serde_json::from_value(content).map_err(|_| AgentError::ArtifactContentInvalid)?;
+            let facts = spreadsheet::canonicalize(&mut workbook)?;
+            let content = ArtifactContentV1::Spreadsheet(workbook);
+            let canonical_json =
+                serde_json::to_string(&content).map_err(|_| AgentError::ArtifactContentInvalid)?;
+            if canonical_json.len() > MAX_DEFINITION_BYTES {
+                return Err(AgentError::ArtifactContentInvalid);
+            }
+            return Ok(CanonicalArtifactContent {
+                semantic_sha256: sha256(canonical_json.as_bytes()),
+                content,
+                canonical_json,
+                semantic_unit_count: facts.sheet_count + facts.cell_count,
+            });
+        }
     };
     validate_definition(&definition).map_err(|_| AgentError::ArtifactContentInvalid)?;
     let semantic_unit_count = definition.semantic_count();
@@ -646,6 +745,12 @@ pub fn export_saved(
     if matches!(&artifact.revision.content, ArtifactContentV1::Diagram(_)) {
         return export_saved_diagram(runtime, artifact, output_path, cancellation);
     }
+    if matches!(
+        &artifact.revision.content,
+        ArtifactContentV1::Spreadsheet(_)
+    ) {
+        return export_saved_spreadsheet(runtime, artifact, output_path, cancellation);
+    }
     let (artifact_type, content) = match &artifact.revision.content {
         ArtifactContentV1::Document(value) => (
             "document",
@@ -656,6 +761,9 @@ pub fn export_saved(
             serde_json::to_value(value).map_err(|_| AgentError::ArtifactContentInvalid)?,
         ),
         ArtifactContentV1::Diagram(_) => unreachable!("Diagram export is dispatched above"),
+        ArtifactContentV1::Spreadsheet(_) => {
+            unreachable!("Spreadsheet export is dispatched above")
+        }
     };
     let mut execution = export(
         runtime,
@@ -697,6 +805,124 @@ pub fn export_saved(
     })
     .to_string();
     Ok(execution)
+}
+
+fn export_saved_spreadsheet(
+    runtime: &ToolRuntime,
+    artifact: &ArtifactReadView,
+    output_path: &str,
+    cancellation: &CommandCancellation,
+) -> Result<ToolExecution, AgentError> {
+    let guard = ExportGuard::new(cancellation);
+    guard.check()?;
+    validate_output_extension(output_path, "xlsx")?;
+    let relative = normalize_relative(output_path)?;
+    deny_sensitive(&relative)?;
+    let target = resolve_for_write(&runtime.root, &relative)?;
+    if target.exists() {
+        return Err(AgentError::FileChanged);
+    }
+    let ArtifactContentV1::Spreadsheet(workbook_content) = &artifact.revision.content else {
+        return Err(AgentError::ArtifactContentInvalid);
+    };
+    let mut canonical_workbook = workbook_content.clone();
+    let semantic = spreadsheet::canonicalize(&mut canonical_workbook)?;
+    let canonical_content = ArtifactContentV1::Spreadsheet(canonical_workbook.clone());
+    let canonical_json = serde_json::to_string(&canonical_content)
+        .map_err(|_| AgentError::ArtifactContentInvalid)?;
+    if canonical_json.len() > MAX_DEFINITION_BYTES
+        || sha256(canonical_json.as_bytes()) != artifact.revision.semantic_sha256
+    {
+        return Err(AgentError::ArtifactContentInvalid);
+    }
+    let rendered = spreadsheet::render(&canonical_workbook)?;
+    guard.check()?;
+    if rendered.bytes.is_empty() || rendered.bytes.len() > MAX_OUTPUT_BYTES {
+        return Err(AgentError::FileTooLarge);
+    }
+
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|_| AgentError::IoFailed)?;
+    }
+    let target = resolve_for_write(&runtime.root, &relative)?;
+    if target.exists() {
+        return Err(AgentError::FileChanged);
+    }
+    guard.check()?;
+    atomic_write(&target, &rendered.bytes, true)?;
+    let final_bytes = fs::read(&target).map_err(|_| AgentError::IoFailed)?;
+    let final_check = if final_bytes.len() == rendered.bytes.len()
+        && sha256(&final_bytes) == sha256(&rendered.bytes)
+    {
+        spreadsheet::reopen(&rendered, &final_bytes)
+    } else {
+        Err(AgentError::IoFailed)
+    };
+    if let Err(error) = final_check {
+        let _ = fs::remove_file(&target);
+        return Err(error);
+    }
+
+    let output_sha256 = sha256(&final_bytes);
+    let facts = &rendered.facts;
+    let receipt = json!({
+        "kind":"ARTIFACT_EXPORTED",
+        "artifact_id":artifact.artifact.artifact_id,
+        "artifact_persistence":"DURABLE",
+        "artifact_type":"SPREADSHEET",
+        "artifact_revision_id":artifact.revision.revision_id,
+        "exported_revision_id":artifact.revision.revision_id,
+        "artifact_revision":artifact.revision.sequence,
+        "artifact_semantic_sha256":artifact.revision.semantic_sha256,
+        "content_schema_version":artifact.revision.content_schema_version,
+        "semantic_unit_count":semantic.sheet_count + semantic.cell_count,
+        "sheet_count":facts.sheet_count,
+        "cell_count":facts.cell_count,
+        "string_count":facts.string_count,
+        "decimal_count":facts.decimal_count,
+        "boolean_count":facts.boolean_count,
+        "formula_count":facts.formula_count,
+        "calculation_authority":spreadsheet::CALCULATION_AUTHORITY,
+        "renderer_id":spreadsheet::RENDERER_ID,
+        "renderer_version":spreadsheet::RENDERER_VERSION,
+        "output_format":"XLSX",
+        "path":relative_text(&relative),
+        "output_bytes":final_bytes.len(),
+        "output_sha256":output_sha256,
+        "external_relationship_count":facts.external_relationship_count,
+        "macro_part_count":facts.macro_part_count,
+        "xlsx_static_security":"PASS",
+        "structural_reopen":"STRUCTURAL_VALID",
+        "roundtrip":"LITERAL_SEMANTIC_CONTENT_PRESENT",
+    });
+    let observation = serde_json::to_string(&json!({
+        "artifact_id":artifact.artifact.artifact_id,
+        "artifact_revision_id":artifact.revision.revision_id,
+        "artifact_revision":artifact.revision.sequence,
+        "artifact_persistence":"DURABLE",
+        "artifact_type":"SPREADSHEET",
+        "path":relative_text(&relative),
+        "output_bytes":final_bytes.len(),
+        "output_sha256":output_sha256,
+        "structural_reopen":"STRUCTURAL_VALID",
+        "roundtrip":"LITERAL_SEMANTIC_CONTENT_PRESENT",
+        "visual_compatibility":"NOT_VERIFIED",
+        "calculation_authority":spreadsheet::CALCULATION_AUTHORITY,
+    }))
+    .map_err(|_| AgentError::IoFailed)?;
+    if serde_json::to_vec(&receipt)
+        .map_err(|_| AgentError::IoFailed)?
+        .len()
+        > MAX_TOOL_RESULT_BYTES
+        || observation.len() > MAX_TOOL_RESULT_BYTES
+    {
+        let _ = fs::remove_file(&target);
+        return Err(AgentError::IoFailed);
+    }
+    Ok(ToolExecution {
+        receipt,
+        observation,
+    })
 }
 
 fn export_saved_diagram(
@@ -1803,6 +2029,32 @@ mod tests {
         })
     }
 
+    fn spreadsheet_content(number: &str, summary: &str) -> Value {
+        json!({
+            "title":"季度销售 & <Quarter Sales>",
+            "sheets":[
+                {
+                    "sheet_id":"summary",
+                    "name":"Summary 中英",
+                    "cells":[
+                        {"row":1,"column":1,"value":{"kind":"STRING","value":summary},"presentation":{"emphasis":"HEADER","alignment":"LEFT","wrap":true}},
+                        {"row":3,"column":4,"value":{"kind":"BOOLEAN","value":true}}
+                    ]
+                },
+                {
+                    "sheet_id":"quarter_sales",
+                    "name":"季度销售",
+                    "cells":[
+                        {"row":1,"column":1,"value":{"kind":"STRING","value":"中文产品 <Alpha> & English"},"presentation":{"emphasis":"HEADER","alignment":"CENTER","wrap":true}},
+                        {"row":2,"column":3,"value":{"kind":"DECIMAL","value":number},"format":"DECIMAL_2"},
+                        {"row":5,"column":7,"value":{"kind":"STRING","value":"=WEBSERVICE(\"https://example.com?a=1&b=2\")"}},
+                        {"row":7,"column":2,"value":{"kind":"STRING","value":"@evil"}}
+                    ]
+                }
+            ]
+        })
+    }
+
     fn presentation_from(arguments: &Value) -> PresentationArtifact {
         serde_json::from_value(arguments["content"].clone()).unwrap()
     }
@@ -2394,7 +2646,7 @@ mod tests {
     }
 
     #[test]
-    fn saved_document_presentation_and_diagram_exports_pin_exact_semantic_revisions() {
+    fn saved_document_presentation_diagram_and_spreadsheet_exports_pin_exact_semantic_revisions() {
         let (root, runtime) = fixture_runtime();
         let cases = vec![
             (
@@ -2411,6 +2663,11 @@ mod tests {
                 DurableArtifactType::Diagram,
                 diagram_content("Execution 执行"),
                 "saved-diagram.svg",
+            ),
+            (
+                DurableArtifactType::Spreadsheet,
+                spreadsheet_content("01.2500", "Literal summary"),
+                "saved-spreadsheet.xlsx",
             ),
         ];
         for (artifact_type, content, output_path) in cases {
@@ -2476,6 +2733,16 @@ mod tests {
                 assert_eq!(execution.receipt["static_svg_security"], "PASS");
                 assert_eq!(execution.receipt["node_count"], 5);
                 assert!(!execution.receipt.to_string().contains("Execution 执行"));
+            }
+            if artifact_type == DurableArtifactType::Spreadsheet {
+                assert_eq!(execution.receipt["renderer_id"], spreadsheet::RENDERER_ID);
+                assert_eq!(execution.receipt["output_format"], "XLSX");
+                assert_eq!(execution.receipt["xlsx_static_security"], "PASS");
+                assert_eq!(execution.receipt["formula_count"], 0);
+                assert_eq!(execution.receipt["external_relationship_count"], 0);
+                assert_eq!(execution.receipt["macro_part_count"], 0);
+                assert_eq!(execution.receipt["calculation_authority"], "NONE");
+                assert!(!execution.receipt.to_string().contains("Literal summary"));
             }
             assert_eq!(
                 export_saved(
@@ -2548,7 +2815,32 @@ mod tests {
             Err(AgentError::ArtifactContentInvalid)
         );
 
+        let first = canonicalize_content(
+            DurableArtifactType::Spreadsheet,
+            spreadsheet_content("01.2500", "Literal summary"),
+        )
+        .unwrap();
+        let mut reordered = spreadsheet_content("1.25", "Literal summary");
+        reordered["sheets"].as_array_mut().unwrap().reverse();
+        for sheet in reordered["sheets"].as_array_mut().unwrap() {
+            sheet["cells"].as_array_mut().unwrap().reverse();
+        }
+        let second = canonicalize_content(DurableArtifactType::Spreadsheet, reordered).unwrap();
+        assert_eq!(first.canonical_json, second.canonical_json);
+        assert_eq!(first.semantic_sha256, second.semantic_sha256);
+        assert_eq!(first.semantic_unit_count, 8);
+        assert!(matches!(first.content, ArtifactContentV1::Spreadsheet(_)));
+
+        let mut formula = spreadsheet_content("1.25", "Literal summary");
+        formula["sheets"][0]["cells"][0]["value"] = json!({"kind":"FORMULA","value":"SUM(A1:A2)"});
+        assert_eq!(
+            canonicalize_content(DurableArtifactType::Spreadsheet, formula),
+            Err(AgentError::ArtifactContentInvalid)
+        );
+
         assert!(create_input_schema().to_string().contains("diagram"));
+        assert!(create_input_schema().to_string().contains("spreadsheet"));
         assert!(!legacy_input_schema().to_string().contains("diagram"));
+        assert!(!legacy_input_schema().to_string().contains("spreadsheet"));
     }
 }

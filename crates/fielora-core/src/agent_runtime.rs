@@ -145,6 +145,7 @@ enum ArtifactToolType {
     Document,
     Presentation,
     Diagram,
+    Spreadsheet,
 }
 
 impl From<ArtifactToolType> for ArtifactType {
@@ -153,6 +154,7 @@ impl From<ArtifactToolType> for ArtifactType {
             ArtifactToolType::Document => Self::Document,
             ArtifactToolType::Presentation => Self::Presentation,
             ArtifactToolType::Diagram => Self::Diagram,
+            ArtifactToolType::Spreadsheet => Self::Spreadsheet,
         }
     }
 }
@@ -7605,6 +7607,33 @@ mod tests {
         })
     }
 
+    fn spreadsheet_artifact_content(status: &str, include_forecast: bool) -> Value {
+        let mut summary_cells = vec![
+            json!({"row":1,"column":1,"value":{"kind":"STRING","value":"项目 & <状态>"},"presentation":{"emphasis":"HEADER","alignment":"LEFT","wrap":true}}),
+            json!({"row":1,"column":2,"value":{"kind":"STRING","value":status},"presentation":{"emphasis":"HEADER","alignment":"CENTER","wrap":false}}),
+            json!({"row":2,"column":1,"value":{"kind":"STRING","value":"Revenue 收入"}}),
+            json!({"row":2,"column":2,"value":{"kind":"DECIMAL","value":"0012.3400"},"format":"DECIMAL_2"}),
+            json!({"row":3,"column":1,"value":{"kind":"STRING","value":"Approved"}}),
+            json!({"row":3,"column":2,"value":{"kind":"BOOLEAN","value":true}}),
+            json!({"row":4,"column":1,"value":{"kind":"STRING","value":"Formula-like literal"}}),
+            json!({"row":4,"column":2,"value":{"kind":"STRING","value":"=SUM(B2:B3)"},"format":"TEXT"}),
+        ];
+        if include_forecast {
+            summary_cells.push(json!({"row":5,"column":1,"value":{"kind":"STRING","value":"Forecast 预测"},"presentation":{"emphasis":"TOTAL","alignment":"LEFT","wrap":false}}));
+            summary_cells.push(json!({"row":5,"column":2,"value":{"kind":"DECIMAL","value":"0.985"},"format":"PERCENT_2","presentation":{"emphasis":"TOTAL","alignment":"RIGHT","wrap":false}}));
+        }
+        json!({
+            "title":"Durable Spreadsheet 工作簿",
+            "sheets":[
+                {"sheet_id":"details","name":"Details","cells":[
+                    {"row":2,"column":2,"value":{"kind":"STRING","value":"Sparse cell"}},
+                    {"row":1,"column":1,"value":{"kind":"STRING","value":"ID"},"presentation":{"emphasis":"HEADER","alignment":"AUTO","wrap":false}}
+                ]},
+                {"sheet_id":"summary","name":"概览","cells":summary_cells}
+            ]
+        })
+    }
+
     async fn e2e_environment_guard() -> tokio::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
@@ -9357,6 +9386,336 @@ mod tests {
             updated.revision.revision_id
         );
 
+        // The Spreadsheet type inherits the same coordinator, policy, durable
+        // revision, receipt, verification, export, and recovery machinery. The
+        // workbook model and XLSX renderer are the only additive pieces.
+        let spreadsheet_create_arguments = json!({
+            "type":"spreadsheet",
+            "title":"Durable Spreadsheet proof",
+            "associate_with_current_project":true,
+            "content":spreadsheet_artifact_content("R1 初始", false)
+        });
+        let spreadsheet_create = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                create_spec,
+                AgentModelToolCall {
+                    id: "spreadsheet-create".into(),
+                    name: "artifact.create".into(),
+                    arguments: spreadsheet_create_arguments.clone(),
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(spreadsheet_create.policy_decision, AgentPolicyDecision::Ask);
+        let spreadsheet_create_tool_id = spreadsheet_create.id.clone();
+        let ToolDisposition::Executed(spreadsheet_created_result) = coordinator
+            .execute_tool(&prepared, spreadsheet_create, true, &test_cancellation())
+            .await
+        else {
+            panic!("approved Spreadsheet create must use existing Tool pipeline")
+        };
+        assert!(
+            spreadsheet_created_result.wrote_workspace,
+            "Spreadsheet create failed: {:?}",
+            spreadsheet_created_result.message
+        );
+        assert!(!spreadsheet_created_result.verification_passed);
+        let spreadsheet_create_call = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|tool| tool.id == spreadsheet_create_tool_id)
+            .unwrap();
+        let spreadsheet_create_receipt = spreadsheet_create_call.receipt.as_ref().unwrap();
+        assert_eq!(spreadsheet_create_receipt["artifact_type"], "SPREADSHEET");
+        assert_eq!(
+            spreadsheet_create_receipt["kind"],
+            "ARTIFACT_REVISION_COMMITTED"
+        );
+        assert!(spreadsheet_create_receipt.get("content").is_none());
+        let spreadsheet_id =
+            ArtifactId::new(spreadsheet_create_receipt["artifact_id"].as_str().unwrap());
+        let spreadsheet_revision_one = ArtifactRevisionId::new(
+            spreadsheet_create_receipt["artifact_revision_id"]
+                .as_str()
+                .unwrap(),
+        );
+        let spreadsheet_digest_one = spreadsheet_create_receipt["artifact_semantic_sha256"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let spreadsheet_replay = DurableArtifactToolExecutor {
+            storage: storage.clone(),
+            runtime: ToolRuntime::new(&prepared.project_root, &artifacts).unwrap(),
+            run_id: prepared.run.id.clone(),
+            conversation_id: conversation.id.clone(),
+            project_field_id: project.field_id.clone(),
+            tool_call_id: spreadsheet_create_tool_id,
+        }
+        .execute(
+            "artifact.create",
+            &spreadsheet_create_arguments,
+            true,
+            &CommandCancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            spreadsheet_replay.receipt["artifact_revision_id"],
+            spreadsheet_revision_one.0
+        );
+        assert_eq!(
+            storage
+                .read_artifact(spreadsheet_id.clone(), None)
+                .unwrap()
+                .revision
+                .sequence,
+            1
+        );
+
+        let spreadsheet_read = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                read_spec,
+                AgentModelToolCall {
+                    id: "spreadsheet-read".into(),
+                    name: "artifact.read".into(),
+                    arguments: json!({"artifact_id":spreadsheet_id}),
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(spreadsheet_read.policy_decision, AgentPolicyDecision::Allow);
+        let ToolDisposition::Executed(spreadsheet_read_result) = coordinator
+            .execute_tool(&prepared, spreadsheet_read, false, &test_cancellation())
+            .await
+        else {
+            panic!("Spreadsheet read must use existing Tool pipeline")
+        };
+        assert!(matches!(
+            spreadsheet_read_result.message,
+            AgentModelMessage::ToolResult { content, is_error: false, .. }
+                if content.contains("UNTRUSTED_ARTIFACT_CONTENT")
+                && content.contains("R1 初始")
+                && content.contains("=SUM(B2:B3)")
+        ));
+
+        let spreadsheet_revision_before_update = workspace_revision_for_run(
+            &storage,
+            &prepared.run.id,
+            &prepared.project_root,
+            &artifacts,
+        )
+        .unwrap();
+        let spreadsheet_verification_tool = storage
+            .create_agent_tool_call(
+                prepared.run.id.clone(),
+                "run_command".into(),
+                AgentToolEffect::Process,
+                AgentPolicyDecision::Allow,
+                json!({"program":"cargo","argv":["test","spreadsheet"]}),
+                50,
+            )
+            .unwrap();
+        storage
+            .update_agent_tool_call(
+                spreadsheet_verification_tool.id.clone(),
+                AgentToolStatus::Running,
+                None,
+                None,
+                51,
+            )
+            .unwrap();
+        storage
+            .update_agent_tool_call(
+                spreadsheet_verification_tool.id.clone(),
+                AgentToolStatus::Completed,
+                Some(json!({
+                    "kind":"COMMAND_EXECUTED","success":true,"exit_code":0,
+                    "verification_eligible":true,
+                    "workspace_revision":spreadsheet_revision_before_update,
+                })),
+                None,
+                52,
+            )
+            .unwrap();
+        storage
+            .record_agent_verification(VerificationReceiptView {
+                id: VerificationReceiptId::new(Uuid::now_v7().to_string()),
+                run_id: prepared.run.id.clone(),
+                tool_call_id: Some(spreadsheet_verification_tool.id),
+                check_kind: "COMMAND".into(),
+                outcome: VerificationOutcome::Pass,
+                summary: "Exact Spreadsheet revision one verification".into(),
+                artifact_sha256: None,
+                subject: Some(VerificationSubject::ArtifactRevision {
+                    artifact_id: spreadsheet_id.clone(),
+                    revision_id: spreadsheet_revision_one.clone(),
+                    semantic_sha256: spreadsheet_digest_one.clone(),
+                }),
+                exit_code: Some(0),
+                created_at: 52,
+            })
+            .unwrap();
+        assert!(has_fresh_verification(
+            &storage,
+            &prepared.run.id,
+            &prepared.project_root,
+            &artifacts,
+        ));
+
+        let spreadsheet_update = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                update_spec,
+                AgentModelToolCall {
+                    id: "spreadsheet-update".into(),
+                    name: "artifact.update".into(),
+                    arguments: json!({
+                        "artifact_id":spreadsheet_id,
+                        "expected_revision_id":spreadsheet_revision_one,
+                        "content":spreadsheet_artifact_content("R2 更新", true)
+                    }),
+                },
+                false,
+            )
+            .unwrap();
+        let ToolDisposition::Executed(spreadsheet_updated_result) = coordinator
+            .execute_tool(&prepared, spreadsheet_update, true, &test_cancellation())
+            .await
+        else {
+            panic!("approved Spreadsheet update must use existing Tool pipeline")
+        };
+        assert!(spreadsheet_updated_result.wrote_workspace);
+        assert!(!has_fresh_verification(
+            &storage,
+            &prepared.run.id,
+            &prepared.project_root,
+            &artifacts,
+        ));
+        let spreadsheet_updated = storage.read_artifact(spreadsheet_id.clone(), None).unwrap();
+        assert_eq!(
+            spreadsheet_updated.artifact.artifact_type,
+            ArtifactType::Spreadsheet
+        );
+        assert_eq!(spreadsheet_updated.revision.sequence, 2);
+        assert_ne!(
+            spreadsheet_updated.revision.semantic_sha256,
+            spreadsheet_digest_one
+        );
+        assert_eq!(
+            storage
+                .read_artifact(
+                    spreadsheet_id.clone(),
+                    Some(spreadsheet_revision_one.clone()),
+                )
+                .unwrap()
+                .revision
+                .semantic_sha256,
+            spreadsheet_digest_one
+        );
+
+        let mut spreadsheet_export_r2_tool_id = None;
+        for (call_id, revision_id, output_path) in [
+            (
+                "spreadsheet-export-r1",
+                spreadsheet_revision_one.clone(),
+                "exports/spreadsheet-r1.xlsx",
+            ),
+            (
+                "spreadsheet-export-r2",
+                spreadsheet_updated.revision.revision_id.clone(),
+                "exports/spreadsheet-r2.xlsx",
+            ),
+        ] {
+            let export = coordinator
+                .propose_tool_call(
+                    &prepared.run,
+                    export_spec,
+                    AgentModelToolCall {
+                        id: call_id.into(),
+                        name: "artifact.export".into(),
+                        arguments: json!({
+                            "artifact_id":spreadsheet_id,
+                            "revision_id":revision_id,
+                            "output_path":output_path
+                        }),
+                    },
+                    false,
+                )
+                .unwrap();
+            if call_id == "spreadsheet-export-r2" {
+                spreadsheet_export_r2_tool_id = Some(export.id.clone());
+            }
+            let ToolDisposition::Executed(result) = coordinator
+                .execute_tool(&prepared, export, true, &test_cancellation())
+                .await
+            else {
+                panic!("Spreadsheet historical export must use artifact.export")
+            };
+            assert!(result.wrote_workspace);
+            assert!(workspace.join(output_path).exists());
+        }
+        let spreadsheet_r1_xlsx =
+            std::fs::read(workspace.join("exports/spreadsheet-r1.xlsx")).unwrap();
+        let spreadsheet_r2_xlsx =
+            std::fs::read(workspace.join("exports/spreadsheet-r2.xlsx")).unwrap();
+        assert!(spreadsheet_r1_xlsx.starts_with(b"PK"));
+        assert!(spreadsheet_r2_xlsx.starts_with(b"PK"));
+        assert_ne!(spreadsheet_r1_xlsx, spreadsheet_r2_xlsx);
+        let spreadsheet_export_receipt = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|tool| Some(&tool.id) == spreadsheet_export_r2_tool_id.as_ref())
+            .unwrap()
+            .receipt
+            .unwrap();
+        assert_eq!(spreadsheet_export_receipt["artifact_type"], "SPREADSHEET");
+        assert_eq!(
+            spreadsheet_export_receipt["renderer_id"],
+            "fielora.spreadsheet.xlsx"
+        );
+        assert_eq!(spreadsheet_export_receipt["formula_count"], 0);
+        assert_eq!(spreadsheet_export_receipt["calculation_authority"], "NONE");
+        assert_eq!(spreadsheet_export_receipt["external_relationship_count"], 0);
+        assert_eq!(spreadsheet_export_receipt["macro_part_count"], 0);
+        assert!(spreadsheet_export_receipt.get("content").is_none());
+
+        let spreadsheet_stale_tool = storage
+            .create_agent_tool_call(
+                prepared.run.id.clone(),
+                "artifact.update".into(),
+                AgentToolEffect::WorkspaceWrite,
+                AgentPolicyDecision::Allow,
+                json!({}),
+                54,
+            )
+            .unwrap();
+        let spreadsheet_stale_arguments = json!({
+            "artifact_id":spreadsheet_id,
+            "expected_revision_id":spreadsheet_revision_one,
+            "content":spreadsheet_artifact_content("stale Spreadsheet", false)
+        });
+        assert_eq!(
+            DurableArtifactToolExecutor {
+                storage: storage.clone(),
+                runtime: ToolRuntime::new(&prepared.project_root, &artifacts).unwrap(),
+                run_id: prepared.run.id.clone(),
+                conversation_id: conversation.id.clone(),
+                project_field_id: project.field_id.clone(),
+                tool_call_id: spreadsheet_stale_tool.id,
+            }
+            .execute(
+                "artifact.update",
+                &spreadsheet_stale_arguments,
+                true,
+                &CommandCancellation::default(),
+            ),
+            Err(AgentError::ArtifactRevisionConflict)
+        );
+
         // Simulate commit-before-ToolCall-receipt: the storage transaction is
         // durable, then Core disappears while the ToolCall is still RUNNING.
         let recovery_run = storage
@@ -9390,9 +9749,9 @@ mod tests {
             .unwrap()
             .run;
         let recovery_arguments = json!({
-            "artifact_id":artifact_id,
-            "expected_revision_id":updated.revision.revision_id,
-            "content":diagram_artifact_content("committed before receipt", true)
+            "artifact_id":spreadsheet_id,
+            "expected_revision_id":spreadsheet_updated.revision.revision_id,
+            "content":spreadsheet_artifact_content("committed before receipt", true)
         });
         let recovery_tool = storage
             .create_agent_tool_call(
@@ -9504,8 +9863,14 @@ mod tests {
             recovered_tool.receipt.as_ref().unwrap()["kind"],
             "ARTIFACT_REVISION_COMMITTED"
         );
-        let recovered_artifact = restarted_storage.read_artifact(artifact_id, None).unwrap();
+        let recovered_artifact = restarted_storage
+            .read_artifact(spreadsheet_id, None)
+            .unwrap();
         assert_eq!(recovered_artifact.revision.sequence, 3);
+        assert_eq!(
+            recovered_artifact.artifact.artifact_type,
+            ArtifactType::Spreadsheet
+        );
         assert_eq!(
             restarted_storage
                 .artifact_mutation_by_tool_call(recovered_tool.id)

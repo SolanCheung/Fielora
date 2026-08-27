@@ -12,6 +12,7 @@ pub mod mcp;
 pub mod mcp_connections;
 mod plugins;
 mod skills;
+mod spreadsheet;
 pub mod web;
 
 pub use plugins::{
@@ -768,7 +769,7 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
         ),
         tool(
             "artifact.create",
-            "Create one durable profile-owned DOCUMENT or PRESENTATION Artifact with immutable revision 1.",
+            "Create one durable profile-owned typed Artifact with immutable revision 1.",
             AgentToolEffect::WorkspaceWrite,
             artifact::create_input_schema(),
         ),
@@ -786,7 +787,7 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
         ),
         tool(
             "artifact.export",
-            "Export either inline semantic content or one exact saved Artifact revision to a new DOCX/PPTX project-relative path. This proves structural and semantic roundtrip only, not factual correctness or visual quality.",
+            "Export supported inline semantic content or one exact saved Artifact revision to a new DOCX/PPTX/SVG/XLSX project-relative path. This proves structural and semantic roundtrip only, not factual correctness, calculation, or visual quality.",
             AgentToolEffect::WorkspaceWrite,
             artifact::input_schema(),
         ),
@@ -2670,13 +2671,14 @@ impl ToolRuntime {
         let capabilities = json!({
             "coding":{"status":"AVAILABLE","tools":["files","exact patch","git read","controlled command","verification"]},
             "rich_file_read":{"status":"AVAILABLE","tool":"file.extract","formats":["PDF","DOCX","PPTX","XLSX"],"authority":"UNTRUSTED_PROJECT_CONTENT","limitations":["read/extract only","no OCR","no layout rendering","no formula evaluation"]},
-            "artifact_export":{"status":"AVAILABLE","tool":"artifact.export","formats":["DOCX","PPTX"],"effect":"WORKSPACE_WRITE","persistence":"REQUEST_SCOPED","verification":"STRUCTURAL_AND_SEMANTIC_ROUNDTRIP_ONLY"},
+            "artifact_export":{"status":"AVAILABLE","tool":"artifact.export","formats":["DOCX","PPTX","SVG","XLSX"],"effect":"WORKSPACE_WRITE","persistence":["REQUEST_SCOPED","DURABLE_REVISION"],"verification":"STRUCTURAL_AND_SEMANTIC_ROUNDTRIP_ONLY"},
             "markdown":{"status":"AVAILABLE","path":"create_file/write_file plus verification"},
             "csv":{"status":"AVAILABLE","path":"bounded UTF-8 file tools; formula-aware XLSX is not implied"},
             "web_research":{"status":"UNSUPPORTED_CAPABILITY","reason":"controlled Browser extraction tool is not installed in this build"},
             "archive":{"status":"UNSUPPORTED_CAPABILITY","reason":"safe zip preview/extraction adapter is not installed in this build"},
             "docx_pdf":{"status":"PARTIAL","reason":"bounded one-shot DOCX export and DOCX/PDF extraction are available; PDF export, editing, preview, and visual verification remain unsupported"},
-            "xlsx_charts":{"status":"UNSUPPORTED_CAPABILITY","reason":"creation, editing, charts, and formula evaluation remain unsupported; file.extract supports bounded read-only XLSX cell extraction"},
+            "xlsx":{"status":"PARTIAL","reason":"durable typed literal-only Spreadsheet Artifacts and saved XLSX export are available; formulas, calculation, import, charts, editing UI, and visual verification remain unsupported"},
+            "xlsx_charts":{"status":"UNSUPPORTED_CAPABILITY","reason":"charts, formulas, calculation, and XLSX-to-Artifact import remain unsupported"},
             "pptx":{"status":"PARTIAL","reason":"bounded one-shot PPTX export and extraction are available; editing, preview, arbitrary layout, and visual verification remain unsupported"},
             "image_generation":{"status":"UNSUPPORTED_CAPABILITY","reason":"no dedicated image provider adapter is configured"}
         });

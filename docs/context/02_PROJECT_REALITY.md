@@ -1801,3 +1801,52 @@ NEW_DEPENDENCIES: 0
 UI_FIPC_PNG_MERMAID_COMPOSITION_SPREADSHEET: NOT_IMPLEMENTED
 CHANGE_IMPACT: HIGH
 ```
+
+## 88. Spreadsheet Artifact First Implementation Slice
+
+Durable Artifact Core 现在 additive 支持第四个 closed typed Artifact：
+`SPREADSHEET`。`SpreadsheetArtifactV1` 只包含 bounded workbook metadata、stable
+sheet-local ID、XLSX-compatible display name、one-based typed coordinate、sparse
+non-empty cells、`STRING/DECIMAL/BOOLEAN` literal，以及 closed format/presentation
+intent；不接受 arbitrary JSON、XLSX/CSV/OOXML source bytes、Formula、Date、merge、
+chart、link、macro、external data 或 executable DSL。
+
+Spreadsheet canonicalization 按 stable Sheet ID 排 sheets、按 row/column 排 cells、
+拒绝 identity/name/coordinate collision，并把等价 decimal lexical forms 收敛为
+bounded canonical token。输入 sheet/cell array order 不进入语义；canonical typed JSON
+与现有 SHA-256 仍是 Artifact semantic authority。Formula-like `STRING`（包括 `=`、
+`+`、`-`、`@` 前缀）通过 writer 后独立 reopen 为 exact literal text；Formula variant
+和 calculation engine 不存在，`CALCULATION_AUTHORITY=NONE`。
+
+现有 exact-pinned `office_oxide 0.1.8` 已通过 test-only multi-sheet writer Gate，随后
+以 `fielora.spreadsheet.xlsx@0.1.0+office_oxide.0.1.8` 接入 saved-revision
+`artifact.export`。Production adapter 在内存中生成 XLSX，独立检查 bounded ZIP/OPC、
+required parts、internal-only relationships、zero formula/macro/external/link/drawing，
+精确 reopen sheet order/name 与 sparse coordinate/type/value；atomic write 后对 final
+bytes 再次做 size/hash/reopen。当前 probe 观察到 byte-identical output，但 ZIP byte
+identity 不是 Artifact contract，semantic digest 和 exact output digest 分别承担语义与
+文件身份。
+
+Spreadsheet create/read/update/export 完整复用现有 Artifact/Profile ownership、
+schema-9 generic rows、immutable revision、CAS、ToolCall idempotency、restart recovery、
+Policy/Approval、durable receipt、exact Artifact-revision Verification/freshness 与
+`UNTRUSTED_ARTIFACT_CONTENT`。没有 Spreadsheet-specific Tool、Agent、Runtime、
+revision/receipt/verification hierarchy、DB table、migration、dependency、UI 或 FIPC。
+
+```text
+SPREADSHEET_ARTIFACT_FIRST_SLICE: IMPLEMENTED / TARGETED_VALIDATED
+ARCHITECTURE: MODEL + HARNESS + EXISTING_ARTIFACT_TOOLS
+ARTIFACT_TYPES: DOCUMENT + PRESENTATION + DIAGRAM + SPREADSHEET
+SPREADSHEET_SOURCE: CLOSED_TYPED_LITERAL_WORKBOOK
+COORDINATES: ONE_BASED_TYPED_ROW_COLUMN
+CALCULATION_AUTHORITY: NONE
+RENDERER: fielora.spreadsheet.xlsx@0.1.0+office_oxide.0.1.8
+SPREADSHEET_INLINE_EXPORT: NOT_SUPPORTED
+CONTENT_AUTHORITY: UNTRUSTED_ARTIFACT_CONTENT
+CURRENT_DATABASE_SCHEMA: 9
+CONTENT_SCHEMA_VERSION: 1
+NEW_MIGRATION: 0
+NEW_DEPENDENCIES: 0
+FORMULA_CHART_IMPORT_UI_NEW_RUNTIME: 0
+CHANGE_IMPACT: HIGH
+```
