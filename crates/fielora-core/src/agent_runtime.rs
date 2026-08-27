@@ -25,7 +25,9 @@ use fielora_model::{
 };
 use fielora_platform::{CredentialStore, ManagedChildSecretEnvironment, SecretBytes};
 use fielora_storage::{AgentEventCommit, AgentProjectionUpdate, StorageHandle};
+use fielora_storage::{CreateArtifactRecord, UpdateArtifactRecord};
 use futures_util::future::join_all;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -126,6 +128,323 @@ struct ExecutedTool {
 struct InvokedModelTurn {
     turn: AgentModelTurn,
     first_token_ms: Option<u64>,
+}
+
+struct DurableArtifactToolExecutor {
+    storage: StorageHandle,
+    runtime: ToolRuntime,
+    run_id: AgentRunId,
+    conversation_id: ConversationId,
+    project_field_id: FieldId,
+    tool_call_id: ToolCallId,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ArtifactToolType {
+    Document,
+    Presentation,
+}
+
+impl From<ArtifactToolType> for ArtifactType {
+    fn from(value: ArtifactToolType) -> Self {
+        match value {
+            ArtifactToolType::Document => Self::Document,
+            ArtifactToolType::Presentation => Self::Presentation,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateArtifactArgs {
+    #[serde(rename = "type")]
+    artifact_type: ArtifactToolType,
+    title: Option<String>,
+    content: Value,
+    #[serde(default)]
+    associate_with_current_project: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateArtifactArgs {
+    artifact_id: String,
+    expected_revision_id: String,
+    content: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadArtifactArgs {
+    artifact_id: String,
+    revision_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SavedArtifactExportArgs {
+    artifact_id: String,
+    revision_id: Option<String>,
+    output_path: String,
+}
+
+fn map_artifact_storage_error(error: DomainError) -> AgentError {
+    match error {
+        DomainError::NotFound => AgentError::ArtifactNotFound,
+        DomainError::RevisionConflict => AgentError::ArtifactRevisionConflict,
+        DomainError::Validation(code) if code == "ARTIFACT_TOOLCALL_IDEMPOTENCY_CONFLICT" => {
+            AgentError::ArtifactIdempotencyConflict
+        }
+        DomainError::Validation(code)
+            if code.starts_with("ARTIFACT_") || code == "VERIFICATION_SUBJECT_INVALID" =>
+        {
+            AgentError::ArtifactContentInvalid
+        }
+        _ => AgentError::IoFailed,
+    }
+}
+
+fn artifact_mutation_request_sha256(value: &Value) -> Result<String, AgentError> {
+    let bytes = serde_json::to_vec(value).map_err(|_| AgentError::ArtifactContentInvalid)?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn artifact_mutation_digest_from_arguments(
+    storage: &StorageHandle,
+    name: &str,
+    arguments: &Value,
+    project_field_id: &FieldId,
+) -> Result<String, AgentError> {
+    match name {
+        "artifact.create" => {
+            let args: CreateArtifactArgs = serde_json::from_value(arguments.clone())
+                .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+            let artifact_type = ArtifactType::from(args.artifact_type);
+            let canonical =
+                fielora_agent::artifact::canonicalize_content(artifact_type, args.content)?;
+            artifact_mutation_request_sha256(&json!({
+                "operation":"CREATE",
+                "artifact_type":artifact_type,
+                "title":args.title,
+                "project_field_id":args.associate_with_current_project.then(|| project_field_id.clone()),
+                "semantic_sha256":canonical.semantic_sha256,
+            }))
+        }
+        "artifact.update" => {
+            let args: UpdateArtifactArgs = serde_json::from_value(arguments.clone())
+                .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+            let artifact_id = ArtifactId::new(args.artifact_id);
+            let expected_revision_id = ArtifactRevisionId::new(args.expected_revision_id);
+            let current = storage
+                .read_artifact(artifact_id.clone(), None)
+                .map_err(map_artifact_storage_error)?;
+            let canonical = fielora_agent::artifact::canonicalize_content(
+                current.artifact.artifact_type,
+                args.content,
+            )?;
+            artifact_mutation_request_sha256(&json!({
+                "operation":"UPDATE",
+                "artifact_id":artifact_id,
+                "expected_revision_id":expected_revision_id,
+                "semantic_sha256":canonical.semantic_sha256,
+            }))
+        }
+        _ => Err(AgentError::ToolArgumentsInvalid),
+    }
+}
+
+fn durable_artifact_mutation_receipt(read: &ArtifactReadView) -> Value {
+    json!({
+        "kind":"ARTIFACT_REVISION_COMMITTED",
+        "artifact_persistence":"DURABLE",
+        "artifact_id":read.artifact.artifact_id,
+        "artifact_type":read.artifact.artifact_type,
+        "artifact_revision_id":read.revision.revision_id,
+        "artifact_revision":read.revision.sequence,
+        "parent_revision_id":read.revision.parent_revision_id,
+        "old_revision_id":read.revision.parent_revision_id,
+        "new_revision_id":read.revision.revision_id,
+        "mutation_kind":read.revision.mutation_kind,
+        "artifact_semantic_sha256":read.revision.semantic_sha256,
+        "content_schema_version":read.revision.content_schema_version,
+        "project_field_id":read.artifact.project_field_id,
+    })
+}
+
+impl DurableArtifactToolExecutor {
+    fn create(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
+        let args: CreateArtifactArgs = serde_json::from_value(arguments.clone())
+            .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+        let artifact_type = ArtifactType::from(args.artifact_type);
+        let canonical = fielora_agent::artifact::canonicalize_content(artifact_type, args.content)?;
+        let project_field_id = args
+            .associate_with_current_project
+            .then(|| self.project_field_id.clone());
+        let request_sha256 = artifact_mutation_request_sha256(&json!({
+            "operation":"CREATE",
+            "artifact_type":artifact_type,
+            "title":args.title,
+            "project_field_id":project_field_id,
+            "semantic_sha256":canonical.semantic_sha256,
+        }))?;
+        let read = self
+            .storage
+            .create_artifact(CreateArtifactRecord {
+                artifact_type,
+                title: args.title,
+                project_field_id,
+                conversation_id: self.conversation_id.clone(),
+                run_id: self.run_id.clone(),
+                tool_call_id: self.tool_call_id.clone(),
+                content: canonical.content,
+                canonical_content_json: canonical.canonical_json,
+                semantic_sha256: canonical.semantic_sha256,
+                mutation_request_sha256: request_sha256,
+                now: now_ms(),
+            })
+            .map_err(map_artifact_storage_error)?;
+        let receipt = durable_artifact_mutation_receipt(&read);
+        Ok(ToolExecution {
+            observation: json!({
+                "artifact_id":read.artifact.artifact_id,
+                "artifact_type":read.artifact.artifact_type,
+                "artifact_revision_id":read.revision.revision_id,
+                "artifact_revision":read.revision.sequence,
+                "artifact_persistence":"DURABLE",
+                "semantic_unit_count":canonical.semantic_unit_count,
+            })
+            .to_string(),
+            receipt,
+        })
+    }
+
+    fn update(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
+        let args: UpdateArtifactArgs = serde_json::from_value(arguments.clone())
+            .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+        let artifact_id = ArtifactId::new(args.artifact_id);
+        let expected_revision_id = ArtifactRevisionId::new(args.expected_revision_id);
+        let current = self
+            .storage
+            .read_artifact(artifact_id.clone(), None)
+            .map_err(map_artifact_storage_error)?;
+        let canonical = fielora_agent::artifact::canonicalize_content(
+            current.artifact.artifact_type,
+            args.content,
+        )?;
+        let request_sha256 = artifact_mutation_request_sha256(&json!({
+            "operation":"UPDATE",
+            "artifact_id":artifact_id,
+            "expected_revision_id":expected_revision_id,
+            "semantic_sha256":canonical.semantic_sha256,
+        }))?;
+        let read = self
+            .storage
+            .update_artifact(UpdateArtifactRecord {
+                artifact_id,
+                expected_revision_id,
+                conversation_id: self.conversation_id.clone(),
+                run_id: self.run_id.clone(),
+                tool_call_id: self.tool_call_id.clone(),
+                content: canonical.content,
+                canonical_content_json: canonical.canonical_json,
+                semantic_sha256: canonical.semantic_sha256,
+                mutation_request_sha256: request_sha256,
+                now: now_ms(),
+            })
+            .map_err(map_artifact_storage_error)?;
+        let receipt = durable_artifact_mutation_receipt(&read);
+        Ok(ToolExecution {
+            observation: json!({
+                "artifact_id":read.artifact.artifact_id,
+                "artifact_revision_id":read.revision.revision_id,
+                "artifact_revision":read.revision.sequence,
+                "artifact_persistence":"DURABLE",
+                "semantic_unit_count":canonical.semantic_unit_count,
+            })
+            .to_string(),
+            receipt,
+        })
+    }
+
+    fn read(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
+        let args: ReadArtifactArgs = serde_json::from_value(arguments.clone())
+            .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+        let read = self
+            .storage
+            .read_artifact(
+                ArtifactId::new(args.artifact_id),
+                args.revision_id.map(ArtifactRevisionId::new),
+            )
+            .map_err(map_artifact_storage_error)?;
+        let receipt = json!({
+            "kind":"ARTIFACT_REVISION_READ",
+            "artifact_persistence":"DURABLE",
+            "artifact_id":read.artifact.artifact_id,
+            "artifact_type":read.artifact.artifact_type,
+            "artifact_revision_id":read.revision.revision_id,
+            "artifact_revision":read.revision.sequence,
+            "artifact_semantic_sha256":read.revision.semantic_sha256,
+            "content_schema_version":read.revision.content_schema_version,
+        });
+        let observation = serde_json::to_string(&json!({
+            "content_authority":"UNTRUSTED_ARTIFACT_CONTENT",
+            "artifact_id":read.artifact.artifact_id,
+            "artifact_type":read.artifact.artifact_type,
+            "artifact_revision_id":read.revision.revision_id,
+            "artifact_revision":read.revision.sequence,
+            "is_current":read.artifact.current_revision_id == read.revision.revision_id,
+            "content_schema_version":read.revision.content_schema_version,
+            "content":read.revision.content,
+        }))
+        .map_err(|_| AgentError::ArtifactContentInvalid)?;
+        if observation.len() > 320 * 1024 {
+            return Err(AgentError::ArtifactContentInvalid);
+        }
+        Ok(ToolExecution {
+            receipt,
+            observation,
+        })
+    }
+
+    fn export_saved(
+        &self,
+        arguments: &Value,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, AgentError> {
+        let args: SavedArtifactExportArgs = serde_json::from_value(arguments.clone())
+            .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+        let read = self
+            .storage
+            .read_artifact(
+                ArtifactId::new(args.artifact_id),
+                args.revision_id.map(ArtifactRevisionId::new),
+            )
+            .map_err(map_artifact_storage_error)?;
+        fielora_agent::artifact::export_saved(&self.runtime, &read, &args.output_path, cancellation)
+    }
+}
+
+impl ToolExecutor for DurableArtifactToolExecutor {
+    fn execute(
+        &self,
+        name: &str,
+        arguments: &Value,
+        authorization_confirmed: bool,
+        cancellation: &CommandCancellation,
+    ) -> Result<ToolExecution, AgentError> {
+        match name {
+            "artifact.create" => self.create(arguments),
+            "artifact.read" => self.read(arguments),
+            "artifact.update" => self.update(arguments),
+            "artifact.export" if arguments.get("artifact_id").is_some() => {
+                self.export_saved(arguments, cancellation)
+            }
+            _ => self
+                .runtime
+                .execute(name, arguments, authorization_confirmed, cancellation),
+        }
+    }
 }
 
 fn mcp_activation_execution(
@@ -1546,9 +1865,52 @@ impl AgentCoordinator {
         let mut facts = Vec::with_capacity(unknown.len());
         let mut blocked = None;
         for tool in unknown {
-            let reconciliation = runtime
-                .reconcile_unknown(&tool.name, tool.effect, &tool.arguments)
-                .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+            let reconciliation = if matches!(
+                tool.name.as_str(),
+                "artifact.create" | "artifact.update"
+            ) {
+                match self
+                    .storage
+                    .artifact_mutation_by_tool_call(tool.id.clone())
+                    .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?
+                {
+                    Some(read) => {
+                        let expected = artifact_mutation_digest_from_arguments(
+                            &self.storage,
+                            &tool.name,
+                            &tool.arguments,
+                            &prepared.run.field_id,
+                        )
+                        .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+                        let stored = self
+                            .storage
+                            .artifact_mutation_request_sha256(tool.id.clone())
+                            .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+                        if stored.as_deref() == Some(expected.as_str()) {
+                            fielora_agent::ToolReconciliation {
+                                status: ToolReconciliationStatus::Applied,
+                                evidence: json!({
+                                    "reason":"DURABLE_ARTIFACT_REVISION_COMMITTED",
+                                    "durable_receipt":durable_artifact_mutation_receipt(&read),
+                                }),
+                            }
+                        } else {
+                            fielora_agent::ToolReconciliation {
+                                status: ToolReconciliationStatus::Diverged,
+                                evidence: json!({"reason":"ARTIFACT_TOOLCALL_IDEMPOTENCY_CONFLICT"}),
+                            }
+                        }
+                    }
+                    None => fielora_agent::ToolReconciliation {
+                        status: ToolReconciliationStatus::NotApplied,
+                        evidence: json!({"reason":"NO_DURABLE_ARTIFACT_REVISION_FOR_TOOLCALL"}),
+                    },
+                }
+            } else {
+                runtime
+                    .reconcile_unknown(&tool.name, tool.effect, &tool.arguments)
+                    .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?
+            };
             let status = reconciliation.status;
             facts.push(json!({
                 "tool_call_id":tool.id,
@@ -1596,12 +1958,25 @@ impl AgentCoordinator {
                                 .collect::<Vec<_>>()
                         })
                         .unwrap_or_default();
-                    let receipt = json!({
-                        "kind":"UNKNOWN_EXECUTION_RECONCILED",
-                        "reconciliation_status":"APPLIED",
-                        "evidence":reconciliation.evidence,
-                        "patches":reconciled_patches,
-                    });
+                    let receipt = reconciliation
+                        .evidence
+                        .get("durable_receipt")
+                        .cloned()
+                        .map(|mut receipt| {
+                            if let Some(object) = receipt.as_object_mut() {
+                                object.insert("recovered".into(), json!(true));
+                                object.insert("reconciliation_status".into(), json!("APPLIED"));
+                            }
+                            receipt
+                        })
+                        .unwrap_or_else(|| {
+                            json!({
+                                "kind":"UNKNOWN_EXECUTION_RECONCILED",
+                                "reconciliation_status":"APPLIED",
+                                "evidence":reconciliation.evidence,
+                                "patches":reconciled_patches,
+                            })
+                        });
                     self.storage
                         .reconcile_unknown_agent_tool_call(
                             tool.id.clone(),
@@ -3936,6 +4311,7 @@ impl AgentCoordinator {
             }
             .into(),
             artifact_sha256: None,
+            subject: None,
             exit_code: None,
             created_at: now_ms(),
         };
@@ -4398,6 +4774,11 @@ impl AgentCoordinator {
         let arguments = tool.arguments.clone();
         let command_cancellation = cancellation.command.clone();
         let providers = self.tool_providers.as_ref().clone();
+        let storage = self.storage.clone();
+        let durable_run_id = tool.run_id.clone();
+        let durable_conversation_id = prepared.run.conversation_id.clone();
+        let durable_project_field_id = prepared.run.field_id.clone();
+        let durable_tool_call_id = tool.id.clone();
         let skill_catalog = self
             .skill_catalogs
             .lock()
@@ -4411,6 +4792,14 @@ impl AgentCoordinator {
         } else {
             tokio::task::spawn_blocking(move || {
                 let runtime = ToolRuntime::with_skill_catalog(&root, &artifacts, skill_catalog)?;
+                let runtime = DurableArtifactToolExecutor {
+                    storage,
+                    runtime,
+                    run_id: durable_run_id,
+                    conversation_id: durable_conversation_id,
+                    project_field_id: durable_project_field_id,
+                    tool_call_id: durable_tool_call_id,
+                };
                 RoutedToolExecutor::new(runtime, catalog, &providers)?.execute(
                     &name,
                     &arguments,
@@ -5138,6 +5527,11 @@ impl AgentCoordinator {
         let providers = self.providers_for_run(&tool.run_id);
         let credentials = Arc::clone(&self.credentials);
         let static_credential_bindings = Arc::clone(&self.static_credential_bindings);
+        let storage = self.storage.clone();
+        let durable_run_id = tool.run_id.clone();
+        let durable_conversation_id = prepared.run.conversation_id.clone();
+        let durable_project_field_id = prepared.run.field_id.clone();
+        let durable_tool_call_id = tool.id.clone();
         let skill_catalog = self
             .skill_catalogs
             .lock()
@@ -5169,6 +5563,14 @@ impl AgentCoordinator {
             tokio::task::spawn_blocking(move || {
                 let runtime =
                     ToolRuntime::with_skill_catalog(&root, &artifact_root, skill_catalog)?;
+                let runtime = DurableArtifactToolExecutor {
+                    storage,
+                    runtime,
+                    run_id: durable_run_id,
+                    conversation_id: durable_conversation_id,
+                    project_field_id: durable_project_field_id,
+                    tool_call_id: durable_tool_call_id,
+                };
                 let executor = RoutedToolExecutor::with_static_credential_bindings(
                     runtime,
                     catalog,
@@ -5231,6 +5633,10 @@ impl AgentCoordinator {
                             .get("stdout_sha256")
                             .and_then(Value::as_str)
                             .map(str::to_owned),
+                        // Generic command success is not Artifact semantic
+                        // evidence. A real verifier must supply an exact typed
+                        // subject through the existing receipt contract.
+                        subject: None,
                         exit_code: receipt
                             .get("exit_code")
                             .and_then(Value::as_i64)
@@ -6629,9 +7035,21 @@ fn workspace_revision_for_run(
         .iter()
         .map(|tool| tool.id.0.as_str())
         .collect::<Vec<_>>();
+    let artifact_revisions = mutations
+        .iter()
+        .filter_map(|tool| {
+            let receipt = tool.receipt.as_ref()?;
+            Some(json!({
+                "artifact_id":receipt.get("artifact_id")?.as_str()?,
+                "artifact_revision_id":receipt.get("artifact_revision_id")?.as_str()?,
+                "artifact_semantic_sha256":receipt.get("artifact_semantic_sha256")?.as_str()?,
+            }))
+        })
+        .collect::<Vec<_>>();
     let encoded = serde_json::to_vec(&json!({
         "mutation_generation":generation,
         "workspace_fingerprint":fingerprint,
+        "artifact_revision_mutations":artifact_revisions,
     }))
     .ok()?;
     Some(format!("{:x}", Sha256::digest(encoded)))
@@ -8477,6 +8895,490 @@ mod tests {
         drop(coordinator);
         drop(storage);
         drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn durable_artifact_tools_share_policy_receipts_revision_freshness_and_saved_export() {
+        let root =
+            std::env::temp_dir().join(format!("fielora-core-durable-artifact-{}", Uuid::now_v7()));
+        let workspace = root.join("workspace");
+        let artifacts = root.join("artifacts");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let worker = StorageWorker::start(&paths.database, device, 1).unwrap();
+        let storage = worker.handle();
+        let project = storage
+            .create_project(
+                CreateProjectRequest {
+                    title: "Durable Artifact pipeline".into(),
+                    goal: None,
+                    root_path: workspace.to_string_lossy().into_owned(),
+                },
+                2,
+            )
+            .unwrap();
+        let provider = storage
+            .create_provider_config(
+                CreateProviderConfigRequest {
+                    provider_kind: ProviderKind::Openai,
+                    display_name: "Fixture".into(),
+                    base_url: None,
+                    default_model: "fixture-model".into(),
+                    custom_endpoint_acknowledged: false,
+                },
+                3,
+            )
+            .unwrap();
+        storage
+            .set_provider_credential_present(provider.view.id.clone(), true, 4)
+            .unwrap();
+        let conversation = storage
+            .create_conversation(
+                CreateConversationRequest {
+                    field_id: project.field_id.clone(),
+                    title: "Durable Artifact".into(),
+                    provider_config_id: Some(provider.view.id.clone()),
+                    model_id: Some("fixture-model".into()),
+                },
+                5,
+            )
+            .unwrap();
+        let created = storage
+            .create_agent_run(
+                StartAgentRunRequest {
+                    field_id: project.field_id.clone(),
+                    conversation_id: conversation.id.clone(),
+                    user_message_id: None,
+                    provider_config_id: provider.view.id,
+                    model_id: Some("fixture-model".into()),
+                    task: "Persist and export a semantic Artifact".into(),
+                    permission: AgentPermission::ReadOnly,
+                    max_steps: Some(12),
+                    attachments: None,
+                },
+                6,
+            )
+            .unwrap();
+        let started = storage
+            .append_agent_event(
+                created.run.id.clone(),
+                AgentEventKind::RunStarted,
+                json!({}),
+                AgentProjectionUpdate {
+                    status: Some(AgentRunStatus::Running),
+                    ..Default::default()
+                },
+                7,
+            )
+            .unwrap();
+        let (sender, _receiver) = mpsc::sync_channel(128);
+        let coordinator = AgentCoordinator::new(
+            storage.clone(),
+            Arc::new(WindowsCredentialStore),
+            sender,
+            artifacts.clone(),
+            Handle::current(),
+        );
+        let prepared = PreparedRun {
+            run: started.run,
+            endpoint: ProviderEndpoint {
+                kind: ProviderKind::Openai,
+                base_url: None,
+            },
+            project_root: workspace.canonicalize().unwrap(),
+            secret: SecretBytes::new(b"fixture".to_vec()),
+        };
+        let catalog = coordinator.available_tool_catalog().unwrap();
+        let create_spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "artifact.create")
+            .unwrap();
+        let create = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                create_spec,
+                AgentModelToolCall {
+                    id: "durable-create".into(),
+                    name: "artifact.create".into(),
+                    arguments: json!({
+                        "type":"document",
+                        "title":"Durable proof",
+                        "associate_with_current_project":true,
+                        "content":{"blocks":[{"kind":"PARAGRAPH","text":"immutable revision one"}]}
+                    }),
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(create.effect, AgentToolEffect::WorkspaceWrite);
+        assert_eq!(create.policy_decision, AgentPolicyDecision::Ask);
+        assert!(matches!(
+            coordinator
+                .execute_tool(&prepared, create.clone(), false, &test_cancellation())
+                .await,
+            ToolDisposition::Waiting
+        ));
+        let ToolDisposition::Executed(created_result) = coordinator
+            .execute_tool(&prepared, create, true, &test_cancellation())
+            .await
+        else {
+            panic!("approved durable create must use existing Tool pipeline")
+        };
+        assert!(created_result.wrote_workspace);
+        assert!(!created_result.verification_passed);
+        let create_call = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|tool| tool.name == "artifact.create")
+            .unwrap();
+        let create_receipt = create_call.receipt.as_ref().unwrap();
+        assert_eq!(create_receipt["kind"], "ARTIFACT_REVISION_COMMITTED");
+        assert_eq!(create_receipt["artifact_persistence"], "DURABLE");
+        assert!(create_receipt.get("content").is_none());
+        let artifact_id = ArtifactId::new(create_receipt["artifact_id"].as_str().unwrap());
+        let revision_one =
+            ArtifactRevisionId::new(create_receipt["artifact_revision_id"].as_str().unwrap());
+        let digest_one = create_receipt["artifact_semantic_sha256"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let read_spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "artifact.read")
+            .unwrap();
+        let read = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                read_spec,
+                AgentModelToolCall {
+                    id: "durable-read".into(),
+                    name: "artifact.read".into(),
+                    arguments: json!({"artifact_id":artifact_id}),
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(read.policy_decision, AgentPolicyDecision::Allow);
+        let ToolDisposition::Executed(read_result) = coordinator
+            .execute_tool(&prepared, read, false, &test_cancellation())
+            .await
+        else {
+            panic!("Artifact read must execute without write approval")
+        };
+        assert!(!read_result.wrote_workspace);
+        assert!(matches!(
+            read_result.message,
+            AgentModelMessage::ToolResult { content, is_error: false, .. }
+                if content.contains("UNTRUSTED_ARTIFACT_CONTENT")
+                    && content.contains("immutable revision one")
+        ));
+
+        let revision_before_update = workspace_revision_for_run(
+            &storage,
+            &prepared.run.id,
+            &prepared.project_root,
+            &artifacts,
+        )
+        .unwrap();
+        let verification_tool = storage
+            .create_agent_tool_call(
+                prepared.run.id.clone(),
+                "run_command".into(),
+                AgentToolEffect::Process,
+                AgentPolicyDecision::Allow,
+                json!({"program":"cargo","argv":["test"]}),
+                20,
+            )
+            .unwrap();
+        storage
+            .update_agent_tool_call(
+                verification_tool.id.clone(),
+                AgentToolStatus::Running,
+                None,
+                None,
+                21,
+            )
+            .unwrap();
+        storage
+            .update_agent_tool_call(
+                verification_tool.id.clone(),
+                AgentToolStatus::Completed,
+                Some(json!({
+                    "kind":"COMMAND_EXECUTED","success":true,"exit_code":0,
+                    "verification_eligible":true,"workspace_revision":revision_before_update,
+                })),
+                None,
+                22,
+            )
+            .unwrap();
+        storage
+            .record_agent_verification(VerificationReceiptView {
+                id: VerificationReceiptId::new(Uuid::now_v7().to_string()),
+                run_id: prepared.run.id.clone(),
+                tool_call_id: Some(verification_tool.id),
+                check_kind: "COMMAND".into(),
+                outcome: VerificationOutcome::Pass,
+                summary: "Exact revision one verification".into(),
+                artifact_sha256: None,
+                subject: Some(VerificationSubject::ArtifactRevision {
+                    artifact_id: artifact_id.clone(),
+                    revision_id: revision_one.clone(),
+                    semantic_sha256: digest_one.clone(),
+                }),
+                exit_code: Some(0),
+                created_at: 22,
+            })
+            .unwrap();
+        assert!(has_fresh_verification(
+            &storage,
+            &prepared.run.id,
+            &prepared.project_root,
+            &artifacts,
+        ));
+
+        let update_spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "artifact.update")
+            .unwrap();
+        let update = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                update_spec,
+                AgentModelToolCall {
+                    id: "durable-update".into(),
+                    name: "artifact.update".into(),
+                    arguments: json!({
+                        "artifact_id":artifact_id,
+                        "expected_revision_id":revision_one,
+                        "content":{"blocks":[{"kind":"PARAGRAPH","text":"immutable revision two"}]}
+                    }),
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(update.policy_decision, AgentPolicyDecision::Ask);
+        let ToolDisposition::Executed(updated_result) = coordinator
+            .execute_tool(&prepared, update, true, &test_cancellation())
+            .await
+        else {
+            panic!("approved durable update must execute")
+        };
+        assert!(updated_result.wrote_workspace);
+        assert!(!has_fresh_verification(
+            &storage,
+            &prepared.run.id,
+            &prepared.project_root,
+            &artifacts,
+        ));
+        let updated = storage.read_artifact(artifact_id.clone(), None).unwrap();
+        assert_eq!(updated.revision.sequence, 2);
+        let old = storage
+            .read_artifact(artifact_id.clone(), Some(revision_one.clone()))
+            .unwrap();
+        assert_eq!(old.revision.semantic_sha256, digest_one);
+        let historical_receipts = storage
+            .list_agent_verifications(prepared.run.id.clone())
+            .unwrap();
+        assert_eq!(historical_receipts.len(), 1);
+        assert!(matches!(
+            historical_receipts[0].subject.as_ref(),
+            Some(VerificationSubject::ArtifactRevision { revision_id, .. }) if revision_id == &revision_one
+        ));
+
+        let export_spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "artifact.export")
+            .unwrap();
+        let saved_export = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                export_spec,
+                AgentModelToolCall {
+                    id: "saved-export".into(),
+                    name: "artifact.export".into(),
+                    arguments: json!({
+                        "artifact_id":artifact_id,
+                        "revision_id":revision_one,
+                        "output_path":"exports/revision-one.docx"
+                    }),
+                },
+                false,
+            )
+            .unwrap();
+        let ToolDisposition::Executed(exported) = coordinator
+            .execute_tool(&prepared, saved_export, true, &test_cancellation())
+            .await
+        else {
+            panic!("saved revision export must use artifact.export")
+        };
+        assert!(exported.wrote_workspace);
+        assert!(workspace.join("exports/revision-one.docx").exists());
+        let export_call = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|tool| tool.name == "artifact.export")
+            .unwrap();
+        let export_receipt = export_call.receipt.unwrap();
+        assert_eq!(export_receipt["artifact_id"], artifact_id.0);
+        assert_eq!(export_receipt["artifact_revision_id"], revision_one.0);
+        assert_eq!(export_receipt["artifact_persistence"], "DURABLE");
+        assert_eq!(export_receipt["artifact_semantic_sha256"], digest_one);
+        assert!(
+            storage
+                .list_agent_verifications(prepared.run.id.clone())
+                .unwrap()
+                .len()
+                == 1
+        );
+
+        // Simulate commit-before-ToolCall-receipt: the storage transaction is
+        // durable, then Core disappears while the ToolCall is still RUNNING.
+        let recovery_run = storage
+            .create_agent_run(
+                StartAgentRunRequest {
+                    field_id: project.field_id.clone(),
+                    conversation_id: conversation.id.clone(),
+                    user_message_id: None,
+                    provider_config_id: prepared.run.provider_config_id.clone(),
+                    model_id: Some("fixture-model".into()),
+                    task: "Recover a committed Artifact revision".into(),
+                    permission: AgentPermission::ReviewChanges,
+                    max_steps: Some(4),
+                    attachments: None,
+                },
+                30,
+            )
+            .unwrap()
+            .run;
+        let recovery_run = storage
+            .append_agent_event(
+                recovery_run.id.clone(),
+                AgentEventKind::RunStarted,
+                json!({}),
+                AgentProjectionUpdate {
+                    status: Some(AgentRunStatus::Running),
+                    ..Default::default()
+                },
+                31,
+            )
+            .unwrap()
+            .run;
+        let recovery_arguments = json!({
+            "artifact_id":artifact_id,
+            "expected_revision_id":updated.revision.revision_id,
+            "content":{"blocks":[{"kind":"PARAGRAPH","text":"committed before receipt"}]}
+        });
+        let recovery_tool = storage
+            .create_agent_tool_call(
+                recovery_run.id.clone(),
+                "artifact.update".into(),
+                AgentToolEffect::WorkspaceWrite,
+                AgentPolicyDecision::Allow,
+                recovery_arguments.clone(),
+                32,
+            )
+            .unwrap();
+        storage
+            .update_agent_tool_call(
+                recovery_tool.id.clone(),
+                AgentToolStatus::Running,
+                None,
+                None,
+                33,
+            )
+            .unwrap();
+        let recovery_runtime = ToolRuntime::new(&prepared.project_root, &artifacts).unwrap();
+        let committed = DurableArtifactToolExecutor {
+            storage: storage.clone(),
+            runtime: recovery_runtime,
+            run_id: recovery_run.id.clone(),
+            conversation_id: conversation.id.clone(),
+            project_field_id: project.field_id.clone(),
+            tool_call_id: recovery_tool.id.clone(),
+        }
+        .execute(
+            "artifact.update",
+            &recovery_arguments,
+            true,
+            &CommandCancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(committed.receipt["artifact_persistence"], "DURABLE");
+        assert!(
+            storage
+                .list_agent_tool_calls(recovery_run.id.clone())
+                .unwrap()
+                .into_iter()
+                .find(|tool| tool.id == recovery_tool.id)
+                .unwrap()
+                .receipt
+                .is_none()
+        );
+
+        drop(coordinator);
+        drop(storage);
+        drop(worker);
+        let restart_device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let restarted_worker = StorageWorker::start(&paths.database, restart_device, 40).unwrap();
+        let restarted_storage = restarted_worker.handle();
+        restarted_storage.reconcile_agent_runs(41).unwrap();
+        let paused_recovery_run = restarted_storage
+            .get_agent_run(recovery_run.id.clone())
+            .unwrap();
+        assert_eq!(paused_recovery_run.status, AgentRunStatus::Paused);
+        let (restart_sender, _restart_receiver) = mpsc::sync_channel(128);
+        let restarted_coordinator = AgentCoordinator::new(
+            restarted_storage.clone(),
+            Arc::new(WindowsCredentialStore),
+            restart_sender,
+            artifacts.clone(),
+            Handle::current(),
+        );
+        let restarted_prepared = PreparedRun {
+            run: paused_recovery_run,
+            endpoint: ProviderEndpoint {
+                kind: ProviderKind::Openai,
+                base_url: None,
+            },
+            project_root: workspace.canonicalize().unwrap(),
+            secret: SecretBytes::new(b"fixture".to_vec()),
+        };
+        let recovered = restarted_coordinator
+            .reconcile_for_resume(&restarted_prepared)
+            .unwrap();
+        assert!(recovered.confirmed_workspace_mutation);
+        let recovered_tool = restarted_storage
+            .list_agent_tool_calls(recovery_run.id)
+            .unwrap()
+            .into_iter()
+            .find(|tool| tool.id == recovery_tool.id)
+            .unwrap();
+        assert_eq!(recovered_tool.status, AgentToolStatus::Completed);
+        assert_eq!(recovered_tool.receipt.as_ref().unwrap()["recovered"], true);
+        assert_eq!(
+            recovered_tool.receipt.as_ref().unwrap()["kind"],
+            "ARTIFACT_REVISION_COMMITTED"
+        );
+        let recovered_artifact = restarted_storage.read_artifact(artifact_id, None).unwrap();
+        assert_eq!(recovered_artifact.revision.sequence, 3);
+        assert_eq!(
+            restarted_storage
+                .artifact_mutation_by_tool_call(recovered_tool.id)
+                .unwrap()
+                .unwrap()
+                .revision
+                .revision_id,
+            recovered_artifact.revision.revision_id
+        );
+        drop(restarted_coordinator);
+        drop(restarted_storage);
+        drop(restarted_worker);
         std::fs::remove_dir_all(root).unwrap();
     }
 

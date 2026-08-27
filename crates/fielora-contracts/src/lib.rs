@@ -46,6 +46,8 @@ typed_id!(VerificationReceiptId);
 typed_id!(ProfileId);
 typed_id!(LibraryObjectId);
 typed_id!(SyncChangeId);
+typed_id!(ArtifactId);
+typed_id!(ArtifactRevisionId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ProtocolVersion {
@@ -1313,6 +1315,160 @@ pub struct ListLibraryObjectsRequest {
     pub limit: Option<u16>,
 }
 
+// Durable semantic Artifact foundation. Artifact content is a closed,
+// Fielora-owned contract; renderer packages and arbitrary JSON are not part of
+// the persisted authority boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ArtifactType {
+    Document,
+    Presentation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentArtifact {
+    #[serde(default)]
+    pub title: Option<String>,
+    pub blocks: Vec<DocumentBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
+#[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DocumentBlock {
+    Heading { level: u8, text: String },
+    Paragraph { text: String },
+    BulletList { items: Vec<String> },
+    Table { rows: Vec<Vec<String>> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct PresentationArtifact {
+    pub slides: Vec<PresentationSlide>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct PresentationSlide {
+    pub layout: PresentationLayout,
+    pub title: String,
+    #[serde(default)]
+    pub regions: Vec<SlideRegion>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PresentationLayout {
+    Title,
+    TitleAndBody,
+    TwoColumn,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SlideRegion {
+    pub slot: SlideSlot,
+    pub blocks: Vec<PresentationBlock>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SlideSlot {
+    Body,
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
+#[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PresentationBlock {
+    Paragraph { text: String },
+    BulletList { items: Vec<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", content = "content", rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(tag = "type", content = "content", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ArtifactContentV1 {
+    Document(DocumentArtifact),
+    Presentation(PresentationArtifact),
+}
+
+impl ArtifactContentV1 {
+    pub fn artifact_type(&self) -> ArtifactType {
+        match self {
+            Self::Document(_) => ArtifactType::Document,
+            Self::Presentation(_) => ArtifactType::Presentation,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ArtifactMutationKind {
+    Create,
+    Update,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ArtifactView {
+    pub artifact_id: ArtifactId,
+    pub profile_id: ProfileId,
+    pub artifact_type: ArtifactType,
+    pub title: Option<String>,
+    pub project_field_id: Option<FieldId>,
+    pub current_revision_id: ArtifactRevisionId,
+    pub created_from_conversation_id: Option<ConversationId>,
+    pub created_by_agent_run_id: Option<AgentRunId>,
+    pub updated_by_device: DeviceId,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ArtifactRevisionView {
+    pub revision_id: ArtifactRevisionId,
+    pub artifact_id: ArtifactId,
+    #[ts(type = "number")]
+    pub sequence: u64,
+    pub parent_revision_id: Option<ArtifactRevisionId>,
+    pub mutation_kind: ArtifactMutationKind,
+    pub content_schema_version: u32,
+    pub semantic_sha256: String,
+    pub content: ArtifactContentV1,
+    pub created_from_conversation_id: Option<ConversationId>,
+    pub created_by_agent_run_id: Option<AgentRunId>,
+    pub created_by_tool_call_id: ToolCallId,
+    #[ts(type = "number")]
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ArtifactReadView {
+    pub artifact: ArtifactView,
+    pub revision: ArtifactRevisionView,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum VerificationSubject {
+    ArtifactRevision {
+        artifact_id: ArtifactId,
+        revision_id: ArtifactRevisionId,
+        semantic_sha256: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct ProfileView {
     pub profile_id: ProfileId,
@@ -1903,6 +2059,7 @@ pub struct VerificationReceiptView {
     pub outcome: VerificationOutcome,
     pub summary: String,
     pub artifact_sha256: Option<String>,
+    pub subject: Option<VerificationSubject>,
     #[ts(type = "number | null")]
     pub exit_code: Option<i32>,
     #[ts(type = "number")]

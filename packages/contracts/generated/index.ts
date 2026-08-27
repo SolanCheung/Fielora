@@ -50,6 +50,10 @@ export type LibraryObjectId = string;
 
 export type SyncChangeId = string;
 
+export type ArtifactId = string;
+
+export type ArtifactRevisionId = string;
+
 export type ProtocolVersion = { major: number, minor: number, };
 
 export type FipcErrorData = { code: string, trace_id: string, retryable: boolean, details: unknown, };
@@ -294,6 +298,36 @@ export type DeleteLibraryObjectRequest = { library_object_id: LibraryObjectId, e
 
 export type ListLibraryObjectsRequest = { media_kind: LibraryMediaKind | null, include_deleted: boolean, limit: number | null, };
 
+export type ArtifactType = "DOCUMENT" | "PRESENTATION";
+
+export type DocumentArtifact = { title: string | null, blocks: Array<DocumentBlock>, };
+
+export type DocumentBlock = { "kind": "HEADING", level: number, text: string, } | { "kind": "PARAGRAPH", text: string, } | { "kind": "BULLET_LIST", items: Array<string>, } | { "kind": "TABLE", rows: Array<Array<string>>, };
+
+export type PresentationArtifact = { slides: Array<PresentationSlide>, };
+
+export type PresentationSlide = { layout: PresentationLayout, title: string, regions: Array<SlideRegion>, };
+
+export type PresentationLayout = "TITLE" | "TITLE_AND_BODY" | "TWO_COLUMN";
+
+export type SlideRegion = { slot: SlideSlot, blocks: Array<PresentationBlock>, };
+
+export type SlideSlot = "BODY" | "LEFT" | "RIGHT";
+
+export type PresentationBlock = { "kind": "PARAGRAPH", text: string, } | { "kind": "BULLET_LIST", items: Array<string>, };
+
+export type ArtifactContentV1 = { "type": "DOCUMENT", "content": DocumentArtifact } | { "type": "PRESENTATION", "content": PresentationArtifact };
+
+export type ArtifactMutationKind = "CREATE" | "UPDATE";
+
+export type ArtifactView = { artifact_id: ArtifactId, profile_id: ProfileId, artifact_type: ArtifactType, title: string | null, project_field_id: FieldId | null, current_revision_id: ArtifactRevisionId, created_from_conversation_id: ConversationId | null, created_by_agent_run_id: AgentRunId | null, updated_by_device: DeviceId, created_at: number, updated_at: number, };
+
+export type ArtifactRevisionView = { revision_id: ArtifactRevisionId, artifact_id: ArtifactId, sequence: number, parent_revision_id: ArtifactRevisionId | null, mutation_kind: ArtifactMutationKind, content_schema_version: number, semantic_sha256: string, content: ArtifactContentV1, created_from_conversation_id: ConversationId | null, created_by_agent_run_id: AgentRunId | null, created_by_tool_call_id: ToolCallId, created_at: number, };
+
+export type ArtifactReadView = { artifact: ArtifactView, revision: ArtifactRevisionView, };
+
+export type VerificationSubject = { "kind": "ARTIFACT_REVISION", artifact_id: ArtifactId, revision_id: ArtifactRevisionId, semantic_sha256: string, };
+
 export type ProfileView = { profile_id: ProfileId, schema_version: number, created_at: number, device_id: DeviceId, };
 
 export type SyncOperation = "CREATE" | "UPDATE" | "TOMBSTONE";
@@ -388,7 +422,7 @@ export type ActivateMcpConnectionRequest = { run_id: AgentRunId, connection_id: 
 
 export type AgentContextSnapshotView = { id: ContextSnapshotId, run_id: AgentRunId, step: number, project_root_hash: string, selected_files: number, estimated_tokens: number, content_sha256: string, manifest: unknown, created_at: number, };
 
-export type VerificationReceiptView = { id: VerificationReceiptId, run_id: AgentRunId, tool_call_id: ToolCallId | null, check_kind: string, outcome: VerificationOutcome, summary: string, artifact_sha256: string | null, exit_code: number | null, created_at: number, };
+export type VerificationReceiptView = { id: VerificationReceiptId, run_id: AgentRunId, tool_call_id: ToolCallId | null, check_kind: string, outcome: VerificationOutcome, summary: string, artifact_sha256: string | null, subject: VerificationSubject | null, exit_code: number | null, created_at: number, };
 
 export type AgentChangedEvent = { event: string, run_id: AgentRunId, sequence: number, status: AgentRunStatus, };
 

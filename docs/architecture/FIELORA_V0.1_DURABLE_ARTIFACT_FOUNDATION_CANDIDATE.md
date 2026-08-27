@@ -2,17 +2,17 @@
 
 **Status:** `DRAFT / CANDIDATE / NOT FROZEN`
 
-**Implementation:** `NOT AUTHORIZED`
+**Implementation:** `DURABLE ARTIFACT CORE FIRST SLICE IMPLEMENTED / TARGETED VALIDATED`
 
 **Scope:** Current Reality audit, domain boundary, identity, persistence,
 revision, recovery, and the smallest implementation candidate for durable
 Document and Presentation Artifacts.
 
-This candidate does not modify the Frozen Core Contracts, the canonical Agent
-architecture, the Rapid Desktop route, schema 7, FIPC, UI, or production code.
-It supersedes no implemented behavior in
-`FIELORA_V0.1_ARTIFACT_RUNTIME_CANDIDATE.md`; the current request-scoped
-`artifact.export` remains the production reality.
+This candidate does not modify Frozen architecture documents, the canonical
+Agent architecture, the Rapid Desktop route, FIPC, or UI. Its authorized Core
+First Slice is now implemented as additive schema 8 and production Tool/domain
+behavior. The legacy request-scoped `artifact.export` remains supported beside
+the new durable mode.
 
 ## Decision summary
 
@@ -36,10 +36,60 @@ The smallest viable persistence is bounded, validated semantic JSON in the
 existing DataRoot SQLite database. Binary assets, imports, UI, Diagram,
 Spreadsheet, and bidirectional Office reconciliation are deferred.
 
-The architecture is ready for a focused implementation review, but the
-implementation Gate is not ready: the known baseline-existing migration 0002
-rollback test currently fails before any Artifact migration is added. Repair
-that Storage baseline defect in a separate changeset first.
+The previously recorded migration 0002 baseline defect was repaired in the
+separate preceding Storage changeset. Migration 0008 and the Durable Artifact
+Core First Slice now pass targeted Storage, Agent, Core, contract, and renderer
+evidence. Diagram, Spreadsheet, Assets, Import, Library integration, archive,
+list/history UI, and all Artifact UI remain unimplemented.
+
+## IMPLEMENTED_FIRST_SLICE_REALITY
+
+| Item | Implemented reality |
+|---|---|
+| Identity / ownership | UUIDv7-backed `ArtifactId` and `ArtifactRevisionId`; every Artifact query is scoped by the current `ProfileId`; optional Project association reuses `FieldId` |
+| Semantic contract | Closed `ArtifactContentV1::{Document, Presentation}` using the existing strict renderer-neutral DTOs and validators; schema version 1; canonical typed JSON <= 256 KiB |
+| Persistence | Additive `0008_durable_artifacts.sql`; database schema 8; `artifacts` plus immutable `artifact_revisions`; Profile schema remains 1 |
+| Revision / conflict | Revision 1 on create; append-only N+1 update; opaque revision identity plus diagnostic sequence; required `expected_revision_id`; stale updates fail closed |
+| Atomicity | Artifact envelope + R1 and revision insert + current-pointer CAS commit in one existing `StorageWorker` transaction; immutable update/delete triggers |
+| Idempotency / recovery | Unique `created_by_tool_call_id` and `mutation_request_sha256`; exact replay returns the committed mutation; mismatched replay fails closed; existing resume reconciler reconstructs a compact ToolCall receipt after commit-before-receipt restart |
+| Tools / policy | `artifact.create` and `artifact.update` are existing `WORKSPACE_WRITE`; `artifact.read` is `OBSERVE`; all use catalog -> Policy/Approval -> `ToolExecutor` -> durable ToolCall receipt |
+| Read authority | Current or exact historical revision only; typed content is marked `UNTRUSTED_ARTIFACT_CONTENT`; no catalog/history is admitted by default |
+| Verification | Existing `VerificationReceiptView` gained one nullable typed `ARTIFACT_REVISION` subject containing ArtifactId, RevisionId, and semantic digest; old evidence remains but does not validate a new current revision |
+| Freshness | Existing workspace revision computation now includes durable Artifact revision mutation facts; no fake Project file path and no parallel freshness engine |
+| Export | Existing `artifact.export` now has strict mutually exclusive inline and saved-revision modes; saved export pins one read revision and reuses the existing atomic/no-overwrite DOCX/PPTX renderer |
+| Explicitly absent | UI, FIPC Artifact consumer, Diagram, Spreadsheet, Assets, Import, Library integration, archive/delete/list/history, sync journal, cloud sync, external-edit reconciliation |
+
+## TARGETED_IMPLEMENTATION_EVIDENCE
+
+The implemented Slice was validated on 2026-08-27 from the authorized clean
+baseline `ca2f0ed575501c3b830bd4f490c035eb5c676eea`. The final changeset contains
+no model request, credential read, network request, package installation, or
+new dependency.
+
+```text
+DOCS_LANE: PASS
+CORE_LANE: PASS
+CROSS_LANE: PASS
+CONTRACT_GENERATION_CHECK: PASS
+RUST_WORKSPACE_UNIT: PASS
+  fielora-agent: 96 passed
+  fielora-storage: 19 passed
+CORE_INTEGRATION: 12 passed
+DESKTOP_TYPESCRIPT_UNIT: 176 passed
+RUST_CLIPPY_DENY_WARNINGS: PASS
+RELEASE_CORE_BUILD: PASS
+```
+
+The first Cross run exposed only stale schema-version assertions in existing
+Core/Desktop tests (`7` after the additive migration made production schema
+`8`). Those assertions and the Phase 04 generated test-evidence field were
+aligned to schema 8; the complete Cross lane then passed. No Browser E2E,
+packaged smoke, full premerge, or UI Gate was run because this Slice adds no UI
+or FIPC consumer and its authorization explicitly requires targeted validation.
+
+The following `CURRENT_ARTIFACT_REALITY` tables are retained as the historical
+pre-implementation audit that justified this Slice. The table above is the
+current production reality.
 
 ## CURRENT_ARTIFACT_REALITY
 
@@ -554,11 +604,10 @@ input or Artifact ownership.
 ## SCHEMA_CHANGE_IMPACT
 
 ```text
-CURRENT_SCHEMA_VERSION: 7
-CANDIDATE_MIGRATION: 0008_durable_artifact
-CANDIDATE_SCHEMA_VERSION: 8
-PROFILE_SCHEMA_VERSION_DELTA: REVIEW_REQUIRED (likely 1 -> 2)
-STORAGE_CHANGE_REQUIRED: YES
+CURRENT_SCHEMA_VERSION: 8
+IMPLEMENTED_MIGRATION: 0008_durable_artifacts
+PROFILE_SCHEMA_VERSION: 1 (UNCHANGED)
+STORAGE_CHANGE: IMPLEMENTED / TARGETED VALIDATED
 ```
 
 Candidate tables, adjusted to current SQLite/typed-ID conventions:
@@ -569,96 +618,80 @@ artifacts
   profile_id                 TEXT NOT NULL FK profiles  -- durable owner
   artifact_type              TEXT NOT NULL              -- DOCUMENT | PRESENTATION
   title                      TEXT?
-  lifecycle                  TEXT NOT NULL              -- ACTIVE | ARCHIVED
-  current_revision_id        TEXT NOT NULL               -- deferred/reviewed FK
+  current_revision_id        TEXT NOT NULL               -- deferred composite FK
   project_field_id           TEXT? FK fields SET NULL
   created_from_conversation_id TEXT? FK conversations SET NULL
   created_by_agent_run_id    TEXT? FK agent_runs SET NULL
   updated_by_device          TEXT NOT NULL FK devices RESTRICT
   created_at                 INTEGER NOT NULL
   updated_at                 INTEGER NOT NULL
-  archived_at                INTEGER?
 
 artifact_revisions
   id                         TEXT PK                    -- ArtifactRevisionId
   artifact_id                TEXT NOT NULL FK artifacts RESTRICT
   sequence                   INTEGER NOT NULL >= 1
   parent_revision_id         TEXT? FK artifact_revisions RESTRICT
-  content_schema_version     INTEGER NOT NULL >= 1
+  mutation_kind              TEXT NOT NULL              -- CREATE | UPDATE
+  content_schema_version     INTEGER NOT NULL = 1
   content_json               TEXT NOT NULL, valid/bounded JSON
-  content_sha256             TEXT NOT NULL, lowercase 64-hex
-  creator_kind               TEXT NOT NULL              -- HUMAN | AGENT | SYSTEM
+  semantic_sha256            TEXT NOT NULL, lowercase 64-hex
+  mutation_request_sha256    TEXT NOT NULL, lowercase 64-hex
   created_from_conversation_id TEXT? FK conversations SET NULL
   created_by_agent_run_id    TEXT? FK agent_runs SET NULL
-  created_by_tool_call_id    TEXT? FK agent_tool_calls SET NULL
+  created_by_tool_call_id    TEXT NOT NULL UNIQUE FK agent_tool_calls RESTRICT
   created_at                 INTEGER NOT NULL
 ```
 
 Required indexes/invariants:
 
 - `UNIQUE(artifact_id, sequence)`;
-- one partial unique mutation/idempotency binding for non-null
+- one durable unique mutation/idempotency binding on
   `created_by_tool_call_id`;
-- profile/lifecycle/updated ordering;
+- profile/updated ordering;
 - optional Project association/updated ordering;
 - revision lookup by Artifact/sequence;
 - current pointer references a revision of the same Artifact;
 - parent is null only for sequence 1; otherwise it is the immediately preceding
   revision of the same Artifact;
-- active/archive timestamps are consistent;
 - type/content schema pair is admitted by the typed domain validator.
 
-Exact cyclic-FK strategy must be proven in the migration probe. Either use a
-deferred current-revision foreign key or an equivalent current-sequence design;
-never leave a committed Artifact without a current revision.
+Migration 0008 uses a deferred composite foreign key from
+`(current_revision_id, artifact_id)` to the same Artifact's revision. Targeted
+migration and transaction-failure tests prove no committed Artifact can be left
+without its selected revision.
 
 The same migration may add nullable Artifact subject columns to the existing
 `agent_verification_receipts`; it must not create another evidence table. There
 is no `artifact_exports` table in the Candidate.
 
-Every Artifact create/update should append the existing provider-neutral
-`sync_change_journal` in the same transaction using entity type `ARTIFACT` and
-the aggregate revision sequence. This activates no sync provider and performs
-no network request; it avoids inventing a second change journal.
+Artifact create/update does not append `sync_change_journal` in this Slice.
+Journal participation is deferred until Artifact sync semantics are explicitly
+designed; this avoids implying cloud/sync behavior that does not exist.
 
 Because Artifact rows live in SQLite, DataRoot migration and closed portable
 snapshots naturally include them. The portable manifest allowlist/reporting
-must add an `ARTIFACTS` section when implementation is authorized. Library blobs
-remain optional and separate because the First Slice has no Artifact assets.
+already retain the Artifact rows without a Profile serialized-payload change.
+Library blobs remain separate because the First Slice has no Artifact assets.
 
 ## STORAGE_BASELINE_INTERACTION
 
-The known failure is real and directly relevant to a new migration:
-
 ```text
-fielora-storage::tests::incompatible_legacy_rows_roll_back_migration_0002
-  -> no such table: profiles
+PRECEDING_STORAGE_REPAIR: PASS
+MIGRATION_0002_ROLLBACK_REGRESSION: PASS
+FRESH_DATABASE_TO_SCHEMA_8: PASS
+SCHEMA_7_TO_SCHEMA_8: PASS
+MIGRATION_0008_FAILURE_ROLLBACK: PASS
 ```
 
-The test constructs a migration-0001 database and invokes `bootstrap_records`
-before migration 0007 creates `profiles`; current bootstrap unconditionally
-inserts the singleton profile. The same failure was independently reproduced
-at clean baseline `cb30e080`, and there is no Storage source/migration diff from
-that baseline to this Candidate preflight HEAD.
-
-```text
-STORAGE_BASELINE_BLOCKER_FOR_IMPLEMENTATION_GATE: YES
-RECOMMENDATION: repair and validate the Storage baseline in a separate changeset,
-                then implement migration 0008
-```
-
-Do not mix baseline repair with Durable Artifact tables. The repair Gate must
-restore the legacy incompatible-data rollback proof, fresh 0001->current
-migration, current-schema validation, portable snapshot validation, and normal
-upgrade behavior before Artifact migration code begins.
+The baseline repair remains in its separate preceding commit. This Slice does
+not modify migrations 0001-0007.
 
 ## SECURITY_BLOCKERS
 
-No current renderer security failure requires a new runtime. The following are
-implementation blockers that must be resolved within existing boundaries:
+No current renderer security failure required a new runtime. The previously
+identified First Slice blockers were resolved within existing boundaries:
 
-1. Storage migration baseline must be green before migration 0008 evidence can
-   be trusted.
+1. Storage migration baseline and migration 0008 evidence are green.
 2. Artifact mutation must have ToolCall-bound idempotency/reconciliation so a
    commit-before-receipt crash cannot duplicate state.
 3. Verification needs an additive explicit Artifact revision subject; digest
@@ -667,8 +700,8 @@ implementation blockers that must be resolved within existing boundaries:
    of treating SQLite mutation as an empty Project-file fingerprint.
 5. Reads/updates must enforce current profile scope, explicit context admission,
    bounded payloads, and `UNTRUSTED_ARTIFACT_CONTENT` instruction authority.
-6. Artifact semantic JSON must reject unknown fields, unsupported content
-   schema versions, NUL/unbounded content, and renderer-specific types.
+6. Artifact semantic JSON rejects unknown fields, unsupported types,
+   NUL/unbounded content, and renderer-specific state before persistence.
 
 None authorizes a new Permission, Verification, Receipt, Agent, or filesystem.
 
@@ -676,7 +709,7 @@ None authorizes a new Permission, Verification, Receipt, Agent, or filesystem.
 
 | Area | Impact | Reason |
 |---|---|---|
-| This docs-only Candidate | `LOW` | One non-frozen architecture document; no product/runtime change |
+| This Candidate document | `LOW` | Non-frozen factual alignment for the authorized implementation |
 | Artifact semantic envelope | `MEDIUM` | Promotes current private DTO semantics into a durable typed contract |
 | Artifact persistence | `HIGH` | New profile-owned aggregate in authoritative DataRoot |
 | Immutable revision model | `HIGH` | Permanent identity/history/conflict/recovery semantics |
@@ -695,11 +728,11 @@ None authorizes a new Permission, Verification, Receipt, Agent, or filesystem.
 | Option | Assessment | Decision |
 |---|---|---|
 | A. Durable envelope + Document only | Smallest type scope, but leaves the shared envelope and existing Presentation path insufficiently exercised | Not selected |
-| B. Durable envelope + Document + Presentation | Reuses both real semantic models/renderers and proves type-neutral identity/revision/storage without UI | **SELECT after Storage baseline repair** |
+| B. Durable envelope + Document + Presentation | Reuses both real semantic models/renderers and proves type-neutral identity/revision/storage without UI | **SELECTED / IMPLEMENTED / TARGETED VALIDATED** |
 | C. Full CRUD + UI | Mixes architecture, FIPC, editor, rendering, and product design | Reject |
 | D. Durable schema + generic fixture only | Proves storage but not the real semantic or renderer boundaries | Reject |
 
-Recommended implementation slice after the separate Storage repair:
+Implemented Core First Slice after the separate Storage repair:
 
 ```text
 DURABLE ARTIFACT CORE
@@ -732,7 +765,7 @@ First-slice candidate bounds reuse current production facts:
 | Regions per slide / blocks per region | 3 / 16 |
 | Text per slide | 16 KiB |
 | Assets | 0 |
-| Model-facing read observation | existing 64 KiB bound; page semantic units |
+| Model-facing read observation | one typed revision only; hard 320 KiB serialized observation ceiling |
 | Title metadata | candidate 512 Unicode scalar values |
 
 These values remain Candidate, not Frozen. Validation rejects excess rather
@@ -769,8 +802,9 @@ required to prove the First Slice. Hard delete is explicitly absent.
   mismatch, oversized revision, table/slide overflow reject before mutation;
 - canonical digest is stable across JSON property order and independent of IDs,
   timestamps, Project relation, and renderer version;
-- `artifact.read` pages oversized observations without silently truncating the
-  persisted semantic source or admitting all history.
+- `artifact.read` returns one bounded selected revision without silently
+  truncating content or admitting revision history; semantic paging remains
+  deferred.
 
 ### Tool, Policy, receipt, and recovery
 
@@ -810,8 +844,8 @@ required to prove the First Slice. Hard delete is explicitly absent.
 
 ### Migration and regression
 
-- first, separate Storage baseline repair Gate: legacy 0002 incompatible-data
-  rollback, fresh/upgrade current schema, checksum, and portable snapshot;
+- preceding separate Storage baseline repair Gate remains green: legacy 0002
+  incompatible-data rollback, fresh/upgrade schema, checksum, and portable snapshot;
 - migration 0008 fresh database, schema-7 upgrade, rollback on incompatible
   data, current-pointer/FK/index/check validation, and schema version;
 - Project/Conversation/AgentRun/Events/ToolCalls/Approvals/Context/Verification;
@@ -823,27 +857,25 @@ required to prove the First Slice. Hard delete is explicitly absent.
 
 ## OPEN_QUESTIONS
 
-1. Should the existing VerificationReceipt gain a generic bounded subject tuple
-   admitted initially only for `ARTIFACT_REVISION`, or explicit nullable
-   Artifact columns? Either must preserve current rows and avoid a second
-   engine; exact contract/DDL needs implementation review.
-2. Should `AgentToolEffect::WORKSPACE_WRITE` be documented as any Fielora work
-   product mutation, or should a later generic mutation effect be added? The
-   First Slice should not add an enum, but it must stop file-path freshness code
-   from misclassifying Artifact DB writes.
-3. Is `profiles.schema_version` the portable logical profile schema and therefore
-   incremented to 2 with Artifact inclusion, or is only database schema version
-   8 required? The current code exposes both values and needs an explicit
-   compatibility decision.
-4. Should every Artifact mutation enter the existing `sync_change_journal` now,
-   or should sync journal participation wait for Artifact sync semantics? This
-   Candidate recommends reuse now with network still disabled.
+1. **Resolved for First Slice:** the existing `VerificationReceiptView` has one
+   nullable typed `VerificationSubject::ArtifactRevision`; migration 0008 uses
+   nullable subject columns in the existing receipt table. No evidence engine or
+   receipt hierarchy was added.
+2. **Terminology debt retained:** `AgentToolEffect::WORKSPACE_WRITE` currently
+   covers both Project-file and durable Fielora work-product mutation. The First
+   Slice adds no effect/permission enum; a later generic name requires separate
+   compatibility review.
+3. **Resolved for First Slice:** database schema is 8; Profile schema remains 1
+   because Artifacts are SQLite state, not a new Profile serialized payload.
+4. **Resolved for First Slice:** sync journal participation is deferred until
+   Artifact sync semantics are authorized. No sync claim or network behavior is
+   implied by local persistence.
 5. When assets are authorized, can the LibraryRoot content-addressed blob code
    be promoted into a shared Fielora blob primitive without making every asset
    a LibraryObject, and what reference-count/tombstone/portable rules apply?
-6. Does the saved-revision export form extend `artifact.export` with `oneOf`, or
-   temporarily use a versioned Tool definition to keep model schemas simple?
-   Legacy inline requests must remain valid either way.
+6. **Resolved for First Slice:** saved-revision export extends `artifact.export`
+   with strict `oneOf` inline-vs-saved modes. Legacy inline requests remain
+   valid; the saved mode pins the selected revision before rendering.
 7. Should semantically identical `artifact.update` return the current revision
    as idempotent no-op or reject `ARTIFACT_NO_CHANGE`? It must never append
    meaningless revisions silently.
@@ -855,4 +887,4 @@ required to prove the First Slice. Hard delete is explicitly absent.
 
 ## NEXT_DECISION
 
-`B. STORAGE_BASELINE_REPAIR_REQUIRED_FIRST`
+`A. READY_FOR_DIAGRAM_ARTIFACT`

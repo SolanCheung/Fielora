@@ -41,7 +41,7 @@ await mkdir(productionAgentEvidence,{recursive:true});
 async function runDesktopFoundation(){
 try{
   child=await launch();let cdp=await connect();await cdp.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});await wait(cdp,`document.querySelector('[data-testid="project-workspace"]')&&document.documentElement.dataset.reduceMotion==='false'`);
-  assert.equal((await cdp.eval('window.fielora.core.getHealth()')).schema_version,7);
+  assert.equal((await cdp.eval('window.fielora.core.getHealth()')).schema_version,8);
   assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="desktop-chrome"]'))`),true);
   await wait(cdp,`document.querySelector('.project-brand-button img')?.complete`);
   assert.equal(await cdp.eval(`(()=>{const image=document.querySelector('.project-brand-button img');const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;const context=canvas.getContext('2d');context.drawImage(image,0,0,64,64);const corner=context.getImageData(0,0,1,1).data[3];const center=context.getImageData(32,32,1,1).data[3];return corner===0&&center===255;})()`),true);

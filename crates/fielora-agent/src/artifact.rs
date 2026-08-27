@@ -1,11 +1,16 @@
-//! Request-scoped semantic Artifact export through the existing Tool backend.
+//! Semantic Artifact validation and export through the existing Tool backend.
 //!
-//! The types in this module are Fielora-owned and intentionally private to the
-//! built-in Tool. `office_oxide` is an adapter detail, not an Agent contract.
+//! Fielora-owned semantic DTOs live in `fielora-contracts`; `office_oxide`
+//! remains a stateless renderer adapter detail, not persisted authority.
 
 use crate::{
     AgentError, CommandCancellation, ToolExecution, ToolRuntime, atomic_write, deny_sensitive,
     normalize_relative, relative_text, resolve_for_write, sha256,
+};
+use fielora_contracts::{
+    ArtifactContentV1, ArtifactReadView, ArtifactType as DurableArtifactType, DocumentArtifact,
+    DocumentBlock, PresentationArtifact, PresentationBlock, PresentationLayout, PresentationSlide,
+    SlideRegion, SlideSlot,
 };
 use office_oxide::docx::write::DocxWriter;
 use office_oxide::pptx::write::{PptxWriter, Run, SlideData};
@@ -259,68 +264,6 @@ struct ExportArgs {
     output_path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DocumentArtifact {
-    #[serde(default)]
-    title: Option<String>,
-    blocks: Vec<DocumentBlock>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
-enum DocumentBlock {
-    Heading { level: u8, text: String },
-    Paragraph { text: String },
-    BulletList { items: Vec<String> },
-    Table { rows: Vec<Vec<String>> },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PresentationArtifact {
-    slides: Vec<PresentationSlide>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PresentationSlide {
-    layout: PresentationLayout,
-    title: String,
-    #[serde(default)]
-    regions: Vec<SlideRegion>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-enum PresentationLayout {
-    Title,
-    TitleAndBody,
-    TwoColumn,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SlideRegion {
-    slot: SlideSlot,
-    blocks: Vec<PresentationBlock>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-enum SlideSlot {
-    Body,
-    Left,
-    Right,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
-enum PresentationBlock {
-    Paragraph { text: String },
-    BulletList { items: Vec<String> },
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", content = "content", rename_all = "snake_case")]
 enum ArtifactDefinition {
@@ -426,7 +369,7 @@ enum ExportStage {
     BeforeAtomicWrite,
 }
 
-pub(super) fn input_schema() -> Value {
+fn legacy_input_schema() -> Value {
     let document_block = json!({
         "oneOf":[
             {"type":"object","properties":{"kind":{"const":"HEADING"},"level":{"type":"integer","minimum":1,"maximum":3},"text":{"type":"string","minLength":1,"maxLength":16384}},"required":["kind","level","text"],"additionalProperties":false},
@@ -487,6 +430,163 @@ pub(super) fn input_schema() -> Value {
         "required":["type","content","output_path"],
         "additionalProperties":false
     })
+}
+
+pub fn input_schema() -> Value {
+    json!({
+        "oneOf":[
+            legacy_input_schema(),
+            {
+                "type":"object",
+                "properties":{
+                    "artifact_id":{"type":"string","minLength":1,"maxLength":128},
+                    "revision_id":{"type":"string","minLength":1,"maxLength":128},
+                    "output_path":{"type":"string","minLength":1,"maxLength":4096}
+                },
+                "required":["artifact_id","output_path"],
+                "additionalProperties":false
+            }
+        ]
+    })
+}
+
+pub fn create_input_schema() -> Value {
+    let legacy = legacy_input_schema();
+    json!({
+        "type":"object",
+        "properties":{
+            "type":legacy["properties"]["type"].clone(),
+            "title":{"type":"string","minLength":1,"maxLength":512},
+            "content":legacy["properties"]["content"].clone(),
+            "associate_with_current_project":{"type":"boolean"}
+        },
+        "required":["type","content"],
+        "additionalProperties":false
+    })
+}
+
+pub fn update_input_schema() -> Value {
+    let legacy = legacy_input_schema();
+    json!({
+        "type":"object",
+        "properties":{
+            "artifact_id":{"type":"string","minLength":1,"maxLength":128},
+            "expected_revision_id":{"type":"string","minLength":1,"maxLength":128},
+            "content":legacy["properties"]["content"].clone()
+        },
+        "required":["artifact_id","expected_revision_id","content"],
+        "additionalProperties":false
+    })
+}
+
+pub fn read_input_schema() -> Value {
+    json!({
+        "type":"object",
+        "properties":{
+            "artifact_id":{"type":"string","minLength":1,"maxLength":128},
+            "revision_id":{"type":"string","minLength":1,"maxLength":128}
+        },
+        "required":["artifact_id"],
+        "additionalProperties":false
+    })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CanonicalArtifactContent {
+    pub content: ArtifactContentV1,
+    pub canonical_json: String,
+    pub semantic_sha256: String,
+    pub semantic_unit_count: usize,
+}
+
+pub fn canonicalize_content(
+    artifact_type: DurableArtifactType,
+    content: Value,
+) -> Result<CanonicalArtifactContent, AgentError> {
+    let definition = match artifact_type {
+        DurableArtifactType::Document => serde_json::from_value(content)
+            .map(ArtifactDefinition::Document)
+            .map_err(|_| AgentError::ArtifactContentInvalid)?,
+        DurableArtifactType::Presentation => serde_json::from_value(content)
+            .map(ArtifactDefinition::Presentation)
+            .map_err(|_| AgentError::ArtifactContentInvalid)?,
+    };
+    validate_definition(&definition).map_err(|_| AgentError::ArtifactContentInvalid)?;
+    let semantic_unit_count = definition.semantic_count();
+    let content = match definition {
+        ArtifactDefinition::Document(value) => ArtifactContentV1::Document(value),
+        ArtifactDefinition::Presentation(value) => ArtifactContentV1::Presentation(value),
+    };
+    let canonical_json =
+        serde_json::to_string(&content).map_err(|_| AgentError::ArtifactContentInvalid)?;
+    if canonical_json.len() > MAX_DEFINITION_BYTES {
+        return Err(AgentError::ArtifactContentInvalid);
+    }
+    let semantic_sha256 = sha256(canonical_json.as_bytes());
+    Ok(CanonicalArtifactContent {
+        content,
+        canonical_json,
+        semantic_sha256,
+        semantic_unit_count,
+    })
+}
+
+pub fn export_saved(
+    runtime: &ToolRuntime,
+    artifact: &ArtifactReadView,
+    output_path: &str,
+    cancellation: &CommandCancellation,
+) -> Result<ToolExecution, AgentError> {
+    let (artifact_type, content) = match &artifact.revision.content {
+        ArtifactContentV1::Document(value) => (
+            "document",
+            serde_json::to_value(value).map_err(|_| AgentError::ArtifactContentInvalid)?,
+        ),
+        ArtifactContentV1::Presentation(value) => (
+            "presentation",
+            serde_json::to_value(value).map_err(|_| AgentError::ArtifactContentInvalid)?,
+        ),
+    };
+    let mut execution = export(
+        runtime,
+        &json!({"type":artifact_type,"content":content,"output_path":output_path}),
+        cancellation,
+    )?;
+    if let Some(receipt) = execution.receipt.as_object_mut() {
+        receipt.insert("artifact_id".into(), json!(artifact.artifact.artifact_id));
+        receipt.insert(
+            "artifact_revision_id".into(),
+            json!(artifact.revision.revision_id),
+        );
+        receipt.insert(
+            "exported_revision_id".into(),
+            json!(artifact.revision.revision_id),
+        );
+        receipt.insert(
+            "artifact_revision".into(),
+            json!(artifact.revision.sequence),
+        );
+        receipt.insert("artifact_persistence".into(), json!("DURABLE"));
+        receipt.insert(
+            "artifact_semantic_sha256".into(),
+            json!(artifact.revision.semantic_sha256),
+        );
+    }
+    let receipt = &execution.receipt;
+    execution.observation = json!({
+        "artifact_id":artifact.artifact.artifact_id,
+        "artifact_revision_id":artifact.revision.revision_id,
+        "artifact_revision":artifact.revision.sequence,
+        "artifact_persistence":"DURABLE",
+        "path":receipt.get("path"),
+        "output_bytes":receipt.get("output_bytes"),
+        "output_sha256":receipt.get("output_sha256"),
+        "structural_reopen":"STRUCTURAL_VALID",
+        "roundtrip":"SEMANTIC_CONTENT_PRESENT",
+        "visual_compatibility":"NOT_VERIFIED"
+    })
+    .to_string();
+    Ok(execution)
 }
 
 pub(super) fn export(
@@ -578,6 +678,7 @@ where
     let receipt = json!({
         "kind":"ARTIFACT_EXPORTED",
         "artifact_id":artifact_id,
+        "artifact_persistence":"REQUEST_SCOPED",
         "artifact_type":artifact_type.id(),
         "artifact_revision":ARTIFACT_REVISION,
         "artifact_definition_sha256":definition_sha256,
@@ -593,6 +694,7 @@ where
     });
     let observation = serde_json::to_string(&json!({
         "artifact_id":artifact_id,
+        "artifact_persistence":"REQUEST_SCOPED",
         "artifact_type":artifact_type.id(),
         "artifact_revision":ARTIFACT_REVISION,
         "path":relative_text(&relative),
@@ -1381,7 +1483,11 @@ fn compact_whitespace(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::{PolicyEngine, ToolExecutor, coding_tool_catalog};
-    use fielora_contracts::{AgentPermission, AgentPolicyDecision, AgentToolEffect};
+    use fielora_contracts::{
+        AgentPermission, AgentPolicyDecision, AgentRunId, AgentToolEffect, ArtifactId,
+        ArtifactMutationKind, ArtifactRevisionId, ArtifactRevisionView, ArtifactView,
+        ConversationId, DeviceId, ProfileId, ToolCallId,
+    };
 
     #[cfg(windows)]
     fn create_directory_link(link: &Path, target: &Path) {
@@ -2030,5 +2136,127 @@ mod tests {
         );
         assert!(!root.join("unknown.docx").exists());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn saved_document_and_presentation_exports_pin_exact_semantic_revisions() {
+        let (root, runtime) = fixture_runtime();
+        let cases = [
+            (
+                DurableArtifactType::Document,
+                document_args("unused.docx")["content"].clone(),
+                "saved-document.docx",
+            ),
+            (
+                DurableArtifactType::Presentation,
+                presentation_args("unused.pptx")["content"].clone(),
+                "saved-presentation.pptx",
+            ),
+        ];
+        for (artifact_type, content, output_path) in cases {
+            let canonical = canonicalize_content(artifact_type, content).unwrap();
+            let artifact_id = ArtifactId::new(Uuid::now_v7().to_string());
+            let selected_revision = ArtifactRevisionId::new(Uuid::now_v7().to_string());
+            let newer_current_revision = ArtifactRevisionId::new(Uuid::now_v7().to_string());
+            let read = ArtifactReadView {
+                artifact: ArtifactView {
+                    artifact_id: artifact_id.clone(),
+                    profile_id: ProfileId::new(Uuid::now_v7().to_string()),
+                    artifact_type,
+                    title: Some("Saved export".into()),
+                    project_field_id: None,
+                    // Deliberately point current elsewhere: the selected
+                    // historical revision must remain the rendered authority.
+                    current_revision_id: newer_current_revision,
+                    created_from_conversation_id: None,
+                    created_by_agent_run_id: None,
+                    updated_by_device: DeviceId::new(Uuid::now_v7().to_string()),
+                    created_at: 1,
+                    updated_at: 2,
+                },
+                revision: ArtifactRevisionView {
+                    revision_id: selected_revision.clone(),
+                    artifact_id: artifact_id.clone(),
+                    sequence: 1,
+                    parent_revision_id: None,
+                    mutation_kind: ArtifactMutationKind::Create,
+                    content_schema_version: 1,
+                    semantic_sha256: canonical.semantic_sha256.clone(),
+                    content: canonical.content,
+                    created_from_conversation_id: Some(ConversationId::new(
+                        Uuid::now_v7().to_string(),
+                    )),
+                    created_by_agent_run_id: Some(AgentRunId::new(Uuid::now_v7().to_string())),
+                    created_by_tool_call_id: ToolCallId::new(Uuid::now_v7().to_string()),
+                    created_at: 1,
+                },
+            };
+            let execution = export_saved(
+                &runtime,
+                &read,
+                output_path,
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+            assert_eq!(execution.receipt["artifact_id"], artifact_id.0);
+            assert_eq!(
+                execution.receipt["artifact_revision_id"],
+                selected_revision.0
+            );
+            assert_eq!(execution.receipt["artifact_revision"], 1);
+            assert_eq!(execution.receipt["artifact_persistence"], "DURABLE");
+            assert_eq!(
+                execution.receipt["artifact_semantic_sha256"],
+                canonical.semantic_sha256
+            );
+            assert!(root.join(output_path).is_file());
+            assert_eq!(
+                export_saved(
+                    &runtime,
+                    &read,
+                    output_path,
+                    &CommandCancellation::default(),
+                ),
+                Err(AgentError::FileChanged)
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn durable_canonical_content_reuses_strict_renderer_admission() {
+        let valid = canonicalize_content(
+            DurableArtifactType::Document,
+            document_args("unused.docx")["content"].clone(),
+        )
+        .unwrap();
+        assert!(valid.canonical_json.len() <= MAX_DEFINITION_BYTES);
+        assert_eq!(
+            valid.semantic_sha256,
+            sha256(valid.canonical_json.as_bytes())
+        );
+        assert!(matches!(valid.content, ArtifactContentV1::Document(_)));
+
+        assert_eq!(
+            canonicalize_content(
+                DurableArtifactType::Document,
+                json!({"blocks":[{"kind":"PARAGRAPH","text":"valid"}],"unknown":true}),
+            ),
+            Err(AgentError::ArtifactContentInvalid)
+        );
+        assert_eq!(
+            canonicalize_content(
+                DurableArtifactType::Document,
+                json!({"blocks":[{"kind":"PARAGRAPH","text":"x".repeat(MAX_TEXT_ITEM_BYTES + 1)}]}),
+            ),
+            Err(AgentError::ArtifactContentInvalid)
+        );
+        assert_eq!(
+            canonicalize_content(
+                DurableArtifactType::Presentation,
+                json!({"slides":[{"layout":"TITLE","title":"bad\0title","regions":[]}]}),
+            ),
+            Err(AgentError::ArtifactContentInvalid)
+        );
     }
 }

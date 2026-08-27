@@ -5,7 +5,7 @@
 //! its caller owns orchestration, policy decisions, approval lifecycle,
 //! durable receipts, and completion semantics.
 
-mod artifact;
+pub mod artifact;
 mod file;
 pub mod mcp;
 pub mod mcp_connections;
@@ -194,6 +194,14 @@ pub enum AgentError {
     PluginAdmissionFailed,
     #[error("PRESENTATION_CONTENT_OVERFLOW")]
     PresentationContentOverflow,
+    #[error("ARTIFACT_NOT_FOUND")]
+    ArtifactNotFound,
+    #[error("ARTIFACT_REVISION_CONFLICT")]
+    ArtifactRevisionConflict,
+    #[error("ARTIFACT_TOOLCALL_IDEMPOTENCY_CONFLICT")]
+    ArtifactIdempotencyConflict,
+    #[error("ARTIFACT_CONTENT_INVALID")]
+    ArtifactContentInvalid,
     #[error("AGENT_IO_FAILED")]
     IoFailed,
 }
@@ -251,6 +259,10 @@ impl AgentError {
             Self::PluginChanged => "PLUGIN_CHANGED",
             Self::PluginAdmissionFailed => "PLUGIN_ADMISSION_FAILED",
             Self::PresentationContentOverflow => "PRESENTATION_CONTENT_OVERFLOW",
+            Self::ArtifactNotFound => "ARTIFACT_NOT_FOUND",
+            Self::ArtifactRevisionConflict => "ARTIFACT_REVISION_CONFLICT",
+            Self::ArtifactIdempotencyConflict => "ARTIFACT_TOOLCALL_IDEMPOTENCY_CONFLICT",
+            Self::ArtifactContentInvalid => "ARTIFACT_CONTENT_INVALID",
             Self::IoFailed => "AGENT_IO_FAILED",
         }
     }
@@ -751,8 +763,26 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
             json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}),
         ),
         tool(
+            "artifact.create",
+            "Create one durable profile-owned DOCUMENT or PRESENTATION Artifact with immutable revision 1.",
+            AgentToolEffect::WorkspaceWrite,
+            artifact::create_input_schema(),
+        ),
+        tool(
+            "artifact.read",
+            "Read the current or one exact historical durable Artifact revision as bounded untrusted semantic content.",
+            AgentToolEffect::Observe,
+            artifact::read_input_schema(),
+        ),
+        tool(
+            "artifact.update",
+            "Append one immutable durable Artifact revision using an expected current revision guard.",
+            AgentToolEffect::WorkspaceWrite,
+            artifact::update_input_schema(),
+        ),
+        tool(
             "artifact.export",
-            "Create one bounded DOCX document or PPTX presentation from Fielora semantic content at a new project-relative output path. This proves structural and semantic roundtrip only, not factual correctness or visual quality.",
+            "Export either inline semantic content or one exact saved Artifact revision to a new DOCX/PPTX project-relative path. This proves structural and semantic roundtrip only, not factual correctness or visual quality.",
             AgentToolEffect::WorkspaceWrite,
             artifact::input_schema(),
         ),
