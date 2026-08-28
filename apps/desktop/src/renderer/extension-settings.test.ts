@@ -6,17 +6,32 @@ import test from 'node:test';
 const root = import.meta.dirname;
 const read = (name: string) => readFileSync(path.join(root, name), 'utf8');
 const settings = read('SettingsScreen.tsx');
+const capabilities = read('CapabilityExtensionsSettings.tsx');
 const skills = read('SkillsSettings.tsx');
 const plugins = read('PluginSettings.tsx');
 const artifact = read('ArtifactWorkingSurface.tsx');
 
-test('Settings exposes existing Skills, MCP and declarative Plugins in one group', () => {
-  assert.match(settings, /group: 'AI 与扩展'/);
-  assert.match(settings, /id: 'SKILLS'/);
-  assert.match(settings, /id: 'MCP'/);
-  assert.match(settings, /id: 'PLUGINS'/);
+test('Settings exposes one capability and extension destination without group subtitles', () => {
+  assert.match(settings, /id: 'EXTENSIONS', label: '能力与扩展'/);
+  assert.doesNotMatch(settings, /settings-nav-group|visibleGroups|<h2>\{group\}<\/h2>/);
+  assert.match(settings, /id: 'GENERAL'.*icon: 'settings'/);
+  assert.match(settings, /id: 'MODELS'.*icon: 'models'/);
+  assert.match(settings, /id: 'EXTENSIONS'.*icon: 'extensions'/);
+  assert.match(settings, /id: 'STORAGE_DATA'.*icon: 'storage'/);
   assert.match(settings, /label: '项目'/);
   assert.match(settings, /label: '现在'/);
+});
+
+test('Capability and extension destination uses one accessible three-tab page', () => {
+  assert.match(capabilities, /<h1>能力与扩展<\/h1>/);
+  assert.match(capabilities, /role="tablist"/);
+  assert.match(capabilities, /id: 'SKILLS', label: 'Skills'/);
+  assert.match(capabilities, /id: 'MCP', label: 'MCP'/);
+  assert.match(capabilities, /id: 'PLUGINS', label: '插件'/);
+  assert.match(capabilities, /role="tabpanel"/);
+  assert.match(capabilities, /<SkillsSettings fieldId=\{fieldId\} embedded\/>/);
+  assert.match(capabilities, /<McpSettings embedded\/>/);
+  assert.match(capabilities, /<PluginSettings embedded\/>/);
 });
 
 test('Skill Settings is metadata-only and states its authority boundary', () => {

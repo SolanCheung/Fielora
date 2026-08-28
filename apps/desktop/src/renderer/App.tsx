@@ -227,7 +227,7 @@ export function App() {
     };
     const openSettings = (event: Event) => {
       const category = (event as CustomEvent<SettingsCategory>).detail;
-      if (['GENERAL', 'APPEARANCE', 'MODELS', 'SKILLS', 'MCP', 'PLUGINS', 'STORAGE_DATA', 'SHORTCUTS', 'ABOUT', 'BROWSER'].includes(category)) setSettingsCategory(category);
+      if (['GENERAL', 'APPEARANCE', 'MODELS', 'EXTENSIONS', 'SKILLS', 'MCP', 'PLUGINS', 'STORAGE_DATA', 'SHORTCUTS', 'ABOUT', 'BROWSER'].includes(category)) setSettingsCategory(category);
       navigateTo('SETTINGS');
     };
     window.addEventListener('fielora:navigate', navigate);

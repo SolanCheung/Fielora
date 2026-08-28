@@ -52,7 +52,7 @@ function SkillRow({ skill }: { skill: SkillCatalogEntryView }) {
   </details>;
 }
 
-export function SkillsSettings({ fieldId }: { fieldId: string | null }) {
+export function SkillsSettings({ fieldId, embedded = false }: { fieldId: string | null; embedded?: boolean }) {
   const [catalog, setCatalog] = useState<SkillCatalogView | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -73,8 +73,8 @@ export function SkillsSettings({ fieldId }: { fieldId: string | null }) {
     { id: 'PROJECT_AGENT_SKILL', label: '当前项目', items: catalog?.entries.filter((item) => item.source_kind === 'PROJECT_AGENT_SKILL') ?? [] },
     { id: 'PLUGIN', label: '插件提供', items: catalog?.entries.filter((item) => item.source_kind === 'PLUGIN') ?? [] },
   ], [catalog]);
-  return <div className="settings-section" data-testid="settings-skills">
-    <header><p>AI 与扩展</p><h1>Skills</h1></header>
+  return <div className={embedded ? 'settings-extension-pane' : 'settings-section'} data-testid="settings-skills">
+    {!embedded && <header><p>AI 与扩展</p><h1>Skills</h1></header>}
     <section className="settings-card settings-extension-card">
       <div className="settings-card-heading"><span><strong>可发现的 Skills</strong><small>这里只读取现有 SkillCatalog metadata；完整 SKILL.md 正文仍只在 Agent 明确需要时加载。</small></span><button type="button" onClick={() => void refresh()} disabled={loading}>刷新</button></div>
       {loading && <p className="settings-empty">正在读取 Skills…</p>}

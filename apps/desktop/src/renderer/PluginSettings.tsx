@@ -43,7 +43,7 @@ function PluginRow({ registration, busy, onRemove }: { registration: LocalPlugin
   </article>;
 }
 
-export function PluginSettings() {
+export function PluginSettings({ embedded = false }: { embedded?: boolean }) {
   const [registry, setRegistry] = useState<LocalPluginRegistryView | null>(null);
   const [rootPath, setRootPath] = useState('');
   const [busy, setBusy] = useState(false);
@@ -77,8 +77,8 @@ export function PluginSettings() {
     finally { setBusy(false); }
   }
 
-  return <div className="settings-section" data-testid="settings-plugins">
-    <header><p>AI 与扩展</p><h1>插件</h1></header>
+  return <div className={embedded ? 'settings-extension-pane' : 'settings-section'} data-testid="settings-plugins">
+    {!embedded && <header><p>AI 与扩展</p><h1>插件</h1></header>}
     <section className="settings-card settings-extension-card">
       <div className="settings-card-heading"><span><strong>本地声明式插件</strong><small>本地插件可以向 Fielora 提供 Skills 等声明式扩展内容。</small></span><button type="button" onClick={() => void refresh()} disabled={busy}>刷新</button></div>
       <form className="settings-plugin-add" onSubmit={addPlugin}>

@@ -14,7 +14,7 @@ const diagnosticLabels: Record<string, string> = {
   MCP_CREDENTIAL_BINDING_LIMIT: '单个连接的 credential 绑定超过当前上限。',
 };
 
-export function McpSettings() {
+export function McpSettings({ embedded = false }: { embedded?: boolean }) {
   const [catalog, setCatalog] = useState<McpConnectionCatalogView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -33,8 +33,8 @@ export function McpSettings() {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  return <div className="settings-section" data-testid="settings-mcp">
-    <header><p>工具连接</p><h1>MCP</h1></header>
+  return <div className={embedded ? 'settings-extension-pane' : 'settings-section'} data-testid="settings-mcp">
+    {!embedded && <header><p>工具连接</p><h1>MCP</h1></header>}
     <section className="settings-card settings-mcp-card">
       <div className="settings-card-heading">
         <span><strong>本地 MCP Server</strong><small>只读取当前用户的 mcp.json；打开此页面不会启动 Server 或发现 Tools。</small></span>

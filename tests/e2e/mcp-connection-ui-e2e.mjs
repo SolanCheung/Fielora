@@ -67,7 +67,8 @@ try {
   // resolve or start the configured executable.
   await click(cdp, '[data-testid="settings-nav"]');
   await wait(cdp, `document.querySelector('[data-testid="settings-screen"]')`);
-  await click(cdp, '[data-testid="settings-category-mcp"]');
+  await click(cdp, '[data-testid="settings-category-extensions"]');
+  await click(cdp, '[data-testid="settings-extension-tab-mcp"]');
   await wait(cdp, `document.querySelector('[data-testid="mcp-config-not-found"]')`);
   assert.equal(await access(pidPath).then(() => true, () => false), false);
   await writeFile(configPath, '{ malformed');

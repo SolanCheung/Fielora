@@ -3,15 +3,13 @@ import type { ModelInvocationEvent, ProviderConfigView } from '@fielora/contract
 import fieloraMark from '../../assets/fielora-mark.svg';
 import type { AppPreferences, StartupDestination } from './app-preferences';
 import { AppearanceSettings } from './AppearanceSettings';
-import { ShellIcon } from './PrimaryNav';
+import { ShellIcon, type ShellIconName } from './PrimaryNav';
 import { SelectMenu, SettingsToggle } from './UiPrimitives';
 import { persistWorkspaceNavigationWidth, readWorkspaceNavigationWidth, WorkspaceSurface } from './WorkspaceSurface';
 import { StorageDataSettings } from './StorageDataSettings';
-import { McpSettings } from './McpSettings';
-import { SkillsSettings } from './SkillsSettings';
-import { PluginSettings } from './PluginSettings';
+import { CapabilityExtensionsSettings, type CapabilityExtensionTab } from './CapabilityExtensionsSettings';
 
-export type SettingsCategory = 'GENERAL' | 'APPEARANCE' | 'MODELS' | 'SKILLS' | 'MCP' | 'PLUGINS' | 'STORAGE_DATA' | 'SHORTCUTS' | 'ABOUT' | 'BROWSER';
+export type SettingsCategory = 'GENERAL' | 'APPEARANCE' | 'MODELS' | 'EXTENSIONS' | 'SKILLS' | 'MCP' | 'PLUGINS' | 'STORAGE_DATA' | 'SHORTCUTS' | 'ABOUT' | 'BROWSER';
 
 interface SettingsScreenProps {
   preferences: AppPreferences;
@@ -21,17 +19,23 @@ interface SettingsScreenProps {
   fieldId?: string | null;
 }
 
-const categories: Array<{ id: SettingsCategory; label: string; keywords: string; group: string }> = [
-  { id: 'GENERAL', label: '常规', keywords: '启动 页面 默认', group: '个人' },
-  { id: 'APPEARANCE', label: '外观', keywords: '主题 浅色 深色 系统 字体 密度 圆角 动效 theme appearance', group: '个人' },
-  { id: 'MODELS', label: '模型与服务', keywords: 'provider api key model 模型 服务', group: 'AI 与扩展' },
-  { id: 'SKILLS', label: 'Skills', keywords: 'skills agent skill 项目 插件', group: 'AI 与扩展' },
-  { id: 'MCP', label: 'MCP', keywords: 'mcp tool server stdio connection 工具 连接', group: 'AI 与扩展' },
-  { id: 'PLUGINS', label: '插件', keywords: 'plugin extension local unpacked 插件 扩展 本地', group: 'AI 与扩展' },
-  { id: 'STORAGE_DATA', label: '存储与数据', keywords: 'storage data library cache profile backup import export 存储 数据 资料库 缓存 备份 迁移', group: '数据' },
-  { id: 'SHORTCUTS', label: '键盘快捷键', keywords: '快捷键 keyboard shortcut', group: '系统' },
-  { id: 'ABOUT', label: '关于', keywords: '版本 about', group: '系统' },
+const categories: Array<{ id: SettingsCategory; label: string; keywords: string; icon: ShellIconName }> = [
+  { id: 'GENERAL', label: '常规', keywords: '启动 页面 默认', icon: 'settings' },
+  { id: 'APPEARANCE', label: '外观', keywords: '主题 浅色 深色 系统 字体 密度 圆角 动效 theme appearance', icon: 'appearance' },
+  { id: 'MODELS', label: '模型与服务', keywords: 'provider api key model 模型 服务', icon: 'models' },
+  { id: 'EXTENSIONS', label: '能力与扩展', keywords: 'skills agent skill mcp tool server stdio plugin extension local unpacked 插件 扩展 本地 工具 连接', icon: 'extensions' },
+  { id: 'STORAGE_DATA', label: '存储与数据', keywords: 'storage data library cache profile backup import export 存储 数据 资料库 缓存 备份 迁移', icon: 'storage' },
+  { id: 'SHORTCUTS', label: '键盘快捷键', keywords: '快捷键 keyboard shortcut', icon: 'keyboard' },
+  { id: 'ABOUT', label: '关于', keywords: '版本 about', icon: 'info' },
 ];
+
+function extensionTabFor(category: SettingsCategory): CapabilityExtensionTab {
+  return category === 'MCP' || category === 'PLUGINS' ? category : 'SKILLS';
+}
+
+function normalizedCategory(category: SettingsCategory): SettingsCategory {
+  return ['SKILLS', 'MCP', 'PLUGINS'].includes(category) ? 'EXTENSIONS' : category;
+}
 
 function probeFailureLabel(provider: ProviderConfigView, code?: string | null): string {
   if (provider.provider_kind === 'OPENAI' && /^qwen/i.test(provider.default_model)) return '连接失败 · 当前是 OpenAI 官方协议，但模型像兼容服务；请检查协议与 Base URL';
@@ -47,7 +51,8 @@ function probeFailureLabel(provider: ProviderConfigView, code?: string | null): 
 }
 
 export function SettingsScreen({ preferences, onChange, onBack, initialCategory = 'GENERAL', fieldId = null }: SettingsScreenProps) {
-  const [category, setCategory] = useState<SettingsCategory>(initialCategory);
+  const [category, setCategory] = useState<SettingsCategory>(() => normalizedCategory(initialCategory));
+  const [extensionTab, setExtensionTab] = useState<CapabilityExtensionTab>(() => extensionTabFor(initialCategory));
   const [query, setQuery] = useState('');
   const [providers, setProviders] = useState<ProviderConfigView[]>([]);
   const [providerError, setProviderError] = useState('');
@@ -68,7 +73,10 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
     return () => { delete document.body.dataset.settingsScreen; window.removeEventListener('fielora:providers-changed', changed); };
   }, [refreshProviders]);
 
-  useEffect(() => { setCategory(initialCategory); }, [initialCategory]);
+  useEffect(() => {
+    setCategory(normalizedCategory(initialCategory));
+    if (['EXTENSIONS', 'SKILLS', 'MCP', 'PLUGINS'].includes(initialCategory)) setExtensionTab(extensionTabFor(initialCategory));
+  }, [initialCategory]);
 
   useEffect(() => window.fielora.core.subscribe((event) => {
     if (event.event !== 'event.model.invocation') return;
@@ -88,7 +96,6 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
     const needle = query.trim().toLocaleLowerCase();
     return needle ? categories.filter((item) => `${item.label} ${item.keywords}`.toLocaleLowerCase().includes(needle)) : categories;
   }, [query]);
-  const visibleGroups = useMemo(() => [...new Set(visibleCategories.map((item) => item.group))], [visibleCategories]);
   const update = (patch: Partial<AppPreferences>) => onChange({ ...preferences, ...patch });
   const activeProviders = providers.filter((provider) => provider.lifecycle_status !== 'REMOVED');
 
@@ -112,7 +119,7 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
       <button className="settings-back" onClick={onBack} data-testid="settings-back">← <span>返回应用</span></button>
       <label className="settings-search"><span className="sr-only">搜索设置</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索设置…" data-testid="settings-search" /></label>
       <nav aria-label="设置分类">
-        {visibleGroups.map((group) => <section className="settings-nav-group" key={group}><h2>{group}</h2>{visibleCategories.filter((item) => item.group === group).map((item) => <button key={item.id} className={category === item.id ? 'active' : ''} onClick={() => setCategory(item.id)} data-testid={`settings-category-${item.id.toLowerCase()}`}><ShellIcon name={item.id === 'MODELS' ? 'models' : item.id === 'APPEARANCE' ? 'appearance' : item.id === 'SKILLS' ? 'files' : item.id === 'PLUGINS' ? 'source' : item.id === 'MCP' || item.id === 'STORAGE_DATA' ? 'source' : item.id === 'SHORTCUTS' ? 'keyboard' : item.id === 'ABOUT' ? 'info' : 'settings'} /><span>{item.label}</span></button>)}</section>)}
+        {visibleCategories.map((item) => <button key={item.id} className={category === item.id ? 'active' : ''} onClick={() => setCategory(item.id)} data-testid={`settings-category-${item.id.toLowerCase()}`}><ShellIcon name={item.icon}/><span>{item.label}</span></button>)}
       </nav>
       <div className="settings-brand"><img src={fieloraMark} alt="" /><span>Fielora Desktop</span></div>
     </aside>}>
@@ -131,9 +138,7 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
           </article>)}</div>}
         </section>
       </div>}
-      {category === 'SKILLS' && <SkillsSettings fieldId={fieldId}/>}
-      {category === 'MCP' && <McpSettings/>}
-      {category === 'PLUGINS' && <PluginSettings/>}
+      {category === 'EXTENSIONS' && <CapabilityExtensionsSettings activeTab={extensionTab} fieldId={fieldId} onTabChange={setExtensionTab}/>}
       {category === 'STORAGE_DATA' && <StorageDataSettings preferences={preferences} onPreferencesChange={onChange} />}
       {category === 'SHORTCUTS' && <div className="settings-section" data-testid="settings-shortcuts"><header><p>效率</p><h1>键盘快捷键</h1></header><section className="settings-card shortcut-list"><div><span>新对话</span><kbd>Ctrl+N</kbd></div><div><span>打开 Project 文件夹</span><kbd>Ctrl+O</kbd></div><div><span>显示或隐藏侧栏</span><kbd>Ctrl+B</kbd></div><div><span>审阅</span><kbd>Ctrl+Shift+G</kbd></div><div><span>终端</span><kbd>Ctrl+`</kbd></div><div><span>浏览器 / 新建浏览页面</span><kbd>Ctrl+T</kbd></div><div><span>文件</span><kbd>Ctrl+P</kbd></div><div><span>侧边聊天</span><kbd>Ctrl+Alt+S</kbd></div><div><span>地址栏</span><kbd>Ctrl+L</kbd></div><div><span>刷新网页</span><kbd>Ctrl+R</kbd></div><div><span>Summon</span><kbd>Ctrl+Shift+Space</kbd></div></section></div>}
       {category === 'ABOUT' && <div className="settings-section" data-testid="settings-about"><header><p>Fielora</p><h1>关于</h1></header><section className="settings-card about-card"><img src={fieloraMark} alt="" /><span><strong>Fielora Desktop 0.1.0</strong><small>Windows 11 x64 · Electron 43.4.0 · schema 11</small></span></section></div>}

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import fieloraMark from '../../assets/fielora-mark.svg';
 
 export type PrimarySection = 'PROJECTS' | 'NOW' | 'LIBRARY' | 'BROWSE' | 'FIELDS';
-export type ShellIconName = 'compose' | 'conversation' | 'now' | 'browse' | 'fields' | 'inbox' | 'folder' | 'folderOpen' | 'files' | 'image' | 'filePlus' | 'diff' | 'terminal' | 'computer' | 'settings' | 'refresh' | 'close' | 'more' | 'models' | 'appearance' | 'keyboard' | 'info' | 'environment' | 'branch' | 'cloud' | 'source' | 'copy' | 'check' | 'sort' | 'plus' | 'edit' | 'chevronDown' | 'panelRight';
+export type ShellIconName = 'compose' | 'conversation' | 'now' | 'browse' | 'fields' | 'inbox' | 'folder' | 'folderOpen' | 'files' | 'image' | 'filePlus' | 'diff' | 'terminal' | 'computer' | 'settings' | 'refresh' | 'close' | 'more' | 'models' | 'appearance' | 'extensions' | 'storage' | 'keyboard' | 'info' | 'environment' | 'branch' | 'cloud' | 'source' | 'copy' | 'check' | 'sort' | 'plus' | 'edit' | 'chevronDown' | 'panelRight';
 
 export function ShellIcon({ name }: { name: ShellIconName }) {
   const paths: Record<ShellIconName, ReactNode> = {
@@ -26,6 +26,8 @@ export function ShellIcon({ name }: { name: ShellIconName }) {
     more: <><circle cx="6" cy="12" r="1.25" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.25" fill="currentColor" stroke="none"/></>,
     models: <><rect x="5" y="5" width="14" height="14" rx="3"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></>,
     appearance: <><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></>,
+    extensions: <path d="M8.5 4H5a1 1 0 0 0-1 1v3.5h1.5a2.5 2.5 0 1 1 0 5H4V19a1 1 0 0 0 1 1h3.5v-1.5a2.5 2.5 0 1 1 5 0V20H19a1 1 0 0 0 1-1v-5.5h-1.5a2.5 2.5 0 1 1 0-5H20V5a1 1 0 0 0-1-1h-5.5v1.5a2.5 2.5 0 1 1-5 0V4Z"/>,
+    storage: <><ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6M4.5 11.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/></>,
     keyboard: <><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M6 10h1M10 10h1M14 10h1M18 10h.01M7 14h10"/></>,
     info: <><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></>,
     environment: <><path d="M5 6h14M5 12h14M5 18h14"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></>,

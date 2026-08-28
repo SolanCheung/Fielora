@@ -579,8 +579,15 @@
 .settings-mcp-diagnostics { padding-inline: var(--fl-space-1); }
 .settings-mcp-security { margin: var(--fl-space-5) var(--fl-space-1) 0; color: var(--fl-color-text-muted); font-size: var(--fl-font-size-meta); line-height: var(--fl-line-height-body); }
 .settings-mcp-security p { margin: var(--fl-space-3) 0 0; }
-.settings-nav-group { display: grid; gap: 2px; margin-bottom: var(--fl-space-3); }
-.settings-nav-group h2 { margin: var(--fl-space-3) var(--fl-space-3) var(--fl-space-1); color: var(--fl-color-text-faint); font-size: var(--fl-font-size-caption); font-weight: var(--fl-font-weight-medium); letter-spacing: .05em; }
+.settings-capability-extensions > header { margin-bottom: var(--fl-space-5); }
+.settings-extension-tabs { display: flex; align-items: center; gap: var(--fl-space-6); border-bottom: 1px solid var(--fl-color-border-soft); }
+.settings-extension-tabs > button { position: relative; min-height: 42px; display: flex; align-items: center; gap: var(--fl-space-2); padding: 0 var(--fl-space-2); border: 0; color: var(--fl-color-text-muted); background: transparent; font-size: var(--fl-font-size-navigation); }
+.settings-extension-tabs > button:hover { color: var(--fl-color-text-strong); }
+.settings-extension-tabs > button.active { color: var(--fl-color-text-strong); font-weight: var(--fl-font-weight-medium); }
+.settings-extension-tabs > button.active::after { content: ''; position: absolute; right: var(--fl-space-2); bottom: -1px; left: var(--fl-space-2); height: 2px; border-radius: var(--fl-radius-pill); background: var(--fl-color-accent); }
+.settings-extension-tabs .shell-icon { width: 15px; height: 15px; }
+.settings-extension-panel { padding-top: var(--fl-space-6); }
+.settings-extension-pane { width: 100%; }
 .settings-extension-card { overflow: visible; }
 .settings-extension-group { border-top: 1px solid var(--fl-color-border-soft); }
 .settings-extension-group > header { min-height: 42px; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--fl-space-1); color: var(--fl-color-text-muted); }

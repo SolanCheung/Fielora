@@ -232,7 +232,8 @@ try {
   await click(cdp, '[data-testid="settings-nav"]');
   await wait(cdp, `document.querySelector('[data-testid="settings-general"]')`);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="startup-destination"]').innerText.includes('Projects')||document.querySelector('[data-testid="startup-destination"]').innerText.includes('Now')`), false);
-  await click(cdp, '[data-testid="settings-category-plugins"]');
+  await click(cdp, '[data-testid="settings-category-extensions"]');
+  await click(cdp, '[data-testid="settings-extension-tab-plugins"]');
   await wait(cdp, `document.querySelector('[data-testid="settings-plugins"]')`);
   await cdp.eval(`(()=>{const input=document.querySelector('[data-testid="plugin-root-input"]');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,${JSON.stringify(pluginRoot)});input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   await click(cdp, '[data-testid="plugin-register-local"]');
@@ -243,13 +244,14 @@ try {
   await wait(cdp, `document.querySelector('[data-testid="conversation-${setup.conversationId}"]')`, 60_000);
   await click(cdp, '[data-testid="settings-nav"]');
   await wait(cdp, `document.querySelector('[data-testid="settings-general"]')`);
-  await click(cdp, '[data-testid="settings-category-plugins"]');
+  await click(cdp, '[data-testid="settings-category-extensions"]');
+  await click(cdp, '[data-testid="settings-extension-tab-plugins"]');
   await wait(cdp, `document.querySelector('[data-plugin-status="AVAILABLE"]')`);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="settings-plugins"]').innerText.includes('UI Declarative Plugin')`), true);
   await screenshot(cdp, '09-settings-plugins.png');
 
   const beforeInspection = await cdp.eval(`Promise.all([window.fielora.agent.list({conversation_id:${JSON.stringify(setup.conversationId)}}),window.fielora.plugin.localRegistry()]).then(([runs,registry])=>({runs:runs.length,registry}))`);
-  await click(cdp, '[data-testid="settings-category-skills"]');
+  await click(cdp, '[data-testid="settings-extension-tab-skills"]');
   await wait(cdp, `document.querySelector('[data-testid="settings-skill-project-ui-skill"]')&&document.querySelector('[data-testid="settings-skill-plugin-ui-skill"]')`);
   const skillPageFacts = await cdp.eval(`(()=>{const page=document.querySelector('[data-testid="settings-skills"]');return{text:page.innerText,html:page.innerHTML,builtin:page.querySelectorAll('[data-skill-source="BUILTIN"] .settings-extension-row').length,project:page.querySelectorAll('[data-skill-source="PROJECT_AGENT_SKILL"] .settings-extension-row').length,plugin:page.querySelectorAll('[data-skill-source="PLUGIN"] .settings-extension-row').length}})()`);
   assert.ok(skillPageFacts.builtin > 0 && skillPageFacts.project === 1 && skillPageFacts.plugin === 1, JSON.stringify(skillPageFacts));
@@ -261,7 +263,7 @@ try {
   const afterInspection = await cdp.eval(`window.fielora.agent.list({conversation_id:${JSON.stringify(setup.conversationId)}}).then((runs)=>runs.length)`);
   assert.equal(afterInspection, beforeInspection.runs);
 
-  await click(cdp, '[data-testid="settings-category-plugins"]');
+  await click(cdp, '[data-testid="settings-extension-tab-plugins"]');
   await cdp.eval(`(()=>{const input=document.querySelector('[data-testid="plugin-root-input"]');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,${JSON.stringify(brokenPluginRoot)});input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   await click(cdp, '[data-testid="plugin-register-local"]');
   await wait(cdp, `document.querySelectorAll('[data-plugin-status="AVAILABLE"]').length===2`);
@@ -272,11 +274,11 @@ try {
   await wait(cdp, `!document.querySelector('[data-plugin-status="UNAVAILABLE"]')`);
   await click(cdp, '[data-plugin-status="AVAILABLE"] [data-testid^="plugin-remove-"]');
   await wait(cdp, `!document.querySelector('[data-plugin-status="AVAILABLE"]')`);
-  await click(cdp, '[data-testid="settings-category-skills"]');
+  await click(cdp, '[data-testid="settings-extension-tab-skills"]');
   await wait(cdp, `document.querySelector('[data-testid="settings-skills"]')`);
   assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="settings-skill-plugin-ui-skill"]'))`), false);
 
-  await click(cdp, '[data-testid="settings-category-mcp"]');
+  await click(cdp, '[data-testid="settings-extension-tab-mcp"]');
   await wait(cdp, `document.querySelector('[data-testid="mcp-connection-local-notes"]')`);
   await screenshot(cdp, '10-settings-mcp-polish.png');
   await click(cdp, '[data-testid="settings-category-appearance"]');
