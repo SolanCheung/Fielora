@@ -2,6 +2,9 @@
 
 状态：`HISTORICAL / FIRST-READ GATE SATISFIED / NO LONGER A DEVELOPMENT BLOCKER`
 
+> `HISTORICAL / SUPERSEDED TERMINOLOGY`：本文中的轻量 `IDR` 是当前
+> `Entry Intent Resolver` 的旧名，不是 `Individualized Disposition Runtime`。
+
 阅读日期：2026-08-16（Asia/Shanghai）
 
 阅读工作树：`F:\项目\Fielora`

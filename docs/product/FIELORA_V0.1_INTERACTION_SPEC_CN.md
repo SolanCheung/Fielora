@@ -44,7 +44,7 @@ FIELD：`询问、修改、运行或继续……`
 
 内部可称 Universal Composer，但 UI 不显示该标签。
 
-## 6. IDR Intent
+## 6. Entry Intent Resolver
 
 V0.1：NAVIGATE / SEARCH / ASK / CAPTURE / OPEN / CREATE / CONTINUE / CHANGE / ACT。
 
@@ -54,9 +54,15 @@ Referent 输入：Current Runtime、Current Field、Current Surface、Current Fo
 
 能安全推断时不要重复提问。
 
+这里定义的是当前输入进入哪条产品流程的窄化入口路由。历史名称
+`IDR Intent` / `Bounded IDR` 已被 supersede；它不是 Agent Framework 中的
+`IDR / Individualized Disposition Runtime`，不持有长期 Human Model。
+
 ## 7. Capture
 
-Capture 不设置独立一级快捷键。`Ctrl/Cmd + Shift + Space` 统一打开 `Summon Fielora`，再由 IDR 将“记一下”“保存这个”等输入解析为 CAPTURE Intent。
+Capture 不设置独立一级快捷键。`Ctrl/Cmd + Shift + Space` 统一打开
+`Summon Fielora`，再由 Entry Intent Resolver 将“记一下”“保存这个”等输入
+路由为 CAPTURE Intent。
 
 浮层约 480px，默认只显示输入、当前 Context、保存。
 
@@ -271,7 +277,12 @@ Error 必须告诉用户：什么失败、什么已成功、下一步可做什�
 
 ## 38. P0
 
-Shell、Now、Inbox、Universal Capture、Browse、Summon、Context Chips、Field、Field Resume、Composer + IDR Contract、DXE Surface Primitive、Idea → Requirement、Development Field、Existing Project Takeover、Code Workspace、Terminal、Git Diff、Browser Preview、Verify、Evidence、Library、Multi-provider foundation、Capability Connector contract + 一个最小真实 Generic MCP Connector。
+Shell、Now、Inbox、Universal Capture、Browse、Summon、Context Chips、Field、
+Field Resume、Composer + Entry Intent Resolver Contract、DXE Surface
+Primitive、Idea → Requirement、Development Field、Existing Project Takeover、
+Code Workspace、Terminal、Git Diff、Browser Preview、Verify、Evidence、Library、
+Multi-provider foundation、Capability Connector contract + 一个最小真实
+Generic MCP Connector。
 
 P0 还要求数据与交互模型不把 Windows、本地文件路径或永久单用户环境写成业务事实。OS-specific 行为通过 Platform Adapter；本地路径属于 Device Binding；Field / Object / Activity 预留 owner / actor / visibility / share_scope / permissions / provenance。以上不新增 V0.1 跨平台 UI、Exchange UI 或网络服务。
 

@@ -2,6 +2,10 @@
 
 > 本文不是逐字聊天导出，而是基于当前 Fielora 项目对话和已上传《Fielora 功能讨论》资料制作的高保真时序重建。它的价值是保存“为什么当前方案会变成现在这样”。
 
+> `HISTORICAL / SUPERSEDED TERMINOLOGY`：本文中的轻量 `IDR` 指历史
+> intent/referent 入口路由，当前名称为 `Entry Intent Resolver`，不是
+> `Individualized Disposition Runtime`。
+
 ## 2026-08-11 — 名称与身份
 产品最终采用 **Fielora** 作为品牌名。`Field` 作为核心工作组织概念；`DXE` 是内部核心能力，不作为产品名。
 

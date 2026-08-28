@@ -1,5 +1,9 @@
 # Fielora V0.1 Phase 02 Implementation Specification
 
+> `HISTORICAL / SUPERSEDED TERMINOLOGY`：本文中的 `IDR/Agent intent` 指当时
+> 尚未进入 Phase 02 的入口路由语义；当前名称为 `Entry Intent Resolver`，
+> 不是 `Individualized Disposition Runtime`。
+
 状态：FROZEN / APPROVED / IMPLEMENTATION NOT AUTHORIZED / IMPLEMENTATION NOT STARTED
 
 版本：V0.1

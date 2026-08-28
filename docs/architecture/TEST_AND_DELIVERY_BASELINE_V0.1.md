@@ -49,7 +49,10 @@ Packaging-sensitive 变更必须在 PreMerge 之外追加 targeted packaged smok
 
 TypeScript Unit 覆盖 reducers、interaction state、Context Chips、Surface layout、Composer routing client、UI components、persistence client boundary。
 
-Rust Unit 覆盖核心 State、Permission、Evidence、IDR、Capability Contract、稳定 identity / Device Binding 边界及 Exchange 预留语义。核心逻辑必须可脱离 Electron 测试。
+Rust Unit 覆盖核心 State、Permission、Evidence、Entry Intent Resolver、
+Capability Contract、稳定 identity / Device Binding 边界及 Exchange 预留语义。
+未来 IDR（Individualized Disposition Runtime）只有在获得独立实现授权后才增加
+相应测试；本基线不授权空 IDR module/schema。核心逻辑必须可脱离 Electron 测试。
 
 至少运行：
 

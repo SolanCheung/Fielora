@@ -31,8 +31,8 @@
       "bytes": 2973
     },
     "README.md": {
-      "sha256": "7a2dbb4ae7bfff9db48dfcae805fc86165098d67300e0f22355a9f5908f4e2f0",
-      "bytes": 12872
+      "sha256": "fa1f167f34cae6bff9b22e04c635752890e81252e3089561f01b3870aae16350",
+      "bytes": 13249
     },
     "AGENTS.md": {
       "sha256": "19d11269434e83620c00d01cbf4d1c1128bd363d2895ee3dcab32bd60e4b5592",
@@ -43,16 +43,16 @@
       "bytes": 16500
     },
     "docs/context/01_CONVERSATION_TIMELINE.md": {
-      "sha256": "8b41d0f9a7d2611b05bfcdc2a587a3916d9342651883338fc2d14fb39c558773",
-      "bytes": 12753
+      "sha256": "384593cbee69d3b9e4ce87153987cebb836866d51bbee85f1c2f146fb82cbe90",
+      "bytes": 12955
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "9554f587cc64136691413f43fbbc412579a6728e612dfe5abe142bc9bf1e1f96",
-      "bytes": 175805
+      "sha256": "2c4a805ea9197e6d936208c615f8f807b944932b7c284978edf7acfb7d3ae220",
+      "bytes": 179013
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "751e5e7c68656d1281e082bc7b47048d81cd50f26ac40a7716c93951b8493dcc",
-      "bytes": 89743
+      "sha256": "093bf94a43f374851fa296a48be35937a01e69569fed576d706146dce2334aad",
+      "bytes": 90811
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
       "sha256": "0b4f9bd00ad5b9a198e4f3a6523503aaacbf8b5630aaa5d029577ee08abbc160",
@@ -71,36 +71,36 @@
       "bytes": 9345
     },
     "docs/product/FIELORA_V0.1_INTERACTION_SPEC_CN.md": {
-      "sha256": "e2a4e79ccc403d3fa7edcbab36326cbacfd57d67448e31922242e96ca325e15b",
-      "bytes": 12618
+      "sha256": "a03a96f5b8828519dbc80f7b3f6803e7ace2cacc15b2f15ece9ce531536927f6",
+      "bytes": 12918
     },
     "docs/architecture/TECHNICAL_BASELINE_V0.1.md": {
-      "sha256": "347d30f371803e174e07ac0522c0b856d840c0c82434c965c5e15c3b5696b332",
-      "bytes": 14937
+      "sha256": "47cb456be43891a4932c20c669b0ec2fb096065d82df20655948e7521f1b510a",
+      "bytes": 15764
     },
     "docs/architecture/FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md": {
-      "sha256": "dca872a9a7f0c1e38dd1853687bde59bb41c4f70c70e22d7ce15e4ed312451cb",
-      "bytes": 26725
+      "sha256": "5014cae001c56a7cdc9d44e253a126fe39fa3f5d51c174094a9e5c5970c65443",
+      "bytes": 40806
     },
     "docs/architecture/TECHNICAL_ARCHITECTURE_V0.1.md": {
       "sha256": "c57d97ae7c7b5d4d1a16cd992e4f16fd543193dcc7b1483d45e63a31f959f759",
       "bytes": 29723
     },
     "docs/architecture/PHASE_04_ALPHA_REMAP_CANDIDATE_V0.1.md": {
-      "sha256": "96b792e2e07ac66fce8ce78faf9fa6ebc2e7eed11ddd640cdf833ac2ac408352",
-      "bytes": 59020
+      "sha256": "73000d505e27d1ec03401d64f16465379a95e0b4c4339f4052286624fa3a08c7",
+      "bytes": 59194
     },
     "docs/architecture/PHASE_04_CAPABILITY_DEFINITION_CANDIDATE_V0.1.md": {
-      "sha256": "dc0553ae89d47666459c21d1de4c2f32a7afee87b98bd9da687f9de1a71f67f8",
-      "bytes": 22700
+      "sha256": "cc47ee7c31bf42110e9091e44485771c323ee81e38d6943f8ed6f4dd33d69414",
+      "bytes": 22920
     },
     "docs/architecture/PHASE_04_FREEZE_PACKAGE_CANDIDATE_V0.1.md": {
       "sha256": "0617e6ae4234008057cbaf794865abe4e65e772eaeede650cbbcfb7e4c119d7f",
       "bytes": 5980
     },
     "docs/product/PHASE_04_PRODUCT_FREEZE_CANDIDATE_V0.1.md": {
-      "sha256": "77c6205f1dcf30487359ed93d4e8935e9b5baa59b9c6ccbd83da0aed86b72c9d",
-      "bytes": 7768
+      "sha256": "d787b5c14be6d9443b740cdab56c7412525f0dd4f3ac709b163a50c215cb76f6",
+      "bytes": 7980
     },
     "docs/architecture/PHASE_04_CONTRACT_DELTA_CANDIDATE_V0.1.md": {
       "sha256": "d594e37a81c0e4b983f1470ade695f41af00ac76c680366fd154720f06e0674e",
@@ -127,8 +127,8 @@
       "bytes": 7519
     },
     "docs/architecture/CORE_CONTRACTS_V0.1.md": {
-      "sha256": "fa3dd3bfa743937ad8002a19adb28b840dff1a1204e3de460391a8260bcc1d11",
-      "bytes": 20038
+      "sha256": "1d65736e6859098a69621a8feac47b2b8759e7cd7b3d6863cc8a95ca9a53edc8",
+      "bytes": 20272
     },
     "docs/architecture/SCHEMA_FREEZE_V0.1.md": {
       "sha256": "f3fccfedfe05b3b3f77aff43f49f004dbf114e914c810198a52082637a2b9eab",
@@ -139,8 +139,8 @@
       "bytes": 13657
     },
     "docs/architecture/PHASE_02_IMPLEMENTATION_SPEC_V0.1.md": {
-      "sha256": "ec80724ac85114bb0e5266f4b01a7254be934f3ead8827a86ecaf38e466a256e",
-      "bytes": 20288
+      "sha256": "25de9dc7f14130cc388369982d96e3ee0b62ecba672b86a0db32405379d02d0d",
+      "bytes": 20513
     },
     "docs/architecture/PHASE_02_CONTRACT_DELTA_V0.1.md": {
       "sha256": "534e1b74ed319d4be3a4def9c191cface15a1a17b5b0d70879fa03d720be18a5",
@@ -191,8 +191,8 @@
       "bytes": 2475
     },
     "docs/architecture/TEST_AND_DELIVERY_BASELINE_V0.1.md": {
-      "sha256": "048b422b2934c5ad8aa6f276858c4840fa6dcb4464e7821d06331182ea15171d",
-      "bytes": 7279
+      "sha256": "f303f9a2d9af18e4290776bc45b09725ee0af55eb8b26dea4366563f2aa515e5",
+      "bytes": 7452
     },
     "docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md": {
       "sha256": "e21f20a8557afd59ee2d411ca57328374bac69c80f9fe24917f3a5a89d56a585",

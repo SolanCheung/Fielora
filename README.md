@@ -32,7 +32,12 @@
 
 当前 Agent 的正式架构基线为
 `docs/architecture/FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md`。后续 Agent
-能力统一按 `Model + Harness + Tools` 扩展；Harness 内部使用八个功能域，
+能力统一按 `Model + Harness + Tools` 扩展；Harness 内部固定为
+`Ingress & Context`、`Work Scope & Goal`、`Continuity`、`Orchestration`、
+`Governance`、`Execution`、`Verification & Evidence` 与
+`IDR (Individualized Disposition Runtime)` 八个功能域。Memory 是跨域语义，
+Agent Profile 是 Fielora-owned versioned product definition；两者都不是新的
+Agent Runtime。历史 `Bounded IDR` 入口路由现称 `Entry Intent Resolver`。
 现有 `FAST_EDIT_ADAPTIVE_V1` 归属 `CODING_V0.1` Harness Profile。
 
 ## 当前阶段状态

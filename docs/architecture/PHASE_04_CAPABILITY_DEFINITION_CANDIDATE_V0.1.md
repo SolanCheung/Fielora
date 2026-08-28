@@ -2,6 +2,10 @@
 
 状态：`ACCEPTED FOR FREEZE INPUT / PHASE 04 FREEZE GRANTED / IMPLEMENTATION EXECUTED`
 
+> `HISTORICAL / SUPERSEDED TERMINOLOGY`：本文中的 `Bounded IDR` 是当前
+> `Entry Intent Resolver` 的旧名，不是 `Individualized Disposition Runtime`；
+> Phase 04 当时的实现与 Evidence 语义不变。
+
 版本：V0.1 Candidate 1
 
 日期：2026-08-16

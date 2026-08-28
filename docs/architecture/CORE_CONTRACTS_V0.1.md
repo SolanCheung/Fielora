@@ -2,6 +2,10 @@
 
 状态：FROZEN / APPROVED（含 Phase 02 Frozen Contract Delta）
 
+> `HISTORICAL / SUPERSEDED TERMINOLOGY`：本冻结 Contract 中 Capture 路由的
+> `IDR` 是当前 `Entry Intent Resolver` 的旧名，不是 Agent Framework 的
+> `Individualized Disposition Runtime`；冻结行为语义不变。
+
 版本：V0.1
 
 日期：2026-08-14

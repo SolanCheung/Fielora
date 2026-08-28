@@ -2,6 +2,10 @@
 
 状态：`FROZEN / PROVIDER ACCEPTANCE DEFERRED TO PHASE EXIT / IMPLEMENTATION AUTHORIZED`
 
+> `HISTORICAL / SUPERSEDED TERMINOLOGY`：本冻结 Product 文档中的
+> `Bounded IDR` 是当前 `Entry Intent Resolver` 的旧名，不是
+> `Individualized Disposition Runtime`；冻结产品行为不变。
+
 版本：V0.1 Frozen
 
 日期：2026-08-16

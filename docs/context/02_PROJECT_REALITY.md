@@ -55,7 +55,9 @@ V0.1 内部状态类别：FACT / DECISION / ASSUMPTION / QUESTION / TASK / BLOCK
 
 Capture：任何状态快速记录 text、selection、page、screenshot、file、media timestamp；默认不要求分类。
 
-`Ctrl/Cmd + Shift + Space` 统一用于 `Summon Fielora`。Capture 是 Summon 经 IDR 判断后的一个 Intent，不设置第二套独立一级 Capture 快捷键。
+`Ctrl/Cmd + Shift + Space` 统一用于 `Summon Fielora`。Capture 是 Summon 经
+Entry Intent Resolver 路由后的一个 Intent，不设置第二套独立一级 Capture
+快捷键。
 
 Inbox：存放尚未确定归属的内容。
 
@@ -71,9 +73,11 @@ Fielora AI 是系统级可召唤能力。Browse 中通过 Shortcut Summon、轻�
 
 简单问题在轻量 Overlay 中完成并消失；复杂讨论可 Expand；真正变成持续工作时 Continue in Field。
 
-## 8. IDR
+## 8. Entry Intent Resolver（历史 IDR 命名已 supersede）
 
-IDR 是轻量 Intent + Referent Resolution，不是独立重型产品。
+这里的窄化能力负责当前用户输入进入哪条产品流程；旧文档曾称其为轻量
+`IDR / Bounded IDR`，当前名称为 `Entry Intent Resolver`。它不是 Agent
+Framework 的 `IDR / Individualized Disposition Runtime`。
 
 输入：current runtime / field / focus / object / page / selection / recent activity / explicit refs / user input。
 
@@ -207,7 +211,12 @@ Codex 完成定义不是 `pnpm dev 能跑`。每个开发 Phase 必须提供 Por
 
 ## 27. V0.1 P0
 
-Shell、Now、Inbox、Universal Capture、Browse foundation、Summon、Context Chips、Field、Field Resume、Composer + IDR contract、DXE primitives、Idea → Requirement、Development Field、Existing Project Takeover、Basic Code Workspace、Terminal、Git Diff、Browser Preview、Verify、Evidence、Library foundation、Multi-provider foundation、Capability Connector contract + 一个最小真实 Generic MCP Connector。
+Shell、Now、Inbox、Universal Capture、Browse foundation、Summon、Context Chips、
+Field、Field Resume、Composer + Entry Intent Resolver contract、DXE primitives、
+Idea → Requirement、Development Field、Existing Project Takeover、Basic Code
+Workspace、Terminal、Git Diff、Browser Preview、Verify、Evidence、Library
+foundation、Multi-provider foundation、Capability Connector contract + 一个最小
+真实 Generic MCP Connector。
 
 P0 的架构约束还包括：核心层跨平台、OS-specific Platform Adapter、Field Object identity 与 Device Binding 分离，以及核心模型预留 owner / actor / visibility / share_scope / permissions / provenance 语义。这些是模型和边界要求，不扩大 V0.1 UI 或网络服务范围。
 
@@ -650,7 +659,13 @@ PHASE_04_IMPLEMENTATION: NOT_AUTHORIZED
 
 用户要求确认此前战略/架构讨论是否已经进入开发文档，并要求先把能力定义完整，再准备 Phase 04。只读覆盖审计确认：Codex/ChatGPT 竞争重叠、Personal Digital Steward / Work Reality Steward 战略层级、`trustworthy state`、Reality Competitive Contract、Aegis-derived Governed Agency 边界与 Life Steward 延后已经进入 Remap Candidate、Competitive Boundaries、Project Reality 与 Decisions；但 Permission 四层模型、轻量 Reality Admission 的集中定义、Change Safety 工程纪律和 Phase 04 逐能力规格此前仍不完整。
 
-新的 `docs/architecture/PHASE_04_CAPABILITY_DEFINITION_CANDIDATE_V0.1.md` 已补齐 Phase 04 的 13 项能力目录：Provider Registry/Configuration、Credential Boundary、Model Invocation、Summon、Explicit Context Package/Chips、Bounded IDR、Proposal/Draft Boundary、Capture、Inbox、Promote/Reality Admission、Provider Swap/Failure Recovery、Permission Foundation 与 Resume after Entry。它同时定义 logical persistence、五个纵向 Slice、Phase Exit Evidence、明确排除项与 Freeze 前十二项开放决定。
+新的 `docs/architecture/PHASE_04_CAPABILITY_DEFINITION_CANDIDATE_V0.1.md` 已补齐
+Phase 04 的 13 项能力目录：Provider Registry/Configuration、Credential
+Boundary、Model Invocation、Summon、Explicit Context Package/Chips、当时称为
+`Bounded IDR` 的 Entry Intent Resolver、Proposal/Draft Boundary、Capture、
+Inbox、Promote/Reality Admission、Provider Swap/Failure Recovery、Permission
+Foundation 与 Resume after Entry。它同时定义 logical persistence、五个纵向
+Slice、Phase Exit Evidence、明确排除项与 Freeze 前十二项开放决定。
 
 Permission 采用四层正交模型：
 
@@ -1474,6 +1489,9 @@ ASAR_SHA256: 75222B2AFE9230A6A53782A426DB7BE5E3EFEDC373D47CA82ED15728409524B5
 
 ## 80. Canonical Model / Harness / Tools Agent Architecture
 
+> `SUPERSEDED TERMINOLOGY`：本节记录 2026-08-24 当时采用的八域与 IDR
+> 口径；当前定义由第 94 节和 canonical Agent Architecture Spec 覆盖。
+
 用户于 2026-08-24 提供并要求采用
 `FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md`。当前 Agent 的唯一正式顶层
 结构为 `Model + Harness + Tools`；Harness 统一由 Ingress & Context、
@@ -2087,3 +2105,57 @@ Rust、Clippy、12 Core integration并PASS。Artifact Working Surface、Overall 
 Settings与Appearance Light/Dark targeted E2E均PASS，最终12张截图位于
 `artifacts/final-ui-polish/`。Full PreMerge、Browse baseline、packaged/portable、live Model与
 public network按范围未运行。
+
+## 94. Agent Framework Architecture Terminology Closure
+
+2026-08-28，Fielora Agent 的顶层公式继续固定为：
+
+```text
+Agent = Model + Harness + Tools
+```
+
+Harness 的八个一级职责域最终收口为 Ingress & Context、Work Scope & Goal、
+Continuity、Orchestration、Governance、Execution、Verification & Evidence 与
+IDR（Individualized Disposition Runtime）。旧 `Identity & Goal` 收缩并改名为
+`Work Scope & Goal`；`Adaptation` 不再是一级域，其原有语义按 context、
+continuity、retry、verification、model behavior 与 human personalization
+分别归入现有 owner。
+
+IDR 现在只表示长期、可校正 Human Model 的语义 owner，并通过
+`Individualized Direction` 向 Model/Harness 提供个体化方向。Fact、Observation、
+Preference 与 Inference 必须区分；IDR 不拥有 reasoning、planning、Tool
+selection authority、Permission、Approval、Execution、Verification、Reality
+或 final decision authority。旧 Phase 04 的 ASK/CAPTURE/PROMOTE/CONTINUE
+`Bounded IDR` 正式改称 `Entry Intent Resolver`，历史 Candidate/Freeze/Evidence
+原文保留但属于 superseded terminology。
+
+Memory 是 cross-cutting Domain：working memory 由 Orchestration + Continuity
+承载，episodic history 主要由 Continuity 持有，human-specific long-term
+memory 由 IDR 负责，current Project/Artifact/Decision/Reality facts 则属于
+Reality/Product state 而不是 Memory。Agent Profile 是 Fielora-owned、versioned、
+bundled product definition，回答“我是谁”，不是 Memory 或 Runtime。Workspace
+是长期产品容器；Work Scope 是当前 Agent task/run 的边界，两者不得互换。
+
+当前继续采用本地 single-primary-human 假设，不增加 Aegis-style Identity
+Runtime、Tenant/Organization/Enterprise principal、多用户 subject 或 delegation
+Runtime。Reality Identity 仍由 Fielora 持有，Provider、Model、Conversation 与
+AgentRun 均不能成为 Project/Field/Artifact Reality identity owner。
+
+代码审计未发现依赖 `Adaptation`、`IdentityGoal`、`BoundedIDR`、IDR、
+HumanProfile 或 AgentProfile 名称的 runtime type、contract、table 或 migration。
+现有 `AgentCoordinator`、Context/Policy、Tool/Verification 行为均不修改。本轮不
+实现 IDR、Memory、Agent Profile 或新 Runtime，不新增 Schema/Migration。
+
+```text
+AGENT_FRAMEWORK: MODEL_HARNESS_TOOLS
+HARNESS_DOMAINS: 8_FINAL
+IDR: INDIVIDUALIZED_DISPOSITION_RUNTIME / DESIGN_ONLY
+OLD_BOUNDED_IDR: ENTRY_INTENT_RESOLVER
+MEMORY: CROSS_CUTTING_DOMAIN
+AGENT_PROFILE: FIELORA_OWNED_PRODUCT_DEFINITION
+LOCAL_IDENTITY: SINGLE_PRIMARY_HUMAN
+REALITY_IDENTITY: PRESERVED
+CODE_BEHAVIOR_CHANGE: NONE
+SCHEMA_CHANGE: NONE
+DEPENDENCY_CHANGE: NONE
+```

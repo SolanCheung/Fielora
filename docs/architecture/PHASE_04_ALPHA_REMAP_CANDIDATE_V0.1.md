@@ -4,6 +4,9 @@
 
 > 2026-08-17 用户纠正开发顺序：近期先交付 Codex-like multi-provider desktop，再依次建立 stable long tasks、Aegis、DXE 与 Personal Steward。本文件保留 Phase 04 历史设计与证据语义，但不再控制当前开发路线。当前 canonical 方向见 `docs/product/RAPID_DESKTOP_EXECUTION_V0.1.md`。
 
+> `HISTORICAL / SUPERSEDED TERMINOLOGY`：本文中的 Composer/Bounded `IDR`
+> 是当前 `Entry Intent Resolver` 的旧名，不是 `Individualized Disposition Runtime`。
+
 版本：V0.1 Candidate 4 — Strategic Anchor, Permission & Phase 04 Capability Hardening
 
 日期：2026-08-16

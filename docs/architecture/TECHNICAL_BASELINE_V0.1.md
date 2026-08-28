@@ -18,7 +18,11 @@ V0.1 唯一正式验收平台：**Windows 11 x64** 本地桌面应用。
 UI 业务状态与组件 Contract 不得直接编码 Windows-only 假设；平台差异通过受控 Platform Adapter / capability exposure 进入。
 
 ### Rust
-负责 Field Runtime、Field State、Context、IDR、Agent orchestration、Model Provider、Capability、Evidence、Persistence、Existing Project analysis、Files / Git / Native integration。
+负责 Field Runtime、Field State、Context、Harness（包括未来
+`IDR / Individualized Disposition Runtime`）、Agent orchestration、Model
+Provider、Capability、Evidence、Persistence、Existing Project analysis、
+Files / Git / Native integration。IDR 是 Harness 一级职责域，不是与 Harness
+并列的 Runtime。
 
 Core 业务模块保持 OS-neutral；Files / Git / Native、process、shell、PTY、credential storage 等 OS-specific 实现进入 Platform Adapter。
 
@@ -82,7 +86,6 @@ fielora/
 │  ├─ field/
 │  ├─ state/
 │  ├─ context/
-│  ├─ idr/
 │  ├─ agent/
 │  ├─ capability/
 │  ├─ model/
@@ -95,6 +98,10 @@ fielora/
 ├─ evals/
 └─ tests/
 ```
+
+该目录仅为历史模块建议，不要求每个逻辑职责域对应一个 crate。特别是 IDR、
+Memory、Agent Profile、Work Scope 不得为了架构对称创建空模块、平行 Runtime
+或独立状态系统；物理拆分必须由真实实现压力另行授权。
 
 ## 7. Persistence
 
@@ -190,4 +197,9 @@ Rapid Desktop Foundation 已在 additive Migration 0005/schema 5 中实现首个
 `Harness.Execution`；Electron `BrowserRuntime`、`WorkspaceRuntime` 与
 Rust `ToolRuntime` 是 capability/tool backends，不构成第四层。现有
 Provider、Project、Conversation、schema 6、permission 与 Browser security
-合同不因此改变。
+合同不因此改变。2026-08-28 起 Harness 八域固定为 Ingress & Context、
+Work Scope & Goal、Continuity、Orchestration、Governance、Execution、
+Verification & Evidence 与 IDR（Individualized Disposition Runtime）；
+`Adaptation` 不再是一级域。Memory 是 cross-cutting Domain，Agent Profile 是
+Fielora-owned versioned product definition；均不构成新 Runtime。历史 Bounded
+IDR 的当前名称为 Entry Intent Resolver。
