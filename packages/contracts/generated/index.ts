@@ -520,6 +520,32 @@ export type McpConnectionRuntimeView = { run_id: AgentRunId, run_status: AgentRu
 
 export type ActivateMcpConnectionRequest = { run_id: AgentRunId, connection_id: string, };
 
+export type SkillCatalogRequest = { field_id: FieldId | null, };
+
+export type SkillMetadataView = { key: string, value: string, };
+
+export type SkillPluginProvenanceView = { plugin_id: string, plugin_version: string, plugin_source: string, plugin_trust: string, plugin_manifest_digest: string, plugin_snapshot_digest: string, };
+
+export type SkillCatalogEntryView = { name: string, description: string, source_kind: string, scope: string, trust: string, version: string | null, content_digest: string, location_reference: string, license: string | null, compatibility: string | null, metadata: Array<SkillMetadataView>, allowed_tools_advisory: string | null, resources: Array<string>, resources_truncated: boolean, plugin: SkillPluginProvenanceView | null, };
+
+export type SkillCatalogDiagnosticView = { code: string, skill_name: string | null, };
+
+export type SkillCatalogView = { catalog_sha256: string, entries: Array<SkillCatalogEntryView>, diagnostics: Array<SkillCatalogDiagnosticView>, };
+
+export type PluginContributionSkillView = { name: string, relative_path: string, content_digest: string, };
+
+export type DeclarativePluginView = { id: string, name: string, version: string, publisher: string, engine_requirement: string, source_kind: string, trust: string, manifest_reference: string, manifest_digest: string, skills: Array<PluginContributionSkillView>, plugin_snapshot_digest: string, };
+
+export type LocalPluginRegistrationStatus = "AVAILABLE" | "UNAVAILABLE";
+
+export type LocalPluginRegistrationView = { registration_id: string, root_reference: string, status: LocalPluginRegistrationStatus, error_code: string | null, plugin: DeclarativePluginView | null, };
+
+export type LocalPluginRegistryView = { config_status: string, config_digest: string | null, registrations: Array<LocalPluginRegistrationView>, };
+
+export type RegisterLocalPluginRequest = { root_path: string, };
+
+export type UnregisterLocalPluginRequest = { registration_id: string, };
+
 export type AgentContextSnapshotView = { id: ContextSnapshotId, run_id: AgentRunId, step: number, project_root_hash: string, selected_files: number, estimated_tokens: number, content_sha256: string, manifest: unknown, created_at: number, };
 
 export type VerificationReceiptView = { id: VerificationReceiptId, run_id: AgentRunId, tool_call_id: ToolCallId | null, check_kind: string, outcome: VerificationOutcome, summary: string, artifact_sha256: string | null, subject: VerificationSubject | null, exit_code: number | null, created_at: number, };

@@ -32,6 +32,8 @@ import type {
   AgentChangedEvent, AgentRunView, StartAgentRunRequest, AgentRunRequest, ListAgentRunsRequest,
   AgentEventView, ListAgentEventsRequest, AgentToolCallView, ApprovalView, ResolveAgentApprovalRequest,
   ActivateMcpConnectionRequest, McpConnectionCatalogView, McpConnectionRuntimeView,
+  SkillCatalogRequest, SkillCatalogView, LocalPluginRegistryView,
+  RegisterLocalPluginRequest, UnregisterLocalPluginRequest,
   BuildProvenanceView,
   LibraryObjectView, LibraryObjectRequest, DeleteLibraryObjectRequest, ListLibraryObjectsRequest,
   SaveWebLibraryRequest, ProfileView,
@@ -193,6 +195,14 @@ export interface FieloraBridge {
     mcpConnections(): Promise<McpConnectionCatalogView>;
     mcpRuntime(request: AgentRunRequest): Promise<McpConnectionRuntimeView>;
     activateMcpConnection(request: ActivateMcpConnectionRequest): Promise<AgentToolCallView>;
+  };
+  skill: {
+    catalog(request: SkillCatalogRequest): Promise<SkillCatalogView>;
+  };
+  plugin: {
+    localRegistry(): Promise<LocalPluginRegistryView>;
+    registerLocal(request: RegisterLocalPluginRequest): Promise<LocalPluginRegistryView>;
+    unregisterLocal(request: UnregisterLocalPluginRequest): Promise<LocalPluginRegistryView>;
   };
   capture: {
     create(request: CreateCaptureRequest): Promise<CaptureView>;

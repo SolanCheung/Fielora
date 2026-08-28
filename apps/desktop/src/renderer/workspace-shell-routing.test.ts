@@ -28,7 +28,7 @@ test('right resource view has animated opening, a resizable collapsible tree, an
   assert.match(workspace, /fielora:dock-file-tree-width/);
   assert.match(styles, /\.dock-resource-layout \{[\s\S]*?var\(--dock-file-tree-width,270px\)/);
   assert.match(styles, /\.dock-resource-layout\.file-tree-collapsed \{[\s\S]*?0 0/);
-  assert.match(workspace, /data-testid="dock-project-open-default"><WorkspaceAppBadge target="FILE_EXPLORER" iconDataUrl=\{fileExplorerIconDataUrl\}/);
+  assert.match(workspace, /data-testid="dock-project-open-default"><ShellIcon name="folder"\/><span>打开<\/span>/);
   assert.match(workspace, /data-testid="dock-project-open-menu"/);
   assert.match(workspace, /projectOpenTargets\.map\(\(target\)/);
   assert.match(styles, /\.right-dock-toolbar \.project-launcher-popover > button \{[\s\S]*?width: 100%[\s\S]*?grid-template-columns: 25px minmax\(0,1fr\)/);

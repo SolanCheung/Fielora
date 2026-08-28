@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 const PROTOCOL: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
-const CAPABILITIES: [&str; 81] = [
+const CAPABILITIES: [&str; 85] = [
     "system.build_provenance",
     "field.create",
     "field.list",
@@ -116,6 +116,10 @@ const CAPABILITIES: [&str; 81] = [
     "artifact.asset_preview",
     "artifact.diagram_preview",
     "artifact.set_archive_state",
+    "agent.skill_catalog",
+    "plugin.local_registry",
+    "plugin.register_local",
+    "plugin.unregister_local",
 ];
 
 #[derive(Debug, Error)]
@@ -721,6 +725,19 @@ fn dispatch_request(
         "command.agent.activate_mcp_connection" => {
             let params: ActivateMcpConnectionRequest = parse_params(&request.params)?;
             serialize(runtime.agent.activate_mcp_connection(params)?)
+        }
+        "query.agent.skill_catalog" => {
+            let params: SkillCatalogRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.skill_catalog(params)?)
+        }
+        "query.plugin.local_registry" => serialize(runtime.agent.plugin_registry()),
+        "command.plugin.register_local" => {
+            let params: RegisterLocalPluginRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.register_local_plugin(params)?)
+        }
+        "command.plugin.unregister_local" => {
+            let params: UnregisterLocalPluginRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.unregister_local_plugin(params)?)
         }
         "command.field.create" => {
             let params: CreateFieldRequest = parse_params(&request.params)?;

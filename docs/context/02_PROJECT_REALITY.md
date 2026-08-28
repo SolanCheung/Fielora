@@ -2041,3 +2041,49 @@ PUBLIC_NETWORK_REQUESTS: 0
 HUMAN_GATE: READY / NOT_YET_ACCEPTED
 CHANGE_IMPACT: MEDIUM / PRESENTATION_ONLY
 ```
+
+## 93. Final UI / Product Exposure Polish
+
+Overall UI Human Review 的主要问题已在同一 changeset 收口。Diagram 默认按
+renderer intrinsic coordinate size显示，不再因容器 `fit-contain` 或二次 CSS scale缩成
+中央细条；Surface具有固定可用高度、内部低存在感滚动和临时“适合视图 / 可读大小”切换，
+不会改变 Diagram semantic revision。Spreadsheet移除行/列 slider，继续用 bounded 20×10
+sparse DOM viewport，并通过水平/垂直滚动更新当前窗口；sheet/header/grid与 literal alignment
+保持产品化 viewer语义。Presentation放大 active slide、增加 navigator可读宽度与完整 title
+tooltip；active dock tab获得更高宽度优先级与 horizontal overflow。
+
+Workspace移除 Artifact上方重复 Project toolbar，保持 Tabs + Artifact Header；1440/1920
+并排实测 Conversation为580/862px，1280使用720px overlay且Conversation保持1006px。
+0-message Conversation让同一Composer进入lower-center start state，首条消息后回到底部模式。
+文件变更summary数字、Full Control permission mode、MCP configured/inactive state与普通 folder
+action统一为中性色；真实 PASS/FAIL与代码diff内容仍保留语义色。Light/Dark均使用既有Theme
+Registry，没有新theme或glass范围。
+
+Settings新增产品拥有的Skills与插件页面，并与现有MCP并列为“AI与扩展”。Skills只读取现有
+`SkillCatalog` metadata，分组Built-in/current Project/Plugin-contributed，展开也不调用
+`load_skill`或展示body；`allowed-tools`明确是advisory。Local Plugin Registry复用ConfigRoot
+的bounded `local-plugins.json`，只保存最多16个explicit canonical root reference。人类通过
+trusted FIPC注册/移除，existing Plugin Contribution Host每次被动重读manifest/Skill facts；
+broken root保留为unavailable且不crash，移除不删除Plugin文件。Project不会自动扫描Plugin
+目录，registry不会读取Credential、启动process/network/MCP或向Model暴露路径/能力。
+
+```text
+FINAL_UI_PRODUCT_EXPOSURE_POLISH: IMPLEMENTED / TARGETED_DESKTOP_VALIDATED
+SKILLS_SETTINGS: METADATA_ONLY / EXISTING_SKILL_CATALOG
+LOCAL_PLUGIN_REGISTRY: CONFIG_ROOT_REFERENCES_ONLY
+PLUGIN_EXECUTABLE_RUNTIME_INSTALLER_MARKETPLACE: NOT_IMPLEMENTED
+MODEL_TOOL_DELTA: 0
+CURRENT_DATABASE_SCHEMA: 11
+NEW_MIGRATION: 0
+NEW_DEPENDENCIES: 0
+MODEL_REQUESTS: 0
+PUBLIC_NETWORK_REQUESTS: 0
+HUMAN_GATE: READY / NOT_YET_ACCEPTED
+CHANGE_IMPACT: MEDIUM / TRUSTED_CONFIG_AND_PRODUCT_EXPOSURE
+```
+
+UI development lane为184/184 TS PASS；Cross development lane包含Contracts、全部affected
+Rust、Clippy、12 Core integration并PASS。Artifact Working Surface、Overall visual、MCP
+Settings与Appearance Light/Dark targeted E2E均PASS，最终12张截图位于
+`artifacts/final-ui-polish/`。Full PreMerge、Browse baseline、packaged/portable、live Model与
+public network按范围未运行。

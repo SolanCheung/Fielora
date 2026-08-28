@@ -234,6 +234,6 @@ test('live edited files reuse applied Agent Review data and remain identical in 
   assert.match(turn, /detailsOpen && <div className="agent-run-details"/);
   assert.match(turn, /\['PROPOSED', 'RUNNING', 'WAITING_APPROVAL'\]\.includes\(tool\.status\)/);
   assert.match(turn, /再显示 \{remaining\} 个文件/);
-  assert.match(styles, /\.agent-live-files small b[^}]*var\(--fl-color-text-success\)/);
-  assert.match(styles, /\.agent-live-files small i[^}]*var\(--fl-color-text-danger\)/);
+  assert.match(styles, /\.agent-live-files small b, \.agent-live-files small i[^}]*var\(--fl-color-text-muted\)/);
+  assert.match(styles, /\.agent-live-files small i[^}]*font-style: normal/);
 });

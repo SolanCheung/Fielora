@@ -44,7 +44,7 @@ interface ProjectWorkspaceProps {
   onNow: () => void;
   onBrowse: () => void;
   onFields: () => void;
-  onSettings: () => void;
+  onSettings: (fieldId: string | null) => void;
   newConversationRequest: number;
   addProjectRequest: number;
   workspaceRequest: { id: number; tool: 'FILES' | 'DIFF' | 'TERMINAL' | 'BROWSER' };
@@ -1986,10 +1986,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     .filter((source, index, all) => all.findIndex((candidate) => candidate.id === source.id) === index)
     .slice(-3)
     .reverse();
-  const fileExplorerIconDataUrl = projectOpenTargets.find((target) => target.target === 'FILE_EXPLORER')?.icon_data_url ?? null;
   const environmentControl = project && projectActionsLayer ? createPortal(<>
     <div className="project-launcher" ref={projectLauncherRef}>
-      <button type="button" className="project-launcher-main" aria-label="在文件资源管理器中打开 Project" title="打开 Project" onClick={() => void openProjectTarget('FILE_EXPLORER')} data-testid="project-open-default"><WorkspaceAppBadge target="FILE_EXPLORER" iconDataUrl={fileExplorerIconDataUrl}/></button>
+      <button type="button" className="project-launcher-main" aria-label="在文件资源管理器中打开 Project" title="打开 Project" onClick={() => void openProjectTarget('FILE_EXPLORER')} data-testid="project-open-default"><ShellIcon name="folder"/></button>
       <button type="button" className={`project-launcher-more ${projectLauncherOpen ? 'active' : ''}`} aria-label="选择打开方式" title="选择打开方式" aria-expanded={projectLauncherOpen} onClick={() => void toggleProjectLauncher()} data-testid="project-open-menu-toggle"><ShellIcon name="chevronDown"/></button>
       {projectLauncherOpen && <div className="project-launcher-popover" role="menu" data-testid="project-open-menu">
         {projectOpenTargets.map((target) => <button key={target.target} type="button" role="menuitem" onClick={() => void openProjectTarget(target.target)}><WorkspaceAppBadge target={target.target} iconDataUrl={target.icon_data_url}/><span>{target.label}</span></button>)}
@@ -2023,7 +2022,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const dockBreadcrumb = project
     ? [project.title, ...(activeDockTab?.relativePath?.replaceAll('\\', '/').split('/').filter(Boolean) ?? [])]
     : [];
-  const dockToolbar = activeDockTab && activeDockTab.kind !== 'TERMINAL' && project ? <>
+  const dockToolbar = activeDockTab && !['TERMINAL', 'ARTIFACT', 'ARTIFACTS'].includes(activeDockTab.kind) && project ? <>
     <div className="right-dock-breadcrumb" title={dockBreadcrumb.join(' / ')}>
       {dockBreadcrumb.map((segment, index) => <Fragment key={`${segment}:${index}`}>{index > 0 && <i>/</i>}<span>{segment}</span></Fragment>)}
     </div>
@@ -2034,7 +2033,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       </div>}
       {activeDockTab.kind === 'FILE' && activeFileSession?.file && activeFileSession.content !== activeFileSession.file.content && <button type="button" className="right-dock-review-change" onClick={() => reviewDockFileSession(activeDockTab, activeFileSession)} data-testid="review-change">审阅修改</button>}
       <div className="dock-project-launcher" ref={dockProjectLauncherRef}>
-        <button type="button" className="dock-project-launcher-main" onClick={() => void openProjectTarget('FILE_EXPLORER')} aria-label="在文件资源管理器中打开 Project" title="打开 Project" data-testid="dock-project-open-default"><WorkspaceAppBadge target="FILE_EXPLORER" iconDataUrl={fileExplorerIconDataUrl}/><span>打开</span></button>
+        <button type="button" className="dock-project-launcher-main" onClick={() => void openProjectTarget('FILE_EXPLORER')} aria-label="在文件资源管理器中打开 Project" title="打开 Project" data-testid="dock-project-open-default"><ShellIcon name="folder"/><span>打开</span></button>
         <button type="button" className={`dock-project-launcher-more ${dockProjectLauncherOpen ? 'active' : ''}`} onClick={() => void toggleDockProjectLauncher()} aria-label="选择打开方式" title="选择打开方式" aria-expanded={dockProjectLauncherOpen} data-testid="dock-project-open-menu-toggle"><ShellIcon name="chevronDown"/></button>
         {dockProjectLauncherOpen && <div className="project-launcher-popover dock-project-launcher-popover" role="menu" data-testid="dock-project-open-menu">
           {projectOpenTargets.map((target) => <button key={target.target} type="button" role="menuitem" onClick={() => void openProjectTarget(target.target)}><WorkspaceAppBadge target={target.target} iconDataUrl={target.icon_data_url}/><span>{target.label}</span></button>)}
@@ -2119,7 +2118,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         onBrowse={onBrowse}
         onFields={onFields}
         onNewConversation={() => void createConversation()}
-        onSettings={onSettings}
+        onSettings={() => onSettings(project?.field_id ?? null)}
         onAddProject={() => void addProject()}
         projectHeaderControls={<>
           <ProjectSortControl value={projectSort} onChange={updateProjectSort}/>
@@ -2141,7 +2140,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       />}
     >
 
-      <section className="conversation-column">
+      <section className={`conversation-column${visibleMessages.length === 0 && !streamingOutput ? ' is-empty-conversation' : ''}`}>
         {!project ? newConversationStart ? <div className="new-conversation-start" data-testid="new-conversation-start"><div><p className="eyebrow">新对话</p><h2>开始一条新对话</h2><p>先选择一个本地文件夹建立 Project，然后即可创建第一条对话。Project 与对话各自独立，不会修改文件夹内容。</p><button className="secondary-button" onClick={() => void addProject()} data-testid="new-conversation-choose-project"><ShellIcon name="folder"/>选择 Project 文件夹</button></div></div> : <div className="project-overview" data-testid="project-overview"><header><div><p className="eyebrow">PROJECTS</p><h1>项目</h1><p>本地文件夹、持久对话、文件变更和运行结果。</p></div><button className="secondary-button" onClick={() => void addProject()}><ShellIcon name="folder"/>打开文件夹</button></header><div className="project-overview-empty"><h2>还没有项目</h2><p>使用左侧“项目”旁的 ＋ 或上方“打开文件夹”添加第一个本地 Project。</p></div></div> : !conversation ? <div className="project-empty-conversation" data-testid="project-empty-conversation">
           <div className="project-empty-copy"><h2>{project.title}</h2><p>开始新的工作</p></div>
           <form className="project-empty-composer" onSubmit={(event) => { event.preventDefault(); void createConversationFor(project); }} data-testid="project-empty-composer">
@@ -2151,7 +2150,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         </div> : <>
           <header className="conversation-header conversation-context-header"><div className="conversation-heading"><div><div className="conversation-title-line"><h2 title={conversation.title}>{conversation.title}</h2><ConversationActionsMenu onRename={() => setConversationDialog({ kind: 'RENAME', value: conversation.title })} onDelete={() => setConversationDialog({ kind: 'DELETE' })}/></div><small title={project.root_path}><span>{project.title}</span><i>/</i><span>Fielora</span></small></div></div></header>
           <div className="message-list" ref={messageListRef}>
-            {visibleMessages.length === 0 && !streamingOutput ? <div className="conversation-empty"><h3>这条对话还没有消息</h3><p>描述一个任务，Agent 会读取项目、使用工具、修改文件并运行验证。</p></div> : visibleMessages.map((message, index) => {
+            {visibleMessages.length === 0 && !streamingOutput ? <div className="conversation-empty"><h3>从这里开始工作</h3><p>描述你想在当前项目中完成的任务。</p></div> : visibleMessages.map((message, index) => {
               const isCurrentAgentAssistant = Boolean(agentRun && agentTurn?.assistantMessageId === message.id);
               if (message.role === 'ASSISTANT' && message.invocation_id) {
                 if (isCurrentAgentAssistant) return null;
@@ -2195,7 +2194,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
             <div className="composer-footer">
               <div className="composer-left-actions">
                 <button type="button" className="composer-icon-button" onClick={() => void pickAttachments()} aria-label="添加附件" title="添加附件" data-testid="composer-add-attachment"><ComposerIcon name="plus"/></button>
-                <SelectMenu className="composer-menu-picker permission-picker" value={permission} ariaLabel="权限" testId="composer-permission" placement="top" hideChevron leading={<PermissionIcon permission={permission}/>} options={[{ value: 'READ_ONLY', label: '请求批准', description: '修改文件和运行命令时始终询问', icon: <PermissionIcon permission="READ_ONLY"/> }, { value: 'REVIEW_CHANGES', label: '帮我批准', description: '仅对检测到的风险操作请求批准', icon: <PermissionIcon permission="REVIEW_CHANGES"/> }, { value: 'FULL_CONTROL', label: '完全访问权限', description: '自动访问文件、运行命令和使用网络', icon: <PermissionIcon permission="FULL_CONTROL"/>, tone: 'warning' }]} onChange={updatePermission} />
+                <SelectMenu className="composer-menu-picker permission-picker" value={permission} ariaLabel="权限" testId="composer-permission" placement="top" hideChevron leading={<PermissionIcon permission={permission}/>} options={[{ value: 'READ_ONLY', label: '请求批准', description: '修改文件和运行命令时始终询问', icon: <PermissionIcon permission="READ_ONLY"/> }, { value: 'REVIEW_CHANGES', label: '帮我批准', description: '仅对检测到的风险操作请求批准', icon: <PermissionIcon permission="REVIEW_CHANGES"/> }, { value: 'FULL_CONTROL', label: '完全访问权限', description: '自动访问文件、运行命令和使用网络', icon: <PermissionIcon permission="FULL_CONTROL"/> }]} onChange={updatePermission} />
               </div>
               <div className="composer-right-actions">
                 {activeProviders.length > 1 ? <SelectMenu className="composer-menu-picker configured-model-picker" value={conversation?.provider_config_id ?? ''} ariaLabel="模型" testId="conversation-model" placement="top" options={[{ value: '', label: '选择模型' }, ...activeProviders.map((provider) => ({ value: provider.id, label: provider.default_model, description: `${provider.display_name}${provider.credential_present ? '' : ' · 需要凭据'}`, disabled: !provider.credential_present }))]} onChange={(value) => void updateConversationSelection(value)} /> : effectiveConversationProvider && <span className="composer-model-label" title={effectiveConversationProvider.display_name}>{effectiveConversationProvider.default_model}</span>}

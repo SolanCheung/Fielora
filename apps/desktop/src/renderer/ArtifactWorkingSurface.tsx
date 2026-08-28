@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type UIEvent } from 'react';
 import type {
   ArtifactAssetRefV1, ArtifactReadView, ArtifactRevisionMetadataView,
   ArtifactView, DocumentBlock, PresentationBlock, PresentationSlide,
@@ -96,6 +96,7 @@ function columnLabel(column: number): string {
 }
 
 function SpreadsheetGrid({ sheet, range }: { sheet: SpreadsheetSheetV1; range?: { startRow: number; startColumn: number; endRow: number; endColumn: number } }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const firstRow = sheet.cells.length > 0 ? Math.min(...sheet.cells.map((cell) => cell.row)) : 1;
   const firstColumn = sheet.cells.length > 0 ? Math.min(...sheet.cells.map((cell) => cell.column)) : 1;
   const [rowStart, setRowStart] = useState(range?.startRow ?? firstRow);
@@ -103,19 +104,28 @@ function SpreadsheetGrid({ sheet, range }: { sheet: SpreadsheetSheetV1; range?: 
   useEffect(() => {
     setRowStart(range?.startRow ?? firstRow);
     setColumnStart(range?.startColumn ?? firstColumn);
+    if (scrollRef.current) scrollRef.current.scrollTo({ top: 0, left: 0 });
   }, [firstColumn, firstRow, range?.startColumn, range?.startRow, sheet.sheet_id]);
-  const maxRow = range?.endRow ?? Math.max(...sheet.cells.map((cell) => cell.row), rowStart);
-  const maxColumn = range?.endColumn ?? Math.max(...sheet.cells.map((cell) => cell.column), columnStart);
+  const maxRow = range?.endRow ?? Math.max(firstRow, ...sheet.cells.map((cell) => cell.row));
+  const maxColumn = range?.endColumn ?? Math.max(firstColumn, ...sheet.cells.map((cell) => cell.column));
+  const rowCount = range ? Math.min(20, range.endRow - range.startRow + 1) : 20;
+  const columnCount = range ? Math.min(10, range.endColumn - range.startColumn + 1) : 10;
   const viewport = useMemo(() => spreadsheetViewport(sheet.cells, rowStart, columnStart, range ? Math.min(20, range.endRow - range.startRow + 1) : 20, range ? Math.min(10, range.endColumn - range.startColumn + 1) : 10), [columnStart, range, rowStart, sheet.cells]);
-  return <div className="artifact-sheet-grid-wrap" data-testid="artifact-spreadsheet-grid" data-rendered-cells={viewport.rows.length * viewport.columns.length}>
-    {!range && <div className="artifact-grid-navigation">
-      <label>行 <input type="range" min={1} max={Math.max(1, maxRow)} value={Math.min(rowStart, maxRow)} onChange={(event) => setRowStart(Number(event.target.value))}/><span>{rowStart}</span></label>
-      <label>列 <input type="range" min={1} max={Math.max(1, maxColumn)} value={Math.min(columnStart, maxColumn)} onChange={(event) => setColumnStart(Number(event.target.value))}/><span>{columnLabel(columnStart)}</span></label>
-    </div>}
-    <div className="artifact-sheet-grid" role="grid" style={{ gridTemplateColumns: `48px repeat(${viewport.columns.length}, minmax(96px, 1fr))` }}>
+  function onScroll(event: UIEvent<HTMLDivElement>) {
+    if (range) return;
+    const nextRow = Math.min(Math.max(1, maxRow - rowCount + 1), Math.max(1, Math.floor(event.currentTarget.scrollTop / 35) + 1));
+    const nextColumn = Math.min(Math.max(1, maxColumn - columnCount + 1), Math.max(1, Math.floor(event.currentTarget.scrollLeft / 120) + 1));
+    if (nextRow !== rowStart) setRowStart(nextRow);
+    if (nextColumn !== columnStart) setColumnStart(nextColumn);
+  }
+  const virtualWidth = 48 + Math.max(columnCount, maxColumn) * 120;
+  const virtualHeight = 34 + Math.max(rowCount, maxRow) * 35;
+  return <div ref={scrollRef} className={`artifact-sheet-grid-wrap${range ? ' is-range' : ''}`} onScroll={onScroll} data-testid="artifact-spreadsheet-grid" data-rendered-cells={viewport.rows.length * viewport.columns.length} data-row-start={rowStart} data-column-start={columnStart}>
+    <div className="artifact-sheet-grid" role="grid" style={{ gridTemplateColumns: `48px repeat(${viewport.columns.length}, 120px)` }}>
       <span className="sheet-corner"/>{viewport.columns.map((column) => <span key={`h:${column}`} className="sheet-column" role="columnheader">{columnLabel(column)}</span>)}
       {viewport.rows.map((row) => <div className="sheet-row" role="row" key={row} style={{ display: 'contents' }}><span className="sheet-row-number" role="rowheader">{row}</span>{viewport.columns.map((column) => { const cell = viewport.cells.get(`${row}:${column}`); return <span key={`${row}:${column}`} role="gridcell" data-cell-kind={cell?.value.kind ?? 'EMPTY'} className={`sheet-cell ${cell?.presentation?.emphasis ? `emphasis-${cell.presentation.emphasis.toLowerCase()}` : ''}`} title={cellText(cell)}>{cellText(cell)}</span>; })}</div>)}
     </div>
+    {!range && <div className="artifact-sheet-virtual-space" style={{ width: virtualWidth, height: virtualHeight }} aria-hidden="true"/>}
   </div>;
 }
 
@@ -173,15 +183,16 @@ function PresentationSurface({ read, selectedSlide, onSelectedSlide }: { read: A
   if (read.revision.content.type !== 'PRESENTATION') return null;
   const slides = read.revision.content.content.slides;
   const index = Math.min(selectedSlide ?? 0, Math.max(0, slides.length - 1));
-  return <div className="artifact-presentation" data-testid="artifact-presentation-surface"><nav aria-label="幻灯片">{slides.map((slide, slideIndex) => <button key={slideIndex} type="button" className={index === slideIndex ? 'active' : ''} onClick={() => onSelectedSlide(slideIndex)} data-testid={`artifact-slide-${slideIndex}`}><span>{slideIndex + 1}</span><strong>{slide.title}</strong></button>)}</nav><main>{slides[index] ? <PresentationSlideView slide={slides[index]}/> : <div className="artifact-empty">没有幻灯片</div>}</main></div>;
+  return <div className="artifact-presentation" data-testid="artifact-presentation-surface"><nav aria-label="幻灯片">{slides.map((slide, slideIndex) => <button key={slideIndex} type="button" className={index === slideIndex ? 'active' : ''} title={slide.title} onClick={() => onSelectedSlide(slideIndex)} data-testid={`artifact-slide-${slideIndex}`}><span>{slideIndex + 1}</span><strong>{slide.title}</strong></button>)}</nav><main>{slides[index] ? <PresentationSlideView slide={slides[index]}/> : <div className="artifact-empty">没有幻灯片</div>}</main></div>;
 }
 
 function DiagramSurface({ read }: { read: ArtifactReadView }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
+  const [fitView, setFitView] = useState(false);
   useEffect(() => {
     let alive = true;
-    setUrl(''); setError('');
+    setUrl(''); setError(''); setFitView(false);
     void window.fielora.artifact.previewDiagram({ artifact_id: read.artifact.artifact_id, revision_id: read.revision.revision_id })
       .then((preview) => { if (alive && preview.semantic_sha256 === read.revision.semantic_sha256) setUrl(preview.data_url); else if (alive) setError('图示预览与当前版本不一致。'); })
       .catch((reason) => { if (alive) setError(productError(reason, '图示暂时无法安全渲染。')); });
@@ -189,7 +200,10 @@ function DiagramSurface({ read }: { read: ArtifactReadView }) {
   }, [read.artifact.artifact_id, read.revision.revision_id, read.revision.semantic_sha256]);
   if (error) return <div className="artifact-state artifact-error" role="alert">{error}</div>;
   if (!url) return <div className="artifact-state"><span className="artifact-spinner"/>正在生成受控预览…</div>;
-  return <div className="artifact-diagram" data-testid="artifact-diagram-surface"><img src={url} alt={read.artifact.title || 'Fielora 图示'}/><p>当前版本 · 受控预览</p></div>;
+  return <div className={`artifact-diagram${fitView ? ' fit-view' : ''}`} data-testid="artifact-diagram-surface" data-view-mode={fitView ? 'FIT' : 'READABLE'}>
+    <div className="artifact-diagram-toolbar"><span>当前版本 · {fitView ? '适合视图' : '原始可读大小'}</span><button type="button" onClick={() => setFitView((value) => !value)} data-testid="artifact-diagram-fit">{fitView ? '可读大小' : '适合视图'}</button></div>
+    <div className="artifact-diagram-canvas"><img src={url} alt={read.artifact.title || 'Fielora 图示'}/></div>
+  </div>;
 }
 
 function SpreadsheetSurface({ read, selectedSheetId, onSelectedSheet }: { read: ArtifactReadView; selectedSheetId: string | null; onSelectedSheet: (sheetId: string) => void }) {

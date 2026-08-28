@@ -66,13 +66,13 @@ enum SkillBacking {
 }
 
 #[derive(Debug, Clone)]
-struct PluginSkillProvenance {
-    plugin_id: String,
-    plugin_version: String,
-    plugin_source: String,
-    plugin_trust: String,
-    plugin_manifest_digest: String,
-    plugin_snapshot_digest: String,
+pub struct PluginSkillProvenance {
+    pub plugin_id: String,
+    pub plugin_version: String,
+    pub plugin_source: String,
+    pub plugin_trust: String,
+    pub plugin_manifest_digest: String,
+    pub plugin_snapshot_digest: String,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +96,26 @@ pub struct SkillCatalogEntry {
 }
 
 impl SkillCatalogEntry {
+    pub fn license(&self) -> Option<&str> {
+        self.license.as_deref()
+    }
+
+    pub fn compatibility(&self) -> Option<&str> {
+        self.compatibility.as_deref()
+    }
+
+    pub fn metadata(&self) -> &BTreeMap<String, String> {
+        &self.metadata
+    }
+
+    pub fn allowed_tools_advisory(&self) -> Option<&str> {
+        self.allowed_tools.as_deref()
+    }
+
+    pub fn plugin_provenance(&self) -> Option<&PluginSkillProvenance> {
+        self.plugin.as_ref()
+    }
+
     fn tier_one(&self) -> Value {
         json!({
             "name":self.name,
@@ -300,10 +320,24 @@ impl SkillCatalog {
         project_root: &Path,
         plugin_roots: &[PathBuf],
     ) -> Result<Self, PluginError> {
+        Self::discover(project_root)
+            .map_err(|_| PluginError::IoFailed)?
+            .admit_local_unpacked_plugins(plugin_roots)
+    }
+
+    /// Discovers explicitly supplied declarative Plugin contributions without
+    /// treating any directory as a Project or scanning for Project Skills.
+    pub fn discover_local_unpacked_plugins(plugin_roots: &[PathBuf]) -> Result<Self, PluginError> {
+        Self::builtin_only().admit_local_unpacked_plugins(plugin_roots)
+    }
+
+    fn admit_local_unpacked_plugins(
+        mut self,
+        plugin_roots: &[PathBuf],
+    ) -> Result<Self, PluginError> {
         if plugin_roots.len() > MAX_LOCAL_UNPACKED_PLUGINS {
             return Err(PluginError::ContributionInvalid);
         }
-        let mut catalog = Self::discover(project_root).map_err(|_| PluginError::IoFailed)?;
         let mut plugins = Vec::with_capacity(plugin_roots.len());
         let mut plugin_ids = HashSet::new();
         let mut plugin_roots_seen = HashSet::new();
@@ -319,7 +353,7 @@ impl SkillCatalog {
         }
         plugins.sort_by(|left, right| left.manifest.id.cmp(&right.manifest.id));
 
-        let mut admitted_names = catalog
+        let mut admitted_names = self
             .entries
             .iter()
             .map(|entry| entry.name.clone())
@@ -387,10 +421,10 @@ impl SkillCatalog {
             new_entries.extend(plugin_entries);
             snapshots.push(snapshot);
         }
-        catalog.entries.extend(new_entries);
-        catalog.plugin_snapshots = snapshots;
-        catalog.rebuild_digest();
-        Ok(catalog)
+        self.entries.extend(new_entries);
+        self.plugin_snapshots = snapshots;
+        self.rebuild_digest();
+        Ok(self)
     }
 
     pub fn entries(&self) -> &[SkillCatalogEntry] {

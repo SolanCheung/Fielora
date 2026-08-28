@@ -4,6 +4,8 @@
 
 **First Declarative Local Unpacked Plugin Slice:** `IMPLEMENTED / VALIDATED`
 
+**Local Registry + Settings Exposure:** `IMPLEMENTED / TARGETED VALIDATION PASS`
+
 **Executable Plugin Host:** `NOT IMPLEMENTED / NOT AUTHORIZED`
 
 **Track:** subordinate to `RAPID_DESKTOP_EXECUTION_V0.1.md` and the canonical
@@ -43,7 +45,7 @@ EXECUTABLE_PLUGIN_HOST_DIRECTION:
 PROCESS — DEFERRED, CONDITIONAL ON A REAL SANDBOX/RPC CHANGE IMPACT
 
 PERSISTENCE:
-NONE
+USER CONFIG ROOT REFERENCE REGISTRY (`local-plugins.json`)
 
 MODEL REQUESTS:
 0
@@ -66,28 +68,29 @@ Status meanings:
 | Plugin manifest | `EXISTS` | `crates/fielora-agent/src/plugins.rs`: exact `fielora.json`, typed strict parser, 64 KiB read bound, identity/version/engine/path validation, and digest. Electron Forge `plugins` remains unrelated build tooling. | Product / Extension packaging | Only the First Slice declarative Skill subset exists; executable or additional contribution fields are rejected. |
 | Plugin identity / version | `EXISTS` | `PluginManifest`, deterministic `publisher.plugin-name` validation, reserved `fielora` namespace, core SemVer validation, and minimum Fielora engine check. | Product / Extension packaging | Publisher remains an unverified namespace; signing and full SemVer ranges are absent. |
 | Plugin source / trust | `EXISTS` | `PluginSourceKind::LocalUnpackedPlugin`, `PluginTrust::UntrustedLocalPlugin`, and additive `SkillSourceKind::Plugin`. | Product admission plus receiving domain | No signed/verified Publisher trust state exists; source/trust grant no authority. |
-| Plugin root | `PARTIAL` | `AgentCoordinator::with_local_unpacked_plugin_roots` accepts only an explicit trusted caller/test-provided root; `plugins.rs` canonicalizes every root and contribution. | Product admission + Platform path mechanics | No user path picker, global directory, persistence, watcher, install, or automatic Project scan exists. |
-| Passive discovery | `EXISTS` | `discover_local_unpacked_plugin` and `SkillCatalog::discover_with_local_unpacked_plugins` only read, parse, validate, canonicalize, digest, and enumerate declared Skills. | Product / Extension packaging | Discovery is an internal explicit-root entry only; there is no product activation surface. |
+| Plugin root | `EXISTS` | `AgentCoordinator::with_user_config_root`, `local-plugins.json`, trusted human FIPC, and Settings → 插件 retain explicit canonical local roots; `plugins.rs` canonicalizes every root and contribution. | Product admission + Platform path mechanics | No watcher, install, automatic Project scan, enable-state, or executable activation exists. |
+| Passive discovery | `EXISTS` | `discover_local_unpacked_plugin`, `SkillCatalog::discover_local_unpacked_plugins`, and dynamic registry-backed catalog assembly only read, parse, validate, canonicalize, digest, and enumerate declared Skills. | Product / Extension packaging | Discovery remains declarative and passive; it never starts a process, network, MCP, credential, or Model action. |
 | Contribution admission | `EXISTS` | Bounded `PluginSnapshot` plus atomic pre-admission duplicate ID/path/name collision checks routes only declared standard Skills into `SkillCatalog`. | Product contribution admission, then receiving domain | Only Skill contributions are implemented. Tool/MCP/Command/Surface fields strictly reject. |
 | Skill contribution | `EXISTS` | `crates/fielora-agent/src/skills.rs`: Plugin backing reuses the standard parser, resource inventory, `SkillCatalog`, `load_skill`, `ContextCompiler`, content digest, and existing Skill TOCTOU. | Harness.Ingress & Context + Harness.Orchestration | No Plugin-specific Skill Runtime exists. Resource reads beyond inventory and all execution remain outside this Slice. |
 | ToolProvider contribution | `PARTIAL` | `ToolProvider`, `ProviderToolDefinition`, `coding_tool_catalog_with_providers`, `RoutedToolExecutor` in `crates/fielora-agent/src/lib.rs`. | Tools, with Harness-controlled selection and execution | A Provider can be registered by Fielora composition, but no Plugin manifest may declare or instantiate one. Executable Plugin admission and sandboxing are absent. |
 | MCP contribution | `PARTIAL` | `McpStdioToolProvider`, `McpConnectionSnapshot`, run-scoped activation, current Settings/Run UI. | Tools MCP adapter + Harness.Governance/Execution | User-owned `mcp.json` is the only product config source. No Plugin declaration converts into an `McpConnectionDefinition`; Plugin admission cannot activate MCP. |
 | Context contribution | `PARTIAL` | `ContextCompiler`, Context Snapshots, Skill admission, file/input admission in `AgentCoordinator`. | Harness.Ingress & Context | There is no generic Plugin Context Provider contract. No Plugin may append directly to Model/system context. |
 | Command contribution | `ABSENT` | FIPC `command.*` methods and Agent Tools are fixed, typed boundaries; Desktop buttons call explicit handlers. | Product actions or Harness/Tools, depending on effect | There is no command registry or Plugin command admission. Existing FIPC is intentionally not an untyped extension point. |
-| Surface contribution | `ABSENT` | React surfaces are statically composed; Settings has a real MCP category; Desktop has no Extensions or Plugins page. | Desktop Product UI | No declarative extension point, isolated Plugin view, placement contract, or UI capability bridge exists. |
+| Surface contribution | `ABSENT` | React surfaces remain statically composed. Settings now has product-owned Skills, MCP, and Plugin inspection/configuration pages. | Desktop Product UI | The Plugin Settings page manages Fielora registry facts; it is not a Plugin-contributed Surface. No declarative UI extension point or Plugin view bridge exists. |
 | Credential requirement | `PARTIAL` | `StaticCredentialRequirement`, `StaticCredentialBinding`, `StaticCredentialMediator`, `CredentialRef`, and Local MCP env binding. | Human configuration + Harness.Governance/Execution + Platform | Exact Fielora-owned binding exists, but Plugin manifests cannot declare requirements. Plugin code receives neither `CredentialStore` nor arbitrary refs. |
 | Sandbox / executable host | `ABSENT` | `ManagedChild` supplies `env_clear`, stdio, shutdown, and Windows Job Object cleanup; Electron WebContents use sandboxed preferences. | Future Platform host beneath receiving domains | `ManagedChild` explicitly is not a confidentiality or filesystem/network sandbox. No Plugin RPC, restricted token/AppContainer, capability imports, resource quotas, or Plugin lifecycle exists. Electron WebContents security is not an executable Plugin host. |
 | Signing | `ABSENT` | No Plugin signature or Publisher verification implementation. | Future package trust infrastructure | Package signature, certificate identity, revocation, and verified Publisher status are undefined. Signing must not imply permission. |
 | Install | `ABSENT` | Electron Forge packages Fielora itself; portable profile import/export moves bounded Fielora data. | Future Product / package acquisition | No Plugin installer, package extraction, Git acquisition, registry, installation registry, or uninstall flow exists. |
 | Update | `ABSENT` | No Plugin version watcher or update service. | Future Product / package lifecycle | No update channel, integrity recheck, rollback, or changed-requirements review exists. |
-| Diagnostics | `PARTIAL` | `PluginError` provides bounded fail-closed admission codes; existing Skill/load facts carry stable Plugin provenance. | Each current domain plus Product UI | No Plugin diagnostics UI or persisted read model exists, and absolute roots are intentionally excluded. |
+| Diagnostics | `EXISTS` | `PluginError` supplies bounded admission codes; `LocalPluginRegistryView` retains missing/invalid registrations as `UNAVAILABLE`; Settings shows bounded status/details and permits registry removal. | Each current domain plus Product UI | No executable runtime diagnostics, watcher, repair, signature, or Marketplace diagnostics exist. |
 | SDK / JSON Schema | `PARTIAL` | Public typed Rust manifest/snapshot contracts, deterministic parser/validator, repository fixture, and `docs/extensions/LOCAL_UNPACKED_PLUGIN_SKILL_V0.1.md`. | Developer contract / tooling | JSON Schema, CLI, scaffold, package builder, test kit, and public runtime SDK are deferred; no dependency was added. |
 | Marketplace | `ABSENT` | Marketplace is explicitly outside the current Rapid Desktop route. | Future discovery/trust infrastructure | No catalog, Publisher economy, ratings, payments, ranking, or registry exists; none is required by this Candidate. |
 
 Additional repository facts:
 
-- Settings already contains a dedicated MCP page and an AgentRun can show
-  run-scoped MCP state. This is not an Extension or Plugin management surface.
+- Settings contains dedicated Skills, MCP, and Plugin pages. Skills is
+  metadata-only; Plugin registration is an explicit trusted-human config
+  action. Neither page is a Model Tool or executable Plugin activation surface.
 - Opening a Project currently discovers standard Project Skills, but it does
   not scan Project MCP config. A future Plugin path must follow the stricter
   rule: opening a Project must not discover and execute Plugin code.
@@ -680,18 +683,20 @@ Hard invariant:
 
 | Option | First Slice result |
 |---|---|
-| Explicit path -> ephemeral runtime snapshot | **Selected.** Sufficient to prove the contribution host. |
-| User-level installation registry/config | Deferred. Requires product management, missing-path recovery, update, and portable-profile semantics. |
+| Explicit path -> ephemeral runtime snapshot | **Historical First Slice choice.** It proved the contribution host before product exposure. |
+| User-level root-reference registry/config | **Implemented.** Existing ConfigRoot stores only canonical registered local roots in bounded `local-plugins.json`; each read passively rediscovers current manifest/Skill facts. |
 | Database tables | Rejected for the First Slice. No demonstrated query or lifecycle requires a migration. |
 
 ```text
-FIRST_SLICE_PERSISTENCE: NONE
+CURRENT_REGISTRY_PERSISTENCE: CONFIG ROOT REFERENCES ONLY
 SCHEMA / MIGRATION: NONE
 ```
 
-The Plugin root remains an internal ephemeral path and must not enter Model
-context or durable Skill receipts. Only stable Plugin/source/digest facts are
-eligible for the existing receipt/context metadata.
+The Plugin root is retained only as trusted human configuration and safe
+diagnostics. It does not enter Model context, Skill body, Tool receipts, or
+credential state. Actual Plugin facts remain rediscovered from the current
+manifest through the existing contribution host; no manifest or Skill body is
+copied into the registry.
 
 ---
 
@@ -815,7 +820,9 @@ First Slice security properties:
   activation from discovery;
 - no Tool catalog/effect/Policy/Approval/Verification change;
 - no Project Plugin auto-scan;
-- no persistence, FIPC, UI, Electron Main, or DB access.
+- current persistence/FIPC/UI is limited to trusted-human root registration,
+  metadata inspection, bounded unavailable diagnostics, and removal; there is
+  still no DB access, executable activation, Plugin-provided UI, or Model Tool.
 
 Executable Plugin direction remains blocked until a separate Change Impact can
 prove all of the following:
@@ -878,8 +885,8 @@ Explicit/test-owned LOCAL_UNPACKED Plugin root
 + zero Tool catalog delta
 + zero MCP activation
 + zero Credential read
-+ zero UI/FIPC
-+ zero persistence/migration
++ later trusted-human Settings/FIPC exposure (implemented independently)
++ ConfigRoot reference persistence / zero migration
 + zero new dependency
 + zero Model request
 ```
@@ -1020,9 +1027,9 @@ Loading it must prove:
 5. Does a future product need namespaced internal Skill selection while
    preserving the unmodified standard `SKILL.md` name? First Slice collision
    rejection avoids answering prematurely.
-6. Where should an explicit human-owned local Plugin path be selected once a
-   product UI is authorized? First Slice uses only a test/internal explicit
-   path and adds no Settings surface.
+6. Should the implemented explicit path-input flow later gain a native folder
+   picker without broadening filesystem authority? Current Settings already
+   supports bounded human input and registry removal.
 7. Should a future installed Plugin remain user-scoped only, or may a Project
    reference an already user-admitted Plugin without causing code admission?
 8. Which Plugin diagnostics deserve a trusted human UI, and which must remain
@@ -1044,11 +1051,12 @@ Loading it must prove:
 # 23. EXPLICIT_NON_SCOPE
 
 - no Plugin Runtime, process, Worker, WASM, or third-party code;
-- no TypeScript, React, FIPC, UI, ToolProvider contribution, MCP contribution,
-  Credential, Policy, new receipt hierarchy, Verification, database schema,
-  migration, or dependency change;
+- no Plugin-contributed TypeScript/React Surface, ToolProvider contribution,
+  MCP contribution, Credential, Policy, new receipt hierarchy, Verification,
+  database schema, migration, or dependency change; the implemented trusted
+  Settings/FIPC registry exposure is product-owned and metadata-only;
 - no Plugin directory watcher or Project Plugin auto-scan;
-- no installer, package archive, Git fetch, registry, Marketplace, signing,
+- no installer, package archive, Git fetch, remote registry, Marketplace, signing,
   update, Publisher economy, ratings, reviews, payments, or ranking;
 - no Tool, MCP, Context Provider, Command, Surface, file handler, Artifact
   handler, or Settings contribution implementation;
@@ -1139,3 +1147,48 @@ git diff --check
 JSON Schema remains deferred. The First Slice needed no package dependency and
 the typed runtime parser plus deterministic tests remain the single source of
 admission authority. This document remains `DRAFT / CANDIDATE / NOT FROZEN`.
+
+---
+
+# 25. LOCAL_REGISTRY_AND_SETTINGS_IMPLEMENTATION_EVIDENCE
+
+The later Final UI/Product Exposure changeset adds a product-owned registry
+and inspection surface without changing the declarative contribution model:
+
+```text
+trusted human path input
+  -> typed FIPC validation
+  -> canonical directory validation
+  -> existing Plugin manifest / Skill admission
+  -> bounded ConfigRoot root-reference registry
+  -> passive rediscovery on catalog query / Agent catalog snapshot
+  -> existing SkillCatalog metadata and lazy load path
+```
+
+Current implementation facts:
+
+- `local-plugins.json` is versioned, bounded to 64 KiB and 16 canonical roots,
+  rejects unknown fields/duplicates, and uses temporary/backup replacement;
+- registration stores no manifest copy, Skill body, credential, permission,
+  executable state, MCP state, or activation flag;
+- invalid or missing registered roots remain visible as bounded unavailable
+  entries and never crash startup; removal changes only registry config and
+  never deletes Plugin files;
+- Settings → 插件 shows self-declared publisher namespace, source/trust,
+  manifest digest, engine compatibility, and Skill contributions; it does not
+  claim signing, verification, installation, execution, or permission;
+- Settings → Skills consumes the same current catalog and displays Plugin
+  provenance without loading the Skill body;
+- opening a Project still does not scan `.project/plugins`,
+  `.fielora/plugins`, `plugins/`, or another implicit Plugin directory;
+- the four trusted FIPC methods are human configuration/read methods, not
+  Agent Tools. Model Tool delta, process starts, public network requests,
+  credential reads, MCP activation, schema migrations, and dependencies are
+  all zero.
+
+Targeted Rust persistence/restart/broken-entry tests, full Cross development
+lane, UI development lane, declarative Plugin Settings E2E, Skills integration
+E2E, MCP Settings E2E, and Light/Dark visual evidence pass. Executable Plugin
+Host, installer, package manager, signing, remote registry, Marketplace, Tool
+contribution, MCP contribution, credential declaration, and Plugin-contributed
+Surface remain `NOT IMPLEMENTED / NOT AUTHORIZED`.

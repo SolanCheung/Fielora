@@ -18,13 +18,13 @@ mod spreadsheet;
 pub mod web;
 
 pub use plugins::{
-    PluginContributions, PluginEngines, PluginError, PluginManifest,
+    MAX_LOCAL_UNPACKED_PLUGINS, PluginContributions, PluginEngines, PluginError, PluginManifest,
     PluginSkillContributionSnapshot, PluginSnapshot, PluginSourceKind, PluginTrust,
 };
 
 pub use skills::{
-    CompiledSkillContext, LoadedSkill, SkillCatalog, SkillCatalogEntry, SkillDiagnostic,
-    SkillSourceKind,
+    CompiledSkillContext, LoadedSkill, PluginSkillProvenance, SkillCatalog, SkillCatalogEntry,
+    SkillDiagnostic, SkillSourceKind,
 };
 
 use fielora_contracts::{

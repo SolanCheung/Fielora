@@ -2510,6 +2510,121 @@ pub struct ActivateMcpConnectionRequest {
     pub connection_id: String,
 }
 
+// Metadata-only projections for the existing SkillCatalog and declarative
+// local unpacked Plugin contribution host. These contracts never contain a
+// Skill body, executable state, credentials, permissions, or MCP activation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SkillCatalogRequest {
+    pub field_id: Option<FieldId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SkillMetadataView {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SkillPluginProvenanceView {
+    pub plugin_id: String,
+    pub plugin_version: String,
+    pub plugin_source: String,
+    pub plugin_trust: String,
+    pub plugin_manifest_digest: String,
+    pub plugin_snapshot_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SkillCatalogEntryView {
+    pub name: String,
+    pub description: String,
+    pub source_kind: String,
+    pub scope: String,
+    pub trust: String,
+    pub version: Option<String>,
+    pub content_digest: String,
+    pub location_reference: String,
+    pub license: Option<String>,
+    pub compatibility: Option<String>,
+    pub metadata: Vec<SkillMetadataView>,
+    pub allowed_tools_advisory: Option<String>,
+    pub resources: Vec<String>,
+    pub resources_truncated: bool,
+    pub plugin: Option<SkillPluginProvenanceView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SkillCatalogDiagnosticView {
+    pub code: String,
+    pub skill_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SkillCatalogView {
+    pub catalog_sha256: String,
+    pub entries: Vec<SkillCatalogEntryView>,
+    pub diagnostics: Vec<SkillCatalogDiagnosticView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PluginContributionSkillView {
+    pub name: String,
+    pub relative_path: String,
+    pub content_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DeclarativePluginView {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub publisher: String,
+    pub engine_requirement: String,
+    pub source_kind: String,
+    pub trust: String,
+    pub manifest_reference: String,
+    pub manifest_digest: String,
+    pub skills: Vec<PluginContributionSkillView>,
+    pub plugin_snapshot_digest: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum LocalPluginRegistrationStatus {
+    Available,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LocalPluginRegistrationView {
+    pub registration_id: String,
+    pub root_reference: String,
+    pub status: LocalPluginRegistrationStatus,
+    pub error_code: Option<String>,
+    pub plugin: Option<DeclarativePluginView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LocalPluginRegistryView {
+    pub config_status: String,
+    pub config_digest: Option<String>,
+    pub registrations: Vec<LocalPluginRegistrationView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct RegisterLocalPluginRequest {
+    pub root_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct UnregisterLocalPluginRequest {
+    pub registration_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct AgentContextSnapshotView {
     pub id: ContextSnapshotId,

@@ -25,12 +25,12 @@ test('composer permission uses three semantic icons without a trigger chevron', 
   assert.match(styles, /permission-icon\[data-permission-icon="FULL_CONTROL"\]/);
 });
 
-test('narrow permission trigger is icon-only and full control alone uses warning treatment', () => {
+test('narrow permission trigger is icon-only and every persistent mode stays neutral', () => {
   assert.match(styles, /@container \(max-width: 560px\)[\s\S]*?\.permission-picker \{ width: 34px; flex: 0 0 34px; \}/);
   assert.match(styles, /\.permission-picker \.ui-select-value \{ display: none; \}/);
-  assert.match(controls, /permission-picker\[data-value="FULL_CONTROL"\][\s\S]*?var\(--fl-color-permission-warning\)/);
-  assert.match(controls, /permission-icon\[data-permission-icon="FULL_CONTROL"\][\s\S]*?var\(--fl-color-permission-warning\)/);
-  assert.match(controls, /> button\.is-warning \.ui-select-option-icon/);
+  assert.match(controls, /permission-picker\[data-value="FULL_CONTROL"\][\s\S]*?var\(--fl-color-text\)/);
+  assert.match(controls, /permission-icon\[data-permission-icon="FULL_CONTROL"\][\s\S]*?currentColor/);
+  assert.doesNotMatch(workspace, /value: 'FULL_CONTROL'[\s\S]{0,220}tone: 'warning'/);
 });
 
 test('permission typography follows the shared system type hierarchy', () => {

@@ -50,6 +50,7 @@ export function App() {
   const [addProjectRequest, setAddProjectRequest] = useState(0);
   const [workspaceRequest, setWorkspaceRequest] = useState<{ id: number; tool: 'FILES' | 'DIFF' | 'TERMINAL' | 'BROWSER' }>({ id: 0, tool: 'FILES' });
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>('GENERAL');
+  const [settingsFieldId, setSettingsFieldId] = useState<string | null>(null);
   const [newStateKind, setNewStateKind] = useState<FieldStateKind>('TASK');
   const [stateEdit, setStateEdit] = useState<{ mode: 'REVISE' | 'SUPERSEDE'; state: StateView; value: string } | null>(null);
   const selectedFieldRef = useRef<string | undefined>(undefined);
@@ -181,7 +182,8 @@ export function App() {
   const goProjects = useCallback(() => navigateTo('PROJECTS'), [navigateTo]);
   const goBrowse = useCallback(() => window.dispatchEvent(new CustomEvent('fielora:open-utility', { detail: 'BROWSER' })), []);
   const goFields = useCallback(() => navigateTo('FIELDS'), [navigateTo]);
-  const goSettings = useCallback(() => { setSettingsCategory('GENERAL'); navigateTo('SETTINGS'); }, [navigateTo]);
+  const goSettings = useCallback(() => { setSettingsFieldId(null); setSettingsCategory('GENERAL'); navigateTo('SETTINGS'); }, [navigateTo]);
+  const goProjectSettings = useCallback((fieldId: string | null) => { setSettingsFieldId(fieldId); setSettingsCategory('GENERAL'); navigateTo('SETTINGS'); }, [navigateTo]);
   const goNewConversation = useCallback(() => { setNewConversationRequest((value) => value + 1); navigateTo('PROJECTS'); }, [navigateTo]);
   const openWorkspaceTool = useCallback((tool: 'FILES' | 'DIFF' | 'TERMINAL' | 'BROWSER') => {
     if (tool === 'TERMINAL' && appViewRef.current !== 'PROJECTS') return;
@@ -225,7 +227,7 @@ export function App() {
     };
     const openSettings = (event: Event) => {
       const category = (event as CustomEvent<SettingsCategory>).detail;
-      if (['GENERAL', 'APPEARANCE', 'MODELS', 'STORAGE_DATA', 'SHORTCUTS', 'ABOUT', 'BROWSER'].includes(category)) setSettingsCategory(category);
+      if (['GENERAL', 'APPEARANCE', 'MODELS', 'SKILLS', 'MCP', 'PLUGINS', 'STORAGE_DATA', 'SHORTCUTS', 'ABOUT', 'BROWSER'].includes(category)) setSettingsCategory(category);
       navigateTo('SETTINGS');
     };
     window.addEventListener('fielora:navigate', navigate);
@@ -251,11 +253,11 @@ export function App() {
     return <main className="startup" data-testid="startup-screen"><img className="brand-logo" src={fieloraLogo} alt="Fielora" /><h1>{failed ? 'Fielora Core 暂时不可用' : '正在启动 Fielora…'}</h1><p>{failed ? (error || '核心服务未能启动。你可以重试，或打开日志目录查看详情。') : '正在恢复你的 Field Reality。'}</p>{failed && <div className="actions"><button onClick={() => void window.fielora.core.retry()} data-testid="retry-core">重试</button><button className="secondary" onClick={() => void window.fielora.core.openLogs()}>打开日志目录</button><button className="quiet" onClick={() => void window.fielora.core.quit()}>退出</button></div>}</main>;
   }
 
-  if (screen === 'projects') return <ProjectWorkspace onNow={goNow} onBrowse={goBrowse} onFields={goFields} onSettings={goSettings} newConversationRequest={newConversationRequest} addProjectRequest={addProjectRequest} workspaceRequest={workspaceRequest} />;
+  if (screen === 'projects') return <ProjectWorkspace onNow={goNow} onBrowse={goBrowse} onFields={goFields} onSettings={goProjectSettings} newConversationRequest={newConversationRequest} addProjectRequest={addProjectRequest} workspaceRequest={workspaceRequest} />;
 
   if (screen === 'library') return <LibraryScreen onProjects={goProjects} onNow={goNow} onBrowse={goBrowse} onFields={goFields} onNewConversation={goNewConversation} onSettings={goSettings} />;
 
-  if (screen === 'settings') return <SettingsScreen preferences={preferences} onChange={updatePreferences} onBack={() => navigationIndex.current > 0 ? moveNavigation(-1) : goProjects()} initialCategory={settingsCategory} />;
+  if (screen === 'settings') return <SettingsScreen preferences={preferences} onChange={updatePreferences} onBack={() => navigationIndex.current > 0 ? moveNavigation(-1) : goProjects()} initialCategory={settingsCategory} fieldId={settingsFieldId} />;
 
   if (screen === 'fields') {
     return <div className="shell" data-testid="fields-screen"><PrimaryNav active="FIELDS" onProjects={goProjects} onNow={goNow} onBrowse={goBrowse} onFields={() => undefined} onNewConversation={goNewConversation} onSettings={goSettings} /><main className="content fields-content">

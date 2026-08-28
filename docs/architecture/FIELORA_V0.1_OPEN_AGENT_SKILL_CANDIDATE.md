@@ -6,6 +6,8 @@
 
 **Implementation:** `IMPLEMENTED / TARGETED VALIDATION PASS`
 
+**Settings Metadata Exposure:** `IMPLEMENTED / TARGETED VALIDATION PASS`
+
 **Change Impact:** `MEDIUM`
 
 ## User flow
@@ -20,9 +22,11 @@
   -> existing Agent model context
 ```
 
-This Slice extends `Harness.Ingress & Context` and
+The original runtime Slice extends `Harness.Ingress & Context` and
 `Harness.Orchestration`. It does not create a Skill Runtime, Agent Runtime,
-permission system, Tool path, receipt hierarchy, registry, installer, or UI.
+permission system, Tool path, receipt hierarchy, registry, or installer. A
+later product-exposure changeset adds a metadata-only Settings page over this
+same catalog; it does not reimplement discovery or load Skill bodies.
 
 ## Fixed scope
 
@@ -35,9 +39,10 @@ permission system, Tool path, receipt hierarchy, registry, installer, or UI.
   resource content.
 - Project Skill content is `PROJECT / UNTRUSTED` and has no permission,
   Approval, Tool exposure, delegation, execution, or Semantic Authority.
-- No schema, migration, persistent global registry, user Skill root,
-  compatibility path, network, credential, process, Marketplace, Plugin, or UI
-  change is included.
+- The original runtime Slice added no schema, migration, persistent global
+  Skill registry, user Skill root, compatibility path, network, credential,
+  process, Marketplace, Plugin, or UI change. Current Settings exposure remains
+  read-only and uses the existing Built-in/Project/Plugin catalog projection.
 
 ## Safety bounds
 
@@ -114,3 +119,18 @@ All `FORMAT`, `DISCOVERY`, `PROGRESSIVE_DISCLOSURE`, `CONTEXT`, `INTEGRITY`,
 `CONTAINMENT`, `PERMISSION`, `EXECUTION`, `COLLISION`, and `REGRESSION` gates
 are PASS. No full premerge, Desktop E2E, packaged smoke, or portable smoke was
 run or required for this Candidate.
+
+## Current Settings exposure
+
+Settings → Skills now queries a typed metadata-only read model from the same
+`SkillCatalog` used by Agent runs. It groups Built-in, current Project, and
+Plugin-contributed Skills and exposes bounded name/description/source/scope/
+trust/digest, supported frontmatter metadata, advisory `allowed-tools`, resource
+path inventory, and Plugin provenance. The view does not call `load_skill`,
+does not include the `SKILL.md` body, does not read resource bodies, and cannot
+grant Tool exposure, permission, Approval, credential, MCP, process, delegation,
+or Semantic Authority. A deterministic Desktop E2E proves Project and Plugin
+body sentinels remain absent before and after expanding details, while Model
+requests, public network requests, credential reads, MCP activation, process
+starts, and new Agent runs remain zero. This document remains
+`DRAFT / CANDIDATE / NOT FROZEN`.

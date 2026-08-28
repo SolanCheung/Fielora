@@ -28,6 +28,7 @@ import {
   validateStartAgent, validateAgentRun, validateListAgentRuns, validateListAgentEvents,
   validateResolveAgentApproval,
   validateActivateMcpConnection,
+  validateSkillCatalog, validateRegisterLocalPlugin, validateUnregisterLocalPlugin,
   validateListArtifacts, validateReadArtifact, validateArtifactHistory,
   validateAssetPreview, validateDiagramPreview, validateSetArtifactArchiveState,
   validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment, validateStoreWorkspaceAttachment,
@@ -495,6 +496,10 @@ function registerBridgeHandlers(): void {
   ipcMain.handle(channels.agentMcpConnections, (event) => { assertBridgeEvent(event); return supervisor.request('query.agent.mcp_connections'); });
   handle(channels.agentMcpRuntime, validateAgentRun, 'query.agent.mcp_runtime');
   handle(channels.agentActivateMcpConnection, validateActivateMcpConnection, 'command.agent.activate_mcp_connection');
+  handle(channels.agentSkillCatalog, validateSkillCatalog, 'query.agent.skill_catalog');
+  ipcMain.handle(channels.pluginLocalRegistry, (event) => { assertBridgeEvent(event); return supervisor.request('query.plugin.local_registry'); });
+  handle(channels.pluginRegisterLocal, validateRegisterLocalPlugin, 'command.plugin.register_local');
+  handle(channels.pluginUnregisterLocal, validateUnregisterLocalPlugin, 'command.plugin.unregister_local');
   handle(channels.captureCreate, validateCreateCapture, 'command.capture.create');
   handle(channels.captureAttach, validateAttachCapture, 'command.capture.attach');
   handle(channels.capturePromote, validatePromoteCapture, 'command.capture.promote');

@@ -29,12 +29,14 @@ use fielora_storage::{
     CreateArtifactRecord, CreateAssetRecord, SetArtifactArchiveStateRecord, UpdateArtifactRecord,
 };
 use futures_util::future::join_all;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc::SyncSender};
@@ -44,6 +46,22 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 4_096;
+const USER_PLUGIN_REGISTRY_FILENAME: &str = "local-plugins.json";
+const USER_PLUGIN_REGISTRY_VERSION: u16 = 1;
+const MAX_USER_PLUGIN_REGISTRY_BYTES: u64 = 64 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LocalPluginRegistryFile {
+    version: u16,
+    roots: Vec<String>,
+}
+
+struct LoadedPluginRegistry {
+    status: &'static str,
+    digest: Option<String>,
+    roots: Vec<String>,
+}
 
 #[derive(Clone)]
 struct ExecutionCancellation {
@@ -84,6 +102,7 @@ pub struct AgentCoordinator {
     tool_providers: Arc<Vec<Arc<dyn ToolProvider>>>,
     static_credential_bindings: Arc<Vec<StaticCredentialBinding>>,
     local_unpacked_plugin_roots: Arc<Vec<PathBuf>>,
+    user_plugin_registry_path: Option<PathBuf>,
     user_mcp_config_path: Option<PathBuf>,
     run_mcp_states: Arc<Mutex<HashMap<String, RunMcpState>>>,
 }
@@ -1284,6 +1303,8 @@ impl AgentCoordinator {
     ) -> Self {
         let mut coordinator = Self::new(storage, credentials, sender, artifact_root, runtime);
         coordinator.user_mcp_config_path = Some(user_config_root.join(USER_MCP_CONFIG_FILENAME));
+        coordinator.user_plugin_registry_path =
+            Some(user_config_root.join(USER_PLUGIN_REGISTRY_FILENAME));
         coordinator
     }
 
@@ -1364,6 +1385,7 @@ impl AgentCoordinator {
             tool_providers: Arc::new(tool_providers),
             static_credential_bindings: Arc::new(static_credential_bindings),
             local_unpacked_plugin_roots: Arc::new(Vec::new()),
+            user_plugin_registry_path: None,
             user_mcp_config_path: None,
             run_mcp_states: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -1485,17 +1507,148 @@ impl AgentCoordinator {
         restored
     }
 
+    fn configured_plugin_roots(&self) -> Vec<PathBuf> {
+        let mut roots = self.local_unpacked_plugin_roots.as_ref().clone();
+        if let Some(path) = self.user_plugin_registry_path.as_ref()
+            && let Ok(loaded) = load_plugin_registry(path)
+        {
+            roots.extend(loaded.roots.into_iter().map(PathBuf::from));
+        }
+        roots.sort();
+        roots.dedup();
+        roots
+    }
+
     #[cfg(test)]
     fn discover_skill_catalog(&self, project_root: &Path) -> Result<SkillCatalog, AgentError> {
-        if self.local_unpacked_plugin_roots.is_empty() {
-            SkillCatalog::discover(project_root)
+        discover_skill_catalog_with_roots(project_root, self.configured_plugin_roots())
+    }
+
+    pub fn skill_catalog(
+        &self,
+        request: SkillCatalogRequest,
+    ) -> Result<SkillCatalogView, DomainError> {
+        let roots = self.configured_plugin_roots();
+        let catalog = if let Some(field_id) = request.field_id {
+            let project = self.storage.get_project(field_id)?;
+            let project_root = PathBuf::from(project.root_path);
+            discover_skill_catalog_with_roots(&project_root, roots)
+                .map_err(|error| DomainError::Validation(error.code().into()))?
         } else {
-            SkillCatalog::discover_with_local_unpacked_plugins(
-                project_root,
-                self.local_unpacked_plugin_roots.as_slice(),
-            )
-            .map_err(|_| AgentError::PluginAdmissionFailed)
+            discover_plugin_catalog_with_roots(roots)
+        };
+        Ok(skill_catalog_view(&catalog))
+    }
+
+    pub fn plugin_registry(&self) -> LocalPluginRegistryView {
+        let Some(path) = self.user_plugin_registry_path.as_ref() else {
+            return LocalPluginRegistryView {
+                config_status: "UNAVAILABLE".into(),
+                config_digest: None,
+                registrations: Vec::new(),
+            };
+        };
+        match load_plugin_registry(path) {
+            Ok(loaded) => LocalPluginRegistryView {
+                config_status: loaded.status.into(),
+                config_digest: loaded.digest,
+                registrations: loaded
+                    .roots
+                    .into_iter()
+                    .map(plugin_registration_view)
+                    .collect(),
+            },
+            Err(code) => LocalPluginRegistryView {
+                config_status: code.into(),
+                config_digest: None,
+                registrations: Vec::new(),
+            },
         }
+    }
+
+    pub fn register_local_plugin(
+        &self,
+        request: RegisterLocalPluginRequest,
+    ) -> Result<LocalPluginRegistryView, DomainError> {
+        let path = self
+            .user_plugin_registry_path
+            .as_ref()
+            .ok_or_else(|| DomainError::Validation("PLUGIN_REGISTRY_UNAVAILABLE".into()))?;
+        let requested = request.root_path.trim();
+        if requested.is_empty() || requested.len() > 32_767 || requested.contains('\0') {
+            return Err(DomainError::Validation("PLUGIN_ROOT_INVALID".into()));
+        }
+        let canonical = PathBuf::from(requested)
+            .canonicalize()
+            .map_err(|_| DomainError::Validation("PLUGIN_ROOT_INVALID".into()))?;
+        if !fs::metadata(&canonical).is_ok_and(|metadata| metadata.is_dir()) {
+            return Err(DomainError::Validation("PLUGIN_ROOT_INVALID".into()));
+        }
+        let canonical_text = canonical
+            .to_str()
+            .ok_or_else(|| DomainError::Validation("PLUGIN_ROOT_INVALID".into()))?
+            .to_owned();
+        SkillCatalog::discover_local_unpacked_plugins(std::slice::from_ref(&canonical))
+            .map_err(|error| DomainError::Validation(error.code().into()))?;
+
+        let loaded =
+            load_plugin_registry(path).map_err(|code| DomainError::Validation(code.into()))?;
+        let mut roots = loaded.roots;
+        if roots
+            .iter()
+            .any(|root| Path::new(root) == canonical.as_path())
+        {
+            return Ok(self.plugin_registry());
+        }
+        if roots.len() >= fielora_agent::MAX_LOCAL_UNPACKED_PLUGINS {
+            return Err(DomainError::Validation(
+                "PLUGIN_REGISTRY_LIMIT_EXCEEDED".into(),
+            ));
+        }
+        let mut valid_roots = roots
+            .iter()
+            .map(PathBuf::from)
+            .filter(|root| {
+                SkillCatalog::discover_local_unpacked_plugins(std::slice::from_ref(root)).is_ok()
+            })
+            .collect::<Vec<_>>();
+        valid_roots.push(canonical.clone());
+        SkillCatalog::discover_local_unpacked_plugins(&valid_roots)
+            .map_err(|error| DomainError::Validation(error.code().into()))?;
+        roots.push(canonical_text);
+        roots.sort();
+        write_plugin_registry(path, &roots).map_err(|code| DomainError::Validation(code.into()))?;
+        Ok(self.plugin_registry())
+    }
+
+    pub fn unregister_local_plugin(
+        &self,
+        request: UnregisterLocalPluginRequest,
+    ) -> Result<LocalPluginRegistryView, DomainError> {
+        if !valid_plugin_registration_id(&request.registration_id) {
+            return Err(DomainError::Validation(
+                "PLUGIN_REGISTRATION_ID_INVALID".into(),
+            ));
+        }
+        let path = self
+            .user_plugin_registry_path
+            .as_ref()
+            .ok_or_else(|| DomainError::Validation("PLUGIN_REGISTRY_UNAVAILABLE".into()))?;
+        let loaded =
+            load_plugin_registry(path).map_err(|code| DomainError::Validation(code.into()))?;
+        let before = loaded.roots.len();
+        let roots = loaded
+            .roots
+            .into_iter()
+            .filter(|root| plugin_registration_id(root) != request.registration_id)
+            .collect::<Vec<_>>();
+        if roots.len() == before {
+            return Err(DomainError::Validation(
+                "PLUGIN_REGISTRATION_NOT_FOUND".into(),
+            ));
+        }
+        write_plugin_registry(path, &roots).map_err(|code| DomainError::Validation(code.into()))?;
+        Ok(self.plugin_registry())
     }
 
     fn providers_for_run(&self, run_id: &AgentRunId) -> Vec<Arc<dyn ToolProvider>> {
@@ -3058,17 +3211,9 @@ impl AgentCoordinator {
             (catalog, true)
         } else {
             let root = prepared.project_root.clone();
-            let plugin_roots = Arc::clone(&self.local_unpacked_plugin_roots);
+            let plugin_roots = self.configured_plugin_roots();
             let catalog = match tokio::task::spawn_blocking(move || {
-                if plugin_roots.is_empty() {
-                    SkillCatalog::discover(&root)
-                } else {
-                    SkillCatalog::discover_with_local_unpacked_plugins(
-                        &root,
-                        plugin_roots.as_slice(),
-                    )
-                    .map_err(|_| AgentError::PluginAdmissionFailed)
-                }
+                discover_skill_catalog_with_roots(&root, plugin_roots)
             })
             .await
             {
@@ -6905,6 +7050,239 @@ impl AgentCoordinator {
             }
         }
     }
+}
+
+fn discover_skill_catalog_with_roots(
+    project_root: &Path,
+    mut roots: Vec<PathBuf>,
+) -> Result<SkillCatalog, AgentError> {
+    roots.sort();
+    roots.dedup();
+    let mut catalog = SkillCatalog::discover(project_root)?;
+    let mut admitted = Vec::new();
+    for root in roots {
+        let mut trial = admitted.clone();
+        trial.push(root);
+        if let Ok(candidate) =
+            SkillCatalog::discover_with_local_unpacked_plugins(project_root, &trial)
+        {
+            admitted = trial;
+            catalog = candidate;
+        }
+    }
+    Ok(catalog)
+}
+
+fn discover_plugin_catalog_with_roots(mut roots: Vec<PathBuf>) -> SkillCatalog {
+    roots.sort();
+    roots.dedup();
+    let mut catalog = SkillCatalog::builtin_only();
+    let mut admitted = Vec::new();
+    for root in roots {
+        let mut trial = admitted.clone();
+        trial.push(root);
+        if let Ok(candidate) = SkillCatalog::discover_local_unpacked_plugins(&trial) {
+            admitted = trial;
+            catalog = candidate;
+        }
+    }
+    catalog
+}
+
+fn skill_catalog_view(catalog: &SkillCatalog) -> SkillCatalogView {
+    SkillCatalogView {
+        catalog_sha256: catalog.catalog_sha256().into(),
+        entries: catalog
+            .entries()
+            .iter()
+            .map(|entry| SkillCatalogEntryView {
+                name: entry.name.clone(),
+                description: entry.description.clone(),
+                source_kind: entry.source_kind.id().into(),
+                scope: entry.scope.clone(),
+                trust: entry.trust.clone(),
+                version: entry.version.clone(),
+                content_digest: entry.content_digest.clone(),
+                location_reference: entry.location_reference.clone(),
+                license: entry.license().map(str::to_owned),
+                compatibility: entry.compatibility().map(str::to_owned),
+                metadata: entry
+                    .metadata()
+                    .iter()
+                    .map(|(key, value)| SkillMetadataView {
+                        key: key.clone(),
+                        value: value.clone(),
+                    })
+                    .collect(),
+                allowed_tools_advisory: entry.allowed_tools_advisory().map(str::to_owned),
+                resources: entry.resources.clone(),
+                resources_truncated: entry.resources_truncated,
+                plugin: entry
+                    .plugin_provenance()
+                    .map(|plugin| SkillPluginProvenanceView {
+                        plugin_id: plugin.plugin_id.clone(),
+                        plugin_version: plugin.plugin_version.clone(),
+                        plugin_source: plugin.plugin_source.clone(),
+                        plugin_trust: plugin.plugin_trust.clone(),
+                        plugin_manifest_digest: plugin.plugin_manifest_digest.clone(),
+                        plugin_snapshot_digest: plugin.plugin_snapshot_digest.clone(),
+                    }),
+            })
+            .collect(),
+        diagnostics: catalog
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| SkillCatalogDiagnosticView {
+                code: diagnostic.code.clone(),
+                skill_name: diagnostic.skill_name.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn plugin_registration_view(root: String) -> LocalPluginRegistrationView {
+    let registration_id = plugin_registration_id(&root);
+    match SkillCatalog::discover_local_unpacked_plugins(&[PathBuf::from(&root)]) {
+        Ok(catalog) => {
+            let plugin = catalog
+                .plugin_snapshots()
+                .first()
+                .map(|snapshot| DeclarativePluginView {
+                    id: snapshot.id.clone(),
+                    name: snapshot.name.clone(),
+                    version: snapshot.version.clone(),
+                    publisher: snapshot.publisher.clone(),
+                    engine_requirement: snapshot.engine_requirement.clone(),
+                    source_kind: snapshot.source_kind.clone(),
+                    trust: snapshot.trust.clone(),
+                    manifest_reference: format!("plugin:{}/fielora.json", snapshot.id),
+                    manifest_digest: snapshot.manifest_digest.clone(),
+                    skills: snapshot
+                        .skills
+                        .iter()
+                        .map(|skill| PluginContributionSkillView {
+                            name: skill.name.clone(),
+                            relative_path: skill.relative_path.clone(),
+                            content_digest: skill.content_digest.clone(),
+                        })
+                        .collect(),
+                    plugin_snapshot_digest: snapshot.plugin_snapshot_digest.clone(),
+                });
+            LocalPluginRegistrationView {
+                registration_id,
+                root_reference: root,
+                status: LocalPluginRegistrationStatus::Available,
+                error_code: None,
+                plugin,
+            }
+        }
+        Err(error) => LocalPluginRegistrationView {
+            registration_id,
+            root_reference: root,
+            status: LocalPluginRegistrationStatus::Unavailable,
+            error_code: Some(error.code().into()),
+            plugin: None,
+        },
+    }
+}
+
+fn plugin_registration_id(root: &str) -> String {
+    let digest = format!("{:x}", Sha256::digest(root.as_bytes()));
+    format!("pluginreg_{}", &digest[..32])
+}
+
+fn valid_plugin_registration_id(value: &str) -> bool {
+    value.len() == 42
+        && value.starts_with("pluginreg_")
+        && value[10..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn valid_stored_plugin_root(root: &str) -> bool {
+    if root.trim().is_empty() || root.len() > 32_767 || root.contains('\0') {
+        return false;
+    }
+    let path = Path::new(root);
+    path.is_absolute()
+        && !path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )
+        })
+}
+
+fn load_plugin_registry(path: &Path) -> Result<LoadedPluginRegistry, &'static str> {
+    if !path.exists() {
+        return Ok(LoadedPluginRegistry {
+            status: "CONFIG_NOT_FOUND",
+            digest: None,
+            roots: Vec::new(),
+        });
+    }
+    let metadata = fs::metadata(path).map_err(|_| "PLUGIN_REGISTRY_IO_FAILED")?;
+    if !metadata.is_file() || metadata.len() > MAX_USER_PLUGIN_REGISTRY_BYTES {
+        return Err("PLUGIN_REGISTRY_MALFORMED");
+    }
+    let bytes = fs::read(path).map_err(|_| "PLUGIN_REGISTRY_IO_FAILED")?;
+    let parsed: LocalPluginRegistryFile =
+        serde_json::from_slice(&bytes).map_err(|_| "PLUGIN_REGISTRY_MALFORMED")?;
+    if parsed.version != USER_PLUGIN_REGISTRY_VERSION
+        || parsed.roots.len() > fielora_agent::MAX_LOCAL_UNPACKED_PLUGINS
+        || parsed
+            .roots
+            .iter()
+            .any(|root| !valid_stored_plugin_root(root))
+        || parsed.roots.iter().collect::<HashSet<_>>().len() != parsed.roots.len()
+    {
+        return Err("PLUGIN_REGISTRY_MALFORMED");
+    }
+    Ok(LoadedPluginRegistry {
+        status: "CONFIGURED",
+        digest: Some(format!("{:x}", Sha256::digest(&bytes))),
+        roots: parsed.roots,
+    })
+}
+
+fn write_plugin_registry(path: &Path, roots: &[String]) -> Result<(), &'static str> {
+    let parent = path.parent().ok_or("PLUGIN_REGISTRY_IO_FAILED")?;
+    fs::create_dir_all(parent).map_err(|_| "PLUGIN_REGISTRY_IO_FAILED")?;
+    let bytes = serde_json::to_vec_pretty(&LocalPluginRegistryFile {
+        version: USER_PLUGIN_REGISTRY_VERSION,
+        roots: roots.to_vec(),
+    })
+    .map_err(|_| "PLUGIN_REGISTRY_IO_FAILED")?;
+    if bytes.len() as u64 > MAX_USER_PLUGIN_REGISTRY_BYTES {
+        return Err("PLUGIN_REGISTRY_LIMIT_EXCEEDED");
+    }
+    let suffix = Uuid::now_v7();
+    let temporary = path.with_extension(format!("tmp-{suffix}"));
+    let backup = path.with_extension(format!("previous-{suffix}"));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|_| "PLUGIN_REGISTRY_IO_FAILED")?;
+    if file.write_all(&bytes).is_err() || file.sync_all().is_err() {
+        let _ = fs::remove_file(&temporary);
+        return Err("PLUGIN_REGISTRY_IO_FAILED");
+    }
+    drop(file);
+    let had_previous = path.exists();
+    if had_previous && fs::rename(path, &backup).is_err() {
+        let _ = fs::remove_file(&temporary);
+        return Err("PLUGIN_REGISTRY_IO_FAILED");
+    }
+    if fs::rename(&temporary, path).is_err() {
+        if had_previous {
+            let _ = fs::rename(&backup, path);
+        }
+        let _ = fs::remove_file(&temporary);
+        return Err("PLUGIN_REGISTRY_IO_FAILED");
+    }
+    if had_previous {
+        let _ = fs::remove_file(backup);
+    }
+    Ok(())
 }
 
 fn fast_edit_changed_paths(patch: &AgentToolCallView) -> Vec<String> {
@@ -12355,6 +12733,124 @@ mod tests {
         assert!(!workspace.join("PLUGIN_INSTRUCTION_EXECUTED").exists());
 
         drop(coordinator);
+        drop(storage);
+        drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn local_plugin_registry_persists_passively_and_retains_broken_entries() {
+        let root =
+            std::env::temp_dir().join(format!("fielora-local-plugin-registry-{}", Uuid::now_v7()));
+        let artifacts = root.join("artifacts");
+        let plugin = root.join("plugin");
+        std::fs::create_dir_all(plugin.join("skills/registry-skill")).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::write(
+            plugin.join("fielora.json"),
+            r#"{"id":"registry.fixture","name":"Registry Fixture","version":"1.0.0","publisher":"registry","engines":{"fielora":">=0.1"},"contributes":{"skills":["skills/registry-skill"]}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            plugin.join("skills/registry-skill/SKILL.md"),
+            "---\nname: registry-skill\ndescription: Registry metadata fixture.\nallowed-tools: read_file\n---\nREGISTRY_SKILL_BODY_SENTINEL",
+        )
+        .unwrap();
+        let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let worker = StorageWorker::start(&paths.database, device, 1).unwrap();
+        let storage = worker.handle();
+        let credentials = Arc::new(CoreCredentialStore::default());
+        let (sender, _receiver) = mpsc::sync_channel(32);
+        let coordinator = AgentCoordinator::with_user_config_root(
+            storage.clone(),
+            credentials.clone(),
+            sender.clone(),
+            artifacts.clone(),
+            Handle::current(),
+            paths.config_dir.clone(),
+        );
+
+        let registered = coordinator
+            .register_local_plugin(RegisterLocalPluginRequest {
+                root_path: plugin.to_string_lossy().into_owned(),
+            })
+            .unwrap();
+        assert_eq!(registered.registrations.len(), 1);
+        assert_eq!(
+            registered.registrations[0].status,
+            LocalPluginRegistrationStatus::Available
+        );
+        assert_eq!(
+            registered.registrations[0].plugin.as_ref().unwrap().id,
+            "registry.fixture"
+        );
+        let config_path = paths.config_dir.join(USER_PLUGIN_REGISTRY_FILENAME);
+        let config = std::fs::read_to_string(&config_path).unwrap();
+        let persisted = load_plugin_registry(&config_path).unwrap();
+        assert_eq!(
+            persisted.roots,
+            vec![
+                plugin
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            ]
+        );
+        assert!(!config.contains("REGISTRY_SKILL_BODY_SENTINEL"));
+        let skills = coordinator
+            .skill_catalog(SkillCatalogRequest { field_id: None })
+            .unwrap();
+        let contributed = skills
+            .entries
+            .iter()
+            .find(|entry| entry.name == "registry-skill")
+            .unwrap();
+        assert_eq!(contributed.source_kind, "PLUGIN");
+        assert_eq!(contributed.trust, "UNTRUSTED_LOCAL_PLUGIN");
+        assert_eq!(
+            contributed.allowed_tools_advisory.as_deref(),
+            Some("read_file")
+        );
+        assert!(
+            !serde_json::to_string(&skills)
+                .unwrap()
+                .contains("REGISTRY_SKILL_BODY_SENTINEL")
+        );
+
+        drop(coordinator);
+        let restarted = AgentCoordinator::with_user_config_root(
+            storage.clone(),
+            credentials.clone(),
+            sender,
+            artifacts,
+            Handle::current(),
+            paths.config_dir.clone(),
+        );
+        assert_eq!(restarted.plugin_registry().registrations.len(), 1);
+        std::fs::remove_file(plugin.join("fielora.json")).unwrap();
+        let broken = restarted.plugin_registry();
+        assert_eq!(broken.registrations.len(), 1);
+        assert_eq!(
+            broken.registrations[0].status,
+            LocalPluginRegistrationStatus::Unavailable
+        );
+        let removed = restarted
+            .unregister_local_plugin(UnregisterLocalPluginRequest {
+                registration_id: broken.registrations[0].registration_id.clone(),
+            })
+            .unwrap();
+        assert!(removed.registrations.is_empty());
+        assert!(credentials.reads.lock().unwrap().is_empty());
+        assert!(restarted.run_mcp_states.lock().unwrap().is_empty());
+        std::fs::write(&config_path, r#"{"version":1,"roots":["relative-plugin"]}"#).unwrap();
+        assert!(matches!(
+            load_plugin_registry(&config_path),
+            Err("PLUGIN_REGISTRY_MALFORMED")
+        ));
+
+        drop(restarted);
         drop(storage);
         drop(worker);
         std::fs::remove_dir_all(root).unwrap();

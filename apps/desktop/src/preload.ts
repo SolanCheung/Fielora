@@ -141,6 +141,14 @@ const bridge: FieloraBridge = {
     mcpRuntime: (request) => ipcRenderer.invoke(channels.agentMcpRuntime, request),
     activateMcpConnection: (request) => ipcRenderer.invoke(channels.agentActivateMcpConnection, request),
   },
+  skill: {
+    catalog: (request) => ipcRenderer.invoke(channels.agentSkillCatalog, request),
+  },
+  plugin: {
+    localRegistry: () => ipcRenderer.invoke(channels.pluginLocalRegistry),
+    registerLocal: (request) => ipcRenderer.invoke(channels.pluginRegisterLocal, request),
+    unregisterLocal: (request) => ipcRenderer.invoke(channels.pluginUnregisterLocal, request),
+  },
   capture: {
     create: (request) => ipcRenderer.invoke(channels.captureCreate, request),
     attach: (request) => ipcRenderer.invoke(channels.captureAttach, request),

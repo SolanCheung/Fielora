@@ -114,10 +114,10 @@
   line-height: 1.4;
   letter-spacing: 0;
 }
-.permission-icon[data-permission-icon="FULL_CONTROL"] { color: var(--fl-color-permission-warning); stroke: var(--fl-color-permission-warning); }
-.select-menu.permission-picker[data-value="FULL_CONTROL"] > button { color: var(--fl-color-permission-warning); }
+.permission-icon[data-permission-icon="FULL_CONTROL"] { color: currentColor; stroke: currentColor; }
+.select-menu.permission-picker[data-value="FULL_CONTROL"] > button { color: var(--fl-color-text); }
 .select-menu.permission-picker[data-value="FULL_CONTROL"] > button:hover,
-.select-menu.permission-picker[data-value="FULL_CONTROL"].open > button { color: var(--fl-color-permission-warning); background: color-mix(in srgb, var(--fl-color-permission-warning) 8%, transparent); }
+.select-menu.permission-picker[data-value="FULL_CONTROL"].open > button { color: var(--fl-color-text-strong); background: var(--fl-color-control-hover); }
 .permission-picker .ui-select-popover > button.is-warning .ui-select-option-icon,
 .permission-picker .ui-select-popover > button.is-warning strong,
 .permission-picker .ui-select-popover > button.is-warning small { color: var(--fl-color-permission-warning); }
