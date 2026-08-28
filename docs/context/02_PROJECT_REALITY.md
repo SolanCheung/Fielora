@@ -2239,3 +2239,51 @@ RUNTIME_CONTEXT_UI: NOT_IMPLEMENTED
 MODEL_REQUESTS: 0
 NEXT: USER_REVIEW_OF_CONTRACT_PRECONDITIONS
 ```
+
+## 97. IDR V2 Schema Candidate
+
+`docs/architecture/FIELORA_IDR_V2_SCHEMA_CANDIDATE.md` 已把 accepted IDR V2
+semantic Contract 映射为 local SQLite physical design Candidate，状态为
+`DRAFT / CANDIDATE / NOT FROZEN`。本轮没有创建 migration、table、index、trigger、
+Rust/Serde type、repository、Resolver、Context integration、FIPC、UI 或 Eval。
+
+Candidate 复用现有 DataRoot 与 Fielora SQLite authority；当前仓库 schema version
+仍为 11，未来候选 migration version 为 12，但文件未创建。V2 每个 database
+instance 继续只有一个 implicit local primary human，不复用现有 storage Profile 充当
+`HumanProfileId`，也不新建 `idr.db`、`memory.db` 或 profile table。初始 Human
+Model 固定为空且 aggregate revision 为 0，不扫描历史 Conversation 或自动推断。
+
+最小 durable set 候选为 singleton `idr_human_model_state`、typed current
+`idr_human_model_items`、bounded `idr_item_history`、shared
+`idr_provenance_refs` + many-to-many `idr_item_provenance`、reference-only
+`idr_item_reality_refs` 与 minimal `idr_erasure_tombstones`。Durable proposal、
+resolution、direction snapshot、forget request、observation 专表和 run-context 专表均
+不建立；Candidate item、ephemeral resolution 与 existing `agent_context_snapshots`
+分别承担对应职责。
+
+Typed payload 采用 common relational envelope + closed/versioned/bounded
+kind-specific JSON（Option B），拒绝 universal untyped JSON 与五套过重 subtype
+table。Scope 使用四个 fixed nullable columns，Project ref 指向 Fielora-owned
+`fields.id` 兼容身份但不伪造 FK；Reality 与 polymorphic provenance 只存 tagged
+reference。EvidenceBasis/kind/confidence、lifecycle vocabulary、terminal behavior、
+one-link supersession、global monotonic revision 与 compare-and-increment transaction
+均形成候选约束。
+
+Forget 的 `DISABLE_USE` 保留 Revoked audit；`ERASE_IF_ALLOWED` 与
+`RESET_PROFILE` 删除 IDR-owned semantic row/relations/history，只保留不含 kind、
+payload、scope、provenance 的 opaque tombstone。Resolution 默认 ephemeral；FTS、
+Vector、Embedding 与 provider-specific storage 均为 0。
+
+```text
+IDR_V2_SCHEMA: CANDIDATE
+STORAGE: EXISTING_FIELORA_SQLITE
+CURRENT_SCHEMA_VERSION: 11
+CANDIDATE_MIGRATION_VERSION: 12_NOT_CREATED
+TABLES: 7_CANDIDATE
+TYPED_PAYLOAD: OPTION_B
+HUMAN_PROFILE_ID: NONE
+INITIAL_ITEMS: 0
+MIGRATION_RUNTIME_CONTEXT_UI: NOT_IMPLEMENTED
+MODEL_REQUESTS: 0
+NEXT: USER_REVIEW_OF_SCHEMA_PRECONDITIONS
+```

@@ -19,6 +19,11 @@ This document refines the accepted semantic design in
 Candidate. Shapes below are conceptual semantic contracts, not Rust structs,
 Serde models, tables, indexes, or wire-format commitments.
 
+The physical mapping review is tracked in
+`FIELORA_IDR_V2_SCHEMA_CANDIDATE.md`. It remains
+`DRAFT / CANDIDATE / NOT FROZEN`; no Migration, Runtime, or implementation is
+authorized.
+
 ---
 
 ## 2. Purpose
@@ -1312,6 +1317,10 @@ Version/revision model
 Error/reason codes
 Contract test matrix and Eval hooks
 ```
+
+The 2026-08-28 `IDR V2 SCHEMA CANDIDATE` execution instruction satisfied this
+sequencing prerequisite for drafting the Schema Candidate only. It did not
+freeze the Contract or Schema and did not authorize Migration or implementation.
 
 Only after explicit Contract Review acceptance may a separate task begin:
 
