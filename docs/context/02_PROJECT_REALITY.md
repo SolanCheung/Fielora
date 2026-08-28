@@ -2287,3 +2287,58 @@ MIGRATION_RUNTIME_CONTEXT_UI: NOT_IMPLEMENTED
 MODEL_REQUESTS: 0
 NEXT: USER_REVIEW_OF_SCHEMA_PRECONDITIONS
 ```
+
+## 98. IDR V2 Storage / Migration Implemented Candidate
+
+用户于 2026-08-28 单独授权 IDR V2 的 storage/migration slice，不授权 Resolver、
+Individualized Direction、ContextCompiler/AgentCoordinator integration、Model
+extraction/learning/activation、Memory、FIPC/UI 或 Eval。实现继续位于既有
+`Harness.IDR` 和 `fielora-storage`，没有建立第二套 Core/Runtime/State/
+Permission/Evidence，也没有改变任何现有 Agent 行为。
+
+实现时重新确认 migration 0012 未被占用，因此
+`0012_idr_v2_human_model.sql` 将 existing local Fielora SQLite schema 11→12。
+Migration additive、Immediate transaction、初始 singleton aggregate revision 为 0、
+items 为 0，不扫描 Conversation、不导入旧 Memory、不推断或 seed Human Model。
+它只创建 `idr_human_model_state`、`idr_human_model_items`、
+`idr_item_history`、`idr_provenance_refs`、`idr_item_provenance`、
+`idr_item_reality_refs`、`idr_erasure_tombstones` 七表和六个真实 query/
+uniqueness indexes；proposal/resolution/direction/forget/observation/run-context/
+profile/user 专表仍为 0，FTS/Vector/Embedding 仍为 0。
+
+`fielora-storage::idr` 使用 common relational envelope + closed/versioned/bounded
+kind-specific JSON，建立五种 Rust typed payload、16 KiB V2 payload profile、2 KiB
+bounded provenance support、EvidenceBasis/confidence matrix、fixed nullable Scope、
+Project `fields.id` ownership validation、reference-only Reality dependency、
+singleton revision compare-and-increment、完整 lifecycle matrix、repository-only
+terminal guard、one-link correction/supersession、consistent snapshot read、
+DISABLE_USE、ERASE_IF_ALLOWED、shared-provenance GC、RESET_PROFILE 与 erased ID
+non-reuse。Unknown version/structure fail closed；API 不暴露 arbitrary SQL、generic
+JSON patch、force lifecycle 或 skip revision check。
+
+受影响 storage crate 36/36 unit tests PASS；其中 9 项 IDR tests 覆盖五 kinds、
+非法 matrix/confidence/version/payload、lifecycle/terminal/stale write、Scope/
+Project/provenance/Reality round trip、atomic correction/supersession、forced
+mid-transaction rollback、disable/reset、erasure/GC/non-reuse，以及 forbidden
+schema channels。独立 schema-11→12 upgrade/reopen/forced migration failure test
+证明失败时 physical objects 与 registry/version 同时回滚。高熵非敏感 sentinel 在
+ERASE_IF_ALLOWED 后跨全部 IDR semantic/history/provenance/relation/tombstone 表的
+occurrences 为 0。该结论只证明 application-level semantic erasure，不声明 SQLite
+free-list/disk-sector secure deletion、zero forensic recoverability 或法律合规。
+
+```text
+IDR_V2_STORAGE_IMPLEMENTATION: PASS
+STATUS: IMPLEMENTED_CANDIDATE_NOT_FROZEN
+ARCHITECTURE_PLACEMENT: Harness.IDR
+SCHEMA_VERSION: 12
+MIGRATION_0012: idr_v2_human_model
+TABLES: 7
+INDEXES: 6
+TERMINAL_DB_GUARD: REPOSITORY_ONLY
+ERASURE_SENTINEL_OCCURRENCES: 0
+DEPENDENCIES_CHANGED: NO
+AGENT_BEHAVIOR_CHANGED: NO
+RESOLVER_CONTEXT_MODEL_UI_EVAL: NOT_IMPLEMENTED
+MODEL_REQUESTS: 0
+NEXT: IDR_V2_RESOLVER_DESIGN_CONTEXT_INTEGRATION_REVIEW_NOT_IMPLEMENTED
+```

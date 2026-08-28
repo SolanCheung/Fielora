@@ -5,6 +5,7 @@
 //! Harness.Verification & Evidence. Storage is infrastructure, not a separate
 //! Agent layer or an independent source of execution authority.
 
+pub mod idr;
 pub mod sync;
 
 use fielora_contracts::*;
@@ -32,6 +33,7 @@ const MIGRATION_0008: &str = include_str!("../migrations/0008_durable_artifacts.
 const MIGRATION_0009: &str = include_str!("../migrations/0009_artifact_type_extensibility.sql");
 const MIGRATION_0010: &str = include_str!("../migrations/0010_durable_source_assets.sql");
 const MIGRATION_0011: &str = include_str!("../migrations/0011_artifact_archive_state.sql");
+const MIGRATION_0012: &str = include_str!("../migrations/0012_idr_v2_human_model.sql");
 const MIGRATION_0001_NAME: &str = "core";
 const MIGRATION_0002_NAME: &str = "phase02_reality";
 const MIGRATION_0004_NAME: &str = "phase04_entry";
@@ -42,6 +44,7 @@ const MIGRATION_0008_NAME: &str = "durable_artifacts";
 const MIGRATION_0009_NAME: &str = "artifact_type_extensibility";
 const MIGRATION_0010_NAME: &str = "durable_source_assets";
 const MIGRATION_0011_NAME: &str = "artifact_archive_state";
+const MIGRATION_0012_NAME: &str = "idr_v2_human_model";
 const MIGRATION_0002_FROZEN_SHA256: &str =
     "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9";
 const MIGRATION_0004_FROZEN_SHA256: &str =
@@ -50,7 +53,7 @@ const MIGRATION_0005_FROZEN_SHA256: &str =
     "b7e1e586b47e50389502677e172741d69463e9518ed32211dfafe0dc910c1547";
 const MIGRATION_0006_FROZEN_SHA256: &str =
     "5257959801424a13426259ce10c9ed2d5037795ec7a3a207171c568bc80dbaae";
-const SCHEMA_VERSION: u32 = 11;
+const SCHEMA_VERSION: u32 = 12;
 const LOCAL_USER_NAME: &str = "Local user";
 const SYSTEM_NAME: &str = "Fielora system";
 
@@ -3482,6 +3485,7 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     let checksum_0009 = migration_checksum(MIGRATION_0009);
     let checksum_0010 = migration_checksum(MIGRATION_0010);
     let checksum_0011 = migration_checksum(MIGRATION_0011);
+    let checksum_0012 = migration_checksum(MIGRATION_0012);
     if checksum_0002 != MIGRATION_0002_FROZEN_SHA256 {
         return Err(StorageError::MigrationChecksum { version: 2 });
     }
@@ -3610,7 +3614,31 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     if !migration_exists(connection, 11)? {
         apply_artifact_archive_state_migration(connection, now, MIGRATION_0011, &checksum_0011)?;
     }
+    verify_applied_migration(connection, 12, MIGRATION_0012_NAME, &checksum_0012)?;
+    if !migration_exists(connection, 12)? {
+        apply_idr_v2_storage_migration(connection, now, MIGRATION_0012, &checksum_0012)?;
+    }
     validate_schema(connection)?;
+    Ok(())
+}
+
+fn apply_idr_v2_storage_migration(
+    connection: &mut Connection,
+    now: i64,
+    migration_sql: &str,
+    checksum: &str,
+) -> Result<(), StorageError> {
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if transaction.execute_batch(migration_sql).is_err() {
+        return Err(StorageError::MigrationIncompatibleData);
+    }
+    transaction.execute(
+        "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (12, ?1, ?2, ?3)",
+        params![MIGRATION_0012_NAME, checksum, now],
+    )?;
+    validate_schema(&transaction)?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -4219,6 +4247,109 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
     }
     if migration_exists(connection, 11)? {
         validate_artifact_archive_schema(connection)?;
+    }
+    if migration_exists(connection, 12)? {
+        validate_idr_v2_schema(connection)?;
+    }
+    Ok(())
+}
+
+fn validate_idr_v2_schema(connection: &Connection) -> Result<(), StorageError> {
+    const TABLES: [&str; 7] = [
+        "idr_human_model_state",
+        "idr_human_model_items",
+        "idr_item_history",
+        "idr_provenance_refs",
+        "idr_item_provenance",
+        "idr_item_reality_refs",
+        "idr_erasure_tombstones",
+    ];
+    for table in TABLES {
+        let exists: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            [table],
+            |row| row.get(0),
+        )?;
+        if exists != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "migration validation missing table {table}"
+            )));
+        }
+    }
+    let state: (i64, i64, i64) = connection.query_row(
+        "SELECT COUNT(*),MIN(current_human_model_revision),MAX(storage_contract_version) FROM idr_human_model_state WHERE singleton_key=1",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    if state.0 != 1 || state.1 < 0 || state.2 != 1 {
+        return Err(StorageError::OpenGate(
+            "IDR singleton aggregate state invalid".into(),
+        ));
+    }
+    for index in [
+        "idx_idr_items_lifecycle_scope_dimension",
+        "idx_idr_items_candidate_disposition",
+        "uq_idr_items_supersedes_predecessor",
+        "idx_idr_item_provenance_reverse",
+        "idx_idr_item_reality_reverse",
+        "uq_idr_history_item_revision",
+    ] {
+        let exists: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+            [index],
+            |row| row.get(0),
+        )?;
+        if exists != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required index missing: {index}"
+            )));
+        }
+    }
+    let item_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='idr_human_model_items'",
+        [],
+        |row| row.get(0),
+    )?;
+    let normalized = item_sql
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_uppercase();
+    for fragment in [
+        "KIND IN ('FACT', 'PREFERENCE', 'OBSERVATION', 'DISPOSITION', 'LONG_TERM_GOAL')",
+        "LIFECYCLE IN ('CANDIDATE', 'ACTIVE', 'WEAKENED', 'CONFLICTED', 'SUPERSEDED', 'REVOKED')",
+        "EVIDENCE_BASIS IN ('EXPLICIT', 'OBSERVED', 'INFERRED')",
+        "INFERENCE_CONFIDENCE IN ('LOW', 'MEDIUM', 'HIGH')",
+        "JSON_VALID(TYPED_PAYLOAD_JSON)",
+        "LENGTH(CAST(TYPED_PAYLOAD_JSON AS BLOB)) BETWEEN 2 AND 16384",
+        "PAYLOAD_SCHEMA_VERSION = 1",
+    ] {
+        if !normalized.contains(fragment) {
+            return Err(StorageError::OpenGate(format!(
+                "required IDR CHECK missing: {fragment}"
+            )));
+        }
+    }
+    for forbidden in [
+        "idr_update_proposals",
+        "idr_resolutions",
+        "idr_direction_snapshots",
+        "idr_forget_requests",
+        "idr_observations",
+        "idr_run_contexts",
+        "idr_profiles",
+        "idr_users",
+    ] {
+        let exists: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            [forbidden],
+            |row| row.get(0),
+        )?;
+        if exists != 0 {
+            return Err(StorageError::OpenGate(format!(
+                "forbidden IDR table detected: {forbidden}"
+            )));
+        }
     }
     Ok(())
 }
@@ -6287,6 +6418,31 @@ mod tests {
         transaction.commit().unwrap();
     }
 
+    fn apply_schema_through_11(connection: &mut Connection, now: i64) {
+        apply_schema_through_8(connection, now);
+        apply_artifact_type_extensibility_migration(
+            connection,
+            now + 1,
+            MIGRATION_0009,
+            &migration_checksum(MIGRATION_0009),
+        )
+        .unwrap();
+        apply_durable_source_asset_migration(
+            connection,
+            now + 2,
+            MIGRATION_0010,
+            &migration_checksum(MIGRATION_0010),
+        )
+        .unwrap();
+        apply_artifact_archive_state_migration(
+            connection,
+            now + 3,
+            MIGRATION_0011,
+            &migration_checksum(MIGRATION_0011),
+        )
+        .unwrap();
+    }
+
     fn start_pre_migrated_worker(
         mut connection: Connection,
         database_path: PathBuf,
@@ -6983,7 +7139,7 @@ mod tests {
             frozen_migration_checksum(MIGRATION_0006),
             MIGRATION_0006_FROZEN_SHA256
         );
-        assert_eq!(schema_version(), 11);
+        assert_eq!(schema_version(), 12);
     }
 
     #[test]
@@ -7014,7 +7170,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!((profile_before, version), (profile_after, 11));
+        assert_eq!((profile_before, version), (profile_after, 12));
         drop(connection);
         fs::remove_dir_all(&root).unwrap();
 
@@ -7171,7 +7327,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             (version, migration_name.as_str()),
-            (11, MIGRATION_0009_NAME)
+            (12, MIGRATION_0009_NAME)
         );
         assert_eq!(
             artifacts_before,
@@ -7466,7 +7622,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((max_version, assets_table), (11, 1));
+        assert_eq!((max_version, assets_table), (12, 1));
         assert_eq!(
             artifacts_before,
             query_json_rows(
@@ -7594,6 +7750,73 @@ mod tests {
         );
         drop(connection);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn migration_0012_upgrades_schema_11_empty_reopens_and_rolls_back_on_failure() {
+        const IDR_TABLES: &str = "'idr_human_model_state','idr_human_model_items','idr_item_history','idr_provenance_refs','idr_item_provenance','idr_item_reality_refs','idr_erasure_tombstones'";
+
+        let root = temporary_root();
+        let paths = PlatformPaths::from_root(root.clone()).unwrap();
+        let mut connection = open_connection(&paths.database).unwrap();
+        apply_schema_through_11(&mut connection, 1);
+        let before: (i64, i64) = connection
+            .query_row(
+                &format!(
+                    "SELECT (SELECT MAX(version) FROM schema_migrations), (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ({IDR_TABLES}))"
+                ),
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(before, (11, 0));
+
+        apply_migrations(&mut connection, 10).unwrap();
+        let after: (i64, i64, i64, i64) = connection
+            .query_row(
+                &format!(
+                    "SELECT (SELECT MAX(version) FROM schema_migrations), (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ({IDR_TABLES})), (SELECT current_human_model_revision FROM idr_human_model_state WHERE singleton_key=1), (SELECT COUNT(*) FROM idr_human_model_items)"
+                ),
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(after, (12, 7, 0, 0));
+        drop(connection);
+
+        let mut reopened = open_connection(&paths.database).unwrap();
+        apply_migrations(&mut reopened, 11).unwrap();
+        validate_schema(&reopened).unwrap();
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+
+        let rollback_root = temporary_root();
+        let rollback_paths = PlatformPaths::from_root(rollback_root.clone()).unwrap();
+        let mut rollback = open_connection(&rollback_paths.database).unwrap();
+        apply_schema_through_11(&mut rollback, 1);
+        let failing_migration =
+            format!("{MIGRATION_0012}\nSELECT * FROM migration_0012_forced_failure;");
+        assert!(matches!(
+            apply_idr_v2_storage_migration(
+                &mut rollback,
+                10,
+                &failing_migration,
+                &migration_checksum(&failing_migration),
+            ),
+            Err(StorageError::MigrationIncompatibleData)
+        ));
+        let rolled_back: (i64, i64, i64) = rollback
+            .query_row(
+                &format!(
+                    "SELECT (SELECT MAX(version) FROM schema_migrations), (SELECT COUNT(*) FROM schema_migrations WHERE version=12), (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ({IDR_TABLES}))"
+                ),
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(rolled_back, (11, 0, 0));
+        drop(rollback);
+        fs::remove_dir_all(rollback_root).unwrap();
     }
 
     #[test]

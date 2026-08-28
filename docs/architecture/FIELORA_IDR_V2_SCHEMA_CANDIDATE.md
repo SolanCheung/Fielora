@@ -4,21 +4,21 @@
 
 ```text
 DOCUMENT: FIELORA_IDR_V2_SCHEMA_CANDIDATE.md
-STATUS: DRAFT / CANDIDATE / NOT FROZEN
+STATUS: IMPLEMENTED CANDIDATE / NOT FROZEN
 ARCHITECTURE_PLACEMENT: Harness.IDR
-SCHEMA DESIGN: CANDIDATE ONLY
-MIGRATION: NOT AUTHORIZED / NOT CREATED
-IMPLEMENTATION: NOT AUTHORIZED
+SCHEMA DESIGN: IMPLEMENTED CANDIDATE
+MIGRATION: 0012_idr_v2_human_model / IMPLEMENTED
+IMPLEMENTATION: STORAGE + MIGRATION ONLY
 RUNTIME: NOT IMPLEMENTED
 RESOLVER: NOT IMPLEMENTED
 CONTEXT / FIPC / UI / EVAL: OUT OF SCOPE
 DATE: 2026-08-28
 ```
 
-This document maps the accepted IDR V2 semantic Contract to a minimum local
-SQLite persistence candidate. Names and shapes below are physical-design
-candidates, not frozen SQL, Rust, serialization, repository, or migration
-contracts.
+This document maps the accepted IDR V2 semantic Contract to the implemented
+minimum local SQLite persistence candidate. The schema-12 migration and typed
+repository are implemented and tested, but remain Candidate rather than frozen
+semantic or wire contracts.
 
 ---
 
@@ -56,7 +56,7 @@ FIPC / UI / A-B Eval
 Memory Runtime
 Vector DB / embedding / FTS
 multi-user / Tenant / Principal / HumanProfileId
-actual migration or source code
+freeze of the implemented storage profile
 ```
 
 ---
@@ -147,7 +147,7 @@ erasure.
 
 `HumanModelItemId` is unique across both current items and tombstones and is
 never reused. SQLite cannot express cross-table uniqueness directly, so the
-future repository must check both identity sets inside the aggregate write
+implemented repository checks both identity sets inside the aggregate write
 transaction before admitting a new item.
 
 ### 5.2 Remove from V2
@@ -265,7 +265,7 @@ Candidate payload families:
 | `LONG_TERM_GOAL` | `LongTermGoalValue`: goal key and bounded desired durable outcome. |
 
 SQLite enforces valid JSON, object root, non-empty payload, and accepted maximum
-serialized size. The future repository performs closed per-kind validation and
+serialized size. The repository performs closed per-kind validation and
 canonical re-open on read. The Candidate default maximum is `16 KiB UTF-8` per
 typed payload; the exact bound must be accepted before migration freeze.
 
@@ -402,7 +402,7 @@ Storage must not deduplicate by fuzzy text, Model prose, or support-body hash.
 
 At least one provenance relation is a commit invariant. SQLite cannot express
 "at least one child row at transaction end" with a simple foreign key, so the
-future repository must validate this before commit and verify it before the
+repository validates this before commit and verifies it before the
 aggregate revision advances. Complex triggers are not proposed.
 
 ### 10.3 Erasure interaction
@@ -578,7 +578,7 @@ Local single-human semantics do not imply single-threaded access. Agent runs,
 human correction, activation, import, and background proposal admission may
 race.
 
-The future repository must perform a compare-and-increment inside one SQLite
+The repository performs a compare-and-increment inside one SQLite
 write transaction:
 
 ```text
@@ -1107,7 +1107,7 @@ implementation; if no suitable code exists, a Contract amendment is required.
 
 ## 34. Schema Test Matrix
 
-Future migration/storage tests must cover at least:
+The implemented migration/storage test matrix covers:
 
 | Case | Expected storage result |
 |---|---|
@@ -1149,10 +1149,10 @@ reasoning content and prove foreign-key integrity for internal relations.
 
 ```text
 exact registered dimension/value vocabulary
-final typed payload field schemas and 16 KiB candidate bound
-final provenance support byte bound and safe digest policy
+whether the implemented typed payload fields and 16 KiB profile become frozen
+whether the implemented 2 KiB provenance support bound becomes frozen
 exact Reality kind/relation registry
-whether a narrow terminal-state trigger is retained at freeze
+whether repository-only terminal enforcement remains the frozen choice
 retention/compaction for weakened/conflicted/old observations
 outer Core code for physical storage/erasure failure
 Context Snapshot projection bytes versus digest/reference retention
@@ -1162,40 +1162,39 @@ query-plan evidence for optional indexes
 encryption-at-rest policy within existing DataRoot authority
 ```
 
-These are not permission for implementation defaults. Schema freeze must either
-resolve them or explicitly prove they do not affect the first migration.
+The implementation choices above are bounded V2 Candidate profiles. Schema
+freeze must either retain them or define an explicit compatibility transition;
+their existence is not authority to reinterpret already stored rows.
 
 ---
 
-## 36. Implementation Preconditions
+## 36. Implementation Outcome and Boundary
 
-No migration, Rust type, storage repository, Resolver, Context integration,
-FIPC, UI, or Eval implementation may begin until the user explicitly accepts:
+Migration `0012_idr_v2_human_model.sql` implements the seven-table Candidate in
+the existing Fielora SQLite database. `fielora-storage::idr` implements closed
+typed payloads, revision-guarded mutations, lifecycle transitions, normalized
+provenance and Reality references, atomic correction, disable, erasure, reset,
+and consistent snapshot reads. Six required query/uniqueness indexes are
+present. Terminal lifecycle immutability is repository-enforced; no trigger
+business runtime was added.
 
-```text
-table set
-Option B typed payload and closed validation boundary
-dimension/value representation
-fixed nullable Scope columns and Project ref behavior
-shared provenance row + many-to-many relation
-reference-only Reality dependency relation
-lifecycle/history and terminal enforcement split
-one-link supersession chain
-singleton aggregate revision and concurrency protocol
-ephemeral update proposal/resolution decisions
-erasure/tombstone semantics
-required/deferred index set
-schema-12 empty-model migration strategy
-transaction and integrity boundaries
-storage error-envelope precondition
-```
-
-The next separately authorized task would be:
+The implementation profile uses payload version 1, a 16 KiB serialized payload
+maximum, and 2 KiB bounded provenance support. Project references are validated
+against the current local user's `fields.id` compatibility identity without a
+fake polymorphic foreign key. Erasure proof is application-level semantic
+erasure only; it does not claim SQLite free-list, disk-sector, forensic, or
+legal secure deletion.
 
 ```text
-IDR V2 STORAGE / MIGRATION IMPLEMENTATION REVIEW
+SCHEMA_VERSION: 12
+TABLES: 7
+INDEXES: 6
+INITIAL_HUMAN_MODEL_REVISION: 0
+INITIAL_ITEMS: 0
+TERMINAL_DB_GUARD: REPOSITORY_ONLY
+DEPENDENCIES_CHANGED: NO
+AGENT_BEHAVIOR_CHANGED: NO
+RESOLVER_CONTEXT_FIPC_UI_EVAL: NOT IMPLEMENTED
+MODEL_REQUESTS: 0
+NEXT: IDR V2 RESOLVER DESIGN / CONTEXT INTEGRATION REVIEW (NOT IMPLEMENTED)
 ```
-
-This Candidate creates no migration file, table, index, trigger, Rust/Serde
-type, repository code, FIPC, UI, Resolver, Context change, dependency, or
-product behavior.

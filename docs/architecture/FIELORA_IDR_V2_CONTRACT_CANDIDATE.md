@@ -5,9 +5,9 @@
 ```text
 DOCUMENT: FIELORA_IDR_V2_CONTRACT_CANDIDATE.md
 STATUS: DRAFT / CANDIDATE / NOT FROZEN
-IMPLEMENTATION: NOT AUTHORIZED
-SCHEMA: NOT AUTHORIZED
-MIGRATION: NONE
+IMPLEMENTATION: STORAGE + MIGRATION IMPLEMENTED CANDIDATE
+SCHEMA: IMPLEMENTED CANDIDATE / NOT FROZEN
+MIGRATION: 0012_idr_v2_human_model
 RUNTIME: NOT IMPLEMENTED
 FIPC: NOT DESIGNED
 UI: OUT OF SCOPE
@@ -20,9 +20,9 @@ Candidate. Shapes below are conceptual semantic contracts, not Rust structs,
 Serde models, tables, indexes, or wire-format commitments.
 
 The physical mapping review is tracked in
-`FIELORA_IDR_V2_SCHEMA_CANDIDATE.md`. It remains
-`DRAFT / CANDIDATE / NOT FROZEN`; no Migration, Runtime, or implementation is
-authorized.
+`FIELORA_IDR_V2_SCHEMA_CANDIDATE.md`. Its schema-12 storage profile is an
+`IMPLEMENTED CANDIDATE / NOT FROZEN`; Resolver, Runtime, Context integration,
+FIPC, UI, automatic learning/activation, and Eval remain unimplemented.
 
 ---
 
@@ -1294,40 +1294,16 @@ Implementation must not invent defaults for deferred semantics.
 
 ---
 
-## 34. Schema preconditions
+## 34. Implemented storage disposition
 
-This Candidate remains `NOT FROZEN`. Schema Candidate work is prohibited until
-the user reviews and accepts at least:
+The separately authorized IDR V2 storage task implemented migration 0012 and a
+typed local repository as a Candidate profile. That implementation proves the
+five-kind payload matrix, scope/provenance/Reality reference persistence,
+lifecycle and optimistic revision guards, atomic correction/supersession,
+disable, application-level semantic erasure, reset, and consistent reads.
 
-```text
-Contract surface KEEP/MERGE/REMOVE decisions
-HumanProfileId removal
-HumanModelItem semantic shape and kind validation matrix
-Provenance and source-unavailable semantics
-EvidenceBasis / confidence field rules
-Scope matching and specificity key
-Lifecycle transition table and terminal semantics
-Conservative activation policy
-Update/correction/forget contracts
-Resolution input/result/RelevantDisposition/IDRProjection
-CLARIFY_WHEN naming
-Precedence and Reality invalidation
-Sensitive admission outcomes
-Version/revision model
-Error/reason codes
-Contract test matrix and Eval hooks
-```
-
-The 2026-08-28 `IDR V2 SCHEMA CANDIDATE` execution instruction satisfied this
-sequencing prerequisite for drafting the Schema Candidate only. It did not
-freeze the Contract or Schema and did not authorize Migration or implementation.
-
-Only after explicit Contract Review acceptance may a separate task begin:
-
-```text
-IDR V2 SCHEMA CANDIDATE
-```
-
-That task must still not imply Runtime implementation authorization. This
-Contract Candidate creates no table, migration, Rust type, Serde model, FIPC,
-Context integration, UI, dependency, or product behavior.
+This semantic Contract remains `NOT FROZEN`. The implemented schema does not
+authorize Resolver semantics, Individualized Direction generation, Context or
+AgentCoordinator integration, Model extraction, automatic learning/activation,
+FIPC, UI, or Eval. Any such step requires a separate design/integration review;
+stored version-1 rows must not be silently reinterpreted.
