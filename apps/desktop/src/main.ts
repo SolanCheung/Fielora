@@ -28,6 +28,8 @@ import {
   validateStartAgent, validateAgentRun, validateListAgentRuns, validateListAgentEvents,
   validateResolveAgentApproval,
   validateActivateMcpConnection,
+  validateListArtifacts, validateReadArtifact, validateArtifactHistory,
+  validateAssetPreview, validateDiagramPreview, validateSetArtifactArchiveState,
   validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment, validateStoreWorkspaceAttachment,
   validateSaveWebLibrary, validateLibraryObject, validateDeleteLibraryObject, validateListLibraryObjects,
 } from './validation';
@@ -314,6 +316,12 @@ function registerBridgeHandlers(): void {
   handle(channels.conversationArchive, validateArchiveConversation, 'command.conversation.archive');
   handle(channels.conversationMessageCreate, validateCreateConversationMessage, 'command.conversation.message.create');
   handle(channels.conversationMessageList, validateListConversationMessages, 'query.conversation.message.list');
+  handle(channels.artifactList, validateListArtifacts, 'query.artifact.list');
+  handle(channels.artifactRead, validateReadArtifact, 'query.artifact.read');
+  handle(channels.artifactHistory, validateArtifactHistory, 'query.artifact.history');
+  handle(channels.artifactAssetPreview, validateAssetPreview, 'query.artifact.asset_preview');
+  handle(channels.artifactDiagramPreview, validateDiagramPreview, 'query.artifact.diagram_preview');
+  handle(channels.artifactSetArchiveState, validateSetArtifactArchiveState, 'command.artifact.set_archive_state');
   ipcMain.handle(channels.workspaceFileList, async (event, payload) => {
     assertBridgeEvent(event); const request=validateWorkspaceProject(payload);
     return workspaceRuntime.listFiles(await projectRoot(request.field_id));

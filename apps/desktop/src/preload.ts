@@ -24,6 +24,14 @@ const bridge: FieloraBridge = {
     createMessage: (request) => ipcRenderer.invoke(channels.conversationMessageCreate, request),
     listMessages: (request) => ipcRenderer.invoke(channels.conversationMessageList, request),
   },
+  artifact: {
+    list: (request) => ipcRenderer.invoke(channels.artifactList, request),
+    read: (request) => ipcRenderer.invoke(channels.artifactRead, request),
+    history: (request) => ipcRenderer.invoke(channels.artifactHistory, request),
+    previewAsset: (request) => ipcRenderer.invoke(channels.artifactAssetPreview, request),
+    previewDiagram: (request) => ipcRenderer.invoke(channels.artifactDiagramPreview, request),
+    setArchiveState: (request) => ipcRenderer.invoke(channels.artifactSetArchiveState, request),
+  },
   workspace: {
     listFiles: (request) => ipcRenderer.invoke(channels.workspaceFileList, request),
     readFile: (request) => ipcRenderer.invoke(channels.workspaceFileRead, request),

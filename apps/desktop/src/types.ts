@@ -35,6 +35,10 @@ import type {
   BuildProvenanceView,
   LibraryObjectView, LibraryObjectRequest, DeleteLibraryObjectRequest, ListLibraryObjectsRequest,
   SaveWebLibraryRequest, ProfileView,
+  ListArtifactsRequest, ReadArtifactRequest, ArtifactHistoryRequest,
+  ArtifactListView, ArtifactReadView, ArtifactHistoryView,
+  AssetPreviewRequest, AssetPreviewView, DiagramPreviewRequest, DiagramPreviewView,
+  SetArtifactArchiveStateCommandRequest,
 } from '@fielora/contracts';
 import type { StorageDetail, StorageInfo } from './storage-manager';
 import type { AppPreferences } from './renderer/app-preferences';
@@ -80,6 +84,14 @@ export interface FieloraBridge {
     archive(request: ArchiveConversationRequest): Promise<ConversationView>;
     createMessage(request: CreateConversationMessageRequest): Promise<ConversationMessageView>;
     listMessages(request: ListConversationMessagesRequest): Promise<ConversationMessageView[]>;
+  };
+  artifact: {
+    list(request: ListArtifactsRequest): Promise<ArtifactListView>;
+    read(request: ReadArtifactRequest): Promise<ArtifactReadView>;
+    history(request: ArtifactHistoryRequest): Promise<ArtifactHistoryView>;
+    previewAsset(request: AssetPreviewRequest): Promise<AssetPreviewView>;
+    previewDiagram(request: DiagramPreviewRequest): Promise<DiagramPreviewView>;
+    setArchiveState(request: SetArtifactArchiveStateCommandRequest): Promise<AgentToolCallView>;
   };
   workspace: {
     listFiles(request: WorkspaceProjectRequest): Promise<WorkspaceFileEntry[]>;

@@ -16,6 +16,7 @@ use fielora_storage::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
@@ -33,7 +34,7 @@ use uuid::Uuid;
 
 const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 const PROTOCOL: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
-const CAPABILITIES: [&str; 75] = [
+const CAPABILITIES: [&str; 81] = [
     "system.build_provenance",
     "field.create",
     "field.list",
@@ -109,6 +110,12 @@ const CAPABILITIES: [&str; 75] = [
     "agent.resume",
     "agent.resolve_approval",
     "agent.stream",
+    "artifact.list",
+    "artifact.read",
+    "artifact.history",
+    "artifact.asset_preview",
+    "artifact.diagram_preview",
+    "artifact.set_archive_state",
 ];
 
 #[derive(Debug, Error)]
@@ -160,6 +167,7 @@ struct Runtime {
     completed_invocations: Arc<Mutex<HashSet<String>>>,
     event_sender: SyncSender<Value>,
     agent: AgentCoordinator,
+    content_blob_root: std::path::PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
@@ -286,6 +294,7 @@ fn run() -> Result<(), CoreError> {
         completed_invocations: Arc::new(Mutex::new(HashSet::new())),
         event_sender: event_sender.clone(),
         agent,
+        content_blob_root: paths.library_dir,
     };
 
     let stdin = io::stdin();
@@ -562,6 +571,111 @@ fn dispatch_request(
                     .storage
                     .list_conversation_messages(params.conversation_id)?,
             )
+        }
+        "query.artifact.list" => {
+            let params: ListArtifactsRequest = parse_params(&request.params)?;
+            let limit = params.limit.unwrap_or(30);
+            if limit == 0 || limit > 100 {
+                return Err(DomainError::Validation(
+                    "ARTIFACT_LIST_LIMIT_INVALID".into(),
+                ));
+            }
+            serialize(runtime.storage.list_artifacts(
+                params.cursor,
+                limit,
+                params.include_archived,
+            )?)
+        }
+        "query.artifact.read" => {
+            let params: ReadArtifactRequest = parse_params(&request.params)?;
+            serialize(
+                runtime
+                    .storage
+                    .read_artifact(params.artifact_id, params.revision_id)?,
+            )
+        }
+        "query.artifact.history" => {
+            let params: ArtifactHistoryRequest = parse_params(&request.params)?;
+            let limit = params.limit.unwrap_or(30);
+            if limit == 0 || limit > 100 || params.before_sequence == Some(1) {
+                return Err(DomainError::Validation(
+                    "ARTIFACT_HISTORY_LIMIT_INVALID".into(),
+                ));
+            }
+            serialize(runtime.storage.list_artifact_history(
+                params.artifact_id,
+                params.before_sequence,
+                limit,
+            )?)
+        }
+        "query.artifact.asset_preview" => {
+            const MAX_DESKTOP_PNG_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
+            let params: AssetPreviewRequest = parse_params(&request.params)?;
+            if !valid_sha256(&params.expected_content_sha256) {
+                return Err(DomainError::Validation(
+                    "ASSET_PREVIEW_DIGEST_INVALID".into(),
+                ));
+            }
+            let asset = runtime.storage.read_asset(params.asset_id.clone())?;
+            if asset.media_type != AssetMediaType::Png
+                || asset.content_sha256 != params.expected_content_sha256
+                || asset.byte_length > MAX_DESKTOP_PNG_PREVIEW_BYTES as u64
+            {
+                return Err(DomainError::Validation("ASSET_PREVIEW_REJECTED".into()));
+            }
+            let bytes = fielora_agent::asset::ContentBlobStore::new(&runtime.content_blob_root)
+                .read_verified(
+                    &asset.blob_ref,
+                    asset.byte_length,
+                    &asset.content_sha256,
+                    MAX_DESKTOP_PNG_PREVIEW_BYTES,
+                )
+                .map_err(|_| DomainError::Validation("ASSET_PREVIEW_UNAVAILABLE".into()))?;
+            let admitted = fielora_agent::png_admission::admit(bytes)
+                .map_err(|_| DomainError::Validation("ASSET_PREVIEW_UNAVAILABLE".into()))?;
+            if admitted.content_sha256 != asset.content_sha256
+                || admitted.byte_length != asset.byte_length
+                || admitted.width != asset.width
+                || admitted.height != asset.height
+            {
+                return Err(DomainError::Validation(
+                    "ASSET_PREVIEW_INTEGRITY_FAILED".into(),
+                ));
+            }
+            serialize(AssetPreviewView {
+                asset_id: asset.asset_id,
+                media_type: asset.media_type,
+                content_sha256: asset.content_sha256,
+                byte_length: asset.byte_length,
+                width: asset.width,
+                height: asset.height,
+                data_url: data_url("image/png", admitted.bytes()),
+            })
+        }
+        "query.artifact.diagram_preview" => {
+            let params: DiagramPreviewRequest = parse_params(&request.params)?;
+            let read = runtime
+                .storage
+                .read_artifact(params.artifact_id.clone(), Some(params.revision_id.clone()))?;
+            let ArtifactContentV1::Diagram(diagram) = &read.revision.content else {
+                return Err(DomainError::Validation(
+                    "DIAGRAM_PREVIEW_TYPE_MISMATCH".into(),
+                ));
+            };
+            let bytes = fielora_agent::artifact::render_diagram_preview(diagram)
+                .map_err(|_| DomainError::Validation("DIAGRAM_PREVIEW_UNAVAILABLE".into()))?;
+            let render_sha256 = format!("{:x}", Sha256::digest(&bytes));
+            serialize(DiagramPreviewView {
+                artifact_id: read.artifact.artifact_id,
+                revision_id: read.revision.revision_id,
+                semantic_sha256: read.revision.semantic_sha256,
+                render_sha256,
+                data_url: data_url("image/svg+xml", &bytes),
+            })
+        }
+        "command.artifact.set_archive_state" => {
+            let params: SetArtifactArchiveStateCommandRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.set_artifact_archive_state(params)?)
         }
         "command.agent.start" => {
             let params: StartAgentRunRequest = parse_params(&request.params)?;
@@ -1476,6 +1590,36 @@ fn serialize(value: impl serde::Serialize) -> Result<(Value, Option<DomainEventD
     serde_json::to_value(value)
         .map(|value| (value, None))
         .map_err(|error| DomainError::Validation(error.to_string()))
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn data_url(media_type: &str, bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or(0);
+        let third = chunk.get(2).copied().unwrap_or(0);
+        encoded.push(TABLE[(first >> 2) as usize] as char);
+        encoded.push(TABLE[(((first & 0x03) << 4) | (second >> 4)) as usize] as char);
+        encoded.push(if chunk.len() > 1 {
+            TABLE[(((second & 0x0f) << 2) | (third >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        encoded.push(if chunk.len() > 2 {
+            TABLE[(third & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    format!("data:{media_type};base64,{encoded}")
 }
 
 fn field_summary(field: Field) -> FieldSummary {

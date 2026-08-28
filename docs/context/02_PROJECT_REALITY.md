@@ -1958,3 +1958,43 @@ Clippy `-D warnings`、fmt、context audit、diff check 与 release Core build�
 PreMerge、已知 Browse baseline、Desktop/visual、packaged/portable、live network 与 Model
 probe按范围未运行。详细事实见
 `docs/architecture/FIELORA_V0.1_CAPABILITY_TOOLS_CLOSEOUT.md`。
+
+## 91. Artifact Working Surface Product Integration
+
+Durable Artifact 已进入现有 Project Conversation 右侧 `RightWorkspaceDock`：
+Profile-scoped Artifact catalog 与 `artifact:<ArtifactId>` 多 tab 为 session-local UI
+state，关闭 tab 不改 Artifact，restart 后可从 durable catalog 重新打开。
+Document、Presentation、Diagram、Spreadsheet 都以 exact semantic revision 为 UI
+authority；CURRENT 跟随新 current revision，HISTORICAL 固定 exact revision 并显示
+有新版本。Spreadsheet 只生成 bounded 20×10 viewport DOM，Diagram 只通过既有
+deterministic renderer 和 structural reopen 产生 transient controlled SVG。
+
+Desktop 新增最小 read/mediation FIPC：Artifact list/read/history、same-Profile exact
+PNG Asset preview、exact Diagram preview 与 archive/restore human command。Preview 不暴露
+DataRoot/LibraryRoot/blob/SQLite/temp path，PNG 重查 expected digest、size 与 strict
+admission；SVG 使用 `<img>`，不注入 DOM。Archive/restore 由 zero-model human command
+继续走既有 PolicyEngine、ToolExecutor、durable ToolCall receipt 与 recovery，没有
+第二条 mutation path。
+
+Agent request 可携带 Core-validated `ActiveArtifactContext`：Artifact/type、viewed/current
+revision、CURRENT/HISTORICAL、archive 与 optional selected slide/sheet。该 trusted
+application selection 进入当次 Context Snapshot 并绑定 AgentRun，但不自动加入
+Document blocks、slides、cells、graph、history 或 PNG bytes；Artifact content 继续是
+`UNTRUSTED_ARTIFACT_CONTENT`，Model 需要内容时使用 existing `artifact.read`。
+create/update UI 同步只消费 foreground Conversation 的 durable ToolCall receipt，不解析
+自然语言，也不增 Agent→UI protocol。
+
+```text
+ARTIFACT_WORKING_SURFACE: IMPLEMENTED / TARGETED_DESKTOP_VALIDATED
+HOST: EXISTING_RIGHT_WORKSPACE_DOCK
+MUTATION: CHAT_DRIVEN_EXISTING_ARTIFACT_TOOLS
+ACTIVE_CONTEXT: BOUNDED_TRUSTED_SELECTION_METADATA
+CONTENT_AUTHORITY: UNTRUSTED_ARTIFACT_CONTENT
+PREVIEW: PROFILE_SCOPED_PNG + VALIDATED_DIAGRAM_SVG
+CURRENT_DATABASE_SCHEMA: 11
+NEW_MIGRATION: 0
+NEW_MODEL_TOOLS: 0
+NEW_DEPENDENCIES: 0
+DIRECT_EDITORS_FORMULA_CHART_CANVAS_DESIGNER: DEFERRED
+CHANGE_IMPACT: HIGH
+```

@@ -1839,6 +1839,68 @@ pub struct AssetView {
     pub created_at: i64,
 }
 
+// Product-facing Artifact Working Surface requests. These are trusted Desktop
+// read/mediation contracts, not Model Tool definitions. They intentionally do
+// not expose storage paths or Asset blob references.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ListArtifactsRequest {
+    pub cursor: Option<ArtifactListCursor>,
+    pub limit: Option<u16>,
+    pub include_archived: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ReadArtifactRequest {
+    pub artifact_id: ArtifactId,
+    pub revision_id: Option<ArtifactRevisionId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactHistoryRequest {
+    pub artifact_id: ArtifactId,
+    #[ts(type = "number | null")]
+    pub before_sequence: Option<u64>,
+    pub limit: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AssetPreviewRequest {
+    pub asset_id: AssetId,
+    pub expected_content_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct AssetPreviewView {
+    pub asset_id: AssetId,
+    pub media_type: AssetMediaType,
+    pub content_sha256: String,
+    #[ts(type = "number")]
+    pub byte_length: u64,
+    pub width: u32,
+    pub height: u32,
+    pub data_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct DiagramPreviewRequest {
+    pub artifact_id: ArtifactId,
+    pub revision_id: ArtifactRevisionId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct DiagramPreviewView {
+    pub artifact_id: ArtifactId,
+    pub revision_id: ArtifactRevisionId,
+    pub semantic_sha256: String,
+    pub render_sha256: String,
+    pub data_url: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
 #[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
@@ -2233,6 +2295,27 @@ pub struct AgentInputAttachment {
     pub data_url: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ActiveArtifactViewMode {
+    Current,
+    Historical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ActiveArtifactContext {
+    pub artifact_id: ArtifactId,
+    pub artifact_type: ArtifactType,
+    pub viewed_revision_id: ArtifactRevisionId,
+    pub current_revision_id: ArtifactRevisionId,
+    pub view_mode: ActiveArtifactViewMode,
+    pub archived: bool,
+    pub selected_slide: Option<u32>,
+    pub selected_sheet_id: Option<SpreadsheetSheetId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct StartAgentRunRequest {
@@ -2245,6 +2328,20 @@ pub struct StartAgentRunRequest {
     pub permission: AgentPermission,
     pub max_steps: Option<u32>,
     pub attachments: Option<Vec<AgentInputAttachment>>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub active_work_surface: Option<ActiveArtifactContext>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SetArtifactArchiveStateCommandRequest {
+    pub field_id: FieldId,
+    pub conversation_id: ConversationId,
+    pub provider_config_id: ProviderConfigId,
+    pub model_id: Option<String>,
+    pub artifact_id: ArtifactId,
+    pub archived: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

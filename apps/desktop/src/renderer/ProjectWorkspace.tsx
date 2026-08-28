@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type {
   AgentChangedEvent, AgentEventView, AgentPermission, AgentRunView, AgentToolCallView, ApprovalView,
   McpConnectionRuntimeView,
-  ConversationMessageStatus, ConversationMessageView, ConversationView, ProjectView, ProviderConfigView,
+  ConversationMessageStatus, ConversationMessageView, ConversationView, ProjectView, ProviderConfigView, ArtifactView,
 } from '@fielora/contracts';
 import type { AgentTextDeltaEvent } from '../types';
 import type { WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceFileEntry, WorkspaceFileView, WorkspaceImagePreview, WorkspaceProjectOpenTarget, WorkspaceProjectOpenTargetView } from '../workspace-types';
@@ -17,6 +17,11 @@ import { buildAgentReview } from './agent-review';
 import { MarkdownMessage } from './MarkdownMessage';
 import { ResizableDivider } from './ResizableDivider';
 import { RightWorkspaceDock, type RightWorkspaceTab } from './RightWorkspaceDock';
+import { ArtifactCatalog, ArtifactSurface } from './ArtifactWorkingSurface';
+import {
+  activeArtifactContext, artifactTabId, emptyArtifactSession, pinArtifactRevision,
+  refreshArtifactCurrent, type ArtifactSurfaceSession,
+} from './artifact-working-surface';
 import { WorkspaceFileTree } from './WorkspaceFileTree';
 import { IconButton, SelectMenu, TextActionDialog, ToolbarAction } from './UiPrimitives';
 import { persistWorkspaceNavigationWidth, readWorkspaceNavigationWidth, WorkspaceSurface } from './WorkspaceSurface';
@@ -115,7 +120,7 @@ type FilePreviewState =
   | { kind: 'UNSUPPORTED'; relativePath: string; message: string }
   | null;
 
-type RightDockKind = 'FILES' | 'FILE' | 'IMAGE' | 'REVIEW' | 'BROWSER' | 'TERMINAL';
+type RightDockKind = 'FILES' | 'FILE' | 'IMAGE' | 'REVIEW' | 'BROWSER' | 'TERMINAL' | 'ARTIFACTS' | 'ARTIFACT';
 
 function WorkspaceAppBadge({ target, iconDataUrl = null }: { target: WorkspaceProjectOpenTarget; iconDataUrl?: string | null }) {
   if (iconDataUrl) return <img className={`workspace-app-icon target-${target.toLowerCase()}`} src={iconDataUrl} alt="" aria-hidden="true" data-app-icon={target} data-icon-source="native"/>;
@@ -138,6 +143,7 @@ interface ProjectDockTab extends RightWorkspaceTab {
   relativePath?: string;
   attachment?: WorkspaceAttachmentView;
   reviewSelection?: HistoricalReviewSelection;
+  artifactId?: string;
 }
 
 interface FileDockSession {
@@ -633,6 +639,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const [dockTabs, setDockTabs] = useState<ProjectDockTab[]>([]);
   const [activeDockTabId, setActiveDockTabId] = useState('');
   const [fileDockSessions, setFileDockSessions] = useState<Record<string, FileDockSession>>({});
+  const [artifactSessions, setArtifactSessions] = useState<Record<string, ArtifactSurfaceSession>>({});
+  const [artifactRefreshToken, setArtifactRefreshToken] = useState(0);
+  const [artifactCommandBusy, setArtifactCommandBusy] = useState(false);
   const [fileFilter, setFileFilter] = useState('');
   const [fileTreeSelection, setFileTreeSelection] = useState('');
   const [environment, setEnvironment] = useState<WorkspaceEnvironmentView | null>(null);
@@ -700,6 +709,10 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const agentRunIdRef = useRef('');
   const agentEventsRef = useRef<AgentEventView[]>([]);
   const agentToolsRef = useRef<AgentToolCallView[]>([]);
+  const dockTabsRef = useRef<ProjectDockTab[]>([]);
+  const artifactSessionsRef = useRef<Record<string, ArtifactSurfaceSession>>({});
+  const handledArtifactToolCallsRef = useRef(new Set<string>());
+  const foregroundAgentRunsRef = useRef(new Set<string>());
   const agentProjectionRefreshRef = useRef({ runId: '', inFlight: false, pending: false, timer: null as number | null });
   const terminalAgentRefreshRef = useRef(new Set<string>());
   const terminalRef = useRef<ActiveTerminal | null>(null);
@@ -740,6 +753,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('fielora:workspace-dock-state', { detail: { open: workspaceOpen, activeTabId: activeDockTabId } }));
   }, [activeDockTabId, workspaceOpen]);
+
+  useEffect(() => { dockTabsRef.current = dockTabs; }, [dockTabs]);
+  useEffect(() => { artifactSessionsRef.current = artifactSessions; }, [artifactSessions]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('fielora:terminal-state', { detail: { open: bottomTerminalOpen, height: bottomTerminalHeight } }));
@@ -945,6 +961,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const events = mergeAgentEventPages(existing, incremental);
     agentEventsRef.current = events;
     agentToolsRef.current = tools;
+    processArtifactToolReceipts(tools);
     agentRunIdRef.current = run.id;
     setAgentRun(run); setAgentEvents(events); setAgentTools(tools); setMcpRuntime(nextMcpRuntime); setAgentProjectionNotice('');
     performance.clearMeasures('fielora.agent.projection');
@@ -954,7 +971,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     } else if (activeAgentRef.current?.runId === run.id) activeAgentRef.current = null;
   }, []);
   const refreshConversationAgent = useCallback(async (id: string) => {
-    const runs = (await window.fielora.agent.list({ conversation_id: id })).filter((run) => !run.task.startsWith('[SUBAGENT '));
+    const runs = (await window.fielora.agent.list({ conversation_id: id })).filter((run) => !run.task.startsWith('[SUBAGENT ') && !run.task.startsWith('[HUMAN_COMMAND '));
     if (selectedConversationRef.current !== id) return;
     if (!runs[0]) { agentRunIdRef.current = ''; agentEventsRef.current = []; agentToolsRef.current = []; setAgentRun(null); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); activeAgentRef.current = null; return; }
     await loadAgentRun(runs[0], true);
@@ -971,9 +988,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   }, [refreshProviders]);
 
   useEffect(() => {
-    if (!projectId) { setConversations([]); setConversationId(''); setFiles([]); setEnvironment(null); setDockTabs([]); setActiveDockTabId(''); setWorkspaceOpen(false); setDockFocused(false); return; }
+    if (!projectId) { setConversations([]); setConversationId(''); setFiles([]); setEnvironment(null); setDockTabs([]); setArtifactSessions({}); setActiveDockTabId(''); setWorkspaceOpen(false); setDockFocused(false); foregroundAgentRunsRef.current.clear(); return; }
     setSelectedFile(null); setFilePreview(null); setEditorContent(''); setDraft(null); setUndoChange(null);
-    setWorkspaceOpen(false); setDockTabs([]); setActiveDockTabId(''); setFileDockSessions({}); setFileTreeSelection(''); setEnvironmentOpen(false); setProjectLauncherOpen(false); setDockProjectLauncherOpen(false); setDockFocused(false);
+    setWorkspaceOpen(false); setDockTabs([]); setArtifactSessions({}); setActiveDockTabId(''); setFileDockSessions({}); setFileTreeSelection(''); setEnvironmentOpen(false); setProjectLauncherOpen(false); setDockProjectLauncherOpen(false); setDockFocused(false); handledArtifactToolCallsRef.current.clear(); foregroundAgentRunsRef.current.clear();
     void Promise.all([
       refreshConversations(projectId),
       window.fielora.workspace.listFiles({ field_id: projectId }).then(setFiles),
@@ -1343,7 +1360,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         attachments: retryImages.filter((item) => item.data_url && item.width && item.height).map((item) => ({
           id: item.id, filename: item.name, mime_type: item.mime_type, size: item.size, width: item.width!, height: item.height!, source: item.source, data_url: item.data_url!,
         })),
+        active_work_surface: selectedActiveArtifactContext(),
       });
+      foregroundAgentRunsRef.current.add(started.id);
       activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '' };
       agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
       setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); setStreamingOutput('');
@@ -1486,7 +1505,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       provider_config_id: provider.id, model_id: provider.default_model,
       task: `${item.content}${selectedHint}`.slice(0, 32_000), permission: item.permission, max_steps: 24,
       attachments: [],
+      active_work_surface: selectedActiveArtifactContext(),
     });
+    foregroundAgentRunsRef.current.add(started.id);
     activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '' };
     agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
     setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); setStreamingOutput('');
@@ -1558,7 +1579,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
           id: item.id, filename: item.name, mime_type: item.mime_type, size: item.size,
           width: item.width!, height: item.height!, source: item.source, data_url: item.data_url!,
         })),
+        active_work_surface: selectedActiveArtifactContext(),
       });
+      foregroundAgentRunsRef.current.add(started.id);
       activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '' };
       agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
       setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null);
@@ -1578,23 +1601,131 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       .finally(() => { queuedFollowUpStartingRef.current = false; setBusy(false); });
   }, [agentRun?.id, agentRun?.status, queuedFollowUps]);
 
+  function selectedActiveArtifactContext() {
+    const tab = dockTabsRef.current.find((candidate) => candidate.id === activeDockTabId);
+    if (tab?.kind !== 'ARTIFACT') return undefined;
+    return activeArtifactContext(artifactSessionsRef.current[tab.id] ?? null) ?? undefined;
+  }
+
+  function updateArtifactTabLabel(artifact: ArtifactView) {
+    const id = artifactTabId(artifact.artifact_id);
+    setDockTabs((current) => current.map((tab) => tab.id === id ? {
+      ...tab,
+      label: artifact.title?.trim() || `未命名${artifact.artifact_type === 'PRESENTATION' ? '演示文稿' : artifact.artifact_type === 'SPREADSHEET' ? '电子表格' : artifact.artifact_type === 'DIAGRAM' ? '图示' : '文档'}`,
+    } : tab));
+  }
+
+  async function loadArtifactRevision(artifactId: string, revisionId: string | null, mode: 'CURRENT' | 'HISTORICAL') {
+    const tabId = artifactTabId(artifactId);
+    setArtifactSessions((current) => ({ ...current, [tabId]: { ...(current[tabId] ?? emptyArtifactSession(artifactId)), loading: true, error: '' } }));
+    try {
+      const [read, history] = await Promise.all([
+        window.fielora.artifact.read({ artifact_id: artifactId, revision_id: revisionId }),
+        window.fielora.artifact.history({ artifact_id: artifactId, before_sequence: null, limit: 50 }),
+      ]);
+      setArtifactSessions((current) => {
+        const previous = current[tabId] ?? emptyArtifactSession(artifactId);
+        let next = mode === 'CURRENT'
+          ? refreshArtifactCurrent({ ...previous, mode: 'CURRENT' }, read, history)
+          : pinArtifactRevision(previous, read, history);
+        if (read.revision.content.type === 'PRESENTATION' && next.selectedSlide === null) next = { ...next, selectedSlide: 0 };
+        if (read.revision.content.type === 'SPREADSHEET' && next.selectedSheetId === null) next = { ...next, selectedSheetId: read.revision.content.content.sheets[0]?.sheet_id ?? null };
+        return { ...current, [tabId]: next };
+      });
+      updateArtifactTabLabel(read.artifact);
+      setArtifactRefreshToken((value) => value + 1);
+    } catch {
+      setArtifactSessions((current) => ({ ...current, [tabId]: { ...(current[tabId] ?? emptyArtifactSession(artifactId)), loading: false, error: '暂时无法读取这个工作对象或版本。' } }));
+    }
+  }
+
+  function openArtifact(artifact: ArtifactView | string) {
+    const artifactId = typeof artifact === 'string' ? artifact : artifact.artifact_id;
+    const tabId = artifactTabId(artifactId);
+    const artifactType = typeof artifact === 'string' ? null : artifact.artifact_type;
+    ensureDockTab({ id: tabId, kind: 'ARTIFACT', label: typeof artifact === 'string' ? '工作对象' : artifact.title || '工作对象', icon: artifactType === 'PRESENTATION' ? 'image' : 'files', artifactId });
+    if (!artifactSessionsRef.current[tabId]) {
+      const session = emptyArtifactSession(artifactId);
+      artifactSessionsRef.current = { ...artifactSessionsRef.current, [tabId]: session };
+      setArtifactSessions((current) => ({ ...current, [tabId]: session }));
+      void loadArtifactRevision(artifactId, null, 'CURRENT');
+    }
+  }
+
+  function refreshOpenArtifact(artifactId: string) {
+    const tabId = artifactTabId(artifactId);
+    const session = artifactSessionsRef.current[tabId];
+    if (!session) return;
+    if (session.mode === 'CURRENT') {
+      void loadArtifactRevision(artifactId, null, 'CURRENT');
+      return;
+    }
+    void Promise.all([
+      window.fielora.artifact.read({ artifact_id: artifactId, revision_id: null }),
+      window.fielora.artifact.history({ artifact_id: artifactId, before_sequence: null, limit: 50 }),
+    ]).then(([currentRead, history]) => setArtifactSessions((current) => {
+      const existing = current[tabId];
+      return existing ? { ...current, [tabId]: refreshArtifactCurrent(existing, currentRead, history) } : current;
+    })).catch(() => undefined);
+  }
+
+  async function setArtifactArchiveState(session: ArtifactSurfaceSession, archived: boolean) {
+    if (!project || !conversation || !effectiveConversationProvider) return;
+    setArtifactCommandBusy(true);
+    try {
+      await window.fielora.artifact.setArchiveState({
+        field_id: project.field_id,
+        conversation_id: conversation.id,
+        provider_config_id: effectiveConversationProvider.id,
+        model_id: effectiveConversationProvider.default_model,
+        artifact_id: session.artifactId,
+        archived,
+      });
+      await loadArtifactRevision(session.artifactId, session.mode === 'HISTORICAL' ? session.viewedRevisionId : null, session.mode);
+      setArtifactRefreshToken((value) => value + 1);
+    } catch (reason) {
+      setError(reasonMessage(reason));
+    } finally {
+      setArtifactCommandBusy(false);
+    }
+  }
+
+  function processArtifactToolReceipts(tools: AgentToolCallView[]) {
+    for (const tool of tools) {
+      if (tool.status !== 'COMPLETED'
+        || handledArtifactToolCallsRef.current.has(tool.id)
+        || !foregroundAgentRunsRef.current.has(tool.run_id)
+        || !tool.receipt
+        || typeof tool.receipt !== 'object') continue;
+      const receipt = tool.receipt as Record<string, unknown>;
+      if (receipt.kind !== 'ARTIFACT_REVISION_COMMITTED' || typeof receipt.artifact_id !== 'string') continue;
+      handledArtifactToolCallsRef.current.add(tool.id);
+      if (receipt.mutation_kind === 'CREATE') openArtifact(receipt.artifact_id);
+      else if (receipt.mutation_kind === 'UPDATE') refreshOpenArtifact(receipt.artifact_id);
+      setArtifactRefreshToken((value) => value + 1);
+    }
+  }
+
+  useEffect(() => processArtifactToolReceipts(agentTools), [agentTools]);
+
   function ensureDockTab(tab: ProjectDockTab) {
     setDockTabs((current) => current.some((item) => item.id === tab.id) ? current : [...current, tab]);
     setActiveDockTabId(tab.id);
     setWorkspaceOpen(true);
     setWorkspaceWidth((current) => {
       const maximum = Math.max(360, layoutWidth() - navigationWidth - 420);
-      const preferred = tab.kind === 'FILES' ? 400 : tab.kind === 'REVIEW' ? 520 : tab.kind === 'IMAGE' ? 580 : 600;
+      const preferred = tab.kind === 'FILES' ? 400 : tab.kind === 'REVIEW' ? 520 : tab.kind === 'IMAGE' ? 580 : tab.kind === 'ARTIFACT' || tab.kind === 'ARTIFACTS' ? 760 : 600;
       return Math.min(Math.max(current, preferred), Math.min(900, maximum));
     });
   }
 
-  function openDockTool(kind: 'FILES' | 'REVIEW' | 'BROWSER' | 'TERMINAL') {
+  function openDockTool(kind: 'FILES' | 'REVIEW' | 'BROWSER' | 'TERMINAL' | 'ARTIFACTS') {
     const definitions: Record<typeof kind, ProjectDockTab> = {
       FILES: { id: 'files', kind: 'FILES', label: '文件', icon: 'folder' },
       REVIEW: { id: 'review', kind: 'REVIEW', label: '审阅', icon: 'diff' },
       BROWSER: { id: 'browser', kind: 'BROWSER', label: '浏览器', icon: 'browse' },
       TERMINAL: { id: 'terminal', kind: 'TERMINAL', label: 'PowerShell', icon: 'terminal' },
+      ARTIFACTS: { id: 'artifacts', kind: 'ARTIFACTS', label: '工作对象', icon: 'filePlus' },
     };
     if (kind === 'REVIEW') {
       setHistoricalReview(null);
@@ -1626,6 +1757,12 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const next = dockTabs.filter((item) => item.id !== id);
     setDockTabs(next);
     if (id.startsWith('file:')) setFileDockSessions((current) => { const copy = { ...current }; delete copy[id]; return copy; });
+    if (id.startsWith('artifact:')) {
+      const nextSessions = { ...artifactSessionsRef.current };
+      delete nextSessions[id];
+      artifactSessionsRef.current = nextSessions;
+      setArtifactSessions(nextSessions);
+    }
     if (next.length === 0) {
       setActiveDockTabId('');
       setWorkspaceOpen(false);
@@ -1911,6 +2048,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   </> : null;
   const dockViews = project ? dockTabs.map((tab) => {
     const session = fileDockSessions[tab.id] ?? null;
+    const artifactSession = artifactSessions[tab.id] ?? null;
     const imageAttachment = tab.attachment ?? (session?.preview?.kind === 'IMAGE' ? workspaceImageAttachment(session.preview.preview) : null);
     const dockFileTree = <WorkspaceFileTree files={files} filter={fileFilter} activePath={fileTreeSelection} onFilter={setFileFilter} onRefresh={() => void window.fielora.workspace.listFiles({ field_id: project.field_id }).then(setFiles).catch((reason) => setError(reasonMessage(reason)))} onOpen={(file) => void openFile(file)}/>;
     return <section key={tab.id} className={`right-dock-view right-dock-view-${tab.kind.toLowerCase()}`} hidden={tab.id !== activeDockTabId} data-dock-kind={tab.kind} data-testid={`right-dock-view-${tab.id}`}>
@@ -1927,6 +2065,16 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       {tab.kind === 'REVIEW' && <div className="diff-workspace">{draft ? <><header><div><p className="eyebrow">REVIEW</p><h3>{draft.relativePath}</h3></div><span>写入前不会修改磁盘</span></header><pre className="diff-view" data-testid="diff-view">{draft.diff}</pre><footer><button className="secondary-button" onClick={() => { setDraft(null); setEditorContent(selectedFile?.content ?? ''); if (selectedFile) ensureDockTab({ id: `file:${selectedFile.relative_path}`, kind: 'FILE', label: fileTabLabel(selectedFile.relative_path), icon: 'files', relativePath: selectedFile.relative_path }); else openDockTool('FILES'); }}>放弃</button><button className="primary-button" onClick={() => void acceptDraft()} data-testid="accept-change">接受变更</button></footer></> : (tab.reviewSelection?.review ?? displayedAgentReview).files.length > 0 ? <AgentHumanReview review={tab.reviewSelection?.review ?? displayedAgentReview} task={tab.reviewSelection?.task ?? agentRun?.task ?? conversation?.title ?? ''} runId={tab.reviewSelection?.runId ?? agentRun?.id ?? ''} selectedPathHint={tab.relativePath ?? agentReviewPath} onOpenFile={(path) => void openAgentReviewFile(path)}/> : <div className="workspace-blank"><h3>{conversation ? '本次任务没有文件变更' : '当前 Project 没有可审阅的变更'}</h3><p>文件写入、补丁和替换会显示在这里。</p></div>}</div>}
       {tab.kind === 'BROWSER' && <BrowsePanel browser={window.fielora.browser} onSaveToLibrary={(input) => window.fielora.library.saveWeb(input)} onOpenBrowserSettings={() => window.dispatchEvent(new CustomEvent('fielora:open-settings', { detail: 'BROWSER' }))}/>}
       {tab.kind === 'TERMINAL' && <div className="right-terminal-view" data-testid="terminal-dock"><TerminalSession workingDirectory={terminalWorkingDirectory || project.root_path} command={terminalCommand} lastCommand={terminalLastCommand} output={terminalOutput} running={Boolean(terminalRunId)} active={workspaceOpen && tab.id === activeDockTabId} onCommandChange={setTerminalCommand} onRun={() => void runTerminal(terminalCommand, 'RIGHT')} onCancel={() => terminalRunId ? void window.fielora.workspace.cancelTerminal({ run_id: terminalRunId }) : undefined} testId="terminal"/></div>}
+      {tab.kind === 'ARTIFACTS' && <ArtifactCatalog refreshToken={artifactRefreshToken} onOpen={openArtifact}/>}
+      {tab.kind === 'ARTIFACT' && artifactSession && <ArtifactSurface
+        session={artifactSession}
+        busy={artifactCommandBusy}
+        onSelectRevision={(revisionId) => void loadArtifactRevision(artifactSession.artifactId, revisionId, 'HISTORICAL')}
+        onReturnCurrent={() => void loadArtifactRevision(artifactSession.artifactId, null, 'CURRENT')}
+        onArchiveState={(archived) => void setArtifactArchiveState(artifactSession, archived)}
+        onSelectedSlide={(selectedSlide) => { const next = { ...artifactSession, selectedSlide }; artifactSessionsRef.current = { ...artifactSessionsRef.current, [tab.id]: next }; setArtifactSessions((current) => ({ ...current, [tab.id]: next })); }}
+        onSelectedSheet={(selectedSheetId) => { const next = { ...artifactSession, selectedSheetId }; artifactSessionsRef.current = { ...artifactSessionsRef.current, [tab.id]: next }; setArtifactSessions((current) => ({ ...current, [tab.id]: next })); }}
+      />}
     </section>;
   }) : null;
   const currentAgentTurn = agentRun && agentTurn?.userMessageId ? <AgentTurn
@@ -2081,6 +2229,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         toolbar={dockToolbar}
         showLauncher={workspaceOpen && dockTabs.length === 0}
         tools={[
+          { id: 'artifacts', label: '工作对象', icon: 'filePlus', onOpen: () => openDockTool('ARTIFACTS') },
           { id: 'review', label: '审阅', icon: 'diff', shortcut: 'Ctrl+Shift+G', onOpen: () => openDockTool('REVIEW') },
           { id: 'terminal', label: '终端', icon: 'terminal', shortcut: 'Ctrl+`', onOpen: () => openDockTool('TERMINAL') },
           { id: 'browser', label: '浏览器', icon: 'browse', shortcut: 'Ctrl+T', onOpen: () => openDockTool('BROWSER') },

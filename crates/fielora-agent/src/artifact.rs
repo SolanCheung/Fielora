@@ -829,6 +829,16 @@ pub struct CanonicalArtifactContent {
     pub semantic_unit_count: usize,
 }
 
+/// Render one admitted Diagram semantic model through the same deterministic
+/// renderer and structural reopen validation used by durable SVG export. The
+/// returned bytes are transient preview bytes; they are never artifact source
+/// of truth and are not written to the project.
+pub fn render_diagram_preview(diagram: &DiagramArtifactV1) -> Result<Vec<u8>, AgentError> {
+    let rendered = diagram::render(diagram)?;
+    diagram::reopen(&rendered, &rendered.bytes)?;
+    Ok(rendered.bytes)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ArtifactDependencyFact {
     pub child_artifact_id: ArtifactId,

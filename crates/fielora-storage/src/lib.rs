@@ -574,6 +574,7 @@ impl StorageHandle {
                 "user_message_id": request.user_message_id,
                 "max_steps": max_steps,
                 "task_bytes": request.task.len(),
+                "active_work_surface": request.active_work_surface,
             });
             let transaction = connection.transaction().map_err(storage_domain)?;
             transaction.execute(
@@ -6446,6 +6447,7 @@ mod tests {
                     permission: AgentPermission::ReviewChanges,
                     max_steps: Some(8),
                     attachments: None,
+                    active_work_surface: None,
                 },
                 now + 4,
             )
@@ -8726,6 +8728,7 @@ mod tests {
                         permission: AgentPermission::ReadOnly,
                         max_steps: Some(4),
                         attachments: None,
+                        active_work_surface: None,
                     },
                     6,
                 )
@@ -8926,6 +8929,7 @@ mod tests {
                         permission: AgentPermission::ReviewChanges,
                         max_steps: Some(8),
                         attachments: None,
+                        active_work_surface: None,
                     },
                     6,
                 )
@@ -8997,6 +9001,7 @@ mod tests {
                         permission: AgentPermission::ReviewChanges,
                         max_steps: Some(8),
                         attachments: None,
+                        active_work_surface: None,
                     },
                     13,
                 )
@@ -9026,6 +9031,7 @@ mod tests {
                         permission: AgentPermission::ReviewChanges,
                         max_steps: Some(8),
                         attachments: None,
+                        active_work_surface: None,
                     },
                     16,
                 )
@@ -9284,6 +9290,7 @@ mod tests {
                         permission: AgentPermission::ReadOnly,
                         max_steps: Some(2),
                         attachments: None,
+                        active_work_surface: None,
                     },
                     7,
                 )

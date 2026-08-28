@@ -3,6 +3,8 @@ export const channels = {
   conversationCreate: 'fielora:conversation:create', conversationList: 'fielora:conversation:list', conversationGet: 'fielora:conversation:get',
   conversationUpdate: 'fielora:conversation:update', conversationArchive: 'fielora:conversation:archive',
   conversationMessageCreate: 'fielora:conversation:message:create', conversationMessageList: 'fielora:conversation:message:list',
+  artifactList: 'fielora:artifact:list', artifactRead: 'fielora:artifact:read', artifactHistory: 'fielora:artifact:history',
+  artifactAssetPreview: 'fielora:artifact:asset-preview', artifactDiagramPreview: 'fielora:artifact:diagram-preview', artifactSetArchiveState: 'fielora:artifact:set-archive-state',
   workspaceFileList: 'fielora:workspace:file:list', workspaceFileRead: 'fielora:workspace:file:read', workspaceFilePreview: 'fielora:workspace:file:preview', workspaceFileApply: 'fielora:workspace:file:apply',
   workspaceEnvironment: 'fielora:workspace:environment',
   workspaceOpenTargets: 'fielora:workspace:open-targets', workspaceOpenProject: 'fielora:workspace:open-project',

@@ -406,6 +406,20 @@ export type ArtifactReadView = { artifact: ArtifactView, revision: ArtifactRevis
 
 export type AssetView = { asset_id: AssetId, profile_id: ProfileId, media_type: AssetMediaType, content_sha256: string, byte_length: number, width: number, height: number, blob_ref: string, created_from_conversation_id: ConversationId | null, created_by_agent_run_id: AgentRunId | null, created_by_tool_call_id: ToolCallId, created_at: number, };
 
+export type ListArtifactsRequest = { cursor: ArtifactListCursor | null, limit: number | null, include_archived: boolean, };
+
+export type ReadArtifactRequest = { artifact_id: ArtifactId, revision_id: ArtifactRevisionId | null, };
+
+export type ArtifactHistoryRequest = { artifact_id: ArtifactId, before_sequence: number | null, limit: number | null, };
+
+export type AssetPreviewRequest = { asset_id: AssetId, expected_content_sha256: string, };
+
+export type AssetPreviewView = { asset_id: AssetId, media_type: AssetMediaType, content_sha256: string, byte_length: number, width: number, height: number, data_url: string, };
+
+export type DiagramPreviewRequest = { artifact_id: ArtifactId, revision_id: ArtifactRevisionId, };
+
+export type DiagramPreviewView = { artifact_id: ArtifactId, revision_id: ArtifactRevisionId, semantic_sha256: string, render_sha256: string, data_url: string, };
+
 export type VerificationSubject = { "kind": "ARTIFACT_REVISION", artifact_id: ArtifactId, revision_id: ArtifactRevisionId, semantic_sha256: string, };
 
 export type ProfileView = { profile_id: ProfileId, schema_version: number, created_at: number, device_id: DeviceId, };
@@ -468,7 +482,13 @@ export type AgentRunView = { id: AgentRunId, field_id: FieldId, conversation_id:
 
 export type AgentInputAttachment = { id: string, filename: string, mime_type: string, size: number, width: number, height: number, source: string, data_url: string, };
 
-export type StartAgentRunRequest = { field_id: FieldId, conversation_id: ConversationId, user_message_id: MessageId | null, provider_config_id: ProviderConfigId, model_id: string | null, task: string, permission: AgentPermission, max_steps: number | null, attachments: Array<AgentInputAttachment> | null, };
+export type ActiveArtifactViewMode = "CURRENT" | "HISTORICAL";
+
+export type ActiveArtifactContext = { artifact_id: ArtifactId, artifact_type: ArtifactType, viewed_revision_id: ArtifactRevisionId, current_revision_id: ArtifactRevisionId, view_mode: ActiveArtifactViewMode, archived: boolean, selected_slide: number | null, selected_sheet_id: SpreadsheetSheetId | null, };
+
+export type StartAgentRunRequest = { field_id: FieldId, conversation_id: ConversationId, user_message_id: MessageId | null, provider_config_id: ProviderConfigId, model_id: string | null, task: string, permission: AgentPermission, max_steps: number | null, attachments: Array<AgentInputAttachment> | null, active_work_surface?: ActiveArtifactContext, };
+
+export type SetArtifactArchiveStateCommandRequest = { field_id: FieldId, conversation_id: ConversationId, provider_config_id: ProviderConfigId, model_id: string | null, artifact_id: ArtifactId, archived: boolean, };
 
 export type AgentRunRequest = { run_id: AgentRunId, };
 
