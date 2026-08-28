@@ -33,15 +33,34 @@ PolicyEngine, Approval, ToolExecutor, durable ToolCall receipt, and Verification
 boundary. There is no Artifact Agent, Artifact Runtime, second Library, second
 permission engine, second receipt hierarchy, or second verification engine.
 
-The smallest viable persistence is bounded, validated semantic JSON in the
-existing DataRoot SQLite database. Binary assets, imports, UI, Diagram,
-Spreadsheet, and bidirectional Office reconciliation are deferred.
+The smallest viable persistence remains bounded, validated semantic JSON in the
+existing DataRoot SQLite database. Later additive slices implemented Diagram,
+literal-only Spreadsheet, strict durable PNG Assets, and bounded Artifact
+management without replacing this Core. UI, Office import, and bidirectional
+Office reconciliation remain deferred.
 
 The previously recorded migration 0002 baseline defect was repaired in the
 separate preceding Storage changeset. Migration 0008 and the Durable Artifact
-Core First Slice now pass targeted Storage, Agent, Core, contract, and renderer
-evidence. Diagram, Spreadsheet, Assets, Import, Library integration, archive,
-list/history UI, and all Artifact UI remain unimplemented.
+Core First Slice passed targeted Storage, Agent, Core, contract, and renderer
+evidence. Current additive reality is schema 11: Diagram, Spreadsheet, durable
+PNG Assets, metadata-only list/history, and reversible archive/restore are
+implemented; all Artifact UI remains unimplemented.
+
+## CAPABILITY_COMPLETION_REALITY
+
+The V0.1 capability closeout adds `artifact.list`, `artifact.history`, and
+`artifact.set_archive_state` through the same Policy/Approval/ToolExecutor/
+durable ToolCall receipt/recovery path. List/history are bounded, Profile-scoped
+and metadata-only; historical content remains an explicit `artifact.read`.
+Migration `0011_artifact_archive_state` adds lifecycle metadata and ToolCall
+recovery facts only to the existing `artifacts` envelope. Archive is reversible
+visibility state: identity, revisions, exact references, explicit reads and
+saved exports remain available. No second revision, retention, deletion,
+receipt, Verification, or Runtime system exists.
+
+The historical First Slice audit below is retained as audit history where it
+uses `ABSENT` or schema-9 language; this section and current repository facts
+supersede those pre-implementation status statements.
 
 ## IMPLEMENTED_FIRST_SLICE_REALITY
 
@@ -49,7 +68,7 @@ list/history UI, and all Artifact UI remain unimplemented.
 |---|---|
 | Identity / ownership | UUIDv7-backed `ArtifactId` and `ArtifactRevisionId`; every Artifact query is scoped by the current `ProfileId`; optional Project association reuses `FieldId` |
 | Semantic contract | Closed `ArtifactContentV1::{Document, Presentation}` using the existing strict renderer-neutral DTOs and validators; schema version 1; canonical typed JSON <= 256 KiB |
-| Persistence | `0008_durable_artifacts.sql` introduced `artifacts` plus immutable `artifact_revisions`; `0009_artifact_type_extensibility.sql` changed only the persisted type CHECK; current database schema 9; Profile schema remains 1 |
+| Persistence | `0008_durable_artifacts.sql` introduced `artifacts` plus immutable `artifact_revisions`; `0009` made the type token extensible, `0010` added immutable source Asset metadata, and `0011` added reversible archive state; current database schema 11; Profile schema remains 1 |
 | Revision / conflict | Revision 1 on create; append-only N+1 update; opaque revision identity plus diagnostic sequence; required `expected_revision_id`; stale updates fail closed |
 | Atomicity | Artifact envelope + R1 and revision insert + current-pointer CAS commit in one existing `StorageWorker` transaction; immutable update/delete triggers |
 | Idempotency / recovery | Unique `created_by_tool_call_id` and `mutation_request_sha256`; exact replay returns the committed mutation; mismatched replay fails closed; existing resume reconciler reconstructs a compact ToolCall receipt after commit-before-receipt restart |
@@ -58,7 +77,7 @@ list/history UI, and all Artifact UI remain unimplemented.
 | Verification | Existing `VerificationReceiptView` gained one nullable typed `ARTIFACT_REVISION` subject containing ArtifactId, RevisionId, and semantic digest; old evidence remains but does not validate a new current revision |
 | Freshness | Existing workspace revision computation now includes durable Artifact revision mutation facts; no fake Project file path and no parallel freshness engine |
 | Export | Existing `artifact.export` now has strict mutually exclusive inline and saved-revision modes; saved export pins one read revision and reuses the existing atomic/no-overwrite DOCX/PPTX renderer |
-| Explicitly absent | UI, FIPC Artifact consumer, Diagram, Spreadsheet, Assets, Import, Library integration, archive/delete/list/history, sync journal, cloud sync, external-edit reconciliation |
+| Explicitly absent | UI/FIPC Artifact consumer, hard delete/retention/GC, Office import, bidirectional editing, sync journal, cloud sync, external-edit reconciliation |
 
 ## TARGETED_IMPLEMENTATION_EVIDENCE
 

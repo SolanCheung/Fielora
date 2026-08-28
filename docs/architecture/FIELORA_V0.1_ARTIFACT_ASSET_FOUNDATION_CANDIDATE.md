@@ -2,19 +2,39 @@
 
 **Status:** `DRAFT / CANDIDATE / NOT FROZEN`
 
-**Implementation:** `PNG + DURABLE SOURCE ASSET FIRST SLICE IMPLEMENTED / TARGETED VALIDATED`
+**Implementation:** `PNG + DURABLE SOURCE ASSET + PRESENTATION PNG CONSUMER IMPLEMENTED / TARGETED VALIDATED`
 
 **Date:** 2026-08-28
 
 **Audited baseline:** `phase/complete-agent-v0.1@a01a8fcf8b3894b56ce3c5b8005088bbe3d220f6`
 
-**Database schema:** `10`
+**Database schema:** `11`
 
-This remains a non-Frozen architecture Candidate. The separately authorized
-first implementation slice is now represented below as repository reality;
-it does not authorize Presentation images, Diagram raster/composition, UI,
-delete/GC, remote images, or further product activation. Repository facts and
-the current `Model + Harness + Tools` architecture remain authoritative.
+This remains a non-Frozen architecture Candidate. The first implementation
+slice and later Capability / Tools completion are represented below as
+repository reality. Presentation now consumes exact durable PNG refs through
+the same resolver; Diagram raster/composition, UI, delete/GC, remote images,
+and further product activation remain excluded. Repository facts and the
+current `Model + Harness + Tools` architecture remain authoritative.
+
+## PRESENTATION_PNG_CONSUMER_REALITY
+
+The V0.1 capability closeout adds closed typed Presentation `IMAGE` content
+with only `ArtifactAssetRefV1 + CONTAIN`. It accepts no path, URL, base64, raw
+bytes, SVG, LibraryObject, EMU, arbitrary geometry, or OOXML. Presentation
+create/update reuses the generic exact same-Profile Asset resolver used by
+Document. Saved export pins one exact Presentation revision and controlled
+Asset blob snapshot, revalidates length/SHA/static PNG structure/dimensions,
+uses the existing PPTX PNG writer, and independently reopens final internal
+relationships, `p:pic` references, `image/png` content type, bounded placement,
+embedded digest, and complete media graph.
+
+Historical evidence covers `R1 -> PNG A`, `R2 -> PNG B`, then exact exports
+`R1/A`, `R2/B`, `R1/A`. Text-only Presentation and renderer v0.2 semantics
+remain supported. This additive consumer introduces no Asset table, Asset
+revision, binary Tool, Runtime, dependency, permission, receipt, Verification,
+UI, delete, or GC. Schema 11 is caused only by Artifact archive metadata, not
+by Presentation Asset consumption.
 
 ## FIRST_SLICE_IMPLEMENTATION_REALITY
 
@@ -72,9 +92,9 @@ Implemented facts:
 - successful admission/embedding is structural execution evidence only and
   creates no semantic Verification PASS.
 
-First-slice exclusions remain: JPEG/SVG/WebP/GIF, Presentation image blocks,
-Diagram raster/composition, UI, Asset read-bytes Tool, delete/GC, remote images,
-Marketplace/runtime work, and any new permission/receipt/Verification system.
+Current exclusions remain: JPEG/SVG/WebP/GIF, Diagram raster/composition, UI,
+Asset read-bytes Tool, delete/GC, remote images, Marketplace/runtime work, and
+any new permission/receipt/Verification system.
 
 ## FIRST_SLICE_TARGETED_EVIDENCE
 

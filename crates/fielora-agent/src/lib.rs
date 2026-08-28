@@ -739,7 +739,7 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
         ),
         tool(
             "capability_status",
-            "Inspect honest availability and limitations of shared artifact capabilities.",
+            "Inspect honest availability and limitations of current shared capabilities.",
             AgentToolEffect::Observe,
             json!({"type":"object","properties":{},"additionalProperties":false}),
         ),
@@ -841,10 +841,28 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
             artifact::read_input_schema(),
         ),
         tool(
+            "artifact.list",
+            "List one bounded page of profile-owned Artifact metadata without semantic content.",
+            AgentToolEffect::Observe,
+            artifact::list_input_schema(),
+        ),
+        tool(
+            "artifact.history",
+            "List one bounded page of revision metadata for a profile-owned Artifact without semantic content.",
+            AgentToolEffect::Observe,
+            artifact::history_input_schema(),
+        ),
+        tool(
             "artifact.update",
             "Append one immutable durable Artifact revision using an expected current revision guard.",
             AgentToolEffect::WorkspaceWrite,
             artifact::update_input_schema(),
+        ),
+        tool(
+            "artifact.set_archive_state",
+            "Archive or restore one durable Artifact without deleting identity, revisions, references, or explicit export access.",
+            AgentToolEffect::WorkspaceWrite,
+            artifact::archive_input_schema(),
         ),
         tool(
             "artifact.export",
@@ -2798,15 +2816,17 @@ impl ToolRuntime {
         let capabilities = json!({
             "coding":{"status":"AVAILABLE","tools":["files","exact patch","git read","controlled command","verification"]},
             "rich_file_read":{"status":"AVAILABLE","tool":"file.extract","formats":["PDF","DOCX","PPTX","XLSX"],"authority":"UNTRUSTED_PROJECT_CONTENT","limitations":["read/extract only","no OCR","no layout rendering","no formula evaluation"]},
-            "artifact_export":{"status":"AVAILABLE","tool":"artifact.export","formats":["DOCX","PPTX","SVG","XLSX"],"effect":"WORKSPACE_WRITE","persistence":["REQUEST_SCOPED","DURABLE_REVISION"],"verification":"STRUCTURAL_AND_SEMANTIC_ROUNDTRIP_ONLY"},
+            "artifact":{"status":"AVAILABLE","tools":["artifact.create","artifact.read","artifact.update","artifact.list","artifact.history","artifact.set_archive_state","artifact.export"],"types":["DOCUMENT","PRESENTATION","DIAGRAM","SPREADSHEET"],"persistence":"DURABLE_REVISION","catalog_and_history":"BOUNDED_METADATA_ONLY","archive":"REVERSIBLE_VISIBILITY_STATE"},
+            "artifact_export":{"status":"AVAILABLE","tool":"artifact.export","formats":["DOCX","PPTX","SVG","XLSX"],"effect":"WORKSPACE_WRITE","persistence":["REQUEST_SCOPED","DURABLE_REVISION"],"presentation_png_assets":"DURABLE_EXACT_SNAPSHOT_CONTAIN","verification":"STRUCTURAL_AND_SEMANTIC_ROUNDTRIP_ONLY"},
             "markdown":{"status":"AVAILABLE","path":"create_file/write_file plus verification"},
             "csv":{"status":"AVAILABLE","path":"bounded UTF-8 file tools; formula-aware XLSX is not implied"},
-            "web_research":{"status":"UNSUPPORTED_CAPABILITY","reason":"controlled Browser extraction tool is not installed in this build"},
+            "web_research":{"status":"AVAILABLE","tools":["web.search","web.fetch"],"effect":"NETWORK","authority":"UNTRUSTED_WEB_CONTENT","limitations":["no download-to-workspace tool","no browser fallback","no deep research runtime"]},
+            "web_download":{"status":"UNSUPPORTED_CAPABILITY","reason":"the current single-effect Tool contract cannot honestly represent one operation requiring both NETWORK and WORKSPACE_WRITE authority"},
             "archive":{"status":"UNSUPPORTED_CAPABILITY","reason":"safe zip preview/extraction adapter is not installed in this build"},
             "docx_pdf":{"status":"PARTIAL","reason":"bounded one-shot DOCX export and DOCX/PDF extraction are available; PDF export, editing, preview, and visual verification remain unsupported"},
             "xlsx":{"status":"PARTIAL","reason":"durable typed literal-only Spreadsheet Artifacts and saved XLSX export are available; formulas, calculation, import, charts, editing UI, and visual verification remain unsupported"},
             "xlsx_charts":{"status":"UNSUPPORTED_CAPABILITY","reason":"charts, formulas, calculation, and XLSX-to-Artifact import remain unsupported"},
-            "pptx":{"status":"PARTIAL","reason":"bounded one-shot PPTX export and extraction are available; editing, preview, arbitrary layout, and visual verification remain unsupported"},
+            "pptx":{"status":"PARTIAL","reason":"bounded PPTX export, durable exact PNG Asset embedding, and extraction are available; editing, preview, arbitrary layout, crop/fill image placement, and visual verification remain unsupported"},
             "image_generation":{"status":"UNSUPPORTED_CAPABILITY","reason":"no dedicated image provider adapter is configured"}
         });
         Ok(ToolExecution {

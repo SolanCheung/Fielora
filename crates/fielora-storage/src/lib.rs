@@ -31,6 +31,7 @@ const MIGRATION_0007: &str = include_str!("../migrations/0007_library_storage_pr
 const MIGRATION_0008: &str = include_str!("../migrations/0008_durable_artifacts.sql");
 const MIGRATION_0009: &str = include_str!("../migrations/0009_artifact_type_extensibility.sql");
 const MIGRATION_0010: &str = include_str!("../migrations/0010_durable_source_assets.sql");
+const MIGRATION_0011: &str = include_str!("../migrations/0011_artifact_archive_state.sql");
 const MIGRATION_0001_NAME: &str = "core";
 const MIGRATION_0002_NAME: &str = "phase02_reality";
 const MIGRATION_0004_NAME: &str = "phase04_entry";
@@ -40,6 +41,7 @@ const MIGRATION_0007_NAME: &str = "library_storage_profile";
 const MIGRATION_0008_NAME: &str = "durable_artifacts";
 const MIGRATION_0009_NAME: &str = "artifact_type_extensibility";
 const MIGRATION_0010_NAME: &str = "durable_source_assets";
+const MIGRATION_0011_NAME: &str = "artifact_archive_state";
 const MIGRATION_0002_FROZEN_SHA256: &str =
     "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9";
 const MIGRATION_0004_FROZEN_SHA256: &str =
@@ -48,7 +50,7 @@ const MIGRATION_0005_FROZEN_SHA256: &str =
     "b7e1e586b47e50389502677e172741d69463e9518ed32211dfafe0dc910c1547";
 const MIGRATION_0006_FROZEN_SHA256: &str =
     "5257959801424a13426259ce10c9ed2d5037795ec7a3a207171c568bc80dbaae";
-const SCHEMA_VERSION: u32 = 10;
+const SCHEMA_VERSION: u32 = 11;
 const LOCAL_USER_NAME: &str = "Local user";
 const SYSTEM_NAME: &str = "Fielora system";
 
@@ -170,6 +172,20 @@ pub struct UpdateArtifactRecord {
     pub content: ArtifactContentV1,
     pub canonical_content_json: String,
     pub semantic_sha256: String,
+    pub mutation_request_sha256: String,
+    pub now: i64,
+}
+
+/// Trusted Harness-to-storage input for Artifact visibility state. Archive is
+/// lifecycle metadata only: identity, revisions, references, and explicit
+/// reads/exports remain available.
+#[derive(Debug, Clone)]
+pub struct SetArtifactArchiveStateRecord {
+    pub artifact_id: ArtifactId,
+    pub archived: bool,
+    pub conversation_id: ConversationId,
+    pub run_id: AgentRunId,
+    pub tool_call_id: ToolCallId,
     pub mutation_request_sha256: String,
     pub now: i64,
 }
@@ -1141,6 +1157,195 @@ impl StorageHandle {
         let profile_id = self.profile_id.clone();
         request_task(&self.sender, move |connection| {
             get_artifact_read(connection, &profile_id, &artifact_id, revision_id.as_ref())
+        })
+    }
+
+    pub fn list_artifacts(
+        &self,
+        cursor: Option<ArtifactListCursor>,
+        limit: u16,
+        include_archived: bool,
+    ) -> Result<ArtifactListView, DomainError> {
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            if limit == 0 || limit > 100 {
+                return Err(DomainError::Validation(
+                    "ARTIFACT_LIST_LIMIT_INVALID".into(),
+                ));
+            }
+            let cursor_updated_at = cursor.as_ref().map(|value| value.updated_at);
+            let cursor_artifact_id = cursor.as_ref().map(|value| value.artifact_id.0.as_str());
+            let mut statement = connection.prepare(
+                "SELECT id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at,archived_at FROM artifacts WHERE profile_id=?1 AND (?2 OR archived_at IS NULL) AND (?3 IS NULL OR updated_at < ?3 OR (updated_at = ?3 AND id < ?4)) ORDER BY updated_at DESC,id DESC LIMIT ?5"
+            ).map_err(storage_domain)?;
+            let rows = statement
+                .query_map(
+                    params![
+                        profile_id.0,
+                        include_archived,
+                        cursor_updated_at,
+                        cursor_artifact_id,
+                        i64::from(limit) + 1,
+                    ],
+                    artifact_from_row,
+                )
+                .map_err(storage_domain)?;
+            let persisted = rows
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(storage_domain)?;
+            let mut artifacts = persisted
+                .into_iter()
+                .map(PersistedArtifactRow::into_view)
+                .collect::<Result<Vec<_>, _>>()?;
+            let has_more = artifacts.len() > usize::from(limit);
+            if has_more {
+                artifacts.pop();
+            }
+            let next_cursor = has_more.then(|| {
+                let last = artifacts
+                    .last()
+                    .expect("bounded artifact page is non-empty");
+                ArtifactListCursor {
+                    updated_at: last.updated_at,
+                    artifact_id: last.artifact_id.clone(),
+                }
+            });
+            Ok(ArtifactListView {
+                artifacts,
+                next_cursor,
+            })
+        })
+    }
+
+    pub fn list_artifact_history(
+        &self,
+        artifact_id: ArtifactId,
+        before_sequence: Option<u64>,
+        limit: u16,
+    ) -> Result<ArtifactHistoryView, DomainError> {
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            if limit == 0 || limit > 100 {
+                return Err(DomainError::Validation(
+                    "ARTIFACT_HISTORY_LIMIT_INVALID".into(),
+                ));
+            }
+            let before_sequence = before_sequence.map(revision_to_domain).transpose()?;
+            let artifact = get_artifact(connection, &profile_id, &artifact_id)?;
+            let mut statement = connection.prepare(
+                "SELECT r.id,r.artifact_id,r.sequence,r.parent_revision_id,r.mutation_kind,r.content_schema_version,r.semantic_sha256,r.created_from_conversation_id,r.created_by_agent_run_id,r.created_by_tool_call_id,r.created_at FROM artifact_revisions r JOIN artifacts a ON a.id=r.artifact_id WHERE r.artifact_id=?1 AND a.profile_id=?2 AND (?3 IS NULL OR r.sequence < ?3) ORDER BY r.sequence DESC LIMIT ?4"
+            ).map_err(storage_domain)?;
+            let rows = statement
+                .query_map(
+                    params![
+                        artifact_id.0,
+                        profile_id.0,
+                        before_sequence,
+                        i64::from(limit) + 1
+                    ],
+                    artifact_revision_metadata_from_row,
+                )
+                .map_err(storage_domain)?;
+            let mut revisions = rows
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(storage_domain)?;
+            let has_more = revisions.len() > usize::from(limit);
+            if has_more {
+                revisions.pop();
+            }
+            let next_before_sequence = has_more.then(|| {
+                revisions
+                    .last()
+                    .expect("bounded artifact history page is non-empty")
+                    .sequence
+            });
+            Ok(ArtifactHistoryView {
+                artifact,
+                revisions,
+                next_before_sequence,
+            })
+        })
+    }
+
+    pub fn set_artifact_archive_state(
+        &self,
+        request: SetArtifactArchiveStateRecord,
+    ) -> Result<ArtifactView, DomainError> {
+        let owner = self.local_user.clone();
+        let profile_id = self.profile_id.clone();
+        let device_id = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            let run = get_agent_run(connection, &owner, &request.run_id)?;
+            if run.conversation_id != request.conversation_id {
+                return Err(DomainError::Validation(
+                    "ARTIFACT_TRUSTED_CONTEXT_INVALID".into(),
+                ));
+            }
+            let tool = get_agent_tool_call(connection, &owner, &request.tool_call_id)?;
+            if tool.run_id != request.run_id || tool.name != "artifact.set_archive_state" {
+                return Err(DomainError::Validation(
+                    "ARTIFACT_TOOLCALL_SCOPE_INVALID".into(),
+                ));
+            }
+            if current_profile_id(connection)? != profile_id
+                || !valid_lower_sha256(&request.mutation_request_sha256)
+            {
+                return Err(DomainError::Validation("ARTIFACT_LIFECYCLE_INVALID".into()));
+            }
+            let artifact = get_artifact(connection, &profile_id, &request.artifact_id)?;
+            let existing: Option<(String, String)> = connection
+                .query_row(
+                    "SELECT lifecycle_updated_by_tool_call_id,lifecycle_mutation_request_sha256 FROM artifacts WHERE id=?1 AND profile_id=?2 AND lifecycle_updated_by_tool_call_id IS NOT NULL",
+                    params![request.artifact_id.0, profile_id.0],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(storage_domain)?;
+            if let Some((tool_call_id, request_sha256)) = existing
+                && tool_call_id == request.tool_call_id.0
+            {
+                if request_sha256 == request.mutation_request_sha256
+                    && artifact.archived_at.is_some() == request.archived
+                {
+                    return Ok(artifact);
+                }
+                return Err(DomainError::Validation(
+                    "ARTIFACT_TOOLCALL_IDEMPOTENCY_CONFLICT".into(),
+                ));
+            }
+            let archived_at = request
+                .archived
+                .then_some(request.now.max(artifact.created_at));
+            let changed = connection.execute(
+                "UPDATE artifacts SET archived_at=?1,lifecycle_updated_by_tool_call_id=?2,lifecycle_mutation_request_sha256=?3,updated_by_device=?4,updated_at=MAX(updated_at,?5) WHERE id=?6 AND profile_id=?7",
+                params![archived_at,request.tool_call_id.0,request.mutation_request_sha256,device_id.0,request.now,request.artifact_id.0,profile_id.0],
+            ).map_err(storage_domain)?;
+            if changed != 1 {
+                return Err(DomainError::NotFound);
+            }
+            get_artifact(connection, &profile_id, &request.artifact_id)
+        })
+    }
+
+    pub fn artifact_lifecycle_by_tool_call(
+        &self,
+        tool_call_id: ToolCallId,
+    ) -> Result<Option<(ArtifactView, String)>, DomainError> {
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            let row = connection
+                .query_row(
+                    "SELECT id,lifecycle_mutation_request_sha256 FROM artifacts WHERE lifecycle_updated_by_tool_call_id=?1 AND profile_id=?2",
+                    params![tool_call_id.0, profile_id.0],
+                    |row| Ok((ArtifactId::new(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
+                )
+                .optional()
+                .map_err(storage_domain)?;
+            row.map(|(artifact_id, digest)| {
+                get_artifact(connection, &profile_id, &artifact_id)
+                    .map(|artifact| (artifact, digest))
+            })
+            .transpose()
         })
     }
 
@@ -2378,6 +2583,7 @@ struct PersistedArtifactRow {
     updated_by_device: DeviceId,
     created_at: i64,
     updated_at: i64,
+    archived_at: Option<i64>,
 }
 
 impl PersistedArtifactRow {
@@ -2396,6 +2602,7 @@ impl PersistedArtifactRow {
             updated_by_device: self.updated_by_device,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            archived_at: self.archived_at,
         })
     }
 }
@@ -2413,6 +2620,30 @@ fn artifact_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PersistedArtif
         updated_by_device: DeviceId::new(row.get::<_, String>(8)?),
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
+        archived_at: row.get(11)?,
+    })
+}
+
+fn artifact_revision_metadata_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ArtifactRevisionMetadataView> {
+    Ok(ArtifactRevisionMetadataView {
+        revision_id: ArtifactRevisionId::new(row.get::<_, String>(0)?),
+        artifact_id: ArtifactId::new(row.get::<_, String>(1)?),
+        sequence: revision_from_row(row, 2)?,
+        parent_revision_id: row
+            .get::<_, Option<String>>(3)?
+            .map(ArtifactRevisionId::new),
+        mutation_kind: parse_wire(row.get(4)?)?,
+        content_schema_version: row
+            .get::<_, i64>(5)?
+            .try_into()
+            .map_err(|_| conversion_error("artifact schema version out of range".into()))?,
+        semantic_sha256: row.get(6)?,
+        created_from_conversation_id: row.get::<_, Option<String>>(7)?.map(ConversationId::new),
+        created_by_agent_run_id: row.get::<_, Option<String>>(8)?.map(AgentRunId::new),
+        created_by_tool_call_id: ToolCallId::new(row.get::<_, String>(9)?),
+        created_at: row.get(10)?,
     })
 }
 
@@ -2445,11 +2676,30 @@ fn get_artifact(
     profile_id: &ProfileId,
     artifact_id: &ArtifactId,
 ) -> Result<ArtifactView, DomainError> {
-    let persisted = connection.query_row(
-        "SELECT id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at FROM artifacts WHERE id=?1 AND profile_id=?2",
-        params![artifact_id.0,profile_id.0],
-        artifact_from_row,
-    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)?;
+    // Migration fixture tests exercise schema 8/9/10 with the current domain
+    // reader before the forward migration is applied. Production startup
+    // always reaches schema 11 before exposing StorageHandle.
+    let has_archive_state: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('artifacts') WHERE name='archived_at')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(storage_domain)?;
+    let query = if has_archive_state {
+        "SELECT id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at,archived_at FROM artifacts WHERE id=?1 AND profile_id=?2"
+    } else {
+        "SELECT id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at,NULL AS archived_at FROM artifacts WHERE id=?1 AND profile_id=?2"
+    };
+    let persisted = connection
+        .query_row(
+            query,
+            params![artifact_id.0, profile_id.0],
+            artifact_from_row,
+        )
+        .optional()
+        .map_err(storage_domain)?
+        .ok_or(DomainError::NotFound)?;
     persisted.into_view()
 }
 
@@ -3230,6 +3480,7 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     let checksum_0008 = migration_checksum(MIGRATION_0008);
     let checksum_0009 = migration_checksum(MIGRATION_0009);
     let checksum_0010 = migration_checksum(MIGRATION_0010);
+    let checksum_0011 = migration_checksum(MIGRATION_0011);
     if checksum_0002 != MIGRATION_0002_FROZEN_SHA256 {
         return Err(StorageError::MigrationChecksum { version: 2 });
     }
@@ -3354,7 +3605,31 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     if !migration_exists(connection, 10)? {
         apply_durable_source_asset_migration(connection, now, MIGRATION_0010, &checksum_0010)?;
     }
+    verify_applied_migration(connection, 11, MIGRATION_0011_NAME, &checksum_0011)?;
+    if !migration_exists(connection, 11)? {
+        apply_artifact_archive_state_migration(connection, now, MIGRATION_0011, &checksum_0011)?;
+    }
     validate_schema(connection)?;
+    Ok(())
+}
+
+fn apply_artifact_archive_state_migration(
+    connection: &mut Connection,
+    now: i64,
+    migration_sql: &str,
+    checksum: &str,
+) -> Result<(), StorageError> {
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if transaction.execute_batch(migration_sql).is_err() {
+        return Err(StorageError::MigrationIncompatibleData);
+    }
+    transaction.execute(
+        "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (11, ?1, ?2, ?3)",
+        params![MIGRATION_0011_NAME, checksum, now],
+    )?;
+    validate_schema(&transaction)?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -3940,6 +4215,39 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
     }
     if migration_exists(connection, 10)? {
         validate_asset_schema(connection)?;
+    }
+    if migration_exists(connection, 11)? {
+        validate_artifact_archive_schema(connection)?;
+    }
+    Ok(())
+}
+
+fn validate_artifact_archive_schema(connection: &Connection) -> Result<(), StorageError> {
+    for column in [
+        "archived_at",
+        "lifecycle_updated_by_tool_call_id",
+        "lifecycle_mutation_request_sha256",
+    ] {
+        let count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name=?1",
+            [column],
+            |row| row.get(0),
+        )?;
+        if count != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required column missing: artifacts.{column}"
+            )));
+        }
+    }
+    let index: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_artifacts_profile_archive_updated'",
+        [],
+        |row| row.get(0),
+    )?;
+    if index != 1 {
+        return Err(StorageError::OpenGate(
+            "required index missing: idx_artifacts_profile_archive_updated".into(),
+        ));
     }
     Ok(())
 }
@@ -6333,6 +6641,206 @@ mod tests {
     }
 
     #[test]
+    fn artifact_list_history_and_archive_are_bounded_profile_scoped_and_durable() {
+        let root = temporary_root();
+        let worker = start(&root, 1);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 10);
+        let first = create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Document,
+            artifact_content("first"),
+            "First",
+            20,
+        );
+        let second = create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Presentation,
+            presentation_artifact_content("second"),
+            "Second",
+            30,
+        );
+        let third_r1 = create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Document,
+            artifact_content("third r1"),
+            "Third",
+            40,
+        );
+        let update = |handle: &StorageHandle, parent: &ArtifactReadView, text: &str, now: i64| {
+            let tool = artifact_tool(
+                handle,
+                run.id.clone(),
+                "artifact.update",
+                AgentToolEffect::WorkspaceWrite,
+                now,
+            );
+            let content = artifact_content(text);
+            let (canonical_content_json, semantic_sha256) = canonical_artifact(&content);
+            handle
+                .update_artifact(UpdateArtifactRecord {
+                    artifact_id: parent.artifact.artifact_id.clone(),
+                    expected_revision_id: parent.revision.revision_id.clone(),
+                    conversation_id: conversation.id.clone(),
+                    run_id: run.id.clone(),
+                    tool_call_id: tool.id,
+                    content,
+                    canonical_content_json,
+                    semantic_sha256,
+                    mutation_request_sha256: format!(
+                        "{:x}",
+                        Sha256::digest(format!("history-{text}-{now}").as_bytes())
+                    ),
+                    now: now + 2,
+                })
+                .unwrap()
+        };
+        let third_r2 = update(&handle, &third_r1, "third r2", 50);
+        let third_r3 = update(&handle, &third_r2, "third r3", 60);
+
+        let page_one = handle.list_artifacts(None, 2, false).unwrap();
+        assert_eq!(page_one.artifacts.len(), 2);
+        assert_eq!(
+            page_one.artifacts[0].artifact_id,
+            third_r3.artifact.artifact_id
+        );
+        assert!(page_one.next_cursor.is_some());
+        let page_two = handle
+            .list_artifacts(page_one.next_cursor.clone(), 2, false)
+            .unwrap();
+        assert_eq!(page_two.artifacts.len(), 1);
+        assert_eq!(
+            page_two.artifacts[0].artifact_id,
+            first.artifact.artifact_id
+        );
+        assert!(page_two.next_cursor.is_none());
+
+        let history_one = handle
+            .list_artifact_history(third_r3.artifact.artifact_id.clone(), None, 2)
+            .unwrap();
+        assert_eq!(
+            history_one
+                .revisions
+                .iter()
+                .map(|revision| revision.sequence)
+                .collect::<Vec<_>>(),
+            vec![3, 2]
+        );
+        assert_eq!(history_one.next_before_sequence, Some(2));
+        let history_two = handle
+            .list_artifact_history(
+                third_r3.artifact.artifact_id.clone(),
+                history_one.next_before_sequence,
+                2,
+            )
+            .unwrap();
+        assert_eq!(history_two.revisions.len(), 1);
+        assert_eq!(history_two.revisions[0].sequence, 1);
+        assert!(history_two.next_before_sequence.is_none());
+
+        let archive_tool = artifact_tool(
+            &handle,
+            run.id.clone(),
+            "artifact.set_archive_state",
+            AgentToolEffect::WorkspaceWrite,
+            70,
+        );
+        let archive_request = SetArtifactArchiveStateRecord {
+            artifact_id: second.artifact.artifact_id.clone(),
+            archived: true,
+            conversation_id: conversation.id.clone(),
+            run_id: run.id.clone(),
+            tool_call_id: archive_tool.id.clone(),
+            mutation_request_sha256: format!("{:x}", Sha256::digest(b"archive-second")),
+            now: 72,
+        };
+        let archived = handle
+            .set_artifact_archive_state(archive_request.clone())
+            .unwrap();
+        assert!(archived.archived_at.is_some());
+        assert_eq!(
+            handle.set_artifact_archive_state(archive_request).unwrap(),
+            archived
+        );
+        let visible = handle.list_artifacts(None, 100, false).unwrap();
+        assert!(
+            visible
+                .artifacts
+                .iter()
+                .all(|artifact| artifact.artifact_id != second.artifact.artifact_id)
+        );
+        let all = handle.list_artifacts(None, 100, true).unwrap();
+        assert_eq!(all.artifacts.len(), 3);
+        assert!(all.artifacts.iter().any(|artifact| artifact.artifact_id
+            == second.artifact.artifact_id
+            && artifact.archived_at.is_some()));
+        assert_eq!(
+            handle
+                .read_artifact(
+                    second.artifact.artifact_id.clone(),
+                    Some(second.revision.revision_id.clone()),
+                )
+                .unwrap()
+                .revision,
+            second.revision
+        );
+
+        let other_profile = StorageHandle {
+            sender: handle.sender.clone(),
+            local_user: handle.local_user.clone(),
+            device_id: handle.device_id.clone(),
+            profile_id: ProfileId::new("other-profile"),
+            database_path: handle.database_path.clone(),
+        };
+        assert!(
+            other_profile
+                .list_artifacts(None, 100, true)
+                .unwrap()
+                .artifacts
+                .is_empty()
+        );
+
+        let restore_tool = artifact_tool(
+            &handle,
+            run.id,
+            "artifact.set_archive_state",
+            AgentToolEffect::WorkspaceWrite,
+            80,
+        );
+        let restored = handle
+            .set_artifact_archive_state(SetArtifactArchiveStateRecord {
+                artifact_id: second.artifact.artifact_id.clone(),
+                archived: false,
+                conversation_id: conversation.id,
+                run_id: restore_tool.run_id,
+                tool_call_id: restore_tool.id,
+                mutation_request_sha256: format!("{:x}", Sha256::digest(b"restore-second")),
+                now: 82,
+            })
+            .unwrap();
+        assert_eq!(restored.archived_at, None);
+        drop(other_profile);
+        drop(handle);
+        drop(worker);
+
+        let reopened = start(&root, 90);
+        let reopened_second = reopened
+            .handle()
+            .read_artifact(second.artifact.artifact_id, None)
+            .unwrap();
+        assert_eq!(reopened_second.artifact.archived_at, None);
+        assert_eq!(
+            reopened_second.revision.revision_id,
+            second.revision.revision_id
+        );
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn migration_and_bootstrap_are_idempotent_across_reopen() {
         let root = temporary_root();
         let first_user = {
@@ -6473,7 +6981,7 @@ mod tests {
             frozen_migration_checksum(MIGRATION_0006),
             MIGRATION_0006_FROZEN_SHA256
         );
-        assert_eq!(schema_version(), 10);
+        assert_eq!(schema_version(), 11);
     }
 
     #[test]
@@ -6504,7 +7012,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!((profile_before, version), (profile_after, 10));
+        assert_eq!((profile_before, version), (profile_after, 11));
         drop(connection);
         fs::remove_dir_all(&root).unwrap();
 
@@ -6634,7 +7142,7 @@ mod tests {
         );
         let artifact_fks_before = query_json_rows(
             &connection,
-            "SELECT json_array(id,seq,\"table\",\"from\",\"to\",on_update,on_delete,match) FROM pragma_foreign_key_list('artifacts') ORDER BY id,seq",
+            "SELECT json_array(seq,\"table\",\"from\",\"to\",on_update,on_delete,match) FROM pragma_foreign_key_list('artifacts') WHERE \"table\"!='agent_tool_calls' ORDER BY \"table\",\"from\",seq",
         );
         let revision_fks_before = query_json_rows(
             &connection,
@@ -6661,7 +7169,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             (version, migration_name.as_str()),
-            (10, MIGRATION_0009_NAME)
+            (11, MIGRATION_0009_NAME)
         );
         assert_eq!(
             artifacts_before,
@@ -6688,7 +7196,7 @@ mod tests {
             artifact_fks_before,
             query_json_rows(
                 &connection,
-                "SELECT json_array(id,seq,\"table\",\"from\",\"to\",on_update,on_delete,match) FROM pragma_foreign_key_list('artifacts') ORDER BY id,seq",
+                "SELECT json_array(seq,\"table\",\"from\",\"to\",on_update,on_delete,match) FROM pragma_foreign_key_list('artifacts') WHERE \"table\"!='agent_tool_calls' ORDER BY \"table\",\"from\",seq",
             )
         );
         assert_eq!(
@@ -6702,7 +7210,7 @@ mod tests {
             artifact_indexes_before,
             query_json_rows(
                 &connection,
-                "SELECT json_array(name,sql) FROM sqlite_master WHERE type='index' AND tbl_name='artifacts' AND sql IS NOT NULL ORDER BY name",
+                "SELECT json_array(name,sql) FROM sqlite_master WHERE type='index' AND tbl_name='artifacts' AND sql IS NOT NULL AND name!='idx_artifacts_profile_archive_updated' ORDER BY name",
             )
         );
         let foreign_key_violations: i64 = connection
@@ -6956,12 +7464,123 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((max_version, assets_table), (10, 1));
+        assert_eq!((max_version, assets_table), (11, 1));
         assert_eq!(
             artifacts_before,
             query_json_rows(
                 &connection,
                 "SELECT json_array(id,profile_id,artifact_type,current_revision_id,updated_by_device,created_at,updated_at) FROM artifacts ORDER BY id",
+            )
+        );
+        assert_eq!(
+            revisions_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,artifact_id,sequence,content_json,semantic_sha256) FROM artifact_revisions ORDER BY id",
+            )
+        );
+        drop(connection);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn migration_0011_adds_archive_state_without_changing_artifact_content() {
+        let root = temporary_root();
+        let paths = PlatformPaths::from_root(root.clone()).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let mut connection = open_connection(&paths.database).unwrap();
+        apply_schema_through_8(&mut connection, 1);
+        apply_artifact_type_extensibility_migration(
+            &mut connection,
+            2,
+            MIGRATION_0009,
+            &migration_checksum(MIGRATION_0009),
+        )
+        .unwrap();
+        apply_durable_source_asset_migration(
+            &mut connection,
+            3,
+            MIGRATION_0010,
+            &migration_checksum(MIGRATION_0010),
+        )
+        .unwrap();
+        let worker = start_pre_migrated_worker(connection, paths.database.clone(), device, 4);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 10);
+        let artifact = create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Document,
+            artifact_content("schema 10 survivor"),
+            "Schema 10 survivor",
+            20,
+        );
+        drop(worker);
+
+        let mut connection = open_connection(&paths.database).unwrap();
+        let artifact_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,profile_id,artifact_type,title,current_revision_id,created_at,updated_at) FROM artifacts ORDER BY id",
+        );
+        let revisions_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,artifact_id,sequence,content_json,semantic_sha256) FROM artifact_revisions ORDER BY id",
+        );
+        let failing_migration =
+            format!("{MIGRATION_0011}\nSELECT * FROM migration_0011_forced_failure;");
+        assert!(matches!(
+            apply_artifact_archive_state_migration(
+                &mut connection,
+                30,
+                &failing_migration,
+                &migration_checksum(&failing_migration),
+            ),
+            Err(StorageError::MigrationIncompatibleData)
+        ));
+        let version_11: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version=11",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let archive_columns: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name IN ('archived_at','lifecycle_updated_by_tool_call_id','lifecycle_mutation_request_sha256')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!((version_11, archive_columns), (0, 0));
+        assert_eq!(
+            artifact_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,profile_id,artifact_type,title,current_revision_id,created_at,updated_at) FROM artifacts ORDER BY id",
+            )
+        );
+        assert_eq!(
+            revisions_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,artifact_id,sequence,content_json,semantic_sha256) FROM artifact_revisions ORDER BY id",
+            )
+        );
+
+        apply_migrations(&mut connection, 40).unwrap();
+        let archived_at: Option<i64> = connection
+            .query_row(
+                "SELECT archived_at FROM artifacts WHERE id=?1",
+                [&artifact.artifact.artifact_id.0],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(archived_at, None);
+        assert_eq!(
+            artifact_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,profile_id,artifact_type,title,current_revision_id,created_at,updated_at) FROM artifacts ORDER BY id",
             )
         );
         assert_eq!(

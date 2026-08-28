@@ -326,7 +326,9 @@ export type SlideRegion = { slot: SlideSlot, blocks: Array<PresentationBlock>, }
 
 export type SlideSlot = "BODY" | "LEFT" | "RIGHT";
 
-export type PresentationBlock = { "kind": "PARAGRAPH", text: string, } | { "kind": "BULLET_LIST", items: Array<string>, };
+export type PresentationBlock = { "kind": "PARAGRAPH", text: string, } | { "kind": "BULLET_LIST", items: Array<string>, } | { "kind": "IMAGE", source: ArtifactAssetRefV1, fit: PresentationImageFitV1, };
+
+export type PresentationImageFitV1 = "CONTAIN";
 
 export type DiagramNodeId = string;
 
@@ -388,7 +390,15 @@ export type ArtifactContentV1 = { "type": "DOCUMENT", "content": DocumentArtifac
 
 export type ArtifactMutationKind = "CREATE" | "UPDATE";
 
-export type ArtifactView = { artifact_id: ArtifactId, profile_id: ProfileId, artifact_type: ArtifactType, title: string | null, project_field_id: FieldId | null, current_revision_id: ArtifactRevisionId, created_from_conversation_id: ConversationId | null, created_by_agent_run_id: AgentRunId | null, updated_by_device: DeviceId, created_at: number, updated_at: number, };
+export type ArtifactView = { artifact_id: ArtifactId, profile_id: ProfileId, artifact_type: ArtifactType, title: string | null, project_field_id: FieldId | null, current_revision_id: ArtifactRevisionId, created_from_conversation_id: ConversationId | null, created_by_agent_run_id: AgentRunId | null, updated_by_device: DeviceId, created_at: number, updated_at: number, archived_at: number | null, };
+
+export type ArtifactListCursor = { updated_at: number, artifact_id: ArtifactId, };
+
+export type ArtifactListView = { artifacts: Array<ArtifactView>, next_cursor: ArtifactListCursor | null, };
+
+export type ArtifactRevisionMetadataView = { revision_id: ArtifactRevisionId, artifact_id: ArtifactId, sequence: number, parent_revision_id: ArtifactRevisionId | null, mutation_kind: ArtifactMutationKind, content_schema_version: number, semantic_sha256: string, created_from_conversation_id: ConversationId | null, created_by_agent_run_id: AgentRunId | null, created_by_tool_call_id: ToolCallId, created_at: number, };
+
+export type ArtifactHistoryView = { artifact: ArtifactView, revisions: Array<ArtifactRevisionMetadataView>, next_before_sequence: number | null, };
 
 export type ArtifactRevisionView = { revision_id: ArtifactRevisionId, artifact_id: ArtifactId, sequence: number, parent_revision_id: ArtifactRevisionId | null, mutation_kind: ArtifactMutationKind, content_schema_version: number, semantic_sha256: string, content: ArtifactContentV1, created_from_conversation_id: ConversationId | null, created_by_agent_run_id: AgentRunId | null, created_by_tool_call_id: ToolCallId, created_at: number, };
 

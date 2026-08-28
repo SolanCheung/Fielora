@@ -10,8 +10,9 @@ use crate::{
 use fielora_contracts::{
     ArtifactAssetRefV1, ArtifactContentV1, ArtifactId, ArtifactReadView, ArtifactRevisionId,
     ArtifactType as DurableArtifactType, AssetMediaType, AssetView, DiagramArtifactV1,
-    DocumentArtifact, DocumentBlock, PresentationArtifact, PresentationBlock, PresentationLayout,
-    PresentationSlide, SlideRegion, SlideSlot, SpreadsheetArtifactV1, SpreadsheetRangeEmbedV1,
+    DocumentArtifact, DocumentBlock, PresentationArtifact, PresentationBlock,
+    PresentationImageFitV1, PresentationLayout, PresentationSlide, SlideRegion, SlideSlot,
+    SpreadsheetArtifactV1, SpreadsheetRangeEmbedV1,
 };
 use office_oxide::docx::write::DocxWriter;
 use office_oxide::ir::{Image, ImageFormat, ImagePositioning};
@@ -266,6 +267,14 @@ struct SlideLayoutPlan {
     layout: PresentationLayout,
     density: ContentDensity,
     lines: Vec<PlannedTextLine>,
+    images: Vec<PlannedPresentationImage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlannedPresentationImage {
+    source: ArtifactAssetRefV1,
+    fit: PresentationImageFitV1,
+    bounds: SlideRect,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -343,6 +352,7 @@ impl ArtifactDefinition {
                                 PresentationBlock::BulletList { items } => {
                                     expected.extend(items.iter().map(String::as_str));
                                 }
+                                PresentationBlock::Image { .. } => {}
                             }
                         }
                     }
@@ -671,6 +681,26 @@ fn durable_content_schema() -> Value {
         "required":["kind","source","size_intent"],
         "additionalProperties":false
     });
+    let presentation_image = json!({
+        "type":"object",
+        "properties":{
+            "kind":{"const":"IMAGE"},
+            "source":{
+                "type":"object",
+                "properties":{
+                    "asset_id":{"type":"string","minLength":1,"maxLength":128},
+                    "content_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+                    "media_type":{"const":"image/png"},
+                    "byte_length":{"type":"integer","minimum":1,"maximum":8388608}
+                },
+                "required":["asset_id","content_sha256","media_type","byte_length"],
+                "additionalProperties":false
+            },
+            "fit":{"const":"CONTAIN"}
+        },
+        "required":["kind","source","fit"],
+        "additionalProperties":false
+    });
     variants[0]["properties"]["blocks"]["items"]["oneOf"]
         .as_array_mut()
         .expect("Document block schema must remain a oneOf")
@@ -679,6 +709,11 @@ fn durable_content_schema() -> Value {
         .as_array_mut()
         .expect("Document block schema must remain a oneOf")
         .push(inline_image);
+    variants[1]["properties"]["slides"]["items"]["properties"]["regions"]["items"]
+        ["properties"]["blocks"]["items"]["oneOf"]
+        .as_array_mut()
+        .expect("Presentation block schema must remain a oneOf")
+        .push(presentation_image);
     variants.push(diagram_content_schema());
     variants.push(spreadsheet_content_schema());
     json!({"oneOf":variants})
@@ -741,6 +776,51 @@ pub fn read_input_schema() -> Value {
     })
 }
 
+pub fn list_input_schema() -> Value {
+    json!({
+        "type":"object",
+        "properties":{
+            "limit":{"type":"integer","minimum":1,"maximum":100},
+            "include_archived":{"type":"boolean"},
+            "cursor":{
+                "type":"object",
+                "properties":{
+                    "updated_at":{"type":"integer"},
+                    "artifact_id":{"type":"string","minLength":1,"maxLength":128}
+                },
+                "required":["updated_at","artifact_id"],
+                "additionalProperties":false
+            }
+        },
+        "additionalProperties":false
+    })
+}
+
+pub fn history_input_schema() -> Value {
+    json!({
+        "type":"object",
+        "properties":{
+            "artifact_id":{"type":"string","minLength":1,"maxLength":128},
+            "before_sequence":{"type":"integer","minimum":2},
+            "limit":{"type":"integer","minimum":1,"maximum":100}
+        },
+        "required":["artifact_id"],
+        "additionalProperties":false
+    })
+}
+
+pub fn archive_input_schema() -> Value {
+    json!({
+        "type":"object",
+        "properties":{
+            "artifact_id":{"type":"string","minLength":1,"maxLength":128},
+            "archived":{"type":"boolean"}
+        },
+        "required":["artifact_id","archived"],
+        "additionalProperties":false
+    })
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CanonicalArtifactContent {
     pub content: ArtifactContentV1,
@@ -777,7 +857,7 @@ pub struct ArtifactAssetFact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedDocumentAssets {
+pub struct ResolvedArtifactAssets {
     pub assets: Vec<ArtifactAssetFact>,
     pub asset_set_sha256: String,
     pub reference_count: usize,
@@ -786,21 +866,34 @@ pub struct ResolvedDocumentAssets {
 /// Resolves and pins profile-scoped immutable Asset metadata. The caller owns
 /// storage scoping; missing and cross-profile IDs intentionally share one
 /// outward error.
-pub fn resolve_document_assets<F>(
-    document: &DocumentArtifact,
+pub fn resolve_artifact_assets<F>(
+    content: &ArtifactContentV1,
     mut read_asset: F,
-) -> Result<ResolvedDocumentAssets, AgentError>
+) -> Result<ResolvedArtifactAssets, AgentError>
 where
     F: FnMut(&fielora_contracts::AssetId) -> Result<AssetView, AgentError>,
 {
-    let references = document
-        .blocks
-        .iter()
-        .filter_map(|block| match block {
-            DocumentBlock::InlineImage { source, .. } => Some(source),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let references = match content {
+        ArtifactContentV1::Document(document) => document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                DocumentBlock::InlineImage { source, .. } => Some(source),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        ArtifactContentV1::Presentation(presentation) => presentation
+            .slides
+            .iter()
+            .flat_map(|slide| &slide.regions)
+            .flat_map(|region| &region.blocks)
+            .filter_map(|block| match block {
+                PresentationBlock::Image { source, .. } => Some(source),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        ArtifactContentV1::Diagram(_) | ArtifactContentV1::Spreadsheet(_) => Vec::new(),
+    };
     if references.len() > MAX_ASSETS_PER_REVISION {
         return Err(AgentError::ArtifactCompositionLimitExceeded);
     }
@@ -855,7 +948,7 @@ where
         })
         .collect::<Vec<_>>();
     let encoded = serde_json::to_vec(&digest_input).map_err(|_| AgentError::IoFailed)?;
-    Ok(ResolvedDocumentAssets {
+    Ok(ResolvedArtifactAssets {
         assets,
         asset_set_sha256: sha256(&encoded),
         reference_count: references.len(),
@@ -1260,7 +1353,7 @@ pub fn export_saved_document_composition(
     output_path: &str,
     cancellation: &CommandCancellation,
 ) -> Result<ToolExecution, AgentError> {
-    let empty = ResolvedDocumentAssets {
+    let empty = ResolvedArtifactAssets {
         assets: Vec::new(),
         asset_set_sha256: sha256(b"[]"),
         reference_count: 0,
@@ -1279,31 +1372,14 @@ pub fn export_saved_document_composition_with_assets(
     runtime: &ToolRuntime,
     artifact: &ArtifactReadView,
     resolved: &ResolvedDocumentComposition,
-    resolved_assets: &ResolvedDocumentAssets,
+    resolved_assets: &ResolvedArtifactAssets,
     output_path: &str,
     cancellation: &CommandCancellation,
 ) -> Result<ToolExecution, AgentError> {
     if !matches!(artifact.revision.content, ArtifactContentV1::Document(_)) {
         return Err(AgentError::ArtifactContentInvalid);
     }
-    let mut snapshot = Vec::with_capacity(resolved_assets.assets.len());
-    for asset in &resolved_assets.assets {
-        let bytes = runtime.read_asset_blob(
-            &asset.blob_ref,
-            asset.byte_length,
-            &asset.content_sha256,
-            crate::png_admission::MAX_PNG_BYTES,
-        )?;
-        let structure = crate::png_admission::validate_static_structure(&bytes)
-            .map_err(|_| AgentError::AssetContentChanged)?;
-        if structure.width != asset.width || structure.height != asset.height {
-            return Err(AgentError::AssetContentChanged);
-        }
-        snapshot.push(ResolvedPngBytes {
-            fact: asset.clone(),
-            bytes,
-        });
-    }
+    let snapshot = resolve_png_snapshots(runtime, resolved_assets)?;
     let definition = ArtifactDefinition::Document(resolved.document.clone());
     let expected_media = expected_document_media(&resolved.document, &snapshot)?;
     let arguments = json!({
@@ -1386,6 +1462,109 @@ pub fn export_saved_document_composition_with_assets(
     Ok(execution)
 }
 
+pub fn export_saved_presentation_with_assets(
+    runtime: &ToolRuntime,
+    artifact: &ArtifactReadView,
+    resolved_assets: &ResolvedArtifactAssets,
+    output_path: &str,
+    cancellation: &CommandCancellation,
+) -> Result<ToolExecution, AgentError> {
+    let ArtifactContentV1::Presentation(presentation) = &artifact.revision.content else {
+        return Err(AgentError::ArtifactContentInvalid);
+    };
+    let snapshot = resolve_png_snapshots(runtime, resolved_assets)?;
+    let plans = plan_presentation(presentation)?;
+    let expected_media = expected_presentation_media(&plans, &snapshot)?;
+    let arguments = json!({
+        "type":"presentation",
+        "content":presentation,
+        "output_path":output_path,
+    });
+    let mut execution = export_with_validation(
+        runtime,
+        &arguments,
+        cancellation,
+        |_| render_presentation_with_assets(presentation, &plans, &snapshot),
+        |definition, bytes| {
+            validate_rendered(definition, bytes)?;
+            validate_pptx_png_media(bytes, &expected_media)
+        },
+        |_, _| {},
+    )?;
+    let receipt = execution
+        .receipt
+        .as_object_mut()
+        .ok_or(AgentError::IoFailed)?;
+    receipt.insert("artifact_id".into(), json!(artifact.artifact.artifact_id));
+    receipt.insert(
+        "artifact_revision_id".into(),
+        json!(artifact.revision.revision_id),
+    );
+    receipt.insert(
+        "exported_revision_id".into(),
+        json!(artifact.revision.revision_id),
+    );
+    receipt.insert(
+        "artifact_revision".into(),
+        json!(artifact.revision.sequence),
+    );
+    receipt.insert("artifact_persistence".into(), json!("DURABLE"));
+    receipt.insert(
+        "artifact_semantic_sha256".into(),
+        json!(artifact.revision.semantic_sha256),
+    );
+    receipt.insert("asset_count".into(), json!(resolved_assets.reference_count));
+    receipt.insert(
+        "unique_asset_count".into(),
+        json!(resolved_assets.assets.len()),
+    );
+    receipt.insert(
+        "asset_set_sha256".into(),
+        json!(resolved_assets.asset_set_sha256),
+    );
+    receipt.insert("assets".into(), json!(resolved_assets.assets));
+    receipt.insert(
+        "asset_export_revalidation".into(),
+        json!("LENGTH_SHA256_AND_STATIC_PNG_STRUCTURE"),
+    );
+    receipt.insert("pptx_media_reopen".into(), json!("PASS"));
+    if serde_json::to_vec(&execution.receipt)
+        .map_err(|_| AgentError::IoFailed)?
+        .len()
+        > MAX_TOOL_RESULT_BYTES
+    {
+        return Err(AgentError::IoFailed);
+    }
+    Ok(execution)
+}
+
+fn resolve_png_snapshots(
+    runtime: &ToolRuntime,
+    resolved_assets: &ResolvedArtifactAssets,
+) -> Result<Vec<ResolvedPngBytes>, AgentError> {
+    resolved_assets
+        .assets
+        .iter()
+        .map(|asset| {
+            let bytes = runtime.read_asset_blob(
+                &asset.blob_ref,
+                asset.byte_length,
+                &asset.content_sha256,
+                crate::png_admission::MAX_PNG_BYTES,
+            )?;
+            let structure = crate::png_admission::validate_static_structure(&bytes)
+                .map_err(|_| AgentError::AssetContentChanged)?;
+            if structure.width != asset.width || structure.height != asset.height {
+                return Err(AgentError::AssetContentChanged);
+            }
+            Ok(ResolvedPngBytes {
+                fact: asset.clone(),
+                bytes,
+            })
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 struct ResolvedPngBytes {
     fact: ArtifactAssetFact,
@@ -1397,6 +1576,13 @@ struct ExpectedDocumentMedia {
     content_sha256: String,
     width_emu: u64,
     height_emu: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExpectedPresentationMedia {
+    slide_index: usize,
+    content_sha256: String,
+    rect: SlideRect,
 }
 
 type DocumentImageReferences = (Vec<String>, Vec<(u64, u64)>);
@@ -1518,6 +1704,135 @@ fn render_document_with_assets(
                     positioning: ImagePositioning::Inline,
                 });
             }
+        }
+    }
+    let mut output = Cursor::new(Vec::new());
+    writer
+        .write_to(&mut output)
+        .map_err(|_| AgentError::IoFailed)?;
+    Ok(RenderedArtifact {
+        bytes: output.into_inner(),
+    })
+}
+
+fn expected_presentation_media(
+    plans: &[SlideLayoutPlan],
+    assets: &[ResolvedPngBytes],
+) -> Result<Vec<ExpectedPresentationMedia>, AgentError> {
+    let by_id = assets
+        .iter()
+        .map(|asset| (asset.fact.asset_id.0.as_str(), asset))
+        .collect::<BTreeMap<_, _>>();
+    let mut expected = Vec::new();
+    for (slide_index, plan) in plans.iter().enumerate() {
+        for image in &plan.images {
+            let asset = by_id
+                .get(image.source.asset_id.0.as_str())
+                .ok_or(AgentError::ArtifactReferenceNotFound)?;
+            if asset.fact.content_sha256 != image.source.content_sha256
+                || asset.fact.byte_length != image.source.byte_length
+                || asset.fact.media_type != image.source.media_type
+            {
+                return Err(AgentError::ArtifactReferenceIntegrityFailed);
+            }
+            expected.push(ExpectedPresentationMedia {
+                slide_index,
+                content_sha256: asset.fact.content_sha256.clone(),
+                rect: presentation_image_rect(
+                    image.bounds,
+                    asset.fact.width,
+                    asset.fact.height,
+                    image.fit,
+                )?,
+            });
+        }
+    }
+    Ok(expected)
+}
+
+fn presentation_image_rect(
+    bounds: SlideRect,
+    pixel_width: u32,
+    pixel_height: u32,
+    fit: PresentationImageFitV1,
+) -> Result<SlideRect, AgentError> {
+    if bounds.width <= 0 || bounds.height <= 0 || pixel_width == 0 || pixel_height == 0 {
+        return Err(AgentError::ArtifactContentInvalid);
+    }
+    let (width, height) = match fit {
+        PresentationImageFitV1::Contain => {
+            if i128::from(bounds.width) * i128::from(pixel_height)
+                <= i128::from(bounds.height) * i128::from(pixel_width)
+            {
+                let height =
+                    i128::from(bounds.width) * i128::from(pixel_height) / i128::from(pixel_width);
+                (
+                    bounds.width,
+                    i64::try_from(height).map_err(|_| AgentError::ArtifactContentInvalid)?,
+                )
+            } else {
+                let width =
+                    i128::from(bounds.height) * i128::from(pixel_width) / i128::from(pixel_height);
+                (
+                    i64::try_from(width).map_err(|_| AgentError::ArtifactContentInvalid)?,
+                    bounds.height,
+                )
+            }
+        }
+    };
+    if width <= 0 || height <= 0 {
+        return Err(AgentError::ArtifactContentInvalid);
+    }
+    let rect = SlideRect {
+        x: bounds.x + (bounds.width - width) / 2,
+        y: bounds.y + (bounds.height - height) / 2,
+        width,
+        height,
+    };
+    if !bounds.contains(rect) || !SlideMetrics::widescreen().slide.contains(rect) {
+        return Err(AgentError::ArtifactContentInvalid);
+    }
+    Ok(rect)
+}
+
+fn render_presentation_with_assets(
+    presentation: &PresentationArtifact,
+    plans: &[SlideLayoutPlan],
+    assets: &[ResolvedPngBytes],
+) -> Result<RenderedArtifact, AgentError> {
+    if presentation.slides.len() != plans.len() {
+        return Err(AgentError::ArtifactContentInvalid);
+    }
+    let by_id = assets
+        .iter()
+        .map(|asset| (asset.fact.asset_id.0.as_str(), asset))
+        .collect::<BTreeMap<_, _>>();
+    let mut writer = PptxWriter::new();
+    writer.set_presentation_size(
+        PRESENTATION_WIDTH_EMU as u64,
+        PRESENTATION_HEIGHT_EMU as u64,
+    );
+    for plan in plans {
+        let slide = writer.add_slide();
+        render_presentation_plan(slide, plan);
+        for image in &plan.images {
+            let asset = by_id
+                .get(image.source.asset_id.0.as_str())
+                .ok_or(AgentError::ArtifactReferenceNotFound)?;
+            let rect = presentation_image_rect(
+                image.bounds,
+                asset.fact.width,
+                asset.fact.height,
+                image.fit,
+            )?;
+            slide.add_image(
+                asset.bytes.clone(),
+                ImageFormat::Png,
+                rect.x,
+                rect.y,
+                u64::try_from(rect.width).map_err(|_| AgentError::ArtifactContentInvalid)?,
+                u64::try_from(rect.height).map_err(|_| AgentError::ArtifactContentInvalid)?,
+            );
         }
     }
     let mut output = Cursor::new(Vec::new());
@@ -2096,6 +2411,13 @@ fn validate_definition(definition: &ArtifactDefinition) -> Result<(), AgentError
                             PresentationBlock::BulletList { items } => {
                                 admit_list(items, &mut lists, &mut list_items, &mut text_bytes)?;
                             }
+                            PresentationBlock::Image { source, .. } => {
+                                if region.blocks.len() != 1 {
+                                    return Err(AgentError::ToolArgumentsInvalid);
+                                }
+                                validate_asset_ref(source)
+                                    .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+                            }
                         }
                     }
                 }
@@ -2195,6 +2517,11 @@ fn render(definition: &ArtifactDefinition) -> Result<RenderedArtifact, AgentErro
         }
         ArtifactDefinition::Presentation(presentation) => {
             let plans = plan_presentation(presentation)?;
+            if plans.iter().any(|plan| !plan.images.is_empty()) {
+                // Durable Asset refs require the saved-revision resolver and
+                // cannot be rendered by request-scoped legacy export.
+                return Err(AgentError::ArtifactContentInvalid);
+            }
             let mut writer = PptxWriter::new();
             writer.set_presentation_size(
                 PRESENTATION_WIDTH_EMU as u64,
@@ -2272,6 +2599,9 @@ fn plan_slide(
                         layout: slide.layout,
                         density,
                         lines,
+                        images: planned_region_image(region, metrics.body)
+                            .into_iter()
+                            .collect(),
                     });
                 }
             }
@@ -2318,6 +2648,10 @@ fn plan_slide(
                     layout: slide.layout,
                     density,
                     lines,
+                    images: planned_region_image(left, metrics.left)
+                        .into_iter()
+                        .chain(planned_region_image(right, metrics.right))
+                        .collect(),
                 });
             }
             Err(AgentError::PresentationContentOverflow)
@@ -2362,7 +2696,22 @@ fn plan_cover_slide(
         layout: slide.layout,
         density: ContentDensity::Low,
         lines,
+        images: Vec::new(),
     })
+}
+
+fn planned_region_image(
+    region: &SlideRegion,
+    bounds: SlideRect,
+) -> Option<PlannedPresentationImage> {
+    match region.blocks.as_slice() {
+        [PresentationBlock::Image { source, fit }] => Some(PlannedPresentationImage {
+            source: source.clone(),
+            fit: *fit,
+            bounds,
+        }),
+        _ => None,
+    }
 }
 
 fn body_font_candidates(density: ContentDensity) -> &'static [u16] {
@@ -2388,6 +2737,7 @@ fn region_density(region: &SlideRegion, bounds: SlideRect, column: bool) -> Cont
                     .map(|item| wrap_text(item, bounds.width - bullet_indent, 20).len())
                     .sum::<usize>();
             }
+            PresentationBlock::Image { .. } => {}
         }
     }
     if lines <= 6 {
@@ -2507,6 +2857,7 @@ fn plan_region(
                 }
                 y += points_to_emu((bullet_font_size_pt as f64) * 0.35);
             }
+            PresentationBlock::Image { .. } => {}
         }
     }
     Some(planned)
@@ -2750,28 +3101,11 @@ fn validate_docx_png_media(
     bytes: &[u8],
     expected: &[ExpectedDocumentMedia],
 ) -> Result<(), AgentError> {
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|_| AgentError::IoFailed)?;
-    let mut entries = BTreeMap::<String, Vec<u8>>::new();
-    for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).map_err(|_| AgentError::IoFailed)?;
-        if entry.is_dir() || entry.size() > MAX_OUTPUT_BYTES as u64 {
-            if entry.is_dir() {
-                continue;
-            }
-            return Err(AgentError::IoFailed);
+    let entries = bounded_office_entries(bytes)?;
+    for (name, value) in &entries {
+        if name.ends_with(".rels") {
+            reject_external_relationships(value)?;
         }
-        let name = entry.name().replace('\\', "/");
-        if name.starts_with('/')
-            || name.split('/').any(|part| part == "..")
-            || entries.contains_key(&name)
-        {
-            return Err(AgentError::IoFailed);
-        }
-        let mut value = Vec::with_capacity(entry.size() as usize);
-        entry
-            .read_to_end(&mut value)
-            .map_err(|_| AgentError::IoFailed)?;
-        entries.insert(name, value);
     }
     let content_types = entries
         .get("[Content_Types].xml")
@@ -2851,6 +3185,263 @@ fn validate_docx_png_media(
         return Err(AgentError::IoFailed);
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PptxPictureFact {
+    relationship_id: String,
+    rect: SlideRect,
+}
+
+fn validate_pptx_png_media(
+    bytes: &[u8],
+    expected: &[ExpectedPresentationMedia],
+) -> Result<(), AgentError> {
+    let entries = bounded_office_entries(bytes)?;
+    for (name, value) in &entries {
+        if name.ends_with(".rels") {
+            reject_external_relationships(value)?;
+        }
+    }
+    let content_types = entries
+        .get("[Content_Types].xml")
+        .ok_or(AgentError::IoFailed)?;
+    validate_xml(content_types)?;
+    let (default_png_content_type, content_type_overrides) =
+        parse_docx_content_types(content_types)?;
+    let mut expected_by_slide = BTreeMap::<usize, Vec<&ExpectedPresentationMedia>>::new();
+    for item in expected {
+        expected_by_slide
+            .entry(item.slide_index)
+            .or_default()
+            .push(item);
+    }
+    let mut referenced_media = BTreeSet::new();
+    let slide_count = entries
+        .keys()
+        .filter(|name| {
+            name.starts_with("ppt/slides/slide")
+                && name.ends_with(".xml")
+                && !name.contains("/_rels/")
+        })
+        .count();
+    for slide_index in 0..slide_count {
+        let slide_number = slide_index + 1;
+        let slide_path = format!("ppt/slides/slide{slide_number}.xml");
+        let rels_path = format!("ppt/slides/_rels/slide{slide_number}.xml.rels");
+        let slide = entries.get(&slide_path).ok_or(AgentError::IoFailed)?;
+        let pictures = parse_pptx_picture_refs(slide)?;
+        let relationships = entries
+            .get(&rels_path)
+            .map(|value| parse_image_relationships(value))
+            .transpose()?
+            .unwrap_or_default();
+        let expected_slide = expected_by_slide.remove(&slide_index).unwrap_or_default();
+        if pictures.len() != expected_slide.len() || relationships.len() != expected_slide.len() {
+            return Err(AgentError::IoFailed);
+        }
+        for (picture, expected) in pictures.iter().zip(expected_slide) {
+            let target = relationships
+                .get(&picture.relationship_id)
+                .ok_or(AgentError::IoFailed)?;
+            let media_path = normalize_pptx_media_target(target)?;
+            let media = entries.get(&media_path).ok_or(AgentError::IoFailed)?;
+            let exact_content_type = content_type_overrides
+                .get(&format!("/{media_path}"))
+                .map(String::as_str)
+                .unwrap_or(if default_png_content_type {
+                    "image/png"
+                } else {
+                    ""
+                });
+            if picture.rect != expected.rect
+                || sha256(media) != expected.content_sha256
+                || !media_path.starts_with("ppt/media/")
+                || !media_path.ends_with(".png")
+                || exact_content_type != "image/png"
+                || !SlideMetrics::widescreen().slide.contains(picture.rect)
+            {
+                return Err(AgentError::IoFailed);
+            }
+            referenced_media.insert(media_path);
+        }
+    }
+    if !expected_by_slide.is_empty() {
+        return Err(AgentError::IoFailed);
+    }
+    let packaged_media = entries
+        .keys()
+        .filter(|name| name.starts_with("ppt/media/"))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if packaged_media != referenced_media {
+        return Err(AgentError::IoFailed);
+    }
+    Ok(())
+}
+
+fn bounded_office_entries(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, AgentError> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|_| AgentError::IoFailed)?;
+    let mut entries = BTreeMap::<String, Vec<u8>>::new();
+    let mut expanded_total = 0u64;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|_| AgentError::IoFailed)?;
+        if entry.is_dir() {
+            continue;
+        }
+        if entry.size() > MAX_OUTPUT_BYTES as u64 {
+            return Err(AgentError::IoFailed);
+        }
+        expanded_total = expanded_total
+            .checked_add(entry.size())
+            .ok_or(AgentError::IoFailed)?;
+        if expanded_total > MAX_OUTPUT_BYTES as u64 {
+            return Err(AgentError::IoFailed);
+        }
+        let name = entry.name().replace('\\', "/");
+        if name.starts_with('/')
+            || name.split('/').any(|part| part == "..")
+            || entries.contains_key(&name)
+        {
+            return Err(AgentError::IoFailed);
+        }
+        let mut value = Vec::with_capacity(entry.size() as usize);
+        entry
+            .read_to_end(&mut value)
+            .map_err(|_| AgentError::IoFailed)?;
+        entries.insert(name, value);
+    }
+    Ok(entries)
+}
+
+fn reject_external_relationships(bytes: &[u8]) -> Result<(), AgentError> {
+    let mut reader = XmlReader::from_reader(bytes);
+    reader.config_mut().trim_text(true);
+    loop {
+        match reader.read_event().map_err(|_| AgentError::IoFailed)? {
+            XmlEvent::Empty(event) | XmlEvent::Start(event)
+                if event.name().as_ref().ends_with(b"Relationship") =>
+            {
+                for attribute in event.attributes().with_checks(true) {
+                    let attribute = attribute.map_err(|_| AgentError::IoFailed)?;
+                    if attribute.key.as_ref() == b"TargetMode" {
+                        return Err(AgentError::IoFailed);
+                    }
+                }
+            }
+            XmlEvent::DocType(_) | XmlEvent::PI(_) | XmlEvent::CData(_) => {
+                return Err(AgentError::IoFailed);
+            }
+            XmlEvent::Eof => return Ok(()),
+            _ => {}
+        }
+    }
+}
+
+fn parse_pptx_picture_refs(bytes: &[u8]) -> Result<Vec<PptxPictureFact>, AgentError> {
+    #[derive(Default)]
+    struct PendingPicture {
+        relationship_id: Option<String>,
+        x: Option<i64>,
+        y: Option<i64>,
+        width: Option<i64>,
+        height: Option<i64>,
+    }
+    fn attribute(
+        event: &quick_xml::events::BytesStart<'_>,
+        suffix: &[u8],
+    ) -> Result<Option<String>, AgentError> {
+        for attribute in event.attributes().with_checks(true) {
+            let attribute = attribute.map_err(|_| AgentError::IoFailed)?;
+            if attribute.key.as_ref().ends_with(suffix) {
+                return std::str::from_utf8(attribute.value.as_ref())
+                    .map(str::to_owned)
+                    .map(Some)
+                    .map_err(|_| AgentError::IoFailed);
+            }
+        }
+        Ok(None)
+    }
+    let mut reader = XmlReader::from_reader(bytes);
+    reader.config_mut().trim_text(true);
+    let mut current: Option<PendingPicture> = None;
+    let mut pictures = Vec::new();
+    loop {
+        match reader.read_event().map_err(|_| AgentError::IoFailed)? {
+            XmlEvent::Start(event) if event.local_name().as_ref() == b"pic" => {
+                if current.replace(PendingPicture::default()).is_some() {
+                    return Err(AgentError::IoFailed);
+                }
+            }
+            XmlEvent::Start(event) | XmlEvent::Empty(event)
+                if current.is_some() && event.local_name().as_ref() == b"blip" =>
+            {
+                current
+                    .as_mut()
+                    .ok_or(AgentError::IoFailed)?
+                    .relationship_id = attribute(&event, b"embed")?;
+            }
+            XmlEvent::Start(event) | XmlEvent::Empty(event)
+                if current.is_some() && event.local_name().as_ref() == b"off" =>
+            {
+                let pending = current.as_mut().ok_or(AgentError::IoFailed)?;
+                pending.x = attribute(&event, b"x")?
+                    .map(|value| value.parse::<i64>().map_err(|_| AgentError::IoFailed))
+                    .transpose()?;
+                pending.y = attribute(&event, b"y")?
+                    .map(|value| value.parse::<i64>().map_err(|_| AgentError::IoFailed))
+                    .transpose()?;
+            }
+            XmlEvent::Start(event) | XmlEvent::Empty(event)
+                if current.is_some() && event.local_name().as_ref() == b"ext" =>
+            {
+                let pending = current.as_mut().ok_or(AgentError::IoFailed)?;
+                pending.width = attribute(&event, b"cx")?
+                    .map(|value| value.parse::<i64>().map_err(|_| AgentError::IoFailed))
+                    .transpose()?;
+                pending.height = attribute(&event, b"cy")?
+                    .map(|value| value.parse::<i64>().map_err(|_| AgentError::IoFailed))
+                    .transpose()?;
+            }
+            XmlEvent::End(event) if event.local_name().as_ref() == b"pic" => {
+                let pending = current.take().ok_or(AgentError::IoFailed)?;
+                pictures.push(PptxPictureFact {
+                    relationship_id: pending.relationship_id.ok_or(AgentError::IoFailed)?,
+                    rect: SlideRect {
+                        x: pending.x.ok_or(AgentError::IoFailed)?,
+                        y: pending.y.ok_or(AgentError::IoFailed)?,
+                        width: pending.width.ok_or(AgentError::IoFailed)?,
+                        height: pending.height.ok_or(AgentError::IoFailed)?,
+                    },
+                });
+            }
+            XmlEvent::DocType(_) | XmlEvent::PI(_) | XmlEvent::CData(_) => {
+                return Err(AgentError::IoFailed);
+            }
+            XmlEvent::Eof => break,
+            _ => {}
+        }
+    }
+    if current.is_some() {
+        return Err(AgentError::IoFailed);
+    }
+    Ok(pictures)
+}
+
+fn normalize_pptx_media_target(target: &str) -> Result<String, AgentError> {
+    let target = target.replace('\\', "/");
+    let media = target
+        .strip_prefix("../media/")
+        .ok_or(AgentError::IoFailed)?;
+    if media.is_empty()
+        || media.contains('/')
+        || media.contains("://")
+        || media == "."
+        || media == ".."
+    {
+        return Err(AgentError::IoFailed);
+    }
+    Ok(format!("ppt/media/{media}"))
 }
 
 fn validate_xml(bytes: &[u8]) -> Result<(), AgentError> {
@@ -3101,6 +3692,189 @@ mod tests {
         media.into_iter().map(|(_, digest)| digest).collect()
     }
 
+    fn pptx_media_digests(bytes: &[u8]) -> Vec<String> {
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut media = Vec::new();
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).unwrap();
+            if entry.name().starts_with("ppt/media/") {
+                let name = entry.name().to_owned();
+                let mut bytes = Vec::new();
+                entry.read_to_end(&mut bytes).unwrap();
+                media.push((name, sha256(&bytes)));
+            }
+        }
+        media.sort_by(|left, right| left.0.cmp(&right.0));
+        media.into_iter().map(|(_, digest)| digest).collect()
+    }
+
+    #[test]
+    fn presentation_png_uses_durable_asset_snapshot_and_historical_revision() {
+        let (root, runtime) = fixture_runtime();
+        let runtime = runtime.with_content_blob_root(root.join("library"));
+        let admitted_a =
+            crate::png_admission::admit(png_fixture(64, 32, [25, 90, 180, 255])).unwrap();
+        let admitted_b =
+            crate::png_admission::admit(png_fixture(32, 64, [190, 60, 25, 255])).unwrap();
+        let asset_a = AssetView {
+            asset_id: fielora_contracts::AssetId::new("presentation-asset-a"),
+            profile_id: ProfileId::new("profile"),
+            media_type: AssetMediaType::Png,
+            content_sha256: admitted_a.content_sha256.clone(),
+            byte_length: admitted_a.byte_length,
+            width: admitted_a.width,
+            height: admitted_a.height,
+            blob_ref: runtime
+                .put_asset_blob(admitted_a.bytes(), &admitted_a.content_sha256)
+                .unwrap(),
+            created_from_conversation_id: None,
+            created_by_agent_run_id: None,
+            created_by_tool_call_id: ToolCallId::new("presentation-asset-tool-a"),
+            created_at: 1,
+        };
+        let asset_b = AssetView {
+            asset_id: fielora_contracts::AssetId::new("presentation-asset-b"),
+            profile_id: ProfileId::new("profile"),
+            media_type: AssetMediaType::Png,
+            content_sha256: admitted_b.content_sha256.clone(),
+            byte_length: admitted_b.byte_length,
+            width: admitted_b.width,
+            height: admitted_b.height,
+            blob_ref: runtime
+                .put_asset_blob(admitted_b.bytes(), &admitted_b.content_sha256)
+                .unwrap(),
+            created_from_conversation_id: None,
+            created_by_agent_run_id: None,
+            created_by_tool_call_id: ToolCallId::new("presentation-asset-tool-b"),
+            created_at: 2,
+        };
+        let presentation = |asset: &AssetView, title: &str| PresentationArtifact {
+            slides: vec![PresentationSlide {
+                layout: PresentationLayout::TitleAndBody,
+                title: title.into(),
+                regions: vec![SlideRegion {
+                    slot: SlideSlot::Body,
+                    blocks: vec![PresentationBlock::Image {
+                        source: ArtifactAssetRefV1 {
+                            asset_id: asset.asset_id.clone(),
+                            content_sha256: asset.content_sha256.clone(),
+                            media_type: asset.media_type,
+                            byte_length: asset.byte_length,
+                        },
+                        fit: PresentationImageFitV1::Contain,
+                    }],
+                }],
+            }],
+        };
+        let make_read = |presentation: &PresentationArtifact,
+                         revision_id: &str,
+                         sequence: u64,
+                         current_revision_id: &str| {
+            let canonical = canonicalize_content(
+                DurableArtifactType::Presentation,
+                serde_json::to_value(presentation).unwrap(),
+            )
+            .unwrap();
+            ArtifactReadView {
+                artifact: ArtifactView {
+                    artifact_id: ArtifactId::new("presentation-history"),
+                    profile_id: ProfileId::new("profile"),
+                    artifact_type: DurableArtifactType::Presentation,
+                    title: Some("Presentation history".into()),
+                    project_field_id: None,
+                    current_revision_id: ArtifactRevisionId::new(current_revision_id),
+                    created_from_conversation_id: None,
+                    created_by_agent_run_id: None,
+                    updated_by_device: DeviceId::new("device"),
+                    created_at: 1,
+                    updated_at: sequence as i64,
+                    archived_at: None,
+                },
+                revision: ArtifactRevisionView {
+                    revision_id: ArtifactRevisionId::new(revision_id),
+                    artifact_id: ArtifactId::new("presentation-history"),
+                    sequence,
+                    parent_revision_id: (sequence > 1)
+                        .then(|| ArtifactRevisionId::new("presentation-r1")),
+                    mutation_kind: if sequence == 1 {
+                        ArtifactMutationKind::Create
+                    } else {
+                        ArtifactMutationKind::Update
+                    },
+                    content_schema_version: 1,
+                    semantic_sha256: canonical.semantic_sha256,
+                    content: canonical.content,
+                    created_from_conversation_id: None,
+                    created_by_agent_run_id: None,
+                    created_by_tool_call_id: ToolCallId::new(format!(
+                        "presentation-tool-{sequence}"
+                    )),
+                    created_at: sequence as i64,
+                },
+            }
+        };
+        let presentation_r1 = presentation(&asset_a, "Historical image A");
+        let presentation_r2 = presentation(&asset_b, "Historical image B");
+        let read_r1 = make_read(&presentation_r1, "presentation-r1", 1, "presentation-r2");
+        let read_r2 = make_read(&presentation_r2, "presentation-r2", 2, "presentation-r2");
+        for (read, presentation, output) in [
+            (&read_r1, &presentation_r1, "presentation-r1.pptx"),
+            (&read_r2, &presentation_r2, "presentation-r2.pptx"),
+            (&read_r1, &presentation_r1, "presentation-r1-again.pptx"),
+        ] {
+            let assets = resolve_artifact_assets(&read.revision.content, |asset_id| {
+                if asset_id == &asset_a.asset_id {
+                    Ok(asset_a.clone())
+                } else if asset_id == &asset_b.asset_id {
+                    Ok(asset_b.clone())
+                } else {
+                    Err(AgentError::AssetNotFound)
+                }
+            })
+            .unwrap();
+            let execution = export_saved_presentation_with_assets(
+                &runtime,
+                read,
+                &assets,
+                output,
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+            assert_eq!(
+                execution.receipt["renderer_version"],
+                PRESENTATION_RENDERER_VERSION
+            );
+            assert_eq!(execution.receipt["pptx_media_reopen"], "PASS");
+            let plans = plan_presentation(presentation).unwrap();
+            let snapshot = resolve_png_snapshots(&runtime, &assets).unwrap();
+            validate_pptx_png_media(
+                &fs::read(root.join(output)).unwrap(),
+                &expected_presentation_media(&plans, &snapshot).unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            pptx_media_digests(&fs::read(root.join("presentation-r1.pptx")).unwrap()),
+            vec![asset_a.content_sha256.clone()]
+        );
+        assert_eq!(
+            pptx_media_digests(&fs::read(root.join("presentation-r2.pptx")).unwrap()),
+            vec![asset_b.content_sha256.clone()]
+        );
+        assert_eq!(
+            pptx_media_digests(&fs::read(root.join("presentation-r1-again.pptx")).unwrap()),
+            vec![asset_a.content_sha256.clone()]
+        );
+        assert_eq!(
+            resolve_artifact_assets(&ArtifactContentV1::Presentation(presentation_r1), |_| {
+                Err(AgentError::AssetNotFound)
+            })
+            .unwrap_err(),
+            AgentError::AssetNotFound
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn document_inline_png_uses_exact_immutable_asset_and_production_media_reopen() {
         let (root, runtime) = fixture_runtime();
@@ -3200,6 +3974,7 @@ mod tests {
                 updated_by_device: DeviceId::new("device"),
                 created_at: 1,
                 updated_at: 1,
+                archived_at: None,
             },
             revision: ArtifactRevisionView {
                 revision_id,
@@ -3217,27 +3992,34 @@ mod tests {
             },
         };
         let composition = resolve_document_composition(&document, |_, _| unreachable!()).unwrap();
-        let assets = resolve_document_assets(&document, |asset_id| {
-            if asset_id == &asset.asset_id {
-                Ok(asset.clone())
-            } else if asset_id == &asset_b.asset_id {
-                Ok(asset_b.clone())
-            } else {
-                Err(AgentError::AssetNotFound)
-            }
-        })
-        .unwrap();
+        let assets =
+            resolve_artifact_assets(&ArtifactContentV1::Document(document.clone()), |asset_id| {
+                if asset_id == &asset.asset_id {
+                    Ok(asset.clone())
+                } else if asset_id == &asset_b.asset_id {
+                    Ok(asset_b.clone())
+                } else {
+                    Err(AgentError::AssetNotFound)
+                }
+            })
+            .unwrap();
         let mut mismatched = document.clone();
         let DocumentBlock::InlineImage { source, .. } = &mut mismatched.blocks[1] else {
             unreachable!()
         };
         source.content_sha256 = "0".repeat(64);
         assert_eq!(
-            resolve_document_assets(&mismatched, |_| Ok(asset.clone())).unwrap_err(),
+            resolve_artifact_assets(&ArtifactContentV1::Document(mismatched), |_| {
+                Ok(asset.clone())
+            })
+            .unwrap_err(),
             AgentError::ArtifactReferenceIntegrityFailed
         );
         assert_eq!(
-            resolve_document_assets(&document, |_| Err(AgentError::AssetNotFound)).unwrap_err(),
+            resolve_artifact_assets(&ArtifactContentV1::Document(document.clone()), |_| {
+                Err(AgentError::AssetNotFound)
+            })
+            .unwrap_err(),
             AgentError::AssetNotFound
         );
         let snapshot = assets
@@ -3337,15 +4119,18 @@ mod tests {
         ] {
             let composition =
                 resolve_document_composition(document, |_, _| unreachable!()).unwrap();
-            let assets = resolve_document_assets(document, |asset_id| {
-                if asset_id == &asset.asset_id {
-                    Ok(asset.clone())
-                } else if asset_id == &asset_b.asset_id {
-                    Ok(asset_b.clone())
-                } else {
-                    Err(AgentError::AssetNotFound)
-                }
-            })
+            let assets = resolve_artifact_assets(
+                &ArtifactContentV1::Document(document.clone()),
+                |asset_id| {
+                    if asset_id == &asset.asset_id {
+                        Ok(asset.clone())
+                    } else if asset_id == &asset_b.asset_id {
+                        Ok(asset_b.clone())
+                    } else {
+                        Err(AgentError::AssetNotFound)
+                    }
+                },
+            )
             .unwrap();
             export_saved_document_composition_with_assets(
                 &runtime,
@@ -3431,6 +4216,7 @@ mod tests {
                 updated_by_device: DeviceId::new("device"),
                 created_at: 1,
                 updated_at: 1,
+                archived_at: None,
             },
             revision: ArtifactRevisionView {
                 revision_id,
@@ -4392,6 +5178,7 @@ mod tests {
                     updated_by_device: DeviceId::new(Uuid::now_v7().to_string()),
                     created_at: 1,
                     updated_at: 2,
+                    archived_at: None,
                 },
                 revision: ArtifactRevisionView {
                     revision_id: selected_revision.clone(),

@@ -1904,3 +1904,57 @@ MIGRATION_0010: durable_source_assets
 PRESENTATION_IMAGE_DIAGRAM_RASTER_UI_DELETE_GC_REMOTE_IMAGE: NOT_IMPLEMENTED
 CHANGE_IMPACT: HIGH
 ```
+
+## 90. Capability / Tools V0.1 Artifact Completion
+
+Durable Artifact 的当前产品能力已在既有 `Model + Harness + Tools` 管线内收口。
+Presentation 新增 closed typed `IMAGE` block，只接受 exact durable
+`ArtifactAssetRefV1` 与 `CONTAIN` layout intent；不接受 path、URL、base64、raw bytes、
+SVG、LibraryObject、EMU 或任意 geometry/OOXML。Document 与 Presentation 现在复用同一
+Profile-scoped Asset resolver。Saved Presentation export pin exact revision/blob snapshot，
+重查 length/SHA/static PNG structure/dimensions，复用现有 PPTX writer，并对最终包执行
+bounded Office entry admission、internal-only relationships、`p:pic`、`image/png`、placement、
+embedded digest 与 unexpected-media graph reopen。R1→PNG A、R2→PNG B、再次导出 R1→A
+保持历史精确性；text-only Presentation 与 renderer v0.2 语义不变。
+
+新增三个 ordinary Artifact Tools：`artifact.list` 与 `artifact.history` 均为
+`OBSERVE`、Profile-scoped、metadata-only、default 20/max 100；historical semantic content
+仍只由 `artifact.read(artifact_id, revision_id)` 显式读取。`artifact.set_archive_state`
+为现有 `WORKSPACE_WRITE`/Policy/Approval/ToolCall/receipt/recovery 路径上的 reversible
+visibility mutation。Migration `0011_artifact_archive_state` 将 schema 10→11，只在
+existing `artifacts` envelope 增加 `archived_at`、ToolCall idempotency/recovery facts 与
+bounded index；无新 table、revision、content schema、Verification subject 或 Runtime。
+Archive 默认从 list 隐藏，但不删除 identity/revisions，不阻断 explicit read/export 或
+historical composition reference。
+
+现有 internal `read_asset` 与 generic resolver 已满足 bounded Asset metadata需求，未新增
+Model-facing Asset manager/list/history/binary/blob-path Tool，也仍无 delete/GC。Production
+catalog audit 为 34 built-ins + existing two Web provider Tools，external providers继续受
+16 providers/32 Tools-per-provider上限，Model-visible exposure继续按 task class、permission、
+phase/verification过滤；当前规模不需要 vector tool search 或第二套 registry。
+
+`web.download` 诚实标记为 `WEB_DOWNLOAD_DEFERRED_POLICY_MODEL`：当前 Tool contract每次
+调用只有一个 `AgentToolEffect`，不能同时表达 `NETWORK + WORKSPACE_WRITE`。本 changeset
+禁止用其中一个 effect 偷渡另一个 authority，也不新增 composite Permission/protocol。
+现有 `web.search`/`web.fetch` 与 `file.extract`/`artifact.asset.import` 保持独立可用能力。
+
+```text
+CAPABILITY_TOOLS_V0_1: SUFFICIENT
+PRESENTATION_DURABLE_PNG: IMPLEMENTED / TARGETED_VALIDATED
+ARTIFACT_LIST_HISTORY_ARCHIVE_RESTORE: IMPLEMENTED / TARGETED_VALIDATED
+ASSET_METADATA_TOOL: NOT_NEEDED / INTERNAL_RESOLVER_REUSED
+WEB_DOWNLOAD: WEB_DOWNLOAD_DEFERRED_POLICY_MODEL
+CURRENT_DATABASE_SCHEMA: 11
+MIGRATION_0011: artifact_archive_state
+NEW_DEPENDENCIES: 0
+NEW_RUNTIME_PERMISSION_RECEIPT_VERIFICATION_UI: 0
+GENERAL_ADDITIONAL_TOOLS: 0
+CHANGE_IMPACT: HIGH
+```
+
+Targeted final evidence为 Agent 124、Office writer 8、Contracts 2、Core 29、Storage 26
+全部 PASS，并由 TypeScript、Core integration、Core/Cross/Docs development lanes、
+Clippy `-D warnings`、fmt、context audit、diff check 与 release Core build收口。完整
+PreMerge、已知 Browse baseline、Desktop/visual、packaged/portable、live network 与 Model
+probe按范围未运行。详细事实见
+`docs/architecture/FIELORA_V0.1_CAPABILITY_TOOLS_CLOSEOUT.md`。

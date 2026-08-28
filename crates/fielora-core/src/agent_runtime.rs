@@ -25,7 +25,9 @@ use fielora_model::{
 };
 use fielora_platform::{CredentialStore, ManagedChildSecretEnvironment, SecretBytes};
 use fielora_storage::{AgentEventCommit, AgentProjectionUpdate, StorageHandle};
-use fielora_storage::{CreateArtifactRecord, CreateAssetRecord, UpdateArtifactRecord};
+use fielora_storage::{
+    CreateArtifactRecord, CreateAssetRecord, SetArtifactArchiveStateRecord, UpdateArtifactRecord,
+};
 use futures_util::future::join_all;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -200,6 +202,36 @@ struct SavedArtifactExportArgs {
     output_path: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListArtifactsArgs {
+    #[serde(default = "default_artifact_page_limit")]
+    limit: u16,
+    #[serde(default)]
+    include_archived: bool,
+    cursor: Option<ArtifactListCursor>,
+}
+
+fn default_artifact_page_limit() -> u16 {
+    20
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ArtifactHistoryArgs {
+    artifact_id: String,
+    before_sequence: Option<u64>,
+    #[serde(default = "default_artifact_page_limit")]
+    limit: u16,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetArtifactArchiveStateArgs {
+    artifact_id: String,
+    archived: bool,
+}
+
 fn map_artifact_storage_error(error: DomainError) -> AgentError {
     match error {
         DomainError::NotFound => AgentError::ArtifactNotFound,
@@ -240,6 +272,16 @@ fn asset_import_request_sha256(arguments: &Value) -> Result<String, AgentError> 
     artifact_mutation_request_sha256(&json!({
         "operation":"IMPORT_SOURCE_PNG_ASSET",
         "path":args.path,
+    }))
+}
+
+fn artifact_lifecycle_request_sha256(arguments: &Value) -> Result<String, AgentError> {
+    let args: SetArtifactArchiveStateArgs =
+        serde_json::from_value(arguments.clone()).map_err(|_| AgentError::ToolArgumentsInvalid)?;
+    artifact_mutation_request_sha256(&json!({
+        "operation":"SET_ARCHIVE_STATE",
+        "artifact_id":args.artifact_id,
+        "archived":args.archived,
     }))
 }
 
@@ -315,6 +357,20 @@ fn durable_asset_receipt(asset: &AssetView) -> Value {
         "byte_length":asset.byte_length,
         "width":asset.width,
         "height":asset.height,
+    })
+}
+
+fn durable_artifact_lifecycle_receipt(read: &ArtifactReadView) -> Value {
+    json!({
+        "kind":"ARTIFACT_ARCHIVE_STATE_SET",
+        "artifact_persistence":"DURABLE",
+        "artifact_id":read.artifact.artifact_id,
+        "artifact_type":read.artifact.artifact_type,
+        "artifact_revision_id":read.revision.revision_id,
+        "artifact_revision":read.revision.sequence,
+        "artifact_semantic_sha256":read.revision.semantic_sha256,
+        "archived":read.artifact.archived_at.is_some(),
+        "archived_at":read.artifact.archived_at,
     })
 }
 
@@ -441,14 +497,11 @@ impl DurableArtifactToolExecutor {
         .map(Some)
     }
 
-    fn resolve_document_assets(
+    fn resolve_artifact_assets(
         &self,
         content: &ArtifactContentV1,
-    ) -> Result<Option<fielora_agent::artifact::ResolvedDocumentAssets>, AgentError> {
-        let ArtifactContentV1::Document(document) = content else {
-            return Ok(None);
-        };
-        fielora_agent::artifact::resolve_document_assets(document, |asset_id| {
+    ) -> Result<fielora_agent::artifact::ResolvedArtifactAssets, AgentError> {
+        fielora_agent::artifact::resolve_artifact_assets(content, |asset_id| {
             self.storage
                 .read_asset(asset_id.clone())
                 .map_err(|error| match error {
@@ -456,7 +509,6 @@ impl DurableArtifactToolExecutor {
                     other => map_asset_storage_error(other),
                 })
         })
-        .map(Some)
     }
 
     fn create(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
@@ -480,7 +532,7 @@ impl DurableArtifactToolExecutor {
             return Ok(replayed);
         }
         self.resolve_document_composition(&canonical.content)?;
-        self.resolve_document_assets(&canonical.content)?;
+        self.resolve_artifact_assets(&canonical.content)?;
         let read = self
             .storage
             .create_artifact(CreateArtifactRecord {
@@ -551,7 +603,7 @@ impl DurableArtifactToolExecutor {
             "semantic_sha256":canonical.semantic_sha256,
         }))?;
         self.resolve_document_composition(&canonical.content)?;
-        self.resolve_document_assets(&canonical.content)?;
+        self.resolve_artifact_assets(&canonical.content)?;
         let read = self
             .storage
             .update_artifact(UpdateArtifactRecord {
@@ -621,6 +673,117 @@ impl DurableArtifactToolExecutor {
         })
     }
 
+    fn list(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
+        let args: ListArtifactsArgs = serde_json::from_value(arguments.clone())
+            .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+        if args.limit == 0 || args.limit > 100 {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        let page = self
+            .storage
+            .list_artifacts(args.cursor, args.limit, args.include_archived)
+            .map_err(map_artifact_storage_error)?;
+        let receipt = json!({
+            "kind":"ARTIFACT_METADATA_LISTED",
+            "artifact_persistence":"DURABLE",
+            "metadata_only":true,
+            "count":page.artifacts.len(),
+            "limit":args.limit,
+            "include_archived":args.include_archived,
+            "has_more":page.next_cursor.is_some(),
+        });
+        let observation = serde_json::to_string(&json!({
+            "content_authority":"ARTIFACT_METADATA_ONLY",
+            "metadata_only":true,
+            "artifacts":page.artifacts,
+            "next_cursor":page.next_cursor,
+        }))
+        .map_err(|_| AgentError::ArtifactContentInvalid)?;
+        if observation.len() > 64 * 1024 {
+            return Err(AgentError::ArtifactContentInvalid);
+        }
+        Ok(ToolExecution {
+            receipt,
+            observation,
+        })
+    }
+
+    fn history(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
+        let args: ArtifactHistoryArgs = serde_json::from_value(arguments.clone())
+            .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+        if args.limit == 0 || args.limit > 100 || args.before_sequence == Some(1) {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        let history = self
+            .storage
+            .list_artifact_history(
+                ArtifactId::new(args.artifact_id),
+                args.before_sequence,
+                args.limit,
+            )
+            .map_err(map_artifact_storage_error)?;
+        let receipt = json!({
+            "kind":"ARTIFACT_REVISION_HISTORY_LISTED",
+            "artifact_persistence":"DURABLE",
+            "artifact_id":history.artifact.artifact_id,
+            "metadata_only":true,
+            "count":history.revisions.len(),
+            "limit":args.limit,
+            "has_more":history.next_before_sequence.is_some(),
+        });
+        let observation = serde_json::to_string(&json!({
+            "content_authority":"ARTIFACT_REVISION_METADATA_ONLY",
+            "metadata_only":true,
+            "artifact":history.artifact,
+            "revisions":history.revisions,
+            "next_before_sequence":history.next_before_sequence,
+            "historical_content_tool":"artifact.read",
+        }))
+        .map_err(|_| AgentError::ArtifactContentInvalid)?;
+        if observation.len() > 64 * 1024 {
+            return Err(AgentError::ArtifactContentInvalid);
+        }
+        Ok(ToolExecution {
+            receipt,
+            observation,
+        })
+    }
+
+    fn set_archive_state(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
+        let args: SetArtifactArchiveStateArgs = serde_json::from_value(arguments.clone())
+            .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+        let artifact_id = ArtifactId::new(args.artifact_id);
+        let request_sha256 = artifact_lifecycle_request_sha256(arguments)?;
+        let artifact = self
+            .storage
+            .set_artifact_archive_state(SetArtifactArchiveStateRecord {
+                artifact_id: artifact_id.clone(),
+                archived: args.archived,
+                conversation_id: self.conversation_id.clone(),
+                run_id: self.run_id.clone(),
+                tool_call_id: self.tool_call_id.clone(),
+                mutation_request_sha256: request_sha256,
+                now: now_ms(),
+            })
+            .map_err(map_artifact_storage_error)?;
+        let read = self
+            .storage
+            .read_artifact(artifact_id, Some(artifact.current_revision_id.clone()))
+            .map_err(map_artifact_storage_error)?;
+        Ok(ToolExecution {
+            receipt: durable_artifact_lifecycle_receipt(&read),
+            observation: json!({
+                "artifact_id":read.artifact.artifact_id,
+                "artifact_revision_id":read.revision.revision_id,
+                "artifact_revision":read.revision.sequence,
+                "artifact_persistence":"DURABLE",
+                "archived":read.artifact.archived_at.is_some(),
+                "archived_at":read.artifact.archived_at,
+            })
+            .to_string(),
+        })
+    }
+
     fn export_saved(
         &self,
         arguments: &Value,
@@ -639,13 +802,21 @@ impl DurableArtifactToolExecutor {
             let resolved = self
                 .resolve_document_composition(&read.revision.content)?
                 .ok_or(AgentError::ArtifactContentInvalid)?;
-            let assets = self
-                .resolve_document_assets(&read.revision.content)?
-                .ok_or(AgentError::ArtifactContentInvalid)?;
+            let assets = self.resolve_artifact_assets(&read.revision.content)?;
             return fielora_agent::artifact::export_saved_document_composition_with_assets(
                 &self.runtime,
                 &read,
                 &resolved,
+                &assets,
+                &args.output_path,
+                cancellation,
+            );
+        }
+        if matches!(&read.revision.content, ArtifactContentV1::Presentation(_)) {
+            let assets = self.resolve_artifact_assets(&read.revision.content)?;
+            return fielora_agent::artifact::export_saved_presentation_with_assets(
+                &self.runtime,
+                &read,
                 &assets,
                 &args.output_path,
                 cancellation,
@@ -667,7 +838,10 @@ impl ToolExecutor for DurableArtifactToolExecutor {
             "artifact.asset.import" => self.import_asset(arguments),
             "artifact.create" => self.create(arguments),
             "artifact.read" => self.read(arguments),
+            "artifact.list" => self.list(arguments),
+            "artifact.history" => self.history(arguments),
             "artifact.update" => self.update(arguments),
+            "artifact.set_archive_state" => self.set_archive_state(arguments),
             "artifact.export" if arguments.get("artifact_id").is_some() => {
                 self.export_saved(arguments, cancellation)
             }
@@ -2150,6 +2324,47 @@ impl AgentCoordinator {
                     None => fielora_agent::ToolReconciliation {
                         status: ToolReconciliationStatus::NotApplied,
                         evidence: json!({"reason":"NO_DURABLE_ARTIFACT_REVISION_FOR_TOOLCALL"}),
+                    },
+                }
+            } else if tool.name == "artifact.set_archive_state" {
+                match self
+                    .storage
+                    .artifact_lifecycle_by_tool_call(tool.id.clone())
+                    .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?
+                {
+                    Some((artifact, stored)) => {
+                        let expected = artifact_lifecycle_request_sha256(&tool.arguments)
+                            .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+                        let desired = tool
+                            .arguments
+                            .get("archived")
+                            .and_then(Value::as_bool)
+                            .ok_or("AGENT_RECOVERY_INSPECTION_FAILED")?;
+                        if stored == expected && artifact.archived_at.is_some() == desired {
+                            let read = self
+                                .storage
+                                .read_artifact(
+                                    artifact.artifact_id.clone(),
+                                    Some(artifact.current_revision_id.clone()),
+                                )
+                                .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+                            fielora_agent::ToolReconciliation {
+                                status: ToolReconciliationStatus::Applied,
+                                evidence: json!({
+                                    "reason":"DURABLE_ARTIFACT_ARCHIVE_STATE_COMMITTED",
+                                    "durable_receipt":durable_artifact_lifecycle_receipt(&read),
+                                }),
+                            }
+                        } else {
+                            fielora_agent::ToolReconciliation {
+                                status: ToolReconciliationStatus::Diverged,
+                                evidence: json!({"reason":"ARTIFACT_TOOLCALL_IDEMPOTENCY_CONFLICT"}),
+                            }
+                        }
+                    }
+                    None => fielora_agent::ToolReconciliation {
+                        status: ToolReconciliationStatus::NotApplied,
+                        evidence: json!({"reason":"NO_DURABLE_ARTIFACT_ARCHIVE_STATE_FOR_TOOLCALL"}),
                     },
                 }
             } else if tool.name == "artifact.asset.import" {
@@ -9509,6 +9724,105 @@ mod tests {
                 .is_none()
         );
 
+        let presentation_arguments = json!({
+            "type":"presentation",
+            "title":"Durable PNG Presentation",
+            "content":{
+                "slides":[{
+                    "layout":"TITLE_AND_BODY",
+                    "title":"Exact durable Asset snapshot",
+                    "regions":[{
+                        "slot":"BODY",
+                        "blocks":[{
+                            "kind":"IMAGE",
+                            "source":{
+                                "asset_id":first.asset_id,
+                                "content_sha256":first.content_sha256,
+                                "media_type":"image/png",
+                                "byte_length":first.byte_length
+                            },
+                            "fit":"CONTAIN"
+                        }]
+                    }]
+                }]
+            }
+        });
+        let presentation_create = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                create_spec,
+                AgentModelToolCall {
+                    id: "presentation-with-png".into(),
+                    name: "artifact.create".into(),
+                    arguments: presentation_arguments,
+                },
+                false,
+            )
+            .unwrap();
+        let presentation_tool_id = presentation_create.id.clone();
+        let ToolDisposition::Executed(presentation_create_result) = coordinator
+            .execute_tool(&prepared, presentation_create, true, &test_cancellation())
+            .await
+        else {
+            panic!("Presentation Asset reference must use the durable Artifact pipeline")
+        };
+        assert!(presentation_create_result.wrote_workspace);
+        assert!(!presentation_create_result.verification_passed);
+        let presentation = storage
+            .artifact_mutation_by_tool_call(presentation_tool_id)
+            .unwrap()
+            .unwrap();
+        let export_spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "artifact.export")
+            .unwrap();
+        let presentation_export = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                export_spec,
+                AgentModelToolCall {
+                    id: "presentation-png-export".into(),
+                    name: "artifact.export".into(),
+                    arguments: json!({
+                        "artifact_id":presentation.artifact.artifact_id,
+                        "revision_id":presentation.revision.revision_id,
+                        "output_path":"exports/presentation-with-png.pptx"
+                    }),
+                },
+                false,
+            )
+            .unwrap();
+        let presentation_export_id = presentation_export.id.clone();
+        let ToolDisposition::Executed(presentation_export_result) = coordinator
+            .execute_tool(&prepared, presentation_export, true, &test_cancellation())
+            .await
+        else {
+            panic!("saved Presentation PNG export must use the existing Tool pipeline")
+        };
+        assert!(presentation_export_result.wrote_workspace);
+        assert!(!presentation_export_result.verification_passed);
+        let presentation_receipt = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|tool| tool.id == presentation_export_id)
+            .unwrap()
+            .receipt
+            .unwrap();
+        assert_eq!(presentation_receipt["kind"], "ARTIFACT_EXPORTED");
+        assert_eq!(presentation_receipt["artifact_type"], "PRESENTATION");
+        assert_eq!(presentation_receipt["asset_count"], 1);
+        assert_eq!(
+            presentation_receipt["asset_export_revalidation"],
+            "LENGTH_SHA256_AND_STATIC_PNG_STRUCTURE"
+        );
+        assert_eq!(presentation_receipt["pptx_media_reopen"], "PASS");
+        assert!(
+            workspace
+                .join("exports/presentation-with-png.pptx")
+                .is_file()
+        );
+
         let replay = DurableArtifactToolExecutor {
             storage: storage.clone(),
             runtime: ToolRuntime::new(&prepared.project_root, &artifacts)
@@ -10660,6 +10974,267 @@ mod tests {
         assert!(extracted_r2.observation.contains("R2 更新"));
         assert!(extracted_r2.observation.contains("Forecast 预测"));
         assert!(extracted_r2.observation.contains("0.985"));
+
+        let list_spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "artifact.list")
+            .unwrap();
+        let history_spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "artifact.history")
+            .unwrap();
+        let archive_spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "artifact.set_archive_state")
+            .unwrap();
+        assert_eq!(list_spec.effect, AgentToolEffect::Observe);
+        assert_eq!(history_spec.effect, AgentToolEffect::Observe);
+        assert_eq!(archive_spec.effect, AgentToolEffect::WorkspaceWrite);
+
+        let history = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                history_spec,
+                AgentModelToolCall {
+                    id: "artifact-history-bounded".into(),
+                    name: "artifact.history".into(),
+                    arguments: json!({"artifact_id":spreadsheet_id,"limit":1}),
+                },
+                false,
+            )
+            .unwrap();
+        let ToolDisposition::Executed(history_result) = coordinator
+            .execute_tool(&prepared, history, false, &test_cancellation())
+            .await
+        else {
+            panic!("artifact.history must use the existing Observe pipeline")
+        };
+        assert!(!history_result.wrote_workspace);
+        assert!(matches!(
+            history_result.message,
+            AgentModelMessage::ToolResult { content, is_error: false, .. }
+                if content.contains("ARTIFACT_REVISION_METADATA_ONLY")
+                    && content.contains("next_before_sequence")
+                    && !content.contains("R1 初始")
+                    && !content.contains("R2 更新")
+        ));
+
+        let archive = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                archive_spec,
+                AgentModelToolCall {
+                    id: "artifact-archive".into(),
+                    name: "artifact.set_archive_state".into(),
+                    arguments: json!({"artifact_id":spreadsheet_id,"archived":true}),
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(archive.policy_decision, AgentPolicyDecision::Ask);
+        let ToolDisposition::Executed(archive_result) = coordinator
+            .execute_tool(&prepared, archive, true, &test_cancellation())
+            .await
+        else {
+            panic!("archive must use the existing write pipeline")
+        };
+        assert!(archive_result.wrote_workspace);
+        assert!(!archive_result.verification_passed);
+        assert!(
+            storage
+                .read_artifact(spreadsheet_id.clone(), None)
+                .unwrap()
+                .artifact
+                .archived_at
+                .is_some()
+        );
+
+        for (call_id, include_archived, expected_visible) in [
+            ("artifact-list-default", false, false),
+            ("artifact-list-archived", true, true),
+        ] {
+            let list = coordinator
+                .propose_tool_call(
+                    &prepared.run,
+                    list_spec,
+                    AgentModelToolCall {
+                        id: call_id.into(),
+                        name: "artifact.list".into(),
+                        arguments: json!({"limit":2,"include_archived":include_archived}),
+                    },
+                    false,
+                )
+                .unwrap();
+            let ToolDisposition::Executed(list_result) = coordinator
+                .execute_tool(&prepared, list, false, &test_cancellation())
+                .await
+            else {
+                panic!("artifact.list must use the existing Observe pipeline")
+            };
+            assert!(!list_result.wrote_workspace);
+            let AgentModelMessage::ToolResult {
+                content,
+                is_error: false,
+                ..
+            } = list_result.message
+            else {
+                panic!("artifact.list must return metadata")
+            };
+            assert!(content.contains("ARTIFACT_METADATA_ONLY"));
+            assert!(!content.contains("R1 初始"));
+            assert_eq!(content.contains(&spreadsheet_id.0), expected_visible);
+        }
+
+        // Archive is visibility state only. The already-pinned parent revision
+        // still resolves and exports its exact archived Spreadsheet child.
+        let archived_child_export = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                export_spec,
+                AgentModelToolCall {
+                    id: "composition-export-archived-child".into(),
+                    name: "artifact.export".into(),
+                    arguments: json!({
+                        "artifact_id":document_id,
+                        "revision_id":document_revision_one,
+                        "output_path":"exports/composition-archived-child.docx"
+                    }),
+                },
+                false,
+            )
+            .unwrap();
+        let ToolDisposition::Executed(archived_child_export_result) = coordinator
+            .execute_tool(&prepared, archived_child_export, true, &test_cancellation())
+            .await
+        else {
+            panic!("archived child reference must remain explicitly exportable")
+        };
+        assert!(archived_child_export_result.wrote_workspace);
+        let archived_extract = extraction_runtime
+            .execute(
+                "file.extract",
+                &json!({"path":"exports/composition-archived-child.docx"}),
+                false,
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        assert!(archived_extract.observation.contains("R1 初始"));
+
+        let restore = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                archive_spec,
+                AgentModelToolCall {
+                    id: "artifact-restore".into(),
+                    name: "artifact.set_archive_state".into(),
+                    arguments: json!({"artifact_id":spreadsheet_id,"archived":false}),
+                },
+                false,
+            )
+            .unwrap();
+        let ToolDisposition::Executed(restore_result) = coordinator
+            .execute_tool(&prepared, restore, true, &test_cancellation())
+            .await
+        else {
+            panic!("restore must use the existing write pipeline")
+        };
+        assert!(restore_result.wrote_workspace);
+        assert_eq!(
+            storage
+                .read_artifact(spreadsheet_id.clone(), None)
+                .unwrap()
+                .artifact
+                .archived_at,
+            None
+        );
+
+        // Lifecycle state reuses the same commit-before-receipt recovery path.
+        let archive_recovery_arguments = json!({"artifact_id":spreadsheet_id,"archived":true});
+        let archive_recovery = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                archive_spec,
+                AgentModelToolCall {
+                    id: "artifact-archive-recovery".into(),
+                    name: "artifact.set_archive_state".into(),
+                    arguments: archive_recovery_arguments.clone(),
+                },
+                false,
+            )
+            .unwrap();
+        storage
+            .update_agent_tool_call(
+                archive_recovery.id.clone(),
+                AgentToolStatus::Running,
+                None,
+                None,
+                now_ms(),
+            )
+            .unwrap();
+        DurableArtifactToolExecutor {
+            storage: storage.clone(),
+            runtime: ToolRuntime::new(&prepared.project_root, &artifacts).unwrap(),
+            run_id: prepared.run.id.clone(),
+            conversation_id: conversation.id.clone(),
+            project_field_id: project.field_id.clone(),
+            tool_call_id: archive_recovery.id.clone(),
+        }
+        .execute(
+            "artifact.set_archive_state",
+            &archive_recovery_arguments,
+            true,
+            &CommandCancellation::default(),
+        )
+        .unwrap();
+        storage
+            .update_agent_tool_call(
+                archive_recovery.id.clone(),
+                AgentToolStatus::Unknown,
+                None,
+                None,
+                now_ms(),
+            )
+            .unwrap();
+        let lifecycle_recovery = coordinator.reconcile_for_resume(&prepared).unwrap();
+        assert!(lifecycle_recovery.confirmed_workspace_mutation);
+        let archive_recovered = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|tool| tool.id == archive_recovery.id)
+            .unwrap();
+        assert_eq!(archive_recovered.status, AgentToolStatus::Completed);
+        assert_eq!(
+            archive_recovered.receipt.as_ref().unwrap()["recovered"],
+            true
+        );
+        assert_eq!(
+            archive_recovered.receipt.as_ref().unwrap()["kind"],
+            "ARTIFACT_ARCHIVE_STATE_SET"
+        );
+        let restore_after_recovery = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                archive_spec,
+                AgentModelToolCall {
+                    id: "artifact-restore-after-recovery".into(),
+                    name: "artifact.set_archive_state".into(),
+                    arguments: json!({"artifact_id":spreadsheet_id,"archived":false}),
+                },
+                false,
+            )
+            .unwrap();
+        assert!(matches!(
+            coordinator
+                .execute_tool(
+                    &prepared,
+                    restore_after_recovery,
+                    true,
+                    &test_cancellation(),
+                )
+                .await,
+            ToolDisposition::Executed(_)
+        ));
 
         let spreadsheet_stale_tool = storage
             .create_agent_tool_call(

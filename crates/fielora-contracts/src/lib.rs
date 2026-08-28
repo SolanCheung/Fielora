@@ -1465,8 +1465,23 @@ pub enum SlideSlot {
 #[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
 #[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PresentationBlock {
-    Paragraph { text: String },
-    BulletList { items: Vec<String> },
+    Paragraph {
+        text: String,
+    },
+    BulletList {
+        items: Vec<String>,
+    },
+    Image {
+        source: ArtifactAssetRefV1,
+        fit: PresentationImageFitV1,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PresentationImageFitV1 {
+    Contain,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1737,6 +1752,49 @@ pub struct ArtifactView {
     pub created_at: i64,
     #[ts(type = "number")]
     pub updated_at: i64,
+    #[ts(type = "number | null")]
+    pub archived_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactListCursor {
+    #[ts(type = "number")]
+    pub updated_at: i64,
+    pub artifact_id: ArtifactId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactListView {
+    pub artifacts: Vec<ArtifactView>,
+    pub next_cursor: Option<ArtifactListCursor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ArtifactRevisionMetadataView {
+    pub revision_id: ArtifactRevisionId,
+    pub artifact_id: ArtifactId,
+    #[ts(type = "number")]
+    pub sequence: u64,
+    pub parent_revision_id: Option<ArtifactRevisionId>,
+    pub mutation_kind: ArtifactMutationKind,
+    pub content_schema_version: u32,
+    pub semantic_sha256: String,
+    pub created_from_conversation_id: Option<ConversationId>,
+    pub created_by_agent_run_id: Option<AgentRunId>,
+    pub created_by_tool_call_id: ToolCallId,
+    #[ts(type = "number")]
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactHistoryView {
+    pub artifact: ArtifactView,
+    pub revisions: Vec<ArtifactRevisionMetadataView>,
+    #[ts(type = "number | null")]
+    pub next_before_sequence: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
