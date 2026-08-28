@@ -41,8 +41,8 @@ and the current `Model + Harness + Tools` architecture remain authoritative.
 | Presentation image semantic block | `ABSENT` | `PresentationBlock` has paragraph and bullet list only |
 | Fielora DOCX image adapter | `ABSENT` | production adapter calls headings, paragraphs, lists, and tables only |
 | Fielora PPTX image adapter | `ABSENT` | production adapter calls `add_rich_text_box` only |
-| Office dependency image writer API | `PARTIAL FOUNDATION` | exact `office_oxide 0.1.8` exposes DOCX IR image and PPTX positioned image APIs |
-| Fielora Office media reopen | `ABSENT` | current validator checks required package/text/slide facts, not media part, image relationship, content type, geometry, count, or embedded-byte digest |
+| Office dependency image writer API | `SUPPORTED WRITER FOUNDATION` | test-owned PNG probes prove exact `office_oxide 0.1.8` DOCX IR image and PPTX positioned-image output |
+| Fielora Office media reopen | `TEST-ONLY EXISTS / PRODUCTION ABSENT` | bounded independent test validation proves media part, relationship, content type, geometry, count, and exact embedded-byte digest; the production validator remains unchanged |
 | File Intelligence image extraction | `ABSENT` | `file.extract` admits PDF/DOCX/PPTX/XLSX and extracts bounded text; it does not expose an Asset/image admission contract |
 | Spreadsheet chart/image path | `ABSENT / DEFERRED` | current literal-only Spreadsheet rejects chart/drawing/media semantics |
 
@@ -373,7 +373,7 @@ migration, retention, and profile restoration coherent.
 
 | Format | Writer compatibility | Admission/security reality | Candidate disposition |
 |---|---|---|---|
-| PNG | DOCX/PPTX dependency APIs can package it | No Rust production decoder/dimension admission; no Fielora media reopen | First future source format after gates |
+| PNG | DOCX/PPTX dependency APIs and test-only media reopen are proven | No Rust production decoder/dimension admission or production media validator | First future source format after gates |
 | JPEG | Dependency APIs can package it | More metadata/parsing/privacy surface; no decoder | Defer behind PNG |
 | SVG | Current Diagram emits controlled SVG; Office image enum has no SVG | External SVG is active-content capable | Controlled derived SVG only; external SVG rejected/deferred |
 | WebP | Existing UI attachment/preview paths understand it | Office writer `ImageFormat` does not include WebP | Defer |
@@ -445,7 +445,7 @@ shallow magic, and Browser `nativeImage` is an ephemeral UI-specific decoder.
 ## DOCX_IMAGE_REALITY
 
 ```text
-DOCX_IMAGE_SUPPORT: PARTIAL
+DOCX_PNG_WRITER_REALITY: SUPPORTED
 ```
 
 Dependency-level facts in exact `office_oxide 0.1.8`:
@@ -467,10 +467,15 @@ Fielora production gaps:
 - no Document image block or Asset reference;
 - no production call to `add_ir_image`;
 - no admitted bytes/dimensions/alt-text contract;
-- no deterministic real-image writer probe in Fielora tests;
-- no reopen assertion for media part, internal relationship, content type,
-  placement, count, exact embedded digest, multiple images, or no external
-  relationships.
+- no production media reopen assertion or external PNG admission.
+
+The test-owned Office PNG Reality Gate proves deterministic decompressed OPC
+parts, exact embedded PNG bytes, internal-only relationships, `image/png`,
+bounded inline extent, text semantic reopen, and one/two-image package
+integrity. Repeated identical inputs create distinct sequential media parts;
+the dependency does not deduplicate them. Missing image data is silently
+omitted by the dependency, so a future Fielora adapter must reject it before
+calling the writer.
 
 Inline-only DOCX intent is sufficient for a first Document source-Asset
 consumer. Floating, anchor, wrap, crop, and arbitrary geometry remain deferred.
@@ -478,7 +483,7 @@ consumer. Floating, anchor, wrap, crop, and arbitrary geometry remain deferred.
 ## PPTX_IMAGE_REALITY
 
 ```text
-PPTX_IMAGE_SUPPORT: PARTIAL
+PPTX_PNG_WRITER_REALITY: SUPPORTED
 ```
 
 Dependency-level facts in exact `office_oxide 0.1.8`:
@@ -498,13 +503,65 @@ Fielora production gaps:
 - no Presentation image block, fit/fill intent, or Asset reference;
 - production rendering only emits text boxes;
 - no safe conversion from controlled Diagram SVG;
-- no Fielora deterministic multi-image writer/reopen probe;
-- current structural validation ignores media, relationships, content type,
-  geometry, count, embedded digest, and external media relationships.
+- current production structural validation ignores media, relationships,
+  content type, geometry, count, embedded digest, and external media
+  relationships.
+
+The test-owned Office PNG Reality Gate proves one bounded positioned PNG,
+exact decompressed OPC parts, exact embedded bytes, internal-only relationship,
+`image/png`, picture-to-relationship binding, title semantic reopen, and stable
+structural facts. Whole-PPTX ZIP byte identity is not promised: `office_oxide`
+stores part relationship builders in a `HashMap`, so semantically identical
+packages may order relationship ZIP entries differently. This does not alter
+any decompressed part or parsed media/placement fact.
 
 PPTX image placement must remain parent-layout-owned. A future typed block may
 select a bounded layout slot and `CONTAIN`/`FILL` intent; it must not expose raw
 EMU coordinates or XML to model content.
+
+## OFFICE_PNG_MEDIA_REALITY_GATE_EVIDENCE
+
+```text
+OFFICE_MEDIA_STRUCTURAL_REALITY: PASS
+DOCX_PNG_WRITER_REALITY: SUPPORTED
+PPTX_PNG_WRITER_REALITY: SUPPORTED
+EXTERNAL_PNG_SECURITY_ADMISSION: NOT IMPLEMENTED
+ASSET_FOUNDATION: NOT IMPLEMENTED
+PRODUCTION_API_DELTA: 0
+NEW_DEPENDENCIES: 0
+```
+
+The fixed test-owned fixture is a nonblank 32 x 24 RGBA PNG with no EXIF,
+external data, or animation. It is 133 bytes and has SHA-256
+`168d44cf7d4439c70e924e5bd4c0a49e8be9afeff76732f28a265ea7da318c10`.
+
+DOCX evidence:
+
+- `word/media/image1.png`; two-instance behavior is separate
+  `image1.png`/`image2.png` parts with separate valid relationships;
+- exact `image/png` content type and exact source-byte digest;
+- inline extent `1219200 x 914400` EMU;
+- `word/document.xml` drawing binds the expected internal relationship;
+- bounded ZIP/XML inspection plus independent `Document::from_reader` reopen
+  preserves the surrounding heading/paragraph text.
+
+PPTX evidence:
+
+- `ppt/media/image1.png`, exact `image/png` and source-byte digest;
+- slide picture binds the expected internal relationship;
+- position `1000000,1500000` and extent `3200000 x 2400000` EMU;
+- bounded ZIP/XML inspection plus independent `Document::from_reader` reopen
+  preserves the slide title;
+- repeated writes have identical decompressed part names and bytes; final ZIP
+  entry order and whole-package byte identity remain outside this dependency
+  guarantee.
+
+The test-only relationship validator canonicalizes OPC targets and rejects
+`TargetMode=External`, HTTP(S), `file:`, UNC, absolute/drive paths, and package
+root escape. Existing Artifact export tests continue to own no-overwrite,
+atomic failure, and no-partial-final behavior. These probes do not admit an
+external PNG, create product image blocks, or change receipt/Verification
+semantics.
 
 ## DIAGRAM_DOCUMENT_OPTION
 
@@ -762,16 +819,17 @@ Current options:
 
 | Option | Value | Dependency / storage | Security / writer reality | Decision |
 |---|---|---|---|---|
-| A. admission + durable PNG/JPEG, no consumer | Low; unvalidated abstraction | migration + blob + decoder | no renderer proof | Reject |
-| B. Presentation -> durable PNG | High visual value | migration/blob/decoder | Fielora PPTX media path and reopen absent | Defer |
-| C. Document -> durable PNG | Smallest real source-Asset consumer | migration/blob/PNG decoder | inline layout is bounded, but admission and reopen absent | **Preferred after gates** |
+| A. admission + durable PNG/JPEG, no consumer | Low; unvalidated abstraction | migration + blob + decoder | writer foundation proven but no product consumer | Reject |
+| B. Presentation -> durable PNG | High visual value | migration/blob/decoder | PPTX writer/reopen proven; product block and admission absent | Defer |
+| C. Document -> durable PNG | Smallest real source-Asset consumer | migration/blob/PNG decoder | inline writer/reopen proven; admission and product block absent | **Preferred after gates** |
 | D. Diagram -> Presentation transient | High composition value; no migration | needs safe SVG bridge | native SVG absent; rasterizer unreviewed | Blocked |
 | E. Diagram -> Document transient | Medium value; no migration | same bridge | native SVG absent; rasterizer unreviewed | Blocked |
 | F. metadata/storage only | Low; no consumer | migration/blob | creates empty abstraction | Reject |
 
 ```text
 RECOMMENDED_FIRST_ASSET_SLICE: NOT READY FOR IMPLEMENTATION
-REQUIRED_PRECURSOR: DETERMINISTIC OFFICE PNG WRITER/REOPEN PROBE + SAFE PNG ADMISSION DEPENDENCY DECISION
+OFFICE_PNG_WRITER_REOPEN_PRECURSOR: PASS
+REMAINING_REQUIRED_PRECURSOR: SAFE PNG ADMISSION DEPENDENCY DECISION
 CONDITIONAL_FIRST_REAL_CONSUMER: DOCUMENT -> PINNED DURABLE PNG ASSET -> INLINE DOCX
 CONDITIONAL_SLICE_PROVES: DURABLE BINARY ASSET
 DIAGRAM_DERIVED_MODEL: TRANSIENT, SEPARATE, AND STILL BLOCKED ON REPRESENTATION BRIDGE
@@ -846,29 +904,26 @@ one necessary.
 1. Which exact PNG admission primitive can meet decode, dimensions, metadata,
    polyglot, deterministic behavior, Windows packaging, maintenance, and license
    requirements without broadening the codec surface?
-2. Can a targeted real-image probe establish reliable DOCX and PPTX media
-   reopen with `office_oxide 0.1.8`, or does either writer need a second backend
-   slice?
-3. How should the existing `LibraryRoot` blob primitive be renamed/extracted so
+2. How should the existing `LibraryRoot` blob primitive be renamed/extracted so
    Asset bytes can share storage without becoming Library objects?
-4. How must portable profile include/restore semantics change so required Asset
+3. How must portable profile include/restore semantics change so required Asset
    blobs cannot be omitted while their metadata and parent references are
    imported?
-5. Should identical source bytes imported twice always create separate logical
+4. Should identical source bytes imported twice always create separate logical
    Asset IDs, or may an explicit product action choose an existing Asset while
    preserving provenance?
-6. Is `DOCUMENT_WIDTH_BOUNDED` one closed size intent enough for the first
+5. Is `DOCUMENT_WIDTH_BOUNDED` one closed size intent enough for the first
    inline DOCX image, and what exact alt-text requirement should apply?
-7. What bounded Presentation slot/fit semantics should precede any PPTX image
+6. What bounded Presentation slot/fit semantics should precede any PPTX image
    block without exposing raw EMU geometry?
-8. Is a future approved native Office SVG path sufficient to unblock transient
+7. Is a future approved native Office SVG path sufficient to unblock transient
    Diagram composition, or must controlled SVG still pass an additional Office
    package-specific validator?
-9. How long must old pinned renderer versions remain available for historical
+8. How long must old pinned renderer versions remain available for historical
    re-export, and what user-visible error applies when they are retired?
-10. What dependency-aware retention projection is needed before Asset archive
+9. What dependency-aware retention projection is needed before Asset archive
     or GC, given immutable historical Artifact revisions?
 
 ## NEXT_DECISION
 
-`D. OFFICE_IMAGE_RENDERER_BLOCKER_FOUND`
+`A. READY_FOR_PNG_ADMISSION_DEPENDENCY_REVIEW`
