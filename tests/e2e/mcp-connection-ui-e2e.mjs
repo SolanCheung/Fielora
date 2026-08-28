@@ -77,7 +77,7 @@ try {
   await writeConnection();
   await click(cdp, '[data-testid="mcp-refresh"]');
   await wait(cdp, `document.querySelector('[data-testid="mcp-connection-fixture-ui"]')`);
-  assert.equal(await cdp.eval(`document.querySelector('[data-testid="mcp-connection-fixture-ui"]')?.innerText.includes('Local STDIO · Configured · Not active')`), true);
+  assert.equal(await cdp.eval(`document.querySelector('[data-testid="mcp-connection-fixture-ui"]')?.innerText.includes('Local STDIO · 已配置')`), true);
   assert.equal(await access(pidPath).then(() => true, () => false), false);
 
   const setup = await cdp.eval(`(async()=>{

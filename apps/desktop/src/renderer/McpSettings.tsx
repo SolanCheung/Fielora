@@ -37,18 +37,18 @@ export function McpSettings() {
     <header><p>工具连接</p><h1>MCP</h1></header>
     <section className="settings-card settings-mcp-card">
       <div className="settings-card-heading">
-        <span><strong>Local MCP Servers</strong><small>只读取当前用户的 mcp.json；打开此页面不会启动 Server 或发现 Tools。</small></span>
+        <span><strong>本地 MCP Server</strong><small>只读取当前用户的 mcp.json；打开此页面不会启动 Server 或发现 Tools。</small></span>
         <button type="button" onClick={() => void refresh()} disabled={loading} data-testid="mcp-refresh">{loading ? '正在刷新…' : '刷新'}</button>
       </div>
       {error && <p className="error">{error}</p>}
       {!error && catalog?.status === 'CONFIG_NOT_FOUND' && <div className="settings-mcp-empty" data-testid="mcp-config-not-found"><strong>尚未配置 MCP</strong><small>{diagnosticLabels.CONFIG_NOT_FOUND}</small></div>}
       {!error && catalog?.status === 'CONFIG_MALFORMED' && <div className="settings-mcp-empty is-error" data-testid="mcp-config-malformed"><strong>配置无法读取</strong><small>{diagnosticLabels.CONFIG_MALFORMED}</small></div>}
       {catalog && catalog.connections.length > 0 && <div className="settings-mcp-list" data-testid="mcp-connection-list">{catalog.connections.map((connection) => <article key={connection.connection_id} data-testid={`mcp-connection-${connection.connection_id}`}>
-        <span><strong>{connection.connection_id}</strong><small>Local STDIO · Configured · Not active</small><code title={connection.command_path}>{connection.command_path}</code></span>
-        <div><em className="ready">定义有效 · executable 未检查</em><small>{connection.command_argument_count} 个参数 · {connection.credential_binding_count === 0 ? '无凭据绑定' : `${connection.credential_binding_count} 个凭据绑定${connection.credential_missing_count > 0 ? ` · ${connection.credential_missing_count} 个缺失` : ' · 已配置'}`}</small><small>Tools：仅在当前 AgentRun 激活后可用</small></div>
+        <span><strong>{connection.connection_id}</strong><small>Local STDIO · 已配置</small></span>
+        <div><em>未激活</em><details><summary>连接详情</summary><div><code title={connection.command_path}>{connection.command_path}</code><small>配置已读取 · executable 将在激活时检查</small><small>{connection.command_argument_count} 个参数 · {connection.credential_binding_count === 0 ? '无凭据绑定' : `${connection.credential_binding_count} 个凭据绑定${connection.credential_missing_count > 0 ? ` · ${connection.credential_missing_count} 个缺失` : ' · 已配置'}`}</small><small>Tools 仅在当前 AgentRun 激活后可用</small></div></details></div>
       </article>)}</div>}
       {catalog && catalog.diagnostics.filter((item) => item.code !== 'CONFIG_NOT_FOUND').length > 0 && <div className="settings-mcp-diagnostics" data-testid="mcp-diagnostics"><strong>诊断</strong>{catalog.diagnostics.filter((item) => item.code !== 'CONFIG_NOT_FOUND').map((item, index) => <p key={`${item.connection_id ?? 'config'}-${item.code}-${index}`}><code>{item.code}</code><span>{item.connection_id ? `${item.connection_id} · ` : ''}{diagnosticLabels[item.code] ?? '配置未通过当前 MCP admission。'}</span></p>)}</div>}
     </section>
-    <p className="settings-mcp-security" data-testid="mcp-security-note">Local MCP env 只接受静态 credential 引用，不接受明文值；当前仍不支持 headers、OAuth 或远程连接。Server 只会在你为一个正在进行的 AgentRun 明确激活，并通过现有 PROCESS Policy / Approval 后获得绑定并启动；Run 结束即停止。</p>
+    <details className="settings-mcp-security" data-testid="mcp-security-note"><summary>安全与支持范围</summary><p>Local MCP env 只接受静态 credential 引用，不接受明文值；当前仍不支持 headers、OAuth 或远程连接。Server 只会在你为一个正在进行的 AgentRun 明确激活，并通过现有 PROCESS Policy / Approval 后获得绑定并启动；Run 结束即停止。</p></details>
   </div>;
 }

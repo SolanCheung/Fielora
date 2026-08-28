@@ -114,7 +114,7 @@ function SpreadsheetGrid({ sheet, range }: { sheet: SpreadsheetSheetV1; range?: 
     </div>}
     <div className="artifact-sheet-grid" role="grid" style={{ gridTemplateColumns: `48px repeat(${viewport.columns.length}, minmax(96px, 1fr))` }}>
       <span className="sheet-corner"/>{viewport.columns.map((column) => <span key={`h:${column}`} className="sheet-column" role="columnheader">{columnLabel(column)}</span>)}
-      {viewport.rows.map((row) => <div className="sheet-row" role="row" key={row} style={{ display: 'contents' }}><span className="sheet-row-number" role="rowheader">{row}</span>{viewport.columns.map((column) => { const cell = viewport.cells.get(`${row}:${column}`); return <span key={`${row}:${column}`} role="gridcell" className={`sheet-cell ${cell?.presentation?.emphasis ? `emphasis-${cell.presentation.emphasis.toLowerCase()}` : ''}`} title={cellText(cell)}>{cellText(cell)}</span>; })}</div>)}
+      {viewport.rows.map((row) => <div className="sheet-row" role="row" key={row} style={{ display: 'contents' }}><span className="sheet-row-number" role="rowheader">{row}</span>{viewport.columns.map((column) => { const cell = viewport.cells.get(`${row}:${column}`); return <span key={`${row}:${column}`} role="gridcell" data-cell-kind={cell?.value.kind ?? 'EMPTY'} className={`sheet-cell ${cell?.presentation?.emphasis ? `emphasis-${cell.presentation.emphasis.toLowerCase()}` : ''}`} title={cellText(cell)}>{cellText(cell)}</span>; })}</div>)}
     </div>
   </div>;
 }
@@ -156,7 +156,7 @@ function DocumentBlockView({ block }: { block: DocumentBlock }) {
 function DocumentSurface({ read }: { read: ArtifactReadView }) {
   if (read.revision.content.type !== 'DOCUMENT') return null;
   const document = read.revision.content.content;
-  return <article className="artifact-document" data-testid="artifact-document-surface">{document.title && <header><p className="eyebrow">DOCUMENT</p><h1>{document.title}</h1></header>}{document.blocks.map((block, index) => <DocumentBlockView key={index} block={block}/>)}</article>;
+  return <article className="artifact-document" data-testid="artifact-document-surface">{document.title && <header><h1>{document.title}</h1></header>}{document.blocks.map((block, index) => <DocumentBlockView key={index} block={block}/>)}</article>;
 }
 
 function PresentationBlockView({ block }: { block: PresentationBlock }) {
@@ -166,7 +166,7 @@ function PresentationBlockView({ block }: { block: PresentationBlock }) {
 }
 
 function PresentationSlideView({ slide }: { slide: PresentationSlide }) {
-  return <div className={`artifact-slide layout-${slide.layout.toLowerCase()}`} data-testid="artifact-active-slide"><header><h2>{slide.title}</h2></header><div className="artifact-slide-regions">{slide.regions.map((region, index) => <section key={`${region.slot}:${index}`} className={`slot-${region.slot.toLowerCase()}`}>{region.blocks.map((block, blockIndex) => <PresentationBlockView key={blockIndex} block={block}/>)}</section>)}</div><footer>FIELORA · SEMANTIC PREVIEW</footer></div>;
+  return <div className={`artifact-slide layout-${slide.layout.toLowerCase()}`} data-testid="artifact-active-slide"><header><h2>{slide.title}</h2></header><div className="artifact-slide-regions">{slide.regions.map((region, index) => <section key={`${region.slot}:${index}`} className={`slot-${region.slot.toLowerCase()}`}>{region.blocks.map((block, blockIndex) => <PresentationBlockView key={blockIndex} block={block}/>)}</section>)}</div><footer>Fielora</footer></div>;
 }
 
 function PresentationSurface({ read, selectedSlide, onSelectedSlide }: { read: ArtifactReadView; selectedSlide: number | null; onSelectedSlide: (index: number) => void }) {
@@ -189,14 +189,14 @@ function DiagramSurface({ read }: { read: ArtifactReadView }) {
   }, [read.artifact.artifact_id, read.revision.revision_id, read.revision.semantic_sha256]);
   if (error) return <div className="artifact-state artifact-error" role="alert">{error}</div>;
   if (!url) return <div className="artifact-state"><span className="artifact-spinner"/>正在生成受控预览…</div>;
-  return <div className="artifact-diagram" data-testid="artifact-diagram-surface"><img src={url} alt={read.artifact.title || 'Fielora 图示'}/><p>由当前精确版本通过 Fielora 受控布局与 SVG 验证生成。</p></div>;
+  return <div className="artifact-diagram" data-testid="artifact-diagram-surface"><img src={url} alt={read.artifact.title || 'Fielora 图示'}/><p>当前版本 · 受控预览</p></div>;
 }
 
 function SpreadsheetSurface({ read, selectedSheetId, onSelectedSheet }: { read: ArtifactReadView; selectedSheetId: string | null; onSelectedSheet: (sheetId: string) => void }) {
   if (read.revision.content.type !== 'SPREADSHEET') return null;
   const workbook = read.revision.content.content;
   const sheet = workbook.sheets.find((candidate) => candidate.sheet_id === selectedSheetId) ?? workbook.sheets[0];
-  return <div className="artifact-spreadsheet" data-testid="artifact-spreadsheet-surface"><header><div><p className="eyebrow">SPREADSHEET</p><h2>{workbook.title || read.artifact.title || '未命名电子表格'}</h2></div><nav aria-label="工作表">{workbook.sheets.map((candidate) => <button key={candidate.sheet_id} type="button" className={candidate.sheet_id === sheet?.sheet_id ? 'active' : ''} onClick={() => onSelectedSheet(candidate.sheet_id)} data-testid={`artifact-sheet-${candidate.sheet_id}`}>{candidate.name}</button>)}</nav></header>{sheet ? <SpreadsheetGrid sheet={sheet}/> : <div className="artifact-empty">没有工作表</div>}</div>;
+  return <div className="artifact-spreadsheet" data-testid="artifact-spreadsheet-surface"><header><div><h2>{workbook.title || read.artifact.title || '未命名电子表格'}</h2></div><nav aria-label="工作表">{workbook.sheets.map((candidate) => <button key={candidate.sheet_id} type="button" className={candidate.sheet_id === sheet?.sheet_id ? 'active' : ''} onClick={() => onSelectedSheet(candidate.sheet_id)} data-testid={`artifact-sheet-${candidate.sheet_id}`}>{candidate.name}</button>)}</nav></header>{sheet ? <SpreadsheetGrid sheet={sheet}/> : <div className="artifact-empty">没有工作表</div>}</div>;
 }
 
 function RevisionItem({ revision, currentId, activeId, onSelect }: { revision: ArtifactRevisionMetadataView; currentId: string; activeId: string; onSelect: (revisionId: string) => void }) {
@@ -218,13 +218,13 @@ export function ArtifactSurface({ session, busy, onSelectRevision, onReturnCurre
   if (!read) return <div className="artifact-state artifact-error">这个工作对象暂时不可用。</div>;
   const archived = read.artifact.archived_at !== null;
   return <section className={`artifact-work-surface${session.mode === 'HISTORICAL' ? ' has-version-banner' : ''}`} data-testid="artifact-work-surface" data-artifact-id={read.artifact.artifact_id} data-view-mode={session.mode}>
-    <header className="artifact-surface-header"><div><span className={`artifact-type-mark type-${read.artifact.artifact_type.toLowerCase()}`}><ShellIcon name={read.artifact.artifact_type === 'PRESENTATION' ? 'image' : 'files'}/></span><div><strong>{read.artifact.title || `未命名${artifactTypeLabel(read.artifact.artifact_type)}`}</strong><small>{artifactTypeLabel(read.artifact.artifact_type)} · R{read.revision.sequence}{archived ? ' · 已归档' : ''}</small></div></div><div>{session.mode === 'HISTORICAL' && <button type="button" onClick={onReturnCurrent} data-testid="artifact-return-current">回到当前版本</button>}<button type="button" disabled={busy} onClick={() => onArchiveState(!archived)} data-testid="artifact-archive-toggle">{archived ? '恢复' : '归档'}</button></div></header>
+    <header className="artifact-surface-header"><div><span className={`artifact-type-mark type-${read.artifact.artifact_type.toLowerCase()}`}><ShellIcon name={read.artifact.artifact_type === 'PRESENTATION' ? 'image' : 'files'}/></span><div><strong>{read.artifact.title || `未命名${artifactTypeLabel(read.artifact.artifact_type)}`}</strong><small>{artifactTypeLabel(read.artifact.artifact_type)} · R{read.revision.sequence}{archived ? ' · 已归档' : ''}</small></div></div><div>{session.mode === 'HISTORICAL' && <button type="button" onClick={onReturnCurrent} data-testid="artifact-return-current">回到当前版本</button>}<details className="artifact-history"><summary aria-label="查看版本历史">R{read.revision.sequence}<ShellIcon name="chevronDown"/></summary><div><header><strong>版本历史</strong><small>按需读取精确版本</small></header>{session.history?.revisions.map((revision) => <RevisionItem key={revision.revision_id} revision={revision} currentId={read.artifact.current_revision_id} activeId={read.revision.revision_id} onSelect={onSelectRevision}/>) ?? <div className="artifact-state">正在读取…</div>}</div></details><button type="button" disabled={busy} onClick={() => onArchiveState(!archived)} data-testid="artifact-archive-toggle">{archived ? '恢复' : '归档'}</button></div></header>
     {session.mode === 'HISTORICAL' && <div className="artifact-version-banner"><span>正在查看固定历史版本 R{read.revision.sequence}</span>{session.newRevisionAvailable && <strong>存在更新版本</strong>}</div>}
     <div className="artifact-surface-layout"><main className="artifact-surface-content">
       {read.revision.content.type === 'DOCUMENT' && <DocumentSurface read={read}/>}
       {read.revision.content.type === 'PRESENTATION' && <PresentationSurface read={read} selectedSlide={session.selectedSlide} onSelectedSlide={onSelectedSlide}/>}
       {read.revision.content.type === 'DIAGRAM' && <DiagramSurface read={read}/>}
       {read.revision.content.type === 'SPREADSHEET' && <SpreadsheetSurface read={read} selectedSheetId={session.selectedSheetId} onSelectedSheet={onSelectedSheet}/>}
-    </main><aside className="artifact-history" aria-label="版本历史"><header><strong>版本历史</strong><small>按需读取精确版本</small></header>{session.history?.revisions.map((revision) => <RevisionItem key={revision.revision_id} revision={revision} currentId={read.artifact.current_revision_id} activeId={read.revision.revision_id} onSelect={onSelectRevision}/>) ?? <div className="artifact-state">正在读取…</div>}</aside></div>
+    </main></div>
   </section>;
 }

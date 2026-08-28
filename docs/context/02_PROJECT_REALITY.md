@@ -1998,3 +1998,46 @@ NEW_DEPENDENCIES: 0
 DIRECT_EDITORS_FORMULA_CHART_CANVAS_DESIGNER: DEFERRED
 CHANGE_IMPACT: HIGH
 ```
+
+## 92. Overall Desktop Product Experience Redesign
+
+Fielora Desktop 已在既有 `Quiet Workbench`、Theme Registry 与 `--fl-*` semantic
+token 基线上完成一次 presentation-only 整体收敛。Project/Conversation 信息架构不变，
+Conversation 保持主协作线；Activity 作为可渐进披露的次级事实；Composer 使用统一的
+floating control depth；Document、Presentation、Diagram、Spreadsheet 与 File/Browse/Review
+继续由同一 `RightWorkspaceDock` 承载，并统一 tab/header/toolbar/body 视觉语法。
+
+Artifact Working Surface 不再用常驻版本侧栏压缩内容，既有 exact revision history 改为
+header disclosure；archive/restore、CURRENT/HISTORICAL 与 durable semantics 不变。Settings
+从管理卡片收敛为 section/row，MCP 配置保持被动读取并将 command/argument/credential/tool
+scope 放入按需展开的技术细节；`Configured/Current/Active` 使用中性色，只有真实 PASS/FAIL
+使用绿/红。
+
+Typography 收敛到约 12.5px metadata、13.5px controls 与 15px body；有限 glass 只用于
+shell/header/floating control/popover，并有无 `backdrop-filter` fallback。Light/Dark/System
+继续使用同一组件和 Theme Registry，没有第二套 theme engine。1280px 下右工作区成为
+720px session-local overlay，使 Conversation 保持 1006px；1440/1920 下继续并排，实测
+Conversation 分别为 382px/862px，Composer 与 Dock 均未越界。
+
+真实 Electron deterministic Gate 生成 `artifacts/overall-ui-redesign/` 12 张 Light/Dark、
+Conversation/Activity、四类 Artifact、multi-tab、Settings/MCP 视觉证据；Model requests=0，
+public network requests=0。UI lane 的 typecheck、lint、180 TS tests，以及 Artifact、Appearance、
+Conversation long-task、MCP 与 overall visual targeted E2E 均 PASS。旧
+`workspace-dock-tabs-e2e` 单独运行命中已知 Core startup/Browse baseline，并未修改或放宽。
+Human visual acceptance 仍需用户基于截图或真实 Desktop 完成。
+
+```text
+OVERALL_UI_REDESIGN: IMPLEMENTED / TARGETED_DESKTOP_VALIDATED
+DESIGN_LANGUAGE: QUIET_WORKBENCH_CONVERGED
+PRIMARY_FLOW: PROJECT_CONVERSATION
+WORKING_SURFACE: EXISTING_RIGHT_WORKSPACE_DOCK
+THEME_ENGINE: EXISTING_THEME_REGISTRY
+CURRENT_DATABASE_SCHEMA: 11
+NEW_MIGRATION: 0
+NEW_DEPENDENCIES: 0
+BACKEND_FIPC_MODEL_TOOL_SEMANTIC_DELTA: 0
+MODEL_REQUESTS: 0
+PUBLIC_NETWORK_REQUESTS: 0
+HUMAN_GATE: READY / NOT_YET_ACCEPTED
+CHANGE_IMPACT: MEDIUM / PRESENTATION_ONLY
+```

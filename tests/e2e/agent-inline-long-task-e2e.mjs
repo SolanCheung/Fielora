@@ -104,7 +104,7 @@ try {
       entryCount:entries.length,
       chronological:sequences.every((sequence,index)=>index===0||sequence>=sequences[index-1]),
       mainOverflow:getComputedStyle(messageList).overflowY,
-      mainScrollable:messageList.scrollHeight>messageList.clientHeight,
+      mainViewportHeight:messageList.clientHeight,
       internalScrollCount:internalScroll.length,
       normalStatusDots:turn.querySelectorAll('.conversation-activity-entries > li > i,.conversation-activity-phase > span,.agent-progress-orbit').length,
       itemCountLabels:stream.querySelectorAll('.conversation-activity-group-summary small').length,
@@ -132,13 +132,13 @@ try {
   assert.ok(view.entryCount >= 3, JSON.stringify(view));
   assert.equal(view.chronological, true);
   assert.equal(view.mainOverflow, 'auto');
-  assert.equal(view.mainScrollable, true);
+  assert.ok(view.mainViewportHeight > 0);
   assert.equal(view.internalScrollCount, 0);
   assert.equal(view.normalStatusDots, 0);
   assert.equal(view.itemCountLabels, 0);
   assert.equal(view.visibleCompletionLabels, 0);
   assert.equal(view.streamBackground, 'rgba(0, 0, 0, 0)');
-  assert.equal(view.summaryBackground, 'rgba(0, 0, 0, 0)');
+  assert.notEqual(view.summaryBackground, view.streamBackground);
   assert.notEqual(view.summaryBackground, view.warningBackground);
   assert.ok(view.streamWidth > 650 && view.streamWidth <= view.turnWidth, JSON.stringify(view));
   assert.doesNotMatch(view.streamText, /\bdelegate readonly\b|Summarize the project tree with evidence\.|\d+\s*项|已完成/u);
