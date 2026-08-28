@@ -6,7 +6,7 @@
 
 **Date:** 2026-08-28
 
-**Audited baseline:** `phase/complete-agent-v0.1@3945e6ba652c66061b58f32e5761728a9ba816c9`
+**Audited baseline:** `phase/complete-agent-v0.1@9d4ff1ed570513b0f3ba3368825329da2db098d2`
 
 **Database schema:** `9`
 
@@ -427,8 +427,11 @@ Candidate implementation bounds to review:
 | Bound | Candidate maximum |
 |---|---:|
 | One source PNG encoded bytes | 8 MiB |
-| Width or height | 8,192 pixels |
-| Total decoded pixels | 40,000,000 |
+| Width | 4,096 pixels |
+| Height | 4,096 pixels |
+| Total decoded pixels | 16,777,216 |
+| Decoded output buffer | 64 MiB |
+| Total chunks | 128 |
 | Asset references per parent revision | 16 |
 | Total resolved source bytes per export | 32 MiB |
 | Derived controlled SVG bytes | existing 2 MiB |
@@ -441,6 +444,84 @@ Existing Electron paths are insufficient as this boundary: attachment magic
 checks do not independently decode in the Rust Core, renderer-provided
 dimensions are not durable authority, Workspace preview trusts extension plus
 shallow magic, and Browser `nativeImage` is an ephemeral UI-specific decoder.
+
+### PNG admission security model
+
+```text
+PNG_ADMISSION_SECURITY_MODEL: REVIEWED CANDIDATE / NOT IMPLEMENTED
+FIRST_SOURCE_FORMAT: PNG ONLY
+MEDIA_TYPE_AUTHORITY: BYTES -> image/png
+ENCODED_BYTES_MAX: 8 MiB BEFORE DECODER
+WIDTH_MAX: 4096
+HEIGHT_MAX: 4096
+PIXELS_MAX: 16,777,216
+DECODED_OUTPUT_MAX: 64 MiB
+CHUNK_COUNT_MAX: 128
+INTERLACE: REJECT_FIRST_SLICE
+APNG: REJECT
+PERSISTED_PAYLOAD: ORIGINAL EXACT ADMITTED PNG BYTES
+```
+
+Admission is a Fielora-owned sequence, not `read_info() == Ok`:
+
+1. bound the encoded input before invoking a decoder;
+2. perform a small structural scan with checked arithmetic;
+3. admit only the closed static chunk/color/depth profile below;
+4. reject metadata and animation before either can be decompressed or parsed;
+5. configure explicit decoder allocation and checksum policy;
+6. inspect header facts, recheck all bounds, and checked-compute the output
+   buffer before allocation;
+7. fully decode one static frame into a zeroed validation-only buffer, finish
+   the stream, and drop decoded pixels;
+8. retain the original exact bytes and derive SHA-256 from those bytes, never
+   from a re-encode.
+
+The structural scanner owns the following closed container policy:
+
+- require the PNG signature; alphabetic chunk type bytes; a valid uppercase
+  reserved bit; checked length arithmetic; no truncated chunk; and no more than
+  128 chunks;
+- require one 13-byte `IHDR` first, one or more contiguous `IDAT` chunks, and
+  one zero-byte `IEND` last;
+- optionally allow at most one each of `sRGB` (1 byte), `gAMA` (4 bytes), and
+  `pHYs` (9 bytes), only before `IDAT`; these facts are not exposed as Asset
+  metadata;
+- reject `PLTE` and `tRNS` in the first slice, all unknown/private ancillary
+  chunks, all unknown critical chunks, duplicate/order violations, and any
+  bytes after `IEND`;
+- reject `acTL`, `fcTL`, or `fdAT` as animation, and reject `tEXt`, `zTXt`,
+  `iTXt`, `iCCP`, or `eXIf` as unsupported metadata before decoder admission.
+
+The first color/depth profile allows only 8-bit `Grayscale`, `RGB`,
+`GrayscaleAlpha`, and `RGBA`. It rejects indexed color and 1/2/4/16-bit input.
+This deliberately defers palette-optimized, grayscale transparency, and
+high-bit-depth/scientific PNGs in exchange for a small testable surface.
+
+All width, height, pixel, row, and output-size calculations must use checked
+integer arithmetic. Width and height are independently bounded before checked
+`width * height`; the decoder-reported output size is then independently
+required to be at most 64 MiB. The decoder allocation limit is additional and
+does not replace any Fielora-owned bound.
+
+The admission result is a controlled internal value with only the exact
+original bytes or an equivalent controlled handle, `content_sha256`,
+`byte_length`, `width`, `height`, and fixed `media_type=image/png`. Decoded
+pixels, source filesystem paths, EXIF, text, ICC, and arbitrary metadata do not
+enter the Artifact semantic model, receipt, or Model context.
+
+Future provider-neutral stable errors are:
+
+- `PNG_INVALID`
+- `PNG_UNSUPPORTED`
+- `PNG_TOO_LARGE`
+- `PNG_DIMENSIONS_EXCEEDED`
+- `PNG_ANIMATED_UNSUPPORTED`
+- `PNG_INTERLACED_UNSUPPORTED`
+- `PNG_METADATA_UNSUPPORTED`
+- `PNG_TRAILING_DATA`
+- `PNG_DECODE_FAILED`
+
+They must not include raw decoder payloads, source bytes, or unbounded metadata.
 
 ## DOCX_IMAGE_REALITY
 
@@ -739,26 +820,117 @@ logical Asset records. Physical deletion is allowed only after all retained
 Library and Asset owners, portable/recovery commitments, and in-flight exports
 are proven absent. Derived CacheRoot entries may be evicted at any time.
 
+## PNG_DECODER_DEPENDENCY_DECISION
+
+```text
+RECOMMENDED_PNG_DECODER: png
+EXACT_VERSION: =0.18.1
+FEATURES_SELECTED: default-features = false; no optional features
+LICENSE: MIT OR Apache-2.0
+MSRV: 1.73
+CURRENT_FIELORA_RUST: 1.97.1
+DEPENDENCY_DECISION: REVIEW PASS / NOT ADDED
+```
+
+Exact candidate comparison on 2026-08-28:
+
+| Candidate | Exact audited release | Relevant reality | Decision |
+|---|---:|---|---|
+| [`png`](https://docs.rs/crate/png/0.18.1) | `0.18.1` | PNG-only; crate forbids unsafe code; configurable internal limits, text/iCCP handling, CRC and Adler behavior; [fuzz targets](https://github.com/image-rs/image-png/tree/master/fuzz) and active image-rs maintenance | **Recommend exact pin for a separately authorized implementation** |
+| [`image`](https://docs.rs/crate/image/0.25.10) | `0.25.10` with defaults off plus PNG | umbrella image model/processing API; MSRV 1.88; adds non-PNG abstractions and dependencies; current [`DynamicImage::from_decoder` allocation-limit issue](https://github.com/image-rs/image/issues/3081) shows its `Limits` cannot be the sole admission boundary | Reject for minimum parser surface |
+| [`zune-png`](https://docs.rs/crate/zune-png/0.5.2) | `0.5.2` | PNG-only and bounded axis options, but defaults include SSE, platform-specific SIMD uses `unsafe`, APNG is supported, and current header parsing stores/decompresses text and iCCP data | Reject for the first bounded-correctness slice |
+
+The recommendation is conditional on Fielora owning the structural, resource,
+metadata, static-image, trailing-byte, and output contracts. Safe Rust is not a
+claim that malformed input cannot exhaust CPU or memory.
+
+The exact `png 0.18.1` decoder configuration for the future implementation is:
+
+- `png::DecodeOptions::set_ignore_checksums(false)`;
+- `set_skip_ancillary_crc_failures(false)` so a permitted ancillary chunk with
+  a bad CRC fails rather than being skipped;
+- `set_ignore_text_chunk(true)` and `set_ignore_iccp_chunk(true)` as defense in
+  depth after the raw scanner has already rejected those chunks;
+- `png::Decoder::new_with_options`, then `set_limits(png::Limits { bytes: 8 MiB })`;
+- `png::Transformations::IDENTITY`;
+- `read_info`, independent bounds/output-size checks, exactly one complete
+  `next_frame`, and `finish`.
+
+The raw scanner still owns exact EOF after `IEND`, because decoder completion is
+not the polyglot/trailing-data contract. The `png::Limits` byte budget is best
+effort and excludes the caller-owned output allocation, so it is never the sole
+resource control.
+
+Current upstream risks reviewed for `0.18.1` and avoided by this closed profile:
+
+- image-png issue [`#696`](https://github.com/image-rs/image-png/issues/696): text decompression may have no pixel-limit-equivalent
+  cap; reject all textual chunks before decoder parsing;
+- issue [`#699`](https://github.com/image-rs/image-png/issues/699): interlaced APNG subframe handling; reject both APNG and
+  interlacing;
+- issue [`#700`](https://github.com/image-rs/image-png/issues/700): chunk-ordering inconsistencies involving palette/transparency
+  and color chunks; enforce Fielora ordering and reject `PLTE`/`tRNS`;
+- issue [`#685`](https://github.com/image-rs/image-png/issues/685): a reported palette path panic; indexed/palette input is outside
+  the first profile;
+- issue [`#701`](https://github.com/image-rs/image-png/issues/701): a reported swallowed iCCP limit error; reject `iCCP` before the
+  decoder and do not expose profiles.
+
+An isolated, uncommitted exact-version probe built under Rust 1.97.1 and passed
+5/5 deterministic tests. It proved repeated byte-identical valid RGBA admission;
+strict IHDR/IDAT/permitted-ancillary CRC and zlib Adler rejection; pre-decode
+rejection of APNG, text/iCCP/eXIf, private chunks, trailing payload, interlace,
+indexed color, 16-bit color, zero/oversized dimensions; and fail-closed
+truncation/malformed deflate behavior. The probe is evidence only and is not
+production code.
+
 ## DEPENDENCY_IMPACT
 
 ```text
 THIS_DOCS_ONLY_CANDIDATE_NEW_DEPENDENCIES: 0
 TRANSIENT_CONTROLLED_SVG_NEW_DEPENDENCIES: 0
-SAFE_EXTERNAL_PNG_ADMISSION_DEPENDENCY: NOT PRESENT / REVIEW REQUIRED
+SAFE_EXTERNAL_PNG_ADMISSION_DEPENDENCY: REVIEWED / NOT PRESENT / NOT AUTHORIZED
+RECOMMENDED_FUTURE_DIRECT_DEPENDENCY: png = "=0.18.1"
+RECOMMENDED_OPTIONAL_FEATURES: NONE
 SVG_TO_PNG_DEPENDENCY: NOT PRESENT / REVIEW REQUIRED
 ```
 
-Candidate families for a later separate dependency review:
+The isolated exact resolver produced this runtime tree:
+
+| Crate | Exact version | Relation | License | MSRV |
+|---|---:|---|---|---:|
+| `png` | `0.18.1` | future direct | MIT OR Apache-2.0 | 1.73 |
+| `bitflags` | `2.13.1` | direct dependency of `png`; already locked | MIT OR Apache-2.0 | 1.56 |
+| `crc32fast` | `1.5.1` | direct dependency of `png`; already locked | MIT OR Apache-2.0 | 1.63 |
+| `fdeflate` | `0.3.7` | direct dependency of `png`; **new to lockfile** | MIT OR Apache-2.0 | 1.67 |
+| `flate2` | `1.1.9` | direct dependency of `png`; already locked | MIT OR Apache-2.0 | 1.67 |
+| `miniz_oxide` | `0.8.9` | direct dependency of `png`; already locked | MIT OR Zlib OR Apache-2.0 | not declared |
+| `cfg-if` | `1.0.4` | via `crc32fast`; already locked | MIT OR Apache-2.0 | 1.32 |
+| `adler2` | `2.0.1` | via `miniz_oxide`; already locked | 0BSD OR MIT OR Apache-2.0 | not declared |
+| `simd-adler32` | `0.3.10` | via `fdeflate`/`miniz_oxide`; already locked | MIT | not declared |
+
+Only `png 0.18.1` and `fdeflate 0.3.7` would be new package entries; the
+remaining exact versions already exist in the workspace lockfile. No duplicate
+version split was introduced by the isolated resolver. The licenses are
+compatible with the repository's current permissive runtime dependency set.
+
+Repository-wide `cargo audit`/`cargo deny` tooling and binaries are absent, so
+none was installed for this review. A read-only [OSV API](https://google.github.io/osv.dev/api/)
+exact-version query for all nine packages above returned no matching advisories
+on 2026-08-28. The upstream repository also showed no published GitHub Security
+advisory for this crate at review time. This is a point-in-time advisory result,
+not a guarantee that malformed input is safe.
+
+Other families remain unapproved:
 
 | Candidate | Use | License status for Fielora | Security impact | Alternative |
 |---|---|---|---|---|
-| pinned PNG-specific Rust decoder | PNG structure/decode/dimensions | exact-version license not audited in this Candidate | untrusted compressed-data parser in Core | reviewed Windows WIC adapter or no source raster |
-| pinned general Rust image decoder | future PNG/JPEG | exact-version license not audited | larger codec/metadata attack surface | PNG-only dependency |
+| pinned PNG-specific Rust decoder | PNG structure/decode/dimensions | `png 0.18.1` exact review passed; not installed | untrusted compressed-data parser in Core | reviewed Windows WIC adapter or no source raster |
+| pinned general Rust image decoder | future PNG/JPEG | `image 0.25.10` license compatible but rejected here | larger codec/metadata attack surface | PNG-only dependency |
 | pinned `resvg`/`usvg` family | controlled SVG -> raster | exact-version license not audited | new parser/rasterizer and font/resource policy | native SVG writer, repository-owned vector backend, or defer |
 | Windows Imaging Component | OS decode/metadata | platform API; integration/legal review still required | Windows-only native boundary and codec variability | pinned Rust decoder |
 
-No candidate is approved, installed, or added. Manual ad-hoc decoding is not
-accepted as a shortcut to avoid dependency review.
+No dependency is installed or added by this review. The recommendation is input
+to a separately authorized implementation slice. Manual ad-hoc decoding is not
+accepted as a shortcut around the reviewed decoder and Fielora scanner split.
 
 ## SCHEMA_MIGRATION_IMPACT
 
@@ -775,13 +947,15 @@ migration. It must not be hidden inside Artifact JSON or overloaded onto
 
 ## SECURITY_BLOCKERS
 
-Two blockers prevent an immediate media consumer implementation:
+Two implementation boundaries still prevent an immediate media consumer:
 
-1. Fielora has no safe Rust-side raster admission/decode primitive. Current UI
-   magic checks and renderer dimensions cannot be reused as durable authority.
-2. Fielora DOCX/PPTX production validation does not independently prove media
-   part, internal relationship, content type, placement, count, source-byte
-   digest, or no external relationship. A writer returning `Ok` is not enough.
+1. The Rust-side raster admission/decode primitive is now dependency- and
+   contract-reviewed but remains unimplemented. Current UI magic checks and
+   renderer dimensions still cannot be reused as durable authority.
+2. DOCX/PPTX writer and bounded test reopen capability are proven, but no
+   production Document/PPTX image semantic block, resolver, renderer adapter,
+   or media reopen validator exists. A dependency writer returning `Ok` remains
+   insufficient.
 
 Diagram -> Office additionally has no native SVG writer path and no reviewed
 SVG-to-PNG/EMF/native-shape backend. The Candidate therefore does not authorize
@@ -806,7 +980,8 @@ EXTERNAL_OFFICE_RELATIONSHIPS: 0
 | Asset semantic reference | `MEDIUM` | additive typed parent dependency and canonical digest |
 | Durable Asset metadata | `HIGH` | Profile ownership, migration, portability, retention, historical references |
 | Binary storage | `HIGH` | shared blob lifecycle, atomicity, restore, dedupe, GC |
-| Raster admission | `HIGH` | untrusted compressed content, dimensions/pixel bounds, privacy metadata |
+| This PNG dependency review | `LOW` | docs and isolated evidence only; no manifest, lockfile, product code, contract, or schema change |
+| Future raster admission | `HIGH` | untrusted compressed content, dimensions/pixel bounds, checksums, privacy metadata, and parser dependency |
 | Office media embedding | `HIGH` | package relationships/content types/geometry and exact reopen |
 | Diagram derived composition | `MEDIUM / HIGH` | exact dependency snapshot plus renderer commitment; conversion remains high |
 | SVG conversion/rasterization | `HIGH` | new parser/rasterizer/dependency and deterministic font/resource policy |
@@ -827,9 +1002,10 @@ Current options:
 | F. metadata/storage only | Low; no consumer | migration/blob | creates empty abstraction | Reject |
 
 ```text
-RECOMMENDED_FIRST_ASSET_SLICE: NOT READY FOR IMPLEMENTATION
+RECOMMENDED_FIRST_ASSET_SLICE: READY FOR SEPARATE AUTHORIZATION / NOT AUTHORIZED HERE
 OFFICE_PNG_WRITER_REOPEN_PRECURSOR: PASS
-REMAINING_REQUIRED_PRECURSOR: SAFE PNG ADMISSION DEPENDENCY DECISION
+SAFE_PNG_ADMISSION_DEPENDENCY_REVIEW: PASS
+RECOMMENDED_PNG_DEPENDENCY: png = "=0.18.1"; no optional features
 CONDITIONAL_FIRST_REAL_CONSUMER: DOCUMENT -> PINNED DURABLE PNG ASSET -> INLINE DOCX
 CONDITIONAL_SLICE_PROVES: DURABLE BINARY ASSET
 DIAGRAM_DERIVED_MODEL: TRANSIENT, SEPARATE, AND STILL BLOCKED ON REPRESENTATION BRIDGE
@@ -842,11 +1018,13 @@ embedded-byte digest, independent reopen, malformed-byte rejection at the
 Fielora boundary, and deterministic structural facts. It does not authorize
 production code in this task.
 
-If the DOCX Gate and a reviewed PNG admission primitive pass, Option C is the
+With the DOCX Gate and PNG dependency/security review complete, Option C is the
 smallest real Asset slice: one Profile-owned immutable PNG, one typed inline
 Document block, saved-revision DOCX export, no UI, no JPEG, no Diagram, no
 floating layout, no new Tool family unless the actual admission workflow proves
-one necessary.
+one necessary. That implementation still requires explicit authorization,
+dependency addition in its own changeset, a forward migration review, and the
+full admission/security fixture suite below.
 
 ## TARGETED_TEST_PLAN
 
@@ -865,9 +1043,15 @@ one necessary.
 
 ### Future source PNG admission, if authorized
 
-- valid PNG; wrong extension; magic/type mismatch; truncated/corrupt stream;
-- oversized encoded bytes, axis, pixels, metadata/chunks, and trailing payload;
-- animated/ambiguous/polyglot input rejected;
+- valid small RGB, RGBA, transparent, grayscale, and grayscale-alpha PNGs;
+- invalid signature, wrong extension/magic mismatch, truncated IHDR/IDAT,
+  duplicate critical chunk, missing/multiple IEND, malformed deflate;
+- bad IHDR/IDAT/permitted-ancillary CRC and bad Adler;
+- zero dimensions, oversized width/height, checked pixel overflow, small
+  encoded/large declared dimensions, and oversized decoded output;
+- APNG, text chunks, compressed text bomb, iCCP, eXIf, private/unknown chunks,
+  interlace, indexed/palette, unsupported bit depth, trailing bytes, and PNG +
+  ZIP polyglot rejected before the relevant unsafe/unbounded path;
 - digest, dimensions, atomic blob persistence, metadata transaction, restart,
   duplicate bytes with separate Asset IDs, and shared physical blob;
 - Profile isolation/non-disclosure, Project containment, TOCTOU, and no path in
@@ -901,9 +1085,9 @@ one necessary.
 
 ## OPEN_QUESTIONS
 
-1. Which exact PNG admission primitive can meet decode, dimensions, metadata,
-   polyglot, deterministic behavior, Windows packaging, maintenance, and license
-   requirements without broadening the codec surface?
+1. The PNG dependency question is resolved for the candidate: exact-pin
+   `png 0.18.1`, no optional features, behind the Fielora-owned admission model
+   above. Implementation and production authorization remain separate.
 2. How should the existing `LibraryRoot` blob primitive be renamed/extracted so
    Asset bytes can share storage without becoming Library objects?
 3. How must portable profile include/restore semantics change so required Asset
@@ -926,4 +1110,4 @@ one necessary.
 
 ## NEXT_DECISION
 
-`A. READY_FOR_PNG_ADMISSION_DEPENDENCY_REVIEW`
+`A. READY_FOR_PNG_ADMISSION_AND_DURABLE_ASSET_FIRST_SLICE`
