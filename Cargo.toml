@@ -33,6 +33,7 @@ futures-util = "=0.3.34"
 rmcp = { version = "=3.1.4", default-features = false, features = ["client", "transport-async-rw"] }
 lopdf = { version = "=0.44.0", default-features = false }
 office_oxide = { version = "=0.1.8", default-features = false }
+png = { version = "=0.18.1", default-features = false }
 quick-xml = { version = "=0.41.0", default-features = false }
 zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }

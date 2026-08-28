@@ -1850,3 +1850,57 @@ NEW_DEPENDENCIES: 0
 FORMULA_CHART_IMPORT_UI_NEW_RUNTIME: 0
 CHANGE_IMPACT: HIGH
 ```
+
+## 89. PNG Admission and Durable Source Asset First Slice
+
+Artifact foundation 现在新增第一种 durable binary resource：Profile-owned、immutable
+的 PNG Source Asset。`artifact.asset.import` 仍是现有 `WORKSPACE_WRITE` ToolCall，经过
+PolicyEngine/Approval/ToolExecutor/durable receipt；它只读取 current Project 内的
+bounded relative regular file，不接受 absolute path、URL、Library/Data/Cache path、
+symlink/reparse escape，也不把 bytes/path 传给 Model。
+
+Fielora-owned PNG admission 先执行 exact signature、bounded raw chunk scan、CRC、
+IHDR/contiguous IDAT/final IEND/EOF 与 closed ancillary allowlist，再由 exact-pinned
+`png 0.18.1` 在 CRC + Adler 开启、64 MiB decoder limit、IDENTITY transform 下完成
+一次 full static decode。第一版只允许 8-bit grayscale/RGB/GA/RGBA；8 MiB encoded、
+4096/axis、16,777,216 pixels、64 MiB decoded、128 chunks。APNG、Adam7、palette/tRNS、
+1/2/4/16-bit、text/compressed text/iCCP/eXIf、private/unknown chunks、bad checksum、
+malformed deflate、trailing/polyglot 全部 fail closed。只有 exact original encoded bytes
+持久化；decoded pixels 立即释放。
+
+Forward migration `0010_durable_source_assets` 把 schema 提升到 10，只新增 immutable
+`assets` metadata、Profile scope、provenance、index 与 update/delete denial triggers；
+0001-0009 不变。Asset bytes 复用现有 `LibraryRoot/blobs/objects/<prefix>/<sha256>`
+content-addressed layout，但不创建 `LibraryObject`、Library category/UI/tombstone/journal；
+Library delete 仍只改 metadata，不删除 shared blob。Blob-first→metadata transaction→
+receipt 的 crash ordering 不会产生成功 metadata 指向缺失 blob；metadata failure 只可能
+留下 safe deduplicable orphan，本 Slice不做 delete/GC。
+
+`AssetId` 与 content SHA-256 分离；同 ToolCall/request replay 返回同 AssetId，新
+ToolCall 导入相同 bytes 可创建新 AssetId 并共享 blob。`ArtifactAssetRefV1` pin
+AssetId/digest/`image/png`/byte length，Document `INLINE_IMAGE` 只增加
+`DOCUMENT_WIDTH_BOUNDED` 与 optional bounded alt text。Document create/update 在 parent
+revision commit 前 exact-resolve same-Profile Asset metadata；saved export 从 controlled
+blob 重查 length/SHA/static PNG structure/dimensions，形成 immutable render snapshot，
+再复用 `office_oxide` DOCX inline image writer。Final DOCX bytes 独立 reopen media part、
+internal relationship、content type、drawing ref、bounded extent 与 exact embedded digest。
+
+Receipt 继续是 existing ToolCall receipt，只保存 bounded Asset facts、reference count 与
+canonical sorted Asset-set digest；binary/path/decoded pixels/EXIF 不进入 receipt、Context、
+Model 或 Verification。Admission/embedding success 不产生 semantic Verification PASS。
+
+```text
+PNG_SOURCE_ASSET_FIRST_SLICE: IMPLEMENTED / TARGETED_VALIDATED
+ARCHITECTURE: MODEL + HARNESS + EXISTING_TOOLS
+INGRESS_TOOL: artifact.asset.import / WORKSPACE_WRITE
+PNG_DECODER: png 0.18.1 / DEFAULT_FEATURES_FALSE
+ASSET_STORAGE: SHARED_LIBRARYROOT_CONTENT_BLOB / NO_LIBRARY_OBJECT
+ASSET_IDENTITY: ASSET_ID_DISTINCT_FROM_CONTENT_SHA256
+DOCUMENT_BLOCK: INLINE_IMAGE / DOCUMENT_WIDTH_BOUNDED
+ASSET_EXPORT_REVALIDATION: LENGTH_SHA256_STATIC_STRUCTURE
+CONTENT_AUTHORITY: UNTRUSTED_ARTIFACT_CONTENT / BINARY_NOT_IN_MODEL_CONTEXT
+CURRENT_DATABASE_SCHEMA: 10
+MIGRATION_0010: durable_source_assets
+PRESENTATION_IMAGE_DIAGRAM_RASTER_UI_DELETE_GC_REMOTE_IMAGE: NOT_IMPLEMENTED
+CHANGE_IMPACT: HIGH
+```

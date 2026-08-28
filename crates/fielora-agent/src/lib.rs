@@ -6,11 +6,13 @@
 //! durable receipts, and completion semantics.
 
 pub mod artifact;
+pub mod asset;
 mod diagram;
 mod file;
 pub mod mcp;
 pub mod mcp_connections;
 mod plugins;
+pub mod png_admission;
 mod skills;
 mod spreadsheet;
 pub mod web;
@@ -218,6 +220,26 @@ pub enum AgentError {
     ArtifactCompositionLimitExceeded,
     #[error("DIAGRAM_LAYOUT_OVERFLOW")]
     DiagramLayoutOverflow,
+    #[error("PNG_INVALID")]
+    PngInvalid,
+    #[error("PNG_TOO_LARGE")]
+    PngTooLarge,
+    #[error("PNG_ANIMATED_UNSUPPORTED")]
+    PngAnimatedUnsupported,
+    #[error("PNG_INTERLACED_UNSUPPORTED")]
+    PngInterlacedUnsupported,
+    #[error("PNG_METADATA_UNSUPPORTED")]
+    PngMetadataUnsupported,
+    #[error("PNG_FORMAT_UNSUPPORTED")]
+    PngFormatUnsupported,
+    #[error("PNG_TRAILING_DATA")]
+    PngTrailingData,
+    #[error("ASSET_NOT_FOUND")]
+    AssetNotFound,
+    #[error("ASSET_TOOLCALL_IDEMPOTENCY_CONFLICT")]
+    AssetIdempotencyConflict,
+    #[error("ASSET_CONTENT_CHANGED")]
+    AssetContentChanged,
     #[error("AGENT_IO_FAILED")]
     IoFailed,
 }
@@ -286,6 +308,16 @@ impl AgentError {
             Self::ArtifactCompositionCycle => "ARTIFACT_COMPOSITION_CYCLE",
             Self::ArtifactCompositionLimitExceeded => "ARTIFACT_COMPOSITION_LIMIT_EXCEEDED",
             Self::DiagramLayoutOverflow => "DIAGRAM_LAYOUT_OVERFLOW",
+            Self::PngInvalid => "PNG_INVALID",
+            Self::PngTooLarge => "PNG_TOO_LARGE",
+            Self::PngAnimatedUnsupported => "PNG_ANIMATED_UNSUPPORTED",
+            Self::PngInterlacedUnsupported => "PNG_INTERLACED_UNSUPPORTED",
+            Self::PngMetadataUnsupported => "PNG_METADATA_UNSUPPORTED",
+            Self::PngFormatUnsupported => "PNG_FORMAT_UNSUPPORTED",
+            Self::PngTrailingData => "PNG_TRAILING_DATA",
+            Self::AssetNotFound => "ASSET_NOT_FOUND",
+            Self::AssetIdempotencyConflict => "ASSET_TOOLCALL_IDEMPOTENCY_CONFLICT",
+            Self::AssetContentChanged => "ASSET_CONTENT_CHANGED",
             Self::IoFailed => "AGENT_IO_FAILED",
         }
     }
@@ -790,6 +822,17 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
             "Create one durable profile-owned typed Artifact with immutable revision 1.",
             AgentToolEffect::WorkspaceWrite,
             artifact::create_input_schema(),
+        ),
+        tool(
+            "artifact.asset.import",
+            "Import one bounded project-relative static PNG as an immutable profile-owned durable source Asset.",
+            AgentToolEffect::WorkspaceWrite,
+            json!({
+                "type":"object",
+                "properties":{"path":{"type":"string","minLength":1,"maxLength":4096}},
+                "required":["path"],
+                "additionalProperties":false
+            }),
         ),
         tool(
             "artifact.read",
@@ -1857,6 +1900,7 @@ pub struct ToolRuntime {
     root: PathBuf,
     checkpoint_root: PathBuf,
     skill_catalog: SkillCatalog,
+    content_blob_store: Option<asset::ContentBlobStore>,
 }
 
 impl ToolRuntime {
@@ -1878,7 +1922,37 @@ impl ToolRuntime {
             root,
             checkpoint_root,
             skill_catalog,
+            content_blob_store: None,
         })
+    }
+
+    pub fn with_content_blob_root(mut self, library_root: PathBuf) -> Self {
+        self.content_blob_store = Some(asset::ContentBlobStore::new(library_root));
+        self
+    }
+
+    pub fn put_asset_blob(
+        &self,
+        bytes: &[u8],
+        expected_sha256: &str,
+    ) -> Result<String, AgentError> {
+        self.content_blob_store
+            .as_ref()
+            .ok_or(AgentError::IoFailed)?
+            .put_exact(bytes, expected_sha256)
+    }
+
+    pub fn read_asset_blob(
+        &self,
+        blob_ref: &str,
+        expected_length: u64,
+        expected_sha256: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, AgentError> {
+        self.content_blob_store
+            .as_ref()
+            .ok_or(AgentError::IoFailed)?
+            .read_verified(blob_ref, expected_length, expected_sha256, max_bytes)
     }
 
     /// Inspect durable arguments against current contained workspace state.
@@ -1942,6 +2016,41 @@ impl ToolRuntime {
         }
         let encoded = serde_json::to_vec(&states).map_err(|_| AgentError::IoFailed)?;
         Ok(sha256(&encoded))
+    }
+
+    /// Read one bounded binary source from the current Project only. This is
+    /// intentionally narrower than general filesystem access and is used by
+    /// admitted binary ingress tools.
+    pub fn read_project_binary(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>, AgentError> {
+        let relative = normalize_relative(path)?;
+        deny_sensitive(&relative)?;
+        let target = self.root.join(&relative);
+        let metadata = fs::symlink_metadata(&target).map_err(|_| AgentError::FileNotFound)?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(AgentError::FileOutsideProject);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+            if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                return Err(AgentError::FileOutsideProject);
+            }
+        }
+        if metadata.len() > max_bytes as u64 {
+            return Err(AgentError::PngTooLarge);
+        }
+        let canonical = resolve_existing(&self.root, &relative)?;
+        let mut file = fs::File::open(canonical).map_err(|_| AgentError::IoFailed)?;
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        Read::by_ref(&mut file)
+            .take(max_bytes as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| AgentError::IoFailed)?;
+        if bytes.len() > max_bytes {
+            return Err(AgentError::PngTooLarge);
+        }
+        Ok(bytes)
     }
 }
 

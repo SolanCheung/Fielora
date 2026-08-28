@@ -10,6 +10,7 @@ fielora-platform = { path = "../fielora-platform" }
 futures-util.workspace = true
 lopdf.workspace = true
 office_oxide.workspace = true
+png.workspace = true
 quick-xml.workspace = true
 reqwest.workspace = true
 rmcp.workspace = true

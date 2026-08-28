@@ -48,6 +48,7 @@ typed_id!(LibraryObjectId);
 typed_id!(SyncChangeId);
 typed_id!(ArtifactId);
 typed_id!(ArtifactRevisionId);
+typed_id!(AssetId);
 typed_id!(DiagramNodeId);
 typed_id!(DiagramEdgeId);
 typed_id!(DiagramGroupId);
@@ -1349,6 +1350,38 @@ pub struct ArtifactRefV1 {
     pub semantic_sha256: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub enum AssetMediaType {
+    #[serde(rename = "image/png")]
+    #[ts(rename = "image/png")]
+    Png,
+}
+
+impl AssetMediaType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Png => "image/png",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactAssetRefV1 {
+    pub asset_id: AssetId,
+    pub content_sha256: String,
+    pub media_type: AssetMediaType,
+    #[ts(type = "number")]
+    pub byte_length: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DocumentImageSizeIntentV1 {
+    DocumentWidthBounded,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct SpreadsheetRangeEmbedV1 {
@@ -1364,11 +1397,28 @@ pub struct SpreadsheetRangeEmbedV1 {
 #[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
 #[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DocumentBlock {
-    Heading { level: u8, text: String },
-    Paragraph { text: String },
-    BulletList { items: Vec<String> },
-    Table { rows: Vec<Vec<String>> },
-    SpreadsheetRange { source: SpreadsheetRangeEmbedV1 },
+    Heading {
+        level: u8,
+        text: String,
+    },
+    Paragraph {
+        text: String,
+    },
+    BulletList {
+        items: Vec<String>,
+    },
+    Table {
+        rows: Vec<Vec<String>>,
+    },
+    SpreadsheetRange {
+        source: SpreadsheetRangeEmbedV1,
+    },
+    InlineImage {
+        source: ArtifactAssetRefV1,
+        size_intent: DocumentImageSizeIntentV1,
+        #[serde(default)]
+        alt_text: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1711,6 +1761,24 @@ pub struct ArtifactRevisionView {
 pub struct ArtifactReadView {
     pub artifact: ArtifactView,
     pub revision: ArtifactRevisionView,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct AssetView {
+    pub asset_id: AssetId,
+    pub profile_id: ProfileId,
+    pub media_type: AssetMediaType,
+    pub content_sha256: String,
+    #[ts(type = "number")]
+    pub byte_length: u64,
+    pub width: u32,
+    pub height: u32,
+    pub blob_ref: String,
+    pub created_from_conversation_id: Option<ConversationId>,
+    pub created_by_agent_run_id: Option<AgentRunId>,
+    pub created_by_tool_call_id: ToolCallId,
+    #[ts(type = "number")]
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

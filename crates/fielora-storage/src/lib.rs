@@ -30,6 +30,7 @@ const MIGRATION_0006: &str = include_str!("../migrations/0006_complete_agent.sql
 const MIGRATION_0007: &str = include_str!("../migrations/0007_library_storage_profile.sql");
 const MIGRATION_0008: &str = include_str!("../migrations/0008_durable_artifacts.sql");
 const MIGRATION_0009: &str = include_str!("../migrations/0009_artifact_type_extensibility.sql");
+const MIGRATION_0010: &str = include_str!("../migrations/0010_durable_source_assets.sql");
 const MIGRATION_0001_NAME: &str = "core";
 const MIGRATION_0002_NAME: &str = "phase02_reality";
 const MIGRATION_0004_NAME: &str = "phase04_entry";
@@ -38,6 +39,7 @@ const MIGRATION_0006_NAME: &str = "complete_agent";
 const MIGRATION_0007_NAME: &str = "library_storage_profile";
 const MIGRATION_0008_NAME: &str = "durable_artifacts";
 const MIGRATION_0009_NAME: &str = "artifact_type_extensibility";
+const MIGRATION_0010_NAME: &str = "durable_source_assets";
 const MIGRATION_0002_FROZEN_SHA256: &str =
     "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9";
 const MIGRATION_0004_FROZEN_SHA256: &str =
@@ -46,7 +48,7 @@ const MIGRATION_0005_FROZEN_SHA256: &str =
     "b7e1e586b47e50389502677e172741d69463e9518ed32211dfafe0dc910c1547";
 const MIGRATION_0006_FROZEN_SHA256: &str =
     "5257959801424a13426259ce10c9ed2d5037795ec7a3a207171c568bc80dbaae";
-const SCHEMA_VERSION: u32 = 9;
+const SCHEMA_VERSION: u32 = 10;
 const LOCAL_USER_NAME: &str = "Local user";
 const SYSTEM_NAME: &str = "Fielora system";
 
@@ -168,6 +170,23 @@ pub struct UpdateArtifactRecord {
     pub content: ArtifactContentV1,
     pub canonical_content_json: String,
     pub semantic_sha256: String,
+    pub mutation_request_sha256: String,
+    pub now: i64,
+}
+
+/// Trusted Harness-to-storage input for one immutable source Asset. Encoded
+/// bytes live in the shared content-addressed blob store, never in SQLite.
+#[derive(Debug, Clone)]
+pub struct CreateAssetRecord {
+    pub media_type: AssetMediaType,
+    pub content_sha256: String,
+    pub byte_length: u64,
+    pub width: u32,
+    pub height: u32,
+    pub blob_ref: String,
+    pub conversation_id: ConversationId,
+    pub run_id: AgentRunId,
+    pub tool_call_id: ToolCallId,
     pub mutation_request_sha256: String,
     pub now: i64,
 }
@@ -1146,6 +1165,113 @@ impl StorageHandle {
                 params![tool_call_id.0,profile_id.0],
                 |row| row.get(0),
             ).optional().map_err(storage_domain)
+        })
+    }
+
+    pub fn create_asset(&self, request: CreateAssetRecord) -> Result<AssetView, DomainError> {
+        let owner = self.local_user.clone();
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            let run = get_agent_run(connection, &owner, &request.run_id)?;
+            if run.conversation_id != request.conversation_id {
+                return Err(DomainError::Validation(
+                    "ASSET_TRUSTED_CONTEXT_INVALID".into(),
+                ));
+            }
+            let tool = get_agent_tool_call(connection, &owner, &request.tool_call_id)?;
+            if tool.run_id != request.run_id || tool.name != "artifact.asset.import" {
+                return Err(DomainError::Validation(
+                    "ASSET_TOOLCALL_SCOPE_INVALID".into(),
+                ));
+            }
+            if current_profile_id(connection)? != profile_id
+                || request.media_type != AssetMediaType::Png
+                || !valid_lower_sha256(&request.content_sha256)
+                || !valid_lower_sha256(&request.mutation_request_sha256)
+                || request.byte_length == 0
+                || request.byte_length > 8 * 1024 * 1024
+                || request.width == 0
+                || request.width > 4096
+                || request.height == 0
+                || request.height > 4096
+                || u64::from(request.width) * u64::from(request.height) > 16_777_216
+                || request.blob_ref
+                    != format!(
+                        "blobs/objects/{}/{}",
+                        &request.content_sha256[..2],
+                        request.content_sha256
+                    )
+            {
+                return Err(DomainError::Validation("ASSET_CONTENT_INVALID".into()));
+            }
+            if let Some(existing) =
+                asset_for_tool_call(connection, &profile_id, &request.tool_call_id)?
+            {
+                let existing_request: String = connection
+                    .query_row(
+                        "SELECT mutation_request_sha256 FROM assets WHERE id=?1",
+                        [&existing.asset_id.0],
+                        |row| row.get(0),
+                    )
+                    .map_err(storage_domain)?;
+                if existing_request == request.mutation_request_sha256
+                    && existing.media_type == request.media_type
+                    && existing.content_sha256 == request.content_sha256
+                    && existing.byte_length == request.byte_length
+                    && existing.width == request.width
+                    && existing.height == request.height
+                    && existing.blob_ref == request.blob_ref
+                {
+                    return Ok(existing);
+                }
+                return Err(DomainError::Validation(
+                    "ASSET_TOOLCALL_IDEMPOTENCY_CONFLICT".into(),
+                ));
+            }
+            let asset_id = AssetId::new(Uuid::now_v7().to_string());
+            let byte_length = i64::try_from(request.byte_length)
+                .map_err(|_| DomainError::Validation("ASSET_CONTENT_INVALID".into()))?;
+            let transaction = connection.transaction().map_err(storage_domain)?;
+            transaction.execute(
+                "INSERT INTO assets(id,profile_id,media_type,content_sha256,byte_length,width,height,blob_ref,mutation_request_sha256,created_from_conversation_id,created_by_agent_run_id,created_by_tool_call_id,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                params![asset_id.0,profile_id.0,request.media_type.as_str(),request.content_sha256,byte_length,i64::from(request.width),i64::from(request.height),request.blob_ref,request.mutation_request_sha256,request.conversation_id.0,request.run_id.0,request.tool_call_id.0,request.now],
+            ).map_err(storage_domain)?;
+            transaction.commit().map_err(storage_domain)?;
+            get_asset(connection, &profile_id, &asset_id)
+        })
+    }
+
+    pub fn read_asset(&self, asset_id: AssetId) -> Result<AssetView, DomainError> {
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            get_asset(connection, &profile_id, &asset_id)
+        })
+    }
+
+    pub fn asset_by_tool_call(
+        &self,
+        tool_call_id: ToolCallId,
+    ) -> Result<Option<AssetView>, DomainError> {
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            asset_for_tool_call(connection, &profile_id, &tool_call_id)
+        })
+    }
+
+    pub fn asset_mutation_request_sha256(
+        &self,
+        tool_call_id: ToolCallId,
+    ) -> Result<Option<String>, DomainError> {
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            connection
+                .query_row(
+                    "SELECT mutation_request_sha256 FROM assets WHERE created_by_tool_call_id=?1 AND profile_id=?2",
+                    params![tool_call_id.0, profile_id.0],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(storage_domain)
         })
     }
 
@@ -2394,6 +2520,95 @@ fn artifact_mutation_for_tool_call(
     .transpose()
 }
 
+fn asset_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetView> {
+    let media_type: String = row.get(2)?;
+    let media_type = match media_type.as_str() {
+        "image/png" => AssetMediaType::Png,
+        _ => return Err(conversion_error("unsupported asset media type".into())),
+    };
+    let byte_length = row
+        .get::<_, i64>(4)?
+        .try_into()
+        .map_err(|_| conversion_error("asset byte length out of range".into()))?;
+    let width = row
+        .get::<_, i64>(5)?
+        .try_into()
+        .map_err(|_| conversion_error("asset width out of range".into()))?;
+    let height = row
+        .get::<_, i64>(6)?
+        .try_into()
+        .map_err(|_| conversion_error("asset height out of range".into()))?;
+    Ok(AssetView {
+        asset_id: AssetId::new(row.get::<_, String>(0)?),
+        profile_id: ProfileId::new(row.get::<_, String>(1)?),
+        media_type,
+        content_sha256: row.get(3)?,
+        byte_length,
+        width,
+        height,
+        blob_ref: row.get(7)?,
+        created_from_conversation_id: row.get::<_, Option<String>>(8)?.map(ConversationId::new),
+        created_by_agent_run_id: row.get::<_, Option<String>>(9)?.map(AgentRunId::new),
+        created_by_tool_call_id: ToolCallId::new(row.get::<_, String>(10)?),
+        created_at: row.get(11)?,
+    })
+}
+
+fn get_asset(
+    connection: &Connection,
+    profile_id: &ProfileId,
+    asset_id: &AssetId,
+) -> Result<AssetView, DomainError> {
+    let asset = connection
+        .query_row(
+            "SELECT id,profile_id,media_type,content_sha256,byte_length,width,height,blob_ref,created_from_conversation_id,created_by_agent_run_id,created_by_tool_call_id,created_at FROM assets WHERE id=?1 AND profile_id=?2",
+            params![asset_id.0,profile_id.0],
+            asset_from_row,
+        )
+        .optional()
+        .map_err(storage_domain)?
+        .ok_or(DomainError::NotFound)?;
+    if !valid_lower_sha256(&asset.content_sha256)
+        || asset.media_type != AssetMediaType::Png
+        || asset.byte_length == 0
+        || asset.byte_length > 8 * 1024 * 1024
+        || asset.width == 0
+        || asset.width > 4096
+        || asset.height == 0
+        || asset.height > 4096
+        || u64::from(asset.width) * u64::from(asset.height) > 16_777_216
+        || asset.blob_ref
+            != format!(
+                "blobs/objects/{}/{}",
+                &asset.content_sha256[..2],
+                asset.content_sha256
+            )
+    {
+        return Err(DomainError::Validation(
+            "ASSET_CONTENT_INTEGRITY_FAILED".into(),
+        ));
+    }
+    Ok(asset)
+}
+
+fn asset_for_tool_call(
+    connection: &Connection,
+    profile_id: &ProfileId,
+    tool_call_id: &ToolCallId,
+) -> Result<Option<AssetView>, DomainError> {
+    let asset_id = connection
+        .query_row(
+            "SELECT id FROM assets WHERE created_by_tool_call_id=?1 AND profile_id=?2",
+            params![tool_call_id.0, profile_id.0],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(storage_domain)?;
+    asset_id
+        .map(|asset_id| get_asset(connection, profile_id, &AssetId::new(asset_id)))
+        .transpose()
+}
+
 fn get_project(
     connection: &Connection,
     owner: &PrincipalId,
@@ -3014,6 +3229,7 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     let checksum_0007 = migration_checksum(MIGRATION_0007);
     let checksum_0008 = migration_checksum(MIGRATION_0008);
     let checksum_0009 = migration_checksum(MIGRATION_0009);
+    let checksum_0010 = migration_checksum(MIGRATION_0010);
     if checksum_0002 != MIGRATION_0002_FROZEN_SHA256 {
         return Err(StorageError::MigrationChecksum { version: 2 });
     }
@@ -3134,7 +3350,31 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
             &checksum_0009,
         )?;
     }
+    verify_applied_migration(connection, 10, MIGRATION_0010_NAME, &checksum_0010)?;
+    if !migration_exists(connection, 10)? {
+        apply_durable_source_asset_migration(connection, now, MIGRATION_0010, &checksum_0010)?;
+    }
     validate_schema(connection)?;
+    Ok(())
+}
+
+fn apply_durable_source_asset_migration(
+    connection: &mut Connection,
+    now: i64,
+    migration_sql: &str,
+    checksum: &str,
+) -> Result<(), StorageError> {
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if transaction.execute_batch(migration_sql).is_err() {
+        return Err(StorageError::MigrationIncompatibleData);
+    }
+    transaction.execute(
+        "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (10, ?1, ?2, ?3)",
+        params![MIGRATION_0010_NAME, checksum, now],
+    )?;
+    validate_schema(&transaction)?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -3695,6 +3935,84 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
         if exists != 1 {
             return Err(StorageError::OpenGate(format!(
                 "required index missing: {index}"
+            )));
+        }
+    }
+    if migration_exists(connection, 10)? {
+        validate_asset_schema(connection)?;
+    }
+    Ok(())
+}
+
+fn validate_asset_schema(connection: &Connection) -> Result<(), StorageError> {
+    let exists: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='assets'",
+        [],
+        |row| row.get(0),
+    )?;
+    if exists != 1 {
+        return Err(StorageError::OpenGate(
+            "migration validation missing table assets".into(),
+        ));
+    }
+    for column in [
+        "profile_id",
+        "media_type",
+        "content_sha256",
+        "byte_length",
+        "width",
+        "height",
+        "blob_ref",
+        "mutation_request_sha256",
+        "created_by_tool_call_id",
+    ] {
+        let count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('assets') WHERE name=?1 AND \"notnull\"=1",
+            [column],
+            |row| row.get(0),
+        )?;
+        if count != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required NOT NULL column missing: assets.{column}"
+            )));
+        }
+    }
+    let sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='assets'",
+        [],
+        |row| row.get(0),
+    )?;
+    let normalized = sql
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_uppercase();
+    for fragment in [
+        "MEDIA_TYPE = 'IMAGE/PNG'",
+        "BYTE_LENGTH BETWEEN 1 AND 8388608",
+        "WIDTH BETWEEN 1 AND 4096",
+        "HEIGHT BETWEEN 1 AND 4096",
+        "BLOB_REF = 'BLOBS/OBJECTS/'",
+    ] {
+        if !normalized.contains(fragment) {
+            return Err(StorageError::OpenGate(format!(
+                "required CHECK missing: assets:{fragment}"
+            )));
+        }
+    }
+    for (kind, name) in [
+        ("index", "idx_assets_profile_created"),
+        ("trigger", "assets_immutable_update"),
+        ("trigger", "assets_immutable_delete"),
+    ] {
+        let count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type=?1 AND name=?2",
+            params![kind, name],
+            |row| row.get(0),
+        )?;
+        if count != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required {kind} missing: {name}"
             )));
         }
     }
@@ -5906,6 +6224,115 @@ mod tests {
     }
 
     #[test]
+    fn durable_assets_are_immutable_profile_scoped_idempotent_and_restart_safe() {
+        let root = temporary_root();
+        let worker = start(&root, 1);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 10);
+        let tool = artifact_tool(
+            &handle,
+            run.id.clone(),
+            "artifact.asset.import",
+            AgentToolEffect::WorkspaceWrite,
+            20,
+        );
+        let digest = "a".repeat(64);
+        let request_digest = "b".repeat(64);
+        let request = CreateAssetRecord {
+            media_type: AssetMediaType::Png,
+            content_sha256: digest.clone(),
+            byte_length: 128,
+            width: 16,
+            height: 8,
+            blob_ref: format!("blobs/objects/aa/{digest}"),
+            conversation_id: conversation.id.clone(),
+            run_id: run.id.clone(),
+            tool_call_id: tool.id.clone(),
+            mutation_request_sha256: request_digest.clone(),
+            now: 22,
+        };
+        let created = handle.create_asset(request.clone()).unwrap();
+        assert_eq!(handle.create_asset(request.clone()).unwrap(), created);
+        let mut changed = request;
+        changed.mutation_request_sha256 = "c".repeat(64);
+        assert!(matches!(
+            handle.create_asset(changed),
+            Err(DomainError::Validation(code)) if code == "ASSET_TOOLCALL_IDEMPOTENCY_CONFLICT"
+        ));
+
+        let second_tool = artifact_tool(
+            &handle,
+            run.id.clone(),
+            "artifact.asset.import",
+            AgentToolEffect::WorkspaceWrite,
+            30,
+        );
+        let second = handle
+            .create_asset(CreateAssetRecord {
+                media_type: AssetMediaType::Png,
+                content_sha256: digest.clone(),
+                byte_length: 128,
+                width: 16,
+                height: 8,
+                blob_ref: format!("blobs/objects/aa/{digest}"),
+                conversation_id: conversation.id,
+                run_id: run.id.clone(),
+                tool_call_id: second_tool.id,
+                mutation_request_sha256: "d".repeat(64),
+                now: 32,
+            })
+            .unwrap();
+        assert_ne!(second.asset_id, created.asset_id);
+        assert_eq!(second.content_sha256, created.content_sha256);
+        assert_eq!(project.field_id, run.field_id);
+
+        let other_profile = StorageHandle {
+            sender: handle.sender.clone(),
+            local_user: handle.local_user.clone(),
+            device_id: handle.device_id.clone(),
+            profile_id: ProfileId::new("other-profile"),
+            database_path: handle.database_path.clone(),
+        };
+        assert_eq!(
+            other_profile
+                .read_asset(created.asset_id.clone())
+                .unwrap_err(),
+            DomainError::NotFound
+        );
+        drop(other_profile);
+        drop(handle);
+        drop(worker);
+
+        let reopened = start(&root, 40);
+        assert_eq!(
+            reopened
+                .handle()
+                .read_asset(created.asset_id.clone())
+                .unwrap(),
+            created
+        );
+        drop(reopened);
+
+        let connection =
+            open_connection(&PlatformPaths::from_root(root.clone()).unwrap().database).unwrap();
+        assert!(
+            connection
+                .execute(
+                    "UPDATE assets SET content_sha256=?1 WHERE id=?2",
+                    params!["e".repeat(64), created.asset_id.0]
+                )
+                .is_err()
+        );
+        assert!(
+            connection
+                .execute("DELETE FROM assets WHERE id=?1", [created.asset_id.0])
+                .is_err()
+        );
+        drop(connection);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn migration_and_bootstrap_are_idempotent_across_reopen() {
         let root = temporary_root();
         let first_user = {
@@ -6046,7 +6473,7 @@ mod tests {
             frozen_migration_checksum(MIGRATION_0006),
             MIGRATION_0006_FROZEN_SHA256
         );
-        assert_eq!(schema_version(), 9);
+        assert_eq!(schema_version(), 10);
     }
 
     #[test]
@@ -6077,7 +6504,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!((profile_before, version), (profile_after, 9));
+        assert_eq!((profile_before, version), (profile_after, 10));
         drop(connection);
         fs::remove_dir_all(&root).unwrap();
 
@@ -6232,7 +6659,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((version, migration_name.as_str()), (9, MIGRATION_0009_NAME));
+        assert_eq!(
+            (version, migration_name.as_str()),
+            (10, MIGRATION_0009_NAME)
+        );
         assert_eq!(
             artifacts_before,
             query_json_rows(
@@ -6418,6 +6848,115 @@ mod tests {
         assert_eq!((version9, replacement_table, foreign_keys), (0, 0, 1));
         assert!(artifact_sql.contains("'DOCUMENT', 'PRESENTATION'"));
         assert_eq!(foreign_key_violations, 0);
+        assert_eq!(
+            artifacts_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,profile_id,artifact_type,current_revision_id,updated_by_device,created_at,updated_at) FROM artifacts ORDER BY id",
+            )
+        );
+        assert_eq!(
+            revisions_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,artifact_id,sequence,content_json,semantic_sha256) FROM artifact_revisions ORDER BY id",
+            )
+        );
+        drop(connection);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn migration_0010_upgrades_schema_9_preserves_data_and_rolls_back_on_failure() {
+        let root = temporary_root();
+        let paths = PlatformPaths::from_root(root.clone()).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let mut connection = open_connection(&paths.database).unwrap();
+        apply_schema_through_8(&mut connection, 1);
+        apply_artifact_type_extensibility_migration(
+            &mut connection,
+            2,
+            MIGRATION_0009,
+            &migration_checksum(MIGRATION_0009),
+        )
+        .unwrap();
+        let worker = start_pre_migrated_worker(connection, paths.database.clone(), device, 3);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 10);
+        create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Document,
+            artifact_content("schema 9 survivor"),
+            "Schema 9 survivor",
+            20,
+        );
+        drop(worker);
+
+        let mut connection = open_connection(&paths.database).unwrap();
+        let artifacts_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,profile_id,artifact_type,current_revision_id,updated_by_device,created_at,updated_at) FROM artifacts ORDER BY id",
+        );
+        let revisions_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,artifact_id,sequence,content_json,semantic_sha256) FROM artifact_revisions ORDER BY id",
+        );
+        let failing_migration =
+            format!("{MIGRATION_0010}\nSELECT * FROM migration_0010_forced_failure;");
+        assert!(matches!(
+            apply_durable_source_asset_migration(
+                &mut connection,
+                30,
+                &failing_migration,
+                &migration_checksum(&failing_migration),
+            ),
+            Err(StorageError::MigrationIncompatibleData)
+        ));
+        let version_10: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version=10",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let assets_table: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='assets'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!((version_10, assets_table), (0, 0));
+        assert_eq!(
+            artifacts_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,profile_id,artifact_type,current_revision_id,updated_by_device,created_at,updated_at) FROM artifacts ORDER BY id",
+            )
+        );
+        assert_eq!(
+            revisions_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,artifact_id,sequence,content_json,semantic_sha256) FROM artifact_revisions ORDER BY id",
+            )
+        );
+
+        apply_migrations(&mut connection, 40).unwrap();
+        let max_version: i64 = connection
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let assets_table: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='assets'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!((max_version, assets_table), (10, 1));
         assert_eq!(
             artifacts_before,
             query_json_rows(

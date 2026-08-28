@@ -8,14 +8,17 @@ use crate::{
     diagram, normalize_relative, relative_text, resolve_for_write, sha256, spreadsheet,
 };
 use fielora_contracts::{
-    ArtifactContentV1, ArtifactId, ArtifactReadView, ArtifactRevisionId,
-    ArtifactType as DurableArtifactType, DiagramArtifactV1, DocumentArtifact, DocumentBlock,
-    PresentationArtifact, PresentationBlock, PresentationLayout, PresentationSlide, SlideRegion,
-    SlideSlot, SpreadsheetArtifactV1, SpreadsheetRangeEmbedV1,
+    ArtifactAssetRefV1, ArtifactContentV1, ArtifactId, ArtifactReadView, ArtifactRevisionId,
+    ArtifactType as DurableArtifactType, AssetMediaType, AssetView, DiagramArtifactV1,
+    DocumentArtifact, DocumentBlock, PresentationArtifact, PresentationBlock, PresentationLayout,
+    PresentationSlide, SlideRegion, SlideSlot, SpreadsheetArtifactV1, SpreadsheetRangeEmbedV1,
 };
 use office_oxide::docx::write::DocxWriter;
+use office_oxide::ir::{Image, ImageFormat, ImagePositioning};
 use office_oxide::pptx::write::{PptxWriter, Run, SlideData};
 use office_oxide::{Document, DocumentFormat};
+use quick_xml::Reader as XmlReader;
+use quick_xml::events::Event as XmlEvent;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -49,6 +52,10 @@ const MAX_SLIDE_TEXT_BYTES: usize = 16 * 1024;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TOOL_RESULT_BYTES: usize = 64 * 1024;
 const MAX_REFERENCES_PER_REVISION: usize = 16;
+const MAX_ASSETS_PER_REVISION: usize = 16;
+const MAX_ALT_TEXT_BYTES: usize = 1024;
+const DOCUMENT_MAX_IMAGE_WIDTH_EMU: u64 = 5_943_600;
+const DOCUMENT_MAX_IMAGE_HEIGHT_EMU: u64 = 7_315_200;
 const MAX_TRANSITIVE_DEPENDENCIES: usize = 32;
 const MAX_COMPOSITION_DEPTH: usize = 4;
 const MAX_CHILD_SEMANTIC_JSON_BYTES: usize = 1024 * 1024;
@@ -316,6 +323,11 @@ impl ArtifactDefinition {
                             );
                         }
                         DocumentBlock::SpreadsheetRange { .. } => {}
+                        DocumentBlock::InlineImage { alt_text, .. } => {
+                            if let Some(alt_text) = alt_text {
+                                expected.push(alt_text.as_str());
+                            }
+                        }
                     }
                 }
             }
@@ -638,10 +650,35 @@ fn durable_content_schema() -> Value {
         "required":["kind","source"],
         "additionalProperties":false
     });
+    let inline_image = json!({
+        "type":"object",
+        "properties":{
+            "kind":{"const":"INLINE_IMAGE"},
+            "source":{
+                "type":"object",
+                "properties":{
+                    "asset_id":{"type":"string","minLength":1,"maxLength":128},
+                    "content_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+                    "media_type":{"const":"image/png"},
+                    "byte_length":{"type":"integer","minimum":1,"maximum":8388608}
+                },
+                "required":["asset_id","content_sha256","media_type","byte_length"],
+                "additionalProperties":false
+            },
+            "size_intent":{"const":"DOCUMENT_WIDTH_BOUNDED"},
+            "alt_text":{"type":"string","minLength":1,"maxLength":1024}
+        },
+        "required":["kind","source","size_intent"],
+        "additionalProperties":false
+    });
     variants[0]["properties"]["blocks"]["items"]["oneOf"]
         .as_array_mut()
         .expect("Document block schema must remain a oneOf")
         .push(spreadsheet_range);
+    variants[0]["properties"]["blocks"]["items"]["oneOf"]
+        .as_array_mut()
+        .expect("Document block schema must remain a oneOf")
+        .push(inline_image);
     variants.push(diagram_content_schema());
     variants.push(spreadsheet_content_schema());
     json!({"oneOf":variants})
@@ -725,6 +762,121 @@ pub struct ResolvedDocumentComposition {
     pub document: DocumentArtifact,
     pub dependencies: Vec<ArtifactDependencyFact>,
     pub dependency_set_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ArtifactAssetFact {
+    pub asset_id: fielora_contracts::AssetId,
+    pub content_sha256: String,
+    pub media_type: AssetMediaType,
+    pub byte_length: u64,
+    pub width: u32,
+    pub height: u32,
+    #[serde(skip_serializing)]
+    pub blob_ref: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedDocumentAssets {
+    pub assets: Vec<ArtifactAssetFact>,
+    pub asset_set_sha256: String,
+    pub reference_count: usize,
+}
+
+/// Resolves and pins profile-scoped immutable Asset metadata. The caller owns
+/// storage scoping; missing and cross-profile IDs intentionally share one
+/// outward error.
+pub fn resolve_document_assets<F>(
+    document: &DocumentArtifact,
+    mut read_asset: F,
+) -> Result<ResolvedDocumentAssets, AgentError>
+where
+    F: FnMut(&fielora_contracts::AssetId) -> Result<AssetView, AgentError>,
+{
+    let references = document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            DocumentBlock::InlineImage { source, .. } => Some(source),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if references.len() > MAX_ASSETS_PER_REVISION {
+        return Err(AgentError::ArtifactCompositionLimitExceeded);
+    }
+    let mut unique = BTreeMap::<String, ArtifactAssetFact>::new();
+    for reference in &references {
+        validate_asset_ref(reference)?;
+        if let Some(existing) = unique.get(&reference.asset_id.0) {
+            if existing.content_sha256 != reference.content_sha256
+                || existing.media_type != reference.media_type
+                || existing.byte_length != reference.byte_length
+            {
+                return Err(AgentError::ArtifactReferenceIntegrityFailed);
+            }
+            continue;
+        }
+        let asset = read_asset(&reference.asset_id)?;
+        if asset.asset_id != reference.asset_id
+            || asset.media_type != AssetMediaType::Png
+            || asset.media_type != reference.media_type
+            || asset.content_sha256 != reference.content_sha256
+            || asset.byte_length != reference.byte_length
+            || asset.width == 0
+            || asset.width > 4096
+            || asset.height == 0
+            || asset.height > 4096
+            || u64::from(asset.width) * u64::from(asset.height) > 16_777_216
+        {
+            return Err(AgentError::ArtifactReferenceIntegrityFailed);
+        }
+        unique.insert(
+            reference.asset_id.0.clone(),
+            ArtifactAssetFact {
+                asset_id: asset.asset_id,
+                content_sha256: asset.content_sha256,
+                media_type: asset.media_type,
+                byte_length: asset.byte_length,
+                width: asset.width,
+                height: asset.height,
+                blob_ref: asset.blob_ref,
+            },
+        );
+    }
+    let assets = unique.into_values().collect::<Vec<_>>();
+    let digest_input = assets
+        .iter()
+        .map(|asset| {
+            json!({
+                "asset_id":asset.asset_id,
+                "content_sha256":asset.content_sha256,
+                "media_type":asset.media_type,
+            })
+        })
+        .collect::<Vec<_>>();
+    let encoded = serde_json::to_vec(&digest_input).map_err(|_| AgentError::IoFailed)?;
+    Ok(ResolvedDocumentAssets {
+        assets,
+        asset_set_sha256: sha256(&encoded),
+        reference_count: references.len(),
+    })
+}
+
+fn validate_asset_ref(reference: &ArtifactAssetRefV1) -> Result<(), AgentError> {
+    if reference.asset_id.0.is_empty()
+        || reference.asset_id.0.len() > 128
+        || reference.media_type != AssetMediaType::Png
+        || reference.byte_length == 0
+        || reference.byte_length > 8 * 1024 * 1024
+        || reference.content_sha256.len() != 64
+        || !reference
+            .content_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(AgentError::ArtifactReferenceIntegrityFailed);
+    }
+    Ok(())
 }
 
 /// Resolves exact Artifact revisions into one immutable render-preparation
@@ -1108,12 +1260,109 @@ pub fn export_saved_document_composition(
     output_path: &str,
     cancellation: &CommandCancellation,
 ) -> Result<ToolExecution, AgentError> {
+    let empty = ResolvedDocumentAssets {
+        assets: Vec::new(),
+        asset_set_sha256: sha256(b"[]"),
+        reference_count: 0,
+    };
+    export_saved_document_composition_with_assets(
+        runtime,
+        artifact,
+        resolved,
+        &empty,
+        output_path,
+        cancellation,
+    )
+}
+
+pub fn export_saved_document_composition_with_assets(
+    runtime: &ToolRuntime,
+    artifact: &ArtifactReadView,
+    resolved: &ResolvedDocumentComposition,
+    resolved_assets: &ResolvedDocumentAssets,
+    output_path: &str,
+    cancellation: &CommandCancellation,
+) -> Result<ToolExecution, AgentError> {
     if !matches!(artifact.revision.content, ArtifactContentV1::Document(_)) {
         return Err(AgentError::ArtifactContentInvalid);
     }
-    let mut transient = artifact.clone();
-    transient.revision.content = ArtifactContentV1::Document(resolved.document.clone());
-    let mut execution = export_saved(runtime, &transient, output_path, cancellation)?;
+    let mut snapshot = Vec::with_capacity(resolved_assets.assets.len());
+    for asset in &resolved_assets.assets {
+        let bytes = runtime.read_asset_blob(
+            &asset.blob_ref,
+            asset.byte_length,
+            &asset.content_sha256,
+            crate::png_admission::MAX_PNG_BYTES,
+        )?;
+        let structure = crate::png_admission::validate_static_structure(&bytes)
+            .map_err(|_| AgentError::AssetContentChanged)?;
+        if structure.width != asset.width || structure.height != asset.height {
+            return Err(AgentError::AssetContentChanged);
+        }
+        snapshot.push(ResolvedPngBytes {
+            fact: asset.clone(),
+            bytes,
+        });
+    }
+    let definition = ArtifactDefinition::Document(resolved.document.clone());
+    let expected_media = expected_document_media(&resolved.document, &snapshot)?;
+    let arguments = json!({
+        "type":"document",
+        "content":resolved.document,
+        "output_path":output_path,
+    });
+    let mut execution = export_with_validation(
+        runtime,
+        &arguments,
+        cancellation,
+        |_| render_document_with_assets(&resolved.document, &snapshot),
+        |definition, bytes| {
+            validate_rendered(definition, bytes)?;
+            validate_docx_png_media(bytes, &expected_media)
+        },
+        |_, _| {},
+    )?;
+    // The specialized renderer is still constrained to the exact canonical
+    // resolved Document definition used by the generic export envelope.
+    if definition.semantic_count() != resolved.document.blocks.len() {
+        return Err(AgentError::ArtifactContentInvalid);
+    }
+    let base_receipt = execution
+        .receipt
+        .as_object_mut()
+        .ok_or(AgentError::IoFailed)?;
+    base_receipt.insert("artifact_id".into(), json!(artifact.artifact.artifact_id));
+    base_receipt.insert(
+        "artifact_revision_id".into(),
+        json!(artifact.revision.revision_id),
+    );
+    base_receipt.insert(
+        "exported_revision_id".into(),
+        json!(artifact.revision.revision_id),
+    );
+    base_receipt.insert(
+        "artifact_revision".into(),
+        json!(artifact.revision.sequence),
+    );
+    base_receipt.insert("artifact_persistence".into(), json!("DURABLE"));
+    base_receipt.insert(
+        "artifact_semantic_sha256".into(),
+        json!(artifact.revision.semantic_sha256),
+    );
+    base_receipt.insert("asset_count".into(), json!(resolved_assets.reference_count));
+    base_receipt.insert(
+        "unique_asset_count".into(),
+        json!(resolved_assets.assets.len()),
+    );
+    base_receipt.insert(
+        "asset_set_sha256".into(),
+        json!(resolved_assets.asset_set_sha256),
+    );
+    base_receipt.insert("assets".into(), json!(resolved_assets.assets));
+    base_receipt.insert(
+        "asset_export_revalidation".into(),
+        json!("LENGTH_SHA256_AND_STATIC_PNG_STRUCTURE"),
+    );
     let receipt = execution
         .receipt
         .as_object_mut()
@@ -1135,6 +1384,149 @@ pub fn export_saved_document_composition(
         return Err(AgentError::IoFailed);
     }
     Ok(execution)
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedPngBytes {
+    fact: ArtifactAssetFact,
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExpectedDocumentMedia {
+    content_sha256: String,
+    width_emu: u64,
+    height_emu: u64,
+}
+
+type DocumentImageReferences = (Vec<String>, Vec<(u64, u64)>);
+
+fn expected_document_media(
+    document: &DocumentArtifact,
+    assets: &[ResolvedPngBytes],
+) -> Result<Vec<ExpectedDocumentMedia>, AgentError> {
+    let by_id = assets
+        .iter()
+        .map(|asset| (asset.fact.asset_id.0.as_str(), asset))
+        .collect::<BTreeMap<_, _>>();
+    document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            DocumentBlock::InlineImage { source, .. } => Some(source),
+            _ => None,
+        })
+        .map(|source| {
+            let asset = by_id
+                .get(source.asset_id.0.as_str())
+                .ok_or(AgentError::ArtifactReferenceNotFound)?;
+            if asset.fact.content_sha256 != source.content_sha256
+                || asset.fact.byte_length != source.byte_length
+                || asset.fact.media_type != source.media_type
+            {
+                return Err(AgentError::ArtifactReferenceIntegrityFailed);
+            }
+            let (width_emu, height_emu) =
+                document_image_extent(asset.fact.width, asset.fact.height)?;
+            Ok(ExpectedDocumentMedia {
+                content_sha256: asset.fact.content_sha256.clone(),
+                width_emu,
+                height_emu,
+            })
+        })
+        .collect()
+}
+
+fn document_image_extent(width: u32, height: u32) -> Result<(u64, u64), AgentError> {
+    let mut width_emu = u64::from(width)
+        .checked_mul(9_525)
+        .ok_or(AgentError::ArtifactContentInvalid)?;
+    let mut height_emu = u64::from(height)
+        .checked_mul(9_525)
+        .ok_or(AgentError::ArtifactContentInvalid)?;
+    if width_emu > DOCUMENT_MAX_IMAGE_WIDTH_EMU {
+        height_emu = height_emu
+            .checked_mul(DOCUMENT_MAX_IMAGE_WIDTH_EMU)
+            .and_then(|value| value.checked_div(width_emu))
+            .ok_or(AgentError::ArtifactContentInvalid)?;
+        width_emu = DOCUMENT_MAX_IMAGE_WIDTH_EMU;
+    }
+    if height_emu > DOCUMENT_MAX_IMAGE_HEIGHT_EMU {
+        width_emu = width_emu
+            .checked_mul(DOCUMENT_MAX_IMAGE_HEIGHT_EMU)
+            .and_then(|value| value.checked_div(height_emu))
+            .ok_or(AgentError::ArtifactContentInvalid)?;
+        height_emu = DOCUMENT_MAX_IMAGE_HEIGHT_EMU;
+    }
+    if width_emu == 0 || height_emu == 0 {
+        return Err(AgentError::ArtifactContentInvalid);
+    }
+    Ok((width_emu, height_emu))
+}
+
+fn render_document_with_assets(
+    document: &DocumentArtifact,
+    assets: &[ResolvedPngBytes],
+) -> Result<RenderedArtifact, AgentError> {
+    let by_id = assets
+        .iter()
+        .map(|asset| (asset.fact.asset_id.0.as_str(), asset))
+        .collect::<BTreeMap<_, _>>();
+    let mut writer = DocxWriter::new();
+    if let Some(title) = &document.title {
+        writer.add_heading(title, 1);
+    }
+    for block in &document.blocks {
+        match block {
+            DocumentBlock::Heading { level, text } => {
+                writer.add_heading(text, *level);
+            }
+            DocumentBlock::Paragraph { text } => {
+                writer.add_paragraph(text);
+            }
+            DocumentBlock::BulletList { items } => {
+                let items = items.iter().map(String::as_str).collect::<Vec<_>>();
+                writer.add_list(&items, false);
+            }
+            DocumentBlock::Table { rows } => {
+                let rows = rows
+                    .iter()
+                    .map(|row| row.iter().map(String::as_str).collect::<Vec<_>>())
+                    .collect::<Vec<_>>();
+                writer.add_table(&rows);
+            }
+            DocumentBlock::SpreadsheetRange { .. } => {
+                return Err(AgentError::ArtifactContentInvalid);
+            }
+            DocumentBlock::InlineImage {
+                source, alt_text, ..
+            } => {
+                let asset = by_id
+                    .get(source.asset_id.0.as_str())
+                    .ok_or(AgentError::ArtifactReferenceNotFound)?;
+                let (width_emu, height_emu) =
+                    document_image_extent(asset.fact.width, asset.fact.height)?;
+                writer.add_ir_image(&Image {
+                    alt_text: alt_text.clone(),
+                    data: Some(asset.bytes.clone()),
+                    format: Some(ImageFormat::Png),
+                    display_width_emu: Some(width_emu),
+                    display_height_emu: Some(height_emu),
+                    pixel_width: Some(asset.fact.width),
+                    pixel_height: Some(asset.fact.height),
+                    decorative: alt_text.is_none(),
+                    positioning: ImagePositioning::Inline,
+                });
+            }
+        }
+    }
+    let mut output = Cursor::new(Vec::new());
+    writer
+        .write_to(&mut output)
+        .map_err(|_| AgentError::IoFailed)?;
+    Ok(RenderedArtifact {
+        bytes: output.into_inner(),
+    })
 }
 
 fn export_saved_spreadsheet(
@@ -1389,6 +1781,29 @@ where
     R: FnOnce(&ArtifactDefinition) -> Result<RenderedArtifact, AgentError>,
     H: Fn(ExportStage, &Path),
 {
+    export_with_validation(
+        runtime,
+        arguments,
+        cancellation,
+        renderer,
+        validate_rendered,
+        hook,
+    )
+}
+
+fn export_with_validation<R, V, H>(
+    runtime: &ToolRuntime,
+    arguments: &Value,
+    cancellation: &CommandCancellation,
+    renderer: R,
+    validator: V,
+    hook: H,
+) -> Result<ToolExecution, AgentError>
+where
+    R: FnOnce(&ArtifactDefinition) -> Result<RenderedArtifact, AgentError>,
+    V: Fn(&ArtifactDefinition, &[u8]) -> Result<(), AgentError>,
+    H: Fn(ExportStage, &Path),
+{
     let guard = ExportGuard::new(cancellation);
     guard.check()?;
     let encoded_arguments =
@@ -1425,7 +1840,7 @@ where
     if rendered.bytes.is_empty() || rendered.bytes.len() > MAX_OUTPUT_BYTES {
         return Err(AgentError::FileTooLarge);
     }
-    validate_rendered(&definition, &rendered.bytes)?;
+    validator(&definition, &rendered.bytes)?;
     guard.check()?;
 
     if let Some(parent) = target.parent() {
@@ -1443,7 +1858,7 @@ where
     let final_check = if final_bytes.len() == rendered.bytes.len()
         && sha256(&final_bytes) == sha256(&rendered.bytes)
     {
-        validate_rendered(&definition, &final_bytes)
+        validator(&definition, &final_bytes)
     } else {
         Err(AgentError::IoFailed)
     };
@@ -1610,6 +2025,29 @@ fn validate_definition(definition: &ArtifactDefinition) -> Result<(), AgentError
                             }
                         }
                     }
+                    DocumentBlock::InlineImage {
+                        source, alt_text, ..
+                    } => {
+                        if source.asset_id.0.is_empty()
+                            || source.asset_id.0.len() > 128
+                            || source.media_type != AssetMediaType::Png
+                            || source.byte_length == 0
+                            || source.byte_length > 8 * 1024 * 1024
+                            || source.content_sha256.len() != 64
+                            || !source
+                                .content_sha256
+                                .bytes()
+                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                        {
+                            return Err(AgentError::ToolArgumentsInvalid);
+                        }
+                        if let Some(alt_text) = alt_text {
+                            if alt_text.trim().is_empty() || alt_text.len() > MAX_ALT_TEXT_BYTES {
+                                return Err(AgentError::ToolArgumentsInvalid);
+                            }
+                            admit_text(alt_text, &mut text_bytes)?;
+                        }
+                    }
                 }
             }
         }
@@ -1744,6 +2182,9 @@ fn render(definition: &ArtifactDefinition) -> Result<RenderedArtifact, AgentErro
                         writer.add_table(&rows);
                     }
                     DocumentBlock::SpreadsheetRange { .. } => {
+                        return Err(AgentError::ArtifactContentInvalid);
+                    }
+                    DocumentBlock::InlineImage { .. } => {
                         return Err(AgentError::ArtifactContentInvalid);
                     }
                 }
@@ -2302,6 +2743,287 @@ fn validate_rendered(definition: &ArtifactDefinition, bytes: &[u8]) -> Result<()
     Ok(())
 }
 
+/// Independent production reopen for the exact DOCX PNG media graph. This is
+/// intentionally narrower than the broader office-writer probe: it validates
+/// only facts that form the durable Asset export boundary.
+fn validate_docx_png_media(
+    bytes: &[u8],
+    expected: &[ExpectedDocumentMedia],
+) -> Result<(), AgentError> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|_| AgentError::IoFailed)?;
+    let mut entries = BTreeMap::<String, Vec<u8>>::new();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|_| AgentError::IoFailed)?;
+        if entry.is_dir() || entry.size() > MAX_OUTPUT_BYTES as u64 {
+            if entry.is_dir() {
+                continue;
+            }
+            return Err(AgentError::IoFailed);
+        }
+        let name = entry.name().replace('\\', "/");
+        if name.starts_with('/')
+            || name.split('/').any(|part| part == "..")
+            || entries.contains_key(&name)
+        {
+            return Err(AgentError::IoFailed);
+        }
+        let mut value = Vec::with_capacity(entry.size() as usize);
+        entry
+            .read_to_end(&mut value)
+            .map_err(|_| AgentError::IoFailed)?;
+        entries.insert(name, value);
+    }
+    let content_types = entries
+        .get("[Content_Types].xml")
+        .ok_or(AgentError::IoFailed)?;
+    validate_xml(content_types)?;
+    if expected.is_empty() {
+        if entries.keys().any(|name| name.starts_with("word/media/")) {
+            return Err(AgentError::IoFailed);
+        }
+        if let Some(rels) = entries.get("word/_rels/document.xml.rels")
+            && !parse_image_relationships(rels)?.is_empty()
+        {
+            return Err(AgentError::IoFailed);
+        }
+        let document = entries
+            .get("word/document.xml")
+            .ok_or(AgentError::IoFailed)?;
+        let (embedded_ids, extents) = parse_document_image_refs(document)?;
+        if !embedded_ids.is_empty() || !extents.is_empty() {
+            return Err(AgentError::IoFailed);
+        }
+        return Ok(());
+    }
+    let (default_png_content_type, content_type_overrides) =
+        parse_docx_content_types(content_types)?;
+    let rels = entries
+        .get("word/_rels/document.xml.rels")
+        .ok_or(AgentError::IoFailed)?;
+    let relationships = parse_image_relationships(rels)?;
+    let document = entries
+        .get("word/document.xml")
+        .ok_or(AgentError::IoFailed)?;
+    let (embedded_ids, extents) = parse_document_image_refs(document)?;
+    if embedded_ids.len() != expected.len()
+        || extents.len() != expected.len()
+        || relationships.len() != expected.len()
+    {
+        return Err(AgentError::IoFailed);
+    }
+    let mut referenced_media = BTreeSet::new();
+    for (index, ((relationship_id, extent), expected)) in embedded_ids
+        .iter()
+        .zip(extents.iter())
+        .zip(expected.iter())
+        .enumerate()
+    {
+        let target = relationships
+            .get(relationship_id)
+            .ok_or(AgentError::IoFailed)?;
+        let media_path = normalize_docx_media_target(target)?;
+        let media = entries.get(&media_path).ok_or(AgentError::IoFailed)?;
+        let exact_content_type = content_type_overrides
+            .get(&format!("/{media_path}"))
+            .map(String::as_str)
+            .unwrap_or(if default_png_content_type {
+                "image/png"
+            } else {
+                ""
+            });
+        if sha256(media) != expected.content_sha256
+            || *extent != (expected.width_emu, expected.height_emu)
+            || !media_path.starts_with("word/media/")
+            || !media_path.ends_with(".png")
+            || exact_content_type != "image/png"
+            || index >= MAX_ASSETS_PER_REVISION
+        {
+            return Err(AgentError::IoFailed);
+        }
+        referenced_media.insert(media_path);
+    }
+    let packaged_media = entries
+        .keys()
+        .filter(|name| name.starts_with("word/media/"))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if packaged_media != referenced_media {
+        return Err(AgentError::IoFailed);
+    }
+    Ok(())
+}
+
+fn validate_xml(bytes: &[u8]) -> Result<(), AgentError> {
+    let mut reader = XmlReader::from_reader(bytes);
+    reader.config_mut().trim_text(true);
+    loop {
+        if reader.read_event().map_err(|_| AgentError::IoFailed)? == XmlEvent::Eof {
+            return Ok(());
+        }
+    }
+}
+
+fn parse_docx_content_types(bytes: &[u8]) -> Result<(bool, BTreeMap<String, String>), AgentError> {
+    let mut reader = XmlReader::from_reader(bytes);
+    reader.config_mut().trim_text(true);
+    let mut default_png = None;
+    let mut overrides = BTreeMap::new();
+    loop {
+        match reader.read_event().map_err(|_| AgentError::IoFailed)? {
+            XmlEvent::Empty(event) | XmlEvent::Start(event) => {
+                let is_default = event.name().as_ref().ends_with(b"Default");
+                let is_override = event.name().as_ref().ends_with(b"Override");
+                if !is_default && !is_override {
+                    continue;
+                }
+                let mut extension = None;
+                let mut part_name = None;
+                let mut content_type = None;
+                for attribute in event.attributes().with_checks(true) {
+                    let attribute = attribute.map_err(|_| AgentError::IoFailed)?;
+                    let value = std::str::from_utf8(attribute.value.as_ref())
+                        .map_err(|_| AgentError::IoFailed)?
+                        .to_owned();
+                    match attribute.key.as_ref() {
+                        b"Extension" => extension = Some(value),
+                        b"PartName" => part_name = Some(value),
+                        b"ContentType" => content_type = Some(value),
+                        _ => {}
+                    }
+                }
+                if is_default && extension.as_deref() == Some("png") {
+                    let value = content_type.ok_or(AgentError::IoFailed)?;
+                    if default_png.replace(value == "image/png").is_some() {
+                        return Err(AgentError::IoFailed);
+                    }
+                } else if is_override {
+                    let part_name = part_name.ok_or(AgentError::IoFailed)?;
+                    let content_type = content_type.ok_or(AgentError::IoFailed)?;
+                    if overrides.insert(part_name, content_type).is_some() {
+                        return Err(AgentError::IoFailed);
+                    }
+                }
+            }
+            XmlEvent::Eof => break,
+            _ => {}
+        }
+    }
+    Ok((default_png.unwrap_or(false), overrides))
+}
+
+fn parse_image_relationships(bytes: &[u8]) -> Result<BTreeMap<String, String>, AgentError> {
+    let mut reader = XmlReader::from_reader(bytes);
+    reader.config_mut().trim_text(true);
+    let mut images = BTreeMap::new();
+    loop {
+        match reader.read_event().map_err(|_| AgentError::IoFailed)? {
+            XmlEvent::Empty(event) | XmlEvent::Start(event)
+                if event.name().as_ref().ends_with(b"Relationship") =>
+            {
+                let mut id = None;
+                let mut target = None;
+                let mut relation_type = None;
+                let mut target_mode = None;
+                for attribute in event.attributes().with_checks(true) {
+                    let attribute = attribute.map_err(|_| AgentError::IoFailed)?;
+                    let value = std::str::from_utf8(attribute.value.as_ref())
+                        .map_err(|_| AgentError::IoFailed)?
+                        .to_owned();
+                    match attribute.key.as_ref() {
+                        b"Id" => id = Some(value),
+                        b"Target" => target = Some(value),
+                        b"Type" => relation_type = Some(value),
+                        b"TargetMode" => target_mode = Some(value),
+                        _ => {}
+                    }
+                }
+                if relation_type
+                    .as_deref()
+                    .is_some_and(|value| value.ends_with("/image"))
+                {
+                    if target_mode.is_some() {
+                        return Err(AgentError::IoFailed);
+                    }
+                    let id = id.ok_or(AgentError::IoFailed)?;
+                    let target = target.ok_or(AgentError::IoFailed)?;
+                    if images.insert(id, target).is_some() {
+                        return Err(AgentError::IoFailed);
+                    }
+                }
+            }
+            XmlEvent::Eof => break,
+            _ => {}
+        }
+    }
+    Ok(images)
+}
+
+fn parse_document_image_refs(bytes: &[u8]) -> Result<DocumentImageReferences, AgentError> {
+    let mut reader = XmlReader::from_reader(bytes);
+    reader.config_mut().trim_text(true);
+    let mut embeds = Vec::new();
+    let mut extents = Vec::new();
+    loop {
+        match reader.read_event().map_err(|_| AgentError::IoFailed)? {
+            XmlEvent::Empty(event) | XmlEvent::Start(event) => {
+                let name = event.name();
+                if name.as_ref().ends_with(b"blip") {
+                    for attribute in event.attributes().with_checks(true) {
+                        let attribute = attribute.map_err(|_| AgentError::IoFailed)?;
+                        if attribute.key.as_ref().ends_with(b"embed") {
+                            embeds.push(
+                                std::str::from_utf8(attribute.value.as_ref())
+                                    .map_err(|_| AgentError::IoFailed)?
+                                    .to_owned(),
+                            );
+                        }
+                    }
+                } else if name.as_ref().ends_with(b"extent") {
+                    let mut cx = None;
+                    let mut cy = None;
+                    for attribute in event.attributes().with_checks(true) {
+                        let attribute = attribute.map_err(|_| AgentError::IoFailed)?;
+                        let value = std::str::from_utf8(attribute.value.as_ref())
+                            .map_err(|_| AgentError::IoFailed)?
+                            .parse::<u64>()
+                            .map_err(|_| AgentError::IoFailed)?;
+                        match attribute.key.as_ref() {
+                            b"cx" => cx = Some(value),
+                            b"cy" => cy = Some(value),
+                            _ => {}
+                        }
+                    }
+                    if let (Some(cx), Some(cy)) = (cx, cy)
+                        && cx > 0
+                        && cy > 0
+                        && cx <= DOCUMENT_MAX_IMAGE_WIDTH_EMU
+                        && cy <= DOCUMENT_MAX_IMAGE_HEIGHT_EMU
+                    {
+                        extents.push((cx, cy));
+                    }
+                }
+            }
+            XmlEvent::Eof => break,
+            _ => {}
+        }
+    }
+    Ok((embeds, extents))
+}
+
+fn normalize_docx_media_target(target: &str) -> Result<String, AgentError> {
+    let target = target.replace('\\', "/");
+    if target.is_empty()
+        || target.starts_with('/')
+        || target.contains("://")
+        || target
+            .split('/')
+            .any(|part| part.is_empty() || part == "..")
+    {
+        return Err(AgentError::IoFailed);
+    }
+    Ok(format!("word/{target}"))
+}
+
 fn escape_xml_text(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -2346,6 +3068,338 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let runtime = ToolRuntime::new(&root, &root.join("tool-artifacts")).unwrap();
         (root, runtime)
+    }
+
+    fn png_fixture(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            let pixels = (0..u64::from(width) * u64::from(height))
+                .flat_map(|_| rgba)
+                .collect::<Vec<_>>();
+            writer.write_image_data(&pixels).unwrap();
+        }
+        bytes
+    }
+
+    fn docx_media_digests(bytes: &[u8]) -> Vec<String> {
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut media = Vec::new();
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).unwrap();
+            if entry.name().starts_with("word/media/") {
+                let name = entry.name().to_owned();
+                let mut bytes = Vec::new();
+                entry.read_to_end(&mut bytes).unwrap();
+                media.push((name, sha256(&bytes)));
+            }
+        }
+        media.sort_by(|left, right| left.0.cmp(&right.0));
+        media.into_iter().map(|(_, digest)| digest).collect()
+    }
+
+    #[test]
+    fn document_inline_png_uses_exact_immutable_asset_and_production_media_reopen() {
+        let (root, runtime) = fixture_runtime();
+        let runtime = runtime.with_content_blob_root(root.join("library"));
+        let png = crate::png_admission::admit(png_fixture(32, 24, [20, 80, 160, 255])).unwrap();
+        let blob_ref = runtime
+            .put_asset_blob(png.bytes(), &png.content_sha256)
+            .unwrap();
+        let asset = AssetView {
+            asset_id: fielora_contracts::AssetId::new("asset-a"),
+            profile_id: ProfileId::new("profile"),
+            media_type: AssetMediaType::Png,
+            content_sha256: png.content_sha256.clone(),
+            byte_length: png.byte_length,
+            width: png.width,
+            height: png.height,
+            blob_ref,
+            created_from_conversation_id: None,
+            created_by_agent_run_id: None,
+            created_by_tool_call_id: ToolCallId::new("asset-tool"),
+            created_at: 1,
+        };
+        let png_b = crate::png_admission::admit(png_fixture(24, 32, [180, 40, 20, 255])).unwrap();
+        let blob_ref_b = runtime
+            .put_asset_blob(png_b.bytes(), &png_b.content_sha256)
+            .unwrap();
+        let asset_b = AssetView {
+            asset_id: fielora_contracts::AssetId::new("asset-b"),
+            profile_id: ProfileId::new("profile"),
+            media_type: AssetMediaType::Png,
+            content_sha256: png_b.content_sha256.clone(),
+            byte_length: png_b.byte_length,
+            width: png_b.width,
+            height: png_b.height,
+            blob_ref: blob_ref_b,
+            created_from_conversation_id: None,
+            created_by_agent_run_id: None,
+            created_by_tool_call_id: ToolCallId::new("asset-tool-b"),
+            created_at: 2,
+        };
+        let reference = ArtifactAssetRefV1 {
+            asset_id: asset.asset_id.clone(),
+            content_sha256: asset.content_sha256.clone(),
+            media_type: AssetMediaType::Png,
+            byte_length: asset.byte_length,
+        };
+        let reference_b = ArtifactAssetRefV1 {
+            asset_id: asset_b.asset_id.clone(),
+            content_sha256: asset_b.content_sha256.clone(),
+            media_type: AssetMediaType::Png,
+            byte_length: asset_b.byte_length,
+        };
+        let document = DocumentArtifact {
+            title: Some("Durable PNG document".into()),
+            blocks: vec![
+                DocumentBlock::Heading {
+                    level: 1,
+                    text: "Before image".into(),
+                },
+                DocumentBlock::InlineImage {
+                    source: reference.clone(),
+                    size_intent: fielora_contracts::DocumentImageSizeIntentV1::DocumentWidthBounded,
+                    alt_text: Some("Exact durable blue fixture".into()),
+                },
+                DocumentBlock::Table {
+                    rows: vec![vec!["After".into(), "Table".into()]],
+                },
+                DocumentBlock::InlineImage {
+                    source: reference,
+                    size_intent: fielora_contracts::DocumentImageSizeIntentV1::DocumentWidthBounded,
+                    alt_text: None,
+                },
+                DocumentBlock::InlineImage {
+                    source: reference_b,
+                    size_intent: fielora_contracts::DocumentImageSizeIntentV1::DocumentWidthBounded,
+                    alt_text: Some("Second exact durable fixture".into()),
+                },
+            ],
+        };
+        let canonical = canonicalize_content(
+            DurableArtifactType::Document,
+            serde_json::to_value(&document).unwrap(),
+        )
+        .unwrap();
+        let artifact_id = ArtifactId::new("document-a");
+        let revision_id = ArtifactRevisionId::new("document-r1");
+        let artifact = ArtifactReadView {
+            artifact: ArtifactView {
+                artifact_id: artifact_id.clone(),
+                profile_id: ProfileId::new("profile"),
+                artifact_type: DurableArtifactType::Document,
+                title: document.title.clone(),
+                project_field_id: None,
+                current_revision_id: revision_id.clone(),
+                created_from_conversation_id: None,
+                created_by_agent_run_id: None,
+                updated_by_device: DeviceId::new("device"),
+                created_at: 1,
+                updated_at: 1,
+            },
+            revision: ArtifactRevisionView {
+                revision_id,
+                artifact_id,
+                sequence: 1,
+                parent_revision_id: None,
+                mutation_kind: ArtifactMutationKind::Create,
+                content_schema_version: 1,
+                semantic_sha256: canonical.semantic_sha256,
+                content: canonical.content,
+                created_from_conversation_id: None,
+                created_by_agent_run_id: None,
+                created_by_tool_call_id: ToolCallId::new("document-tool"),
+                created_at: 1,
+            },
+        };
+        let composition = resolve_document_composition(&document, |_, _| unreachable!()).unwrap();
+        let assets = resolve_document_assets(&document, |asset_id| {
+            if asset_id == &asset.asset_id {
+                Ok(asset.clone())
+            } else if asset_id == &asset_b.asset_id {
+                Ok(asset_b.clone())
+            } else {
+                Err(AgentError::AssetNotFound)
+            }
+        })
+        .unwrap();
+        let mut mismatched = document.clone();
+        let DocumentBlock::InlineImage { source, .. } = &mut mismatched.blocks[1] else {
+            unreachable!()
+        };
+        source.content_sha256 = "0".repeat(64);
+        assert_eq!(
+            resolve_document_assets(&mismatched, |_| Ok(asset.clone())).unwrap_err(),
+            AgentError::ArtifactReferenceIntegrityFailed
+        );
+        assert_eq!(
+            resolve_document_assets(&document, |_| Err(AgentError::AssetNotFound)).unwrap_err(),
+            AgentError::AssetNotFound
+        );
+        let snapshot = assets
+            .assets
+            .iter()
+            .map(|fact| ResolvedPngBytes {
+                fact: fact.clone(),
+                bytes: if fact.asset_id == asset.asset_id {
+                    png.bytes().to_vec()
+                } else {
+                    png_b.bytes().to_vec()
+                },
+            })
+            .collect::<Vec<_>>();
+        let rendered = render_document_with_assets(&document, &snapshot).unwrap();
+        validate_rendered(
+            &ArtifactDefinition::Document(document.clone()),
+            &rendered.bytes,
+        )
+        .expect("generic DOCX reopen");
+        let preflight_media = expected_document_media(&document, &snapshot).unwrap();
+        validate_docx_png_media(&rendered.bytes, &preflight_media).expect("PNG media reopen");
+        let execution = export_saved_document_composition_with_assets(
+            &runtime,
+            &artifact,
+            &composition,
+            &assets,
+            "inline-images.docx",
+            &CommandCancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(execution.receipt["asset_count"], 3);
+        assert_eq!(execution.receipt["unique_asset_count"], 2);
+        assert_eq!(
+            execution.receipt["asset_export_revalidation"],
+            "LENGTH_SHA256_AND_STATIC_PNG_STRUCTURE"
+        );
+        let bytes = fs::read(root.join("inline-images.docx")).unwrap();
+        let expected = expected_document_media(&document, &snapshot).unwrap();
+        validate_docx_png_media(&bytes, &expected).unwrap();
+
+        let history_document = |source: ArtifactAssetRefV1, label: &str| DocumentArtifact {
+            title: Some(label.into()),
+            blocks: vec![DocumentBlock::InlineImage {
+                source,
+                size_intent: fielora_contracts::DocumentImageSizeIntentV1::DocumentWidthBounded,
+                alt_text: Some(label.into()),
+            }],
+        };
+        let document_r1 = history_document(
+            ArtifactAssetRefV1 {
+                asset_id: asset.asset_id.clone(),
+                content_sha256: asset.content_sha256.clone(),
+                media_type: asset.media_type,
+                byte_length: asset.byte_length,
+            },
+            "Historical R1",
+        );
+        let document_r2 = history_document(
+            ArtifactAssetRefV1 {
+                asset_id: asset_b.asset_id.clone(),
+                content_sha256: asset_b.content_sha256.clone(),
+                media_type: asset_b.media_type,
+                byte_length: asset_b.byte_length,
+            },
+            "Historical R2",
+        );
+        let r1_canonical = canonicalize_content(
+            DurableArtifactType::Document,
+            serde_json::to_value(&document_r1).unwrap(),
+        )
+        .unwrap();
+        let r2_canonical = canonicalize_content(
+            DurableArtifactType::Document,
+            serde_json::to_value(&document_r2).unwrap(),
+        )
+        .unwrap();
+        let r1_id = ArtifactRevisionId::new("history-r1");
+        let r2_id = ArtifactRevisionId::new("history-r2");
+        let mut history_r1 = artifact.clone();
+        history_r1.artifact.current_revision_id = r2_id.clone();
+        history_r1.revision.revision_id = r1_id.clone();
+        history_r1.revision.sequence = 1;
+        history_r1.revision.semantic_sha256 = r1_canonical.semantic_sha256;
+        history_r1.revision.content = r1_canonical.content;
+        let mut history_r2 = history_r1.clone();
+        history_r2.revision.revision_id = r2_id;
+        history_r2.revision.sequence = 2;
+        history_r2.revision.parent_revision_id = Some(r1_id);
+        history_r2.revision.mutation_kind = ArtifactMutationKind::Update;
+        history_r2.revision.semantic_sha256 = r2_canonical.semantic_sha256;
+        history_r2.revision.content = r2_canonical.content;
+        for (view, document, output) in [
+            (&history_r1, &document_r1, "history-r1.docx"),
+            (&history_r2, &document_r2, "history-r2.docx"),
+            (&history_r1, &document_r1, "history-r1-again.docx"),
+        ] {
+            let composition =
+                resolve_document_composition(document, |_, _| unreachable!()).unwrap();
+            let assets = resolve_document_assets(document, |asset_id| {
+                if asset_id == &asset.asset_id {
+                    Ok(asset.clone())
+                } else if asset_id == &asset_b.asset_id {
+                    Ok(asset_b.clone())
+                } else {
+                    Err(AgentError::AssetNotFound)
+                }
+            })
+            .unwrap();
+            export_saved_document_composition_with_assets(
+                &runtime,
+                view,
+                &composition,
+                &assets,
+                output,
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            docx_media_digests(&fs::read(root.join("history-r1.docx")).unwrap()),
+            vec![asset.content_sha256.clone()]
+        );
+        assert_eq!(
+            docx_media_digests(&fs::read(root.join("history-r2.docx")).unwrap()),
+            vec![asset_b.content_sha256.clone()]
+        );
+        assert_eq!(
+            docx_media_digests(&fs::read(root.join("history-r1-again.docx")).unwrap()),
+            vec![asset.content_sha256.clone()]
+        );
+
+        let asset_blob_path = root.join("library").join(&asset.blob_ref);
+        fs::write(&asset_blob_path, b"corrupt PNG bytes").unwrap();
+        assert_eq!(
+            export_saved_document_composition_with_assets(
+                &runtime,
+                &artifact,
+                &composition,
+                &assets,
+                "corrupt-asset.docx",
+                &CommandCancellation::default(),
+            )
+            .unwrap_err(),
+            AgentError::AssetContentChanged
+        );
+        assert!(!root.join("corrupt-asset.docx").exists());
+        fs::remove_file(asset_blob_path).unwrap();
+        assert_eq!(
+            export_saved_document_composition_with_assets(
+                &runtime,
+                &artifact,
+                &composition,
+                &assets,
+                "missing-asset.docx",
+                &CommandCancellation::default(),
+            )
+            .unwrap_err(),
+            AgentError::AssetContentChanged
+        );
+        assert!(!root.join("missing-asset.docx").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn spreadsheet_revision_fixture() -> ArtifactReadView {

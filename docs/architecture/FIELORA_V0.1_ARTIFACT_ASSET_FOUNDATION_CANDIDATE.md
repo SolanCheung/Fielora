@@ -2,18 +2,106 @@
 
 **Status:** `DRAFT / CANDIDATE / NOT FROZEN`
 
-**Implementation:** `NOT AUTHORIZED`
+**Implementation:** `PNG + DURABLE SOURCE ASSET FIRST SLICE IMPLEMENTED / TARGETED VALIDATED`
 
 **Date:** 2026-08-28
 
-**Audited baseline:** `phase/complete-agent-v0.1@9d4ff1ed570513b0f3ba3368825329da2db098d2`
+**Audited baseline:** `phase/complete-agent-v0.1@a01a8fcf8b3894b56ce3c5b8005088bbe3d220f6`
 
-**Database schema:** `9`
+**Database schema:** `10`
 
-This document is a docs-only architecture candidate. It does not authorize an
-Asset table, migration, Tool, image decoder, Office image adapter, Diagram
-composition, UI, dependency, cache, or product activation. Repository facts
-and the current `Model + Harness + Tools` architecture remain authoritative.
+This remains a non-Frozen architecture Candidate. The separately authorized
+first implementation slice is now represented below as repository reality;
+it does not authorize Presentation images, Diagram raster/composition, UI,
+delete/GC, remote images, or further product activation. Repository facts and
+the current `Model + Harness + Tools` architecture remain authoritative.
+
+## FIRST_SLICE_IMPLEMENTATION_REALITY
+
+This section supersedes pre-implementation status statements retained later in
+the Candidate as audit history.
+
+```text
+External/Project PNG
+  -> artifact.asset.import (existing ToolCall / PolicyEngine / Approval)
+  -> project-relative bounded regular-file read
+  -> Fielora strict PNG scanner + png 0.18.1 strict full decode
+  -> exact immutable bytes in LibraryRoot/blobs/objects/<prefix>/<sha256>
+  -> schema-10 profile-owned assets metadata (no LibraryObject)
+  -> ArtifactAssetRefV1 / Document INLINE_IMAGE
+  -> mutation-time exact Asset admission
+  -> saved exact Document revision render snapshot
+  -> office_oxide DOCX inline PNG writer
+  -> independent final package/media/digest/extent reopen
+  -> existing bounded ToolCall receipt; no Verification PASS
+```
+
+Implemented facts:
+
+- exact dependency `png = "=0.18.1"`, `default-features = false`; lockfile adds
+  only `png 0.18.1` and `fdeflate 0.3.7` as new packages;
+- encoded input is capped at 8 MiB before decoder allocation; scanner caps 128
+  chunks, exact PNG signature/IHDR/contiguous IDAT/final IEND/EOF, verifies CRC,
+  and rejects APNG, Adam7, palette/indexed/16-bit, textual/ICC/EXIF, private and
+  unknown chunks;
+- decoder explicitly verifies CRC and Adler, performs one complete static
+  decode, and is bounded to 4,096 x 4,096, 16,777,216 pixels and 64 MiB decoded
+  output; decoded pixels are immediately discarded;
+- original encoded bytes are the content digest authority; no re-encode,
+  decoded cache, SQLite BLOB, Artifact base64, Project copy, or second blob
+  root exists;
+- `AssetId` is opaque logical identity and differs from SHA-256 byte identity;
+  same ToolCall/request replays one Asset, while a new ToolCall may create a new
+  Asset sharing the same content blob;
+- migration `0010_durable_source_assets.sql` adds only immutable source Asset
+  metadata plus index/update-delete denial triggers; migrations 0001-0009 are
+  unchanged;
+- `ArtifactAssetRefV1` pins AssetId, exact digest, `image/png`, and byte length;
+  `INLINE_IMAGE` stores only that ref, `DOCUMENT_WIDTH_BOUNDED`, and optional
+  bounded alt text;
+- create/update resolves current-Profile Asset metadata before parent revision
+  commit; missing and cross-Profile IDs use the same not-found class;
+- export rechecks blob length/SHA-256 plus Fielora static PNG structure and
+  dimensions. Creation remains the full-decode boundary;
+- DOCX media validation reopens final bytes, resolves internal image
+  relationships, content type, drawing references, bounded extents, and exact
+  embedded content digests. Duplicate media parts for repeated refs are allowed;
+- receipts contain bounded Asset identity/digest/media/size/dimensions and a
+  canonical sorted Asset-set digest, never source path, bytes, decoded pixels,
+  EXIF, credentials, prompt, or model context;
+- successful admission/embedding is structural execution evidence only and
+  creates no semantic Verification PASS.
+
+First-slice exclusions remain: JPEG/SVG/WebP/GIF, Presentation image blocks,
+Diagram raster/composition, UI, Asset read-bytes Tool, delete/GC, remote images,
+Marketplace/runtime work, and any new permission/receipt/Verification system.
+
+## FIRST_SLICE_TARGETED_EVIDENCE
+
+Validated on 2026-08-28 against the implementation baseline above:
+
+- `cargo test -p fielora-agent --lib`: `123 passed`;
+- `cargo test -p fielora-storage --lib`: `24 passed`, including fresh schema
+  10, exact schema 9 -> 10 upgrade, failure rollback, old Artifact data
+  preservation, immutable/profile-scoped Asset restart and idempotency;
+- `cargo test -p fielora-core`: `29 passed`, including real Policy/Approval/
+  ToolCall/receipt ingress, no Verification PASS, same-ToolCall replay, shared
+  blob dedupe, commit-before-receipt UNKNOWN reconciliation to the same durable
+  Asset, and pre-commit rejection of mismatched Asset refs;
+- production Document fixture covers two Assets, one Asset referenced twice,
+  text/table coexistence, R1 -> Asset A, R2 -> Asset B, R1 re-export -> Asset A,
+  exact final DOCX media reopen, and corrupt/missing blob no-output failure;
+- `pnpm verify:dev:core`, `pnpm verify:dev:cross`, and
+  `pnpm verify:dev:docs`: `PASS`; Cross includes 176 TypeScript tests and 12
+  real Core integration tests with schema version 10;
+- generated TypeScript contracts, `contracts:verify-current`, context manifest
+  audit, affected all-target Clippy with `-D warnings`, Rust format, release Core
+  build, and `git diff --check`: `PASS` at closeout;
+- migrations 0001-0009 have zero diff. New dependency packages are exactly
+  `png 0.18.1` and `fdeflate 0.3.7`; no default/optional PNG features are on;
+- deterministic validation made zero Model, network, credential, or MCP
+  requests. Full premerge, Browser/Desktop visual E2E, packaged, and portable
+  were intentionally not run for this backend-only targeted Slice.
 
 ## CURRENT_ASSET_REALITY
 
@@ -829,14 +917,14 @@ FEATURES_SELECTED: default-features = false; no optional features
 LICENSE: MIT OR Apache-2.0
 MSRV: 1.73
 CURRENT_FIELORA_RUST: 1.97.1
-DEPENDENCY_DECISION: REVIEW PASS / NOT ADDED
+DEPENDENCY_DECISION: EXACT PIN ADDED / TARGETED VALIDATED
 ```
 
 Exact candidate comparison on 2026-08-28:
 
 | Candidate | Exact audited release | Relevant reality | Decision |
 |---|---:|---|---|
-| [`png`](https://docs.rs/crate/png/0.18.1) | `0.18.1` | PNG-only; crate forbids unsafe code; configurable internal limits, text/iCCP handling, CRC and Adler behavior; [fuzz targets](https://github.com/image-rs/image-png/tree/master/fuzz) and active image-rs maintenance | **Recommend exact pin for a separately authorized implementation** |
+| [`png`](https://docs.rs/crate/png/0.18.1) | `0.18.1` | PNG-only; crate forbids unsafe code; configurable internal limits, text/iCCP handling, CRC and Adler behavior; [fuzz targets](https://github.com/image-rs/image-png/tree/master/fuzz) and active image-rs maintenance | **Selected and exact-pinned for the authorized first Slice** |
 | [`image`](https://docs.rs/crate/image/0.25.10) | `0.25.10` with defaults off plus PNG | umbrella image model/processing API; MSRV 1.88; adds non-PNG abstractions and dependencies; current [`DynamicImage::from_decoder` allocation-limit issue](https://github.com/image-rs/image/issues/3081) shows its `Limits` cannot be the sole admission boundary | Reject for minimum parser surface |
 | [`zune-png`](https://docs.rs/crate/zune-png/0.5.2) | `0.5.2` | PNG-only and bounded axis options, but defaults include SSE, platform-specific SIMD uses `unsafe`, APNG is supported, and current header parsing stores/decompresses text and iCCP data | Reject for the first bounded-correctness slice |
 
@@ -851,7 +939,7 @@ The exact `png 0.18.1` decoder configuration for the future implementation is:
   a bad CRC fails rather than being skipped;
 - `set_ignore_text_chunk(true)` and `set_ignore_iccp_chunk(true)` as defense in
   depth after the raw scanner has already rejected those chunks;
-- `png::Decoder::new_with_options`, then `set_limits(png::Limits { bytes: 8 MiB })`;
+- `png::Decoder::new_with_options`, then `set_limits(png::Limits { bytes: 64 MiB })`;
 - `png::Transformations::IDENTITY`;
 - `read_info`, independent bounds/output-size checks, exactly one complete
   `next_frame`, and `finish`.
@@ -1041,7 +1129,7 @@ full admission/security fixture suite below.
 - same semantic input yields the same structural facts; record byte identity as
   observed evidence only unless deliberately contracted.
 
-### Future source PNG admission, if authorized
+### Implemented source PNG admission evidence
 
 - valid small RGB, RGBA, transparent, grayscale, and grayscale-alpha PNGs;
 - invalid signature, wrong extension/magic mismatch, truncated IHDR/IDAT,
@@ -1085,29 +1173,19 @@ full admission/security fixture suite below.
 
 ## OPEN_QUESTIONS
 
-1. The PNG dependency question is resolved for the candidate: exact-pin
-   `png 0.18.1`, no optional features, behind the Fielora-owned admission model
-   above. Implementation and production authorization remain separate.
-2. How should the existing `LibraryRoot` blob primitive be renamed/extracted so
-   Asset bytes can share storage without becoming Library objects?
-3. How must portable profile include/restore semantics change so required Asset
+1. How must portable profile include/restore semantics change so required Asset
    blobs cannot be omitted while their metadata and parent references are
    imported?
-4. Should identical source bytes imported twice always create separate logical
-   Asset IDs, or may an explicit product action choose an existing Asset while
-   preserving provenance?
-5. Is `DOCUMENT_WIDTH_BOUNDED` one closed size intent enough for the first
-   inline DOCX image, and what exact alt-text requirement should apply?
-6. What bounded Presentation slot/fit semantics should precede any PPTX image
+2. What bounded Presentation slot/fit semantics should precede any PPTX image
    block without exposing raw EMU geometry?
-7. Is a future approved native Office SVG path sufficient to unblock transient
+3. Is a future approved native Office SVG path sufficient to unblock transient
    Diagram composition, or must controlled SVG still pass an additional Office
    package-specific validator?
-8. How long must old pinned renderer versions remain available for historical
+4. How long must old pinned renderer versions remain available for historical
    re-export, and what user-visible error applies when they are retired?
-9. What dependency-aware retention projection is needed before Asset archive
+5. What dependency-aware retention projection is needed before Asset archive
     or GC, given immutable historical Artifact revisions?
 
 ## NEXT_DECISION
 
-`A. READY_FOR_PNG_ADMISSION_AND_DURABLE_ASSET_FIRST_SLICE`
+`A. ARTIFACT_ASSET_FOUNDATION_SUFFICIENT`

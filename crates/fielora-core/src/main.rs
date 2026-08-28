@@ -256,7 +256,8 @@ fn run() -> Result<(), CoreError> {
         paths.data_dir.join("agent-artifacts"),
         async_runtime.handle().clone(),
         paths.config_dir.clone(),
-    );
+    )
+    .with_content_blob_root(paths.library_dir.clone());
     let reconciled = handle
         .reconcile_agent_runs(now_ms())
         .map_err(|error| CoreError::Storage(error.to_string()))?;

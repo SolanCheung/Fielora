@@ -54,6 +54,8 @@ export type ArtifactId = string;
 
 export type ArtifactRevisionId = string;
 
+export type AssetId = string;
+
 export type ProtocolVersion = { major: number, minor: number, };
 
 export type FipcErrorData = { code: string, trace_id: string, retryable: boolean, details: unknown, };
@@ -302,11 +304,17 @@ export type ArtifactType = "DOCUMENT" | "PRESENTATION" | "DIAGRAM" | "SPREADSHEE
 
 export type ArtifactRefV1 = { artifact_id: ArtifactId, revision_id: ArtifactRevisionId, expected_type: ArtifactType, semantic_sha256: string, };
 
+export type AssetMediaType = "image/png";
+
+export type ArtifactAssetRefV1 = { asset_id: AssetId, content_sha256: string, media_type: AssetMediaType, byte_length: number, };
+
+export type DocumentImageSizeIntentV1 = "DOCUMENT_WIDTH_BOUNDED";
+
 export type SpreadsheetRangeEmbedV1 = { artifact_ref: ArtifactRefV1, sheet_id: SpreadsheetSheetId, start_row: number, start_column: number, end_row: number, end_column: number, };
 
 export type DocumentArtifact = { title: string | null, blocks: Array<DocumentBlock>, };
 
-export type DocumentBlock = { "kind": "HEADING", level: number, text: string, } | { "kind": "PARAGRAPH", text: string, } | { "kind": "BULLET_LIST", items: Array<string>, } | { "kind": "TABLE", rows: Array<Array<string>>, } | { "kind": "SPREADSHEET_RANGE", source: SpreadsheetRangeEmbedV1, };
+export type DocumentBlock = { "kind": "HEADING", level: number, text: string, } | { "kind": "PARAGRAPH", text: string, } | { "kind": "BULLET_LIST", items: Array<string>, } | { "kind": "TABLE", rows: Array<Array<string>>, } | { "kind": "SPREADSHEET_RANGE", source: SpreadsheetRangeEmbedV1, } | { "kind": "INLINE_IMAGE", source: ArtifactAssetRefV1, size_intent: DocumentImageSizeIntentV1, alt_text: string | null, };
 
 export type PresentationArtifact = { slides: Array<PresentationSlide>, };
 
@@ -385,6 +393,8 @@ export type ArtifactView = { artifact_id: ArtifactId, profile_id: ProfileId, art
 export type ArtifactRevisionView = { revision_id: ArtifactRevisionId, artifact_id: ArtifactId, sequence: number, parent_revision_id: ArtifactRevisionId | null, mutation_kind: ArtifactMutationKind, content_schema_version: number, semantic_sha256: string, content: ArtifactContentV1, created_from_conversation_id: ConversationId | null, created_by_agent_run_id: AgentRunId | null, created_by_tool_call_id: ToolCallId, created_at: number, };
 
 export type ArtifactReadView = { artifact: ArtifactView, revision: ArtifactRevisionView, };
+
+export type AssetView = { asset_id: AssetId, profile_id: ProfileId, media_type: AssetMediaType, content_sha256: string, byte_length: number, width: number, height: number, blob_ref: string, created_from_conversation_id: ConversationId | null, created_by_agent_run_id: AgentRunId | null, created_by_tool_call_id: ToolCallId, created_at: number, };
 
 export type VerificationSubject = { "kind": "ARTIFACT_REVISION", artifact_id: ArtifactId, revision_id: ArtifactRevisionId, semantic_sha256: string, };
 

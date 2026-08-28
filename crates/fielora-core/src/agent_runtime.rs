@@ -25,7 +25,7 @@ use fielora_model::{
 };
 use fielora_platform::{CredentialStore, ManagedChildSecretEnvironment, SecretBytes};
 use fielora_storage::{AgentEventCommit, AgentProjectionUpdate, StorageHandle};
-use fielora_storage::{CreateArtifactRecord, UpdateArtifactRecord};
+use fielora_storage::{CreateArtifactRecord, CreateAssetRecord, UpdateArtifactRecord};
 use futures_util::future::join_all;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -71,6 +71,7 @@ pub struct AgentCoordinator {
     credentials: Arc<dyn CredentialStore>,
     sender: SyncSender<Value>,
     artifact_root: PathBuf,
+    content_blob_root: Option<PathBuf>,
     runtime: Handle,
     cancellations: Arc<Mutex<HashMap<String, ExecutionCancellation>>>,
     compiled_contexts: Arc<Mutex<HashMap<String, CompiledContext>>>,
@@ -137,6 +138,12 @@ struct DurableArtifactToolExecutor {
     conversation_id: ConversationId,
     project_field_id: FieldId,
     tool_call_id: ToolCallId,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportAssetArgs {
+    path: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -209,9 +216,31 @@ fn map_artifact_storage_error(error: DomainError) -> AgentError {
     }
 }
 
+fn map_asset_storage_error(error: DomainError) -> AgentError {
+    match error {
+        DomainError::NotFound => AgentError::AssetNotFound,
+        DomainError::Validation(code) if code == "ASSET_TOOLCALL_IDEMPOTENCY_CONFLICT" => {
+            AgentError::AssetIdempotencyConflict
+        }
+        DomainError::Validation(code) if code.starts_with("ASSET_") => {
+            AgentError::AssetContentChanged
+        }
+        _ => AgentError::IoFailed,
+    }
+}
+
 fn artifact_mutation_request_sha256(value: &Value) -> Result<String, AgentError> {
     let bytes = serde_json::to_vec(value).map_err(|_| AgentError::ArtifactContentInvalid)?;
     Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn asset_import_request_sha256(arguments: &Value) -> Result<String, AgentError> {
+    let args: ImportAssetArgs =
+        serde_json::from_value(arguments.clone()).map_err(|_| AgentError::ToolArgumentsInvalid)?;
+    artifact_mutation_request_sha256(&json!({
+        "operation":"IMPORT_SOURCE_PNG_ASSET",
+        "path":args.path,
+    }))
 }
 
 fn artifact_mutation_digest_from_arguments(
@@ -276,7 +305,88 @@ fn durable_artifact_mutation_receipt(read: &ArtifactReadView) -> Value {
     })
 }
 
+fn durable_asset_receipt(asset: &AssetView) -> Value {
+    json!({
+        "kind":"SOURCE_ASSET_COMMITTED",
+        "asset_persistence":"DURABLE_IMMUTABLE",
+        "asset_id":asset.asset_id,
+        "content_sha256":asset.content_sha256,
+        "media_type":asset.media_type,
+        "byte_length":asset.byte_length,
+        "width":asset.width,
+        "height":asset.height,
+    })
+}
+
 impl DurableArtifactToolExecutor {
+    fn import_asset(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
+        let args: ImportAssetArgs = serde_json::from_value(arguments.clone())
+            .map_err(|_| AgentError::ToolArgumentsInvalid)?;
+        let request_sha256 = asset_import_request_sha256(arguments)?;
+        if let Some(asset) = self
+            .storage
+            .asset_by_tool_call(self.tool_call_id.clone())
+            .map_err(map_asset_storage_error)?
+        {
+            let stored = self
+                .storage
+                .asset_mutation_request_sha256(self.tool_call_id.clone())
+                .map_err(map_asset_storage_error)?;
+            if stored.as_deref() != Some(request_sha256.as_str()) {
+                return Err(AgentError::AssetIdempotencyConflict);
+            }
+            return Ok(ToolExecution {
+                receipt: durable_asset_receipt(&asset),
+                observation: json!({
+                    "asset_id":asset.asset_id,
+                    "asset_persistence":"DURABLE_IMMUTABLE",
+                    "media_type":asset.media_type,
+                    "content_sha256":asset.content_sha256,
+                    "byte_length":asset.byte_length,
+                    "width":asset.width,
+                    "height":asset.height,
+                })
+                .to_string(),
+            });
+        }
+        let source = self
+            .runtime
+            .read_project_binary(&args.path, fielora_agent::png_admission::MAX_PNG_BYTES)?;
+        let admitted = fielora_agent::png_admission::admit(source)?;
+        let blob_ref = self
+            .runtime
+            .put_asset_blob(admitted.bytes(), &admitted.content_sha256)?;
+        let asset = self
+            .storage
+            .create_asset(CreateAssetRecord {
+                media_type: AssetMediaType::Png,
+                content_sha256: admitted.content_sha256,
+                byte_length: admitted.byte_length,
+                width: admitted.width,
+                height: admitted.height,
+                blob_ref,
+                conversation_id: self.conversation_id.clone(),
+                run_id: self.run_id.clone(),
+                tool_call_id: self.tool_call_id.clone(),
+                mutation_request_sha256: request_sha256,
+                now: now_ms(),
+            })
+            .map_err(map_asset_storage_error)?;
+        Ok(ToolExecution {
+            receipt: durable_asset_receipt(&asset),
+            observation: json!({
+                "asset_id":asset.asset_id,
+                "asset_persistence":"DURABLE_IMMUTABLE",
+                "media_type":asset.media_type,
+                "content_sha256":asset.content_sha256,
+                "byte_length":asset.byte_length,
+                "width":asset.width,
+                "height":asset.height,
+            })
+            .to_string(),
+        })
+    }
+
     fn replay_committed_mutation(
         &self,
         request_sha256: &str,
@@ -331,6 +441,24 @@ impl DurableArtifactToolExecutor {
         .map(Some)
     }
 
+    fn resolve_document_assets(
+        &self,
+        content: &ArtifactContentV1,
+    ) -> Result<Option<fielora_agent::artifact::ResolvedDocumentAssets>, AgentError> {
+        let ArtifactContentV1::Document(document) = content else {
+            return Ok(None);
+        };
+        fielora_agent::artifact::resolve_document_assets(document, |asset_id| {
+            self.storage
+                .read_asset(asset_id.clone())
+                .map_err(|error| match error {
+                    DomainError::NotFound => AgentError::AssetNotFound,
+                    other => map_asset_storage_error(other),
+                })
+        })
+        .map(Some)
+    }
+
     fn create(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
         let args: CreateArtifactArgs = serde_json::from_value(arguments.clone())
             .map_err(|_| AgentError::ToolArgumentsInvalid)?;
@@ -352,6 +480,7 @@ impl DurableArtifactToolExecutor {
             return Ok(replayed);
         }
         self.resolve_document_composition(&canonical.content)?;
+        self.resolve_document_assets(&canonical.content)?;
         let read = self
             .storage
             .create_artifact(CreateArtifactRecord {
@@ -422,6 +551,7 @@ impl DurableArtifactToolExecutor {
             "semantic_sha256":canonical.semantic_sha256,
         }))?;
         self.resolve_document_composition(&canonical.content)?;
+        self.resolve_document_assets(&canonical.content)?;
         let read = self
             .storage
             .update_artifact(UpdateArtifactRecord {
@@ -509,10 +639,14 @@ impl DurableArtifactToolExecutor {
             let resolved = self
                 .resolve_document_composition(&read.revision.content)?
                 .ok_or(AgentError::ArtifactContentInvalid)?;
-            return fielora_agent::artifact::export_saved_document_composition(
+            let assets = self
+                .resolve_document_assets(&read.revision.content)?
+                .ok_or(AgentError::ArtifactContentInvalid)?;
+            return fielora_agent::artifact::export_saved_document_composition_with_assets(
                 &self.runtime,
                 &read,
                 &resolved,
+                &assets,
                 &args.output_path,
                 cancellation,
             );
@@ -530,6 +664,7 @@ impl ToolExecutor for DurableArtifactToolExecutor {
         cancellation: &CommandCancellation,
     ) -> Result<ToolExecution, AgentError> {
         match name {
+            "artifact.asset.import" => self.import_asset(arguments),
             "artifact.create" => self.create(arguments),
             "artifact.read" => self.read(arguments),
             "artifact.update" => self.update(arguments),
@@ -1024,6 +1159,11 @@ impl AgentCoordinator {
         self
     }
 
+    pub fn with_content_blob_root(mut self, library_root: PathBuf) -> Self {
+        self.content_blob_root = Some(library_root);
+        self
+    }
+
     fn build(
         storage: StorageHandle,
         credentials: Arc<dyn CredentialStore>,
@@ -1038,6 +1178,7 @@ impl AgentCoordinator {
             credentials,
             sender,
             artifact_root,
+            content_blob_root: None,
             runtime,
             cancellations: Arc::new(Mutex::new(HashMap::new())),
             compiled_contexts: Arc::new(Mutex::new(HashMap::new())),
@@ -1054,6 +1195,13 @@ impl AgentCoordinator {
 
     fn available_tool_catalog(&self) -> Result<Vec<ToolSpec>, AgentError> {
         coding_tool_catalog_with_providers(self.tool_providers.as_slice())
+    }
+
+    fn configure_tool_runtime(&self, runtime: ToolRuntime) -> ToolRuntime {
+        match &self.content_blob_root {
+            Some(root) => runtime.with_content_blob_root(root.clone()),
+            None => runtime,
+        }
     }
 
     #[cfg(test)]
@@ -1955,8 +2103,10 @@ impl AgentCoordinator {
             AgentProjectionUpdate::default(),
         )
         .map_err(|_| "AGENT_RECOVERY_PERSIST_FAILED")?;
-        let runtime = ToolRuntime::new(&prepared.project_root, &self.artifact_root)
-            .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+        let runtime = self.configure_tool_runtime(
+            ToolRuntime::new(&prepared.project_root, &self.artifact_root)
+                .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?,
+        );
         let mut assessment = RecoveryAssessment::default();
         let mut facts = Vec::with_capacity(unknown.len());
         let mut blocked = None;
@@ -2000,6 +2150,39 @@ impl AgentCoordinator {
                     None => fielora_agent::ToolReconciliation {
                         status: ToolReconciliationStatus::NotApplied,
                         evidence: json!({"reason":"NO_DURABLE_ARTIFACT_REVISION_FOR_TOOLCALL"}),
+                    },
+                }
+            } else if tool.name == "artifact.asset.import" {
+                match self
+                    .storage
+                    .asset_by_tool_call(tool.id.clone())
+                    .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?
+                {
+                    Some(asset) => {
+                        let expected = asset_import_request_sha256(&tool.arguments)
+                            .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+                        let stored = self
+                            .storage
+                            .asset_mutation_request_sha256(tool.id.clone())
+                            .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+                        if stored.as_deref() == Some(expected.as_str()) {
+                            fielora_agent::ToolReconciliation {
+                                status: ToolReconciliationStatus::Applied,
+                                evidence: json!({
+                                    "reason":"DURABLE_SOURCE_ASSET_COMMITTED",
+                                    "durable_receipt":durable_asset_receipt(&asset),
+                                }),
+                            }
+                        } else {
+                            fielora_agent::ToolReconciliation {
+                                status: ToolReconciliationStatus::Diverged,
+                                evidence: json!({"reason":"ASSET_TOOLCALL_IDEMPOTENCY_CONFLICT"}),
+                            }
+                        }
+                    }
+                    None => fielora_agent::ToolReconciliation {
+                        status: ToolReconciliationStatus::NotApplied,
+                        evidence: json!({"reason":"NO_DURABLE_ASSET_FOR_TOOLCALL"}),
                     },
                 }
             } else {
@@ -4866,6 +5049,7 @@ impl AgentCoordinator {
         );
         let root = prepared.project_root.clone();
         let artifacts = self.artifact_root.clone();
+        let content_blob_root = self.content_blob_root.clone();
         let name = tool.name.clone();
         let arguments = tool.arguments.clone();
         let command_cancellation = cancellation.command.clone();
@@ -4887,7 +5071,11 @@ impl AgentCoordinator {
             self.execute_mcp_connection_list(&tool.run_id)
         } else {
             tokio::task::spawn_blocking(move || {
-                let runtime = ToolRuntime::with_skill_catalog(&root, &artifacts, skill_catalog)?;
+                let mut runtime =
+                    ToolRuntime::with_skill_catalog(&root, &artifacts, skill_catalog)?;
+                if let Some(content_blob_root) = content_blob_root {
+                    runtime = runtime.with_content_blob_root(content_blob_root);
+                }
                 let runtime = DurableArtifactToolExecutor {
                     storage,
                     runtime,
@@ -5617,6 +5805,7 @@ impl AgentCoordinator {
         );
         let root = prepared.project_root.clone();
         let artifact_root = self.artifact_root.clone();
+        let content_blob_root = self.content_blob_root.clone();
         let name = tool.name.clone();
         let arguments = tool.arguments.clone();
         let command_cancellation = cancellation.command.clone();
@@ -5657,8 +5846,11 @@ impl AgentCoordinator {
             .unwrap_or(Err(AgentError::IoFailed))
         } else {
             tokio::task::spawn_blocking(move || {
-                let runtime =
+                let mut runtime =
                     ToolRuntime::with_skill_catalog(&root, &artifact_root, skill_catalog)?;
+                if let Some(content_blob_root) = content_blob_root {
+                    runtime = runtime.with_content_blob_root(content_blob_root);
+                }
                 let runtime = DurableArtifactToolExecutor {
                     storage,
                     runtime,
@@ -7458,6 +7650,49 @@ mod tests {
         files
     }
 
+    fn png_crc32(bytes: &[u8]) -> u32 {
+        let mut crc = 0xffff_ffffu32;
+        for byte in bytes {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                let mask = (crc & 1).wrapping_neg();
+                crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+            }
+        }
+        !crc
+    }
+
+    fn png_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut chunk = Vec::new();
+        chunk.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        chunk.extend_from_slice(kind);
+        chunk.extend_from_slice(data);
+        chunk.extend_from_slice(&png_crc32(&chunk[4..]).to_be_bytes());
+        chunk
+    }
+
+    fn tiny_rgba_png(pixel: [u8; 4]) -> Vec<u8> {
+        let scanline = [0, pixel[0], pixel[1], pixel[2], pixel[3]];
+        let mut adler_a = 1u32;
+        let mut adler_b = 0u32;
+        for byte in scanline {
+            adler_a = (adler_a + u32::from(byte)) % 65_521;
+            adler_b = (adler_b + adler_a) % 65_521;
+        }
+        let mut zlib = vec![0x78, 0x01, 0x01, 5, 0, 0xfa, 0xff];
+        zlib.extend_from_slice(&scanline);
+        zlib.extend_from_slice(&((adler_b << 16) | adler_a).to_be_bytes());
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&1u32.to_be_bytes());
+        ihdr.extend_from_slice(&1u32.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+        png.extend_from_slice(&png_chunk(b"IHDR", &ihdr));
+        png.extend_from_slice(&png_chunk(b"IDAT", &zlib));
+        png.extend_from_slice(&png_chunk(b"IEND", &[]));
+        png
+    }
+
     struct FixtureExternalProvider {
         calls: Arc<AtomicUsize>,
     }
@@ -9049,6 +9284,344 @@ mod tests {
             AgentRunStatus::Completed
         );
 
+        drop(coordinator);
+        drop(storage);
+        drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn durable_png_asset_import_uses_existing_policy_toolcall_and_receipt_pipeline() {
+        let root = std::env::temp_dir().join(format!("fielora-core-png-asset-{}", Uuid::now_v7()));
+        let workspace = root.join("workspace");
+        let artifacts = root.join("artifacts");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let source_bytes = tiny_rgba_png([10, 40, 90, 255]);
+        std::fs::write(workspace.join("source.png"), &source_bytes).unwrap();
+        let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let worker = StorageWorker::start(&paths.database, device, 1).unwrap();
+        let storage = worker.handle();
+        let project = storage
+            .create_project(
+                CreateProjectRequest {
+                    title: "PNG Asset pipeline".into(),
+                    goal: None,
+                    root_path: workspace.to_string_lossy().into_owned(),
+                },
+                2,
+            )
+            .unwrap();
+        let provider = storage
+            .create_provider_config(
+                CreateProviderConfigRequest {
+                    provider_kind: ProviderKind::Openai,
+                    display_name: "Fixture".into(),
+                    base_url: None,
+                    default_model: "fixture-model".into(),
+                    custom_endpoint_acknowledged: false,
+                },
+                3,
+            )
+            .unwrap();
+        storage
+            .set_provider_credential_present(provider.view.id.clone(), true, 4)
+            .unwrap();
+        let conversation = storage
+            .create_conversation(
+                CreateConversationRequest {
+                    field_id: project.field_id.clone(),
+                    title: "PNG Asset".into(),
+                    provider_config_id: Some(provider.view.id.clone()),
+                    model_id: Some("fixture-model".into()),
+                },
+                5,
+            )
+            .unwrap();
+        let run = storage
+            .create_agent_run(
+                StartAgentRunRequest {
+                    field_id: project.field_id.clone(),
+                    conversation_id: conversation.id.clone(),
+                    user_message_id: None,
+                    provider_config_id: provider.view.id,
+                    model_id: Some("fixture-model".into()),
+                    task: "Import one PNG Asset".into(),
+                    permission: AgentPermission::ReadOnly,
+                    max_steps: Some(4),
+                    attachments: None,
+                },
+                6,
+            )
+            .unwrap();
+        let started = storage
+            .append_agent_event(
+                run.run.id.clone(),
+                AgentEventKind::RunStarted,
+                json!({}),
+                AgentProjectionUpdate {
+                    status: Some(AgentRunStatus::Running),
+                    ..Default::default()
+                },
+                7,
+            )
+            .unwrap();
+        let (sender, _receiver) = mpsc::sync_channel(128);
+        let coordinator = AgentCoordinator::new(
+            storage.clone(),
+            Arc::new(WindowsCredentialStore),
+            sender,
+            artifacts.clone(),
+            Handle::current(),
+        )
+        .with_content_blob_root(paths.library_dir.clone());
+        let prepared = PreparedRun {
+            run: started.run,
+            endpoint: ProviderEndpoint {
+                kind: ProviderKind::Openai,
+                base_url: None,
+            },
+            project_root: workspace.canonicalize().unwrap(),
+            secret: SecretBytes::new(b"fixture".to_vec()),
+        };
+        let catalog = coordinator.available_tool_catalog().unwrap();
+        let spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "artifact.asset.import")
+            .unwrap();
+        assert_eq!(spec.effect, AgentToolEffect::WorkspaceWrite);
+        let arguments = json!({"path":"source.png"});
+        let proposed = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                spec,
+                AgentModelToolCall {
+                    id: "asset-import-a".into(),
+                    name: "artifact.asset.import".into(),
+                    arguments: arguments.clone(),
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(proposed.policy_decision, AgentPolicyDecision::Ask);
+        assert!(matches!(
+            coordinator
+                .execute_tool(&prepared, proposed.clone(), false, &test_cancellation())
+                .await,
+            ToolDisposition::Waiting
+        ));
+        let tool_call_id = proposed.id.clone();
+        let ToolDisposition::Executed(result) = coordinator
+            .execute_tool(&prepared, proposed, true, &test_cancellation())
+            .await
+        else {
+            panic!("approved PNG Asset import must execute through the existing Tool pipeline")
+        };
+        assert!(result.wrote_workspace);
+        assert!(!result.verification_passed);
+        let first = storage
+            .asset_by_tool_call(tool_call_id.clone())
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.media_type, AssetMediaType::Png);
+        assert_eq!(
+            first.content_sha256,
+            format!("{:x}", Sha256::digest(&source_bytes))
+        );
+        assert_eq!(first.byte_length, source_bytes.len() as u64);
+        assert_eq!((first.width, first.height), (1, 1));
+        assert!(paths.library_dir.join(&first.blob_ref).is_file());
+        assert_eq!(
+            std::fs::read(paths.library_dir.join(&first.blob_ref)).unwrap(),
+            source_bytes
+        );
+        let call = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|tool| tool.id == tool_call_id)
+            .unwrap();
+        let receipt = call.receipt.unwrap();
+        assert_eq!(receipt["kind"], "SOURCE_ASSET_COMMITTED");
+        assert!(receipt.get("path").is_none());
+        assert!(receipt.get("bytes").is_none());
+
+        let create_spec = catalog
+            .iter()
+            .find(|spec| spec.definition.name == "artifact.create")
+            .unwrap();
+        let invalid_document_arguments = json!({
+            "type":"document",
+            "title":"Must not commit",
+            "content":{
+                "title":"Must not commit",
+                "blocks":[{
+                    "kind":"INLINE_IMAGE",
+                    "source":{
+                        "asset_id":first.asset_id,
+                        "content_sha256":"0".repeat(64),
+                        "media_type":"image/png",
+                        "byte_length":first.byte_length
+                    },
+                    "size_intent":"DOCUMENT_WIDTH_BOUNDED",
+                    "alt_text":"Mismatched immutable reference"
+                }]
+            }
+        });
+        let invalid_document_tool = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                create_spec,
+                AgentModelToolCall {
+                    id: "invalid-document-asset-ref".into(),
+                    name: "artifact.create".into(),
+                    arguments: invalid_document_arguments.clone(),
+                },
+                false,
+            )
+            .unwrap();
+        let invalid_document_tool_id = invalid_document_tool.id.clone();
+        assert_eq!(
+            DurableArtifactToolExecutor {
+                storage: storage.clone(),
+                runtime: ToolRuntime::new(&prepared.project_root, &artifacts)
+                    .unwrap()
+                    .with_content_blob_root(paths.library_dir.clone()),
+                run_id: prepared.run.id.clone(),
+                conversation_id: conversation.id.clone(),
+                project_field_id: project.field_id.clone(),
+                tool_call_id: invalid_document_tool_id.clone(),
+            }
+            .execute(
+                "artifact.create",
+                &invalid_document_arguments,
+                true,
+                &CommandCancellation::default(),
+            )
+            .unwrap_err(),
+            AgentError::ArtifactReferenceIntegrityFailed
+        );
+        assert!(
+            storage
+                .artifact_mutation_by_tool_call(invalid_document_tool_id)
+                .unwrap()
+                .is_none()
+        );
+
+        let replay = DurableArtifactToolExecutor {
+            storage: storage.clone(),
+            runtime: ToolRuntime::new(&prepared.project_root, &artifacts)
+                .unwrap()
+                .with_content_blob_root(paths.library_dir.clone()),
+            run_id: prepared.run.id.clone(),
+            conversation_id: conversation.id.clone(),
+            project_field_id: project.field_id.clone(),
+            tool_call_id: tool_call_id.clone(),
+        }
+        .execute(
+            "artifact.asset.import",
+            &arguments,
+            true,
+            &CommandCancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(replay.receipt["asset_id"], first.asset_id.0);
+
+        let crash_window_tool = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                spec,
+                AgentModelToolCall {
+                    id: "asset-import-commit-before-receipt".into(),
+                    name: "artifact.asset.import".into(),
+                    arguments: arguments.clone(),
+                },
+                false,
+            )
+            .unwrap();
+        storage
+            .update_agent_tool_call(
+                crash_window_tool.id.clone(),
+                AgentToolStatus::Running,
+                None,
+                None,
+                now_ms(),
+            )
+            .unwrap();
+        let committed_before_receipt = DurableArtifactToolExecutor {
+            storage: storage.clone(),
+            runtime: ToolRuntime::new(&prepared.project_root, &artifacts)
+                .unwrap()
+                .with_content_blob_root(paths.library_dir.clone()),
+            run_id: prepared.run.id.clone(),
+            conversation_id: conversation.id.clone(),
+            project_field_id: project.field_id.clone(),
+            tool_call_id: crash_window_tool.id.clone(),
+        }
+        .execute(
+            "artifact.asset.import",
+            &arguments,
+            true,
+            &CommandCancellation::default(),
+        )
+        .unwrap();
+        storage
+            .update_agent_tool_call(
+                crash_window_tool.id.clone(),
+                AgentToolStatus::Unknown,
+                None,
+                None,
+                now_ms(),
+            )
+            .unwrap();
+        let recovery = coordinator.reconcile_for_resume(&prepared).unwrap();
+        assert!(recovery.confirmed_workspace_mutation);
+        let recovered = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|tool| tool.id == crash_window_tool.id)
+            .unwrap();
+        assert_eq!(recovered.status, AgentToolStatus::Completed);
+        let recovered_receipt = recovered.receipt.unwrap();
+        assert_eq!(
+            recovered_receipt["asset_id"],
+            committed_before_receipt.receipt["asset_id"]
+        );
+        assert_eq!(recovered_receipt["recovered"], true);
+        assert_eq!(recovered_receipt["reconciliation_status"], "APPLIED");
+
+        let second = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                spec,
+                AgentModelToolCall {
+                    id: "asset-import-b".into(),
+                    name: "artifact.asset.import".into(),
+                    arguments,
+                },
+                false,
+            )
+            .unwrap();
+        let second_tool_id = second.id.clone();
+        let ToolDisposition::Executed(second_result) = coordinator
+            .execute_tool(&prepared, second, true, &test_cancellation())
+            .await
+        else {
+            panic!("new ToolCall import must execute")
+        };
+        assert!(second_result.wrote_workspace);
+        let second_asset = storage.asset_by_tool_call(second_tool_id).unwrap().unwrap();
+        assert_ne!(second_asset.asset_id, first.asset_id);
+        assert_eq!(second_asset.content_sha256, first.content_sha256);
+        assert_eq!(second_asset.blob_ref, first.blob_ref);
+        assert!(
+            storage
+                .list_agent_verifications(prepared.run.id.clone())
+                .unwrap()
+                .is_empty()
+        );
         drop(coordinator);
         drop(storage);
         drop(worker);
