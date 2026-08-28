@@ -2342,3 +2342,64 @@ RESOLVER_CONTEXT_MODEL_UI_EVAL: NOT_IMPLEMENTED
 MODEL_REQUESTS: 0
 NEXT: IDR_V2_RESOLVER_DESIGN_CONTEXT_INTEGRATION_REVIEW_NOT_IMPLEMENTED
 ```
+
+## 99. IDR V2 Resolver / Context Integration Design Candidate
+
+IDR V2 storage changeset 已独立提交为
+`bd7a1398cfaccfd66d9b0709f5c37d53366e4a63`。随后只进行 design/audit：没有新增
+Resolver runtime，没有接入 `ContextCompiler`，没有改变 Agent 行为、schema、migration、
+Model extraction/learning/activation、Memory write、UI/FIPC、Provider、Tool、FTS、Vector
+或 Embedding。
+
+`docs/architecture/FIELORA_IDR_V2_RESOLVER_CANDIDATE.md` 将 Resolver 精确放在
+existing `Harness.IDR` 内。它只在 caller 提供的 structured Human Model revision、
+Scope、Reality 与 current-constraint input 上，确定 lifecycle/scope/Reality eligibility、
+supersession lineage、kind-specific precedence、structured conflict、suppression 与
+deterministic ordering；不拥有 Context admission、Direction generation、learning、
+activation、planning、Tool、Permission、Reality、Verification 或 final-decision authority。
+同一 revision/input/profile 必须得到同一 ephemeral
+`ResolvedHumanModelViewV1 + resolution_ref`，Model 不参与基础裁决，resolution table/
+cache/vector persistence 仍为 0。
+
+设计审计确认当前只真正拥有 consistent Human Model snapshot/revision、Project
+identity/revision、Run/Conversation identity、raw task 以及可选 Active Artifact
+identity/revision。稳定的 domain/task-type/interaction selector、normalized current-
+instruction constraints、通用 non-Project Reality snapshot、semantic key/value registry、
+freshness/decay profile 与 shared context budget allocator 尚不存在。Resolver 不能解析
+raw prompt 伪造这些输入；selector input 缺失必须 fail closed，non-Project Reality
+未知必须为 `REALITY_UNRESOLVED`，只有对 supplied authority 的确定 mismatch 才能标记
+`STALE_REALITY_REF`。
+
+`docs/architecture/FIELORA_IDR_V2_CONTEXT_INTEGRATION_REVIEW.md` 将 per-invocation
+admission 放在 existing `Harness.Ingress & Context`。Resolver 决定“哪些 Human Model
+语义成立/冲突/失效”，Context Admission 决定“其中哪些可在当前指令、Reality、kind、
+relevance 与 budget 约束下进入 Model Context”；`ContextCompiler` 继续只负责编译现有
+repository excerpts。硬优先级保持
+`CURRENT USER INPUT > CURRENT REALITY > DURABLE HUMAN MODEL`。Candidate、Weakened、
+Conflicted values、Superseded、Revoked、stale/unresolved Reality dependency 均默认不进
+Context；Observation 永不成为直接 guidance。Projection 继续以最多 8 个 semantic
+entries、每项最多 3 个 bounded refs、总计最多 4 KiB 为设计基线，并要求 future
+Context Snapshot why-used manifest 只记录 item/ref/kind/scope/lifecycle/reason/version/
+revision/digest/bounds，不复制 source body、transcript、Provider response 或 reasoning。
+
+本轮 Candidate 进一步提出在实现前拆开 existing Contract Candidate 中 bundled
+`DispositionResolutionResult.direction`：Resolver 只输出
+`ResolvedHumanModelViewV1`，future Individualized Direction 作为独立、非权威阶段消费
+`resolution_ref`。新增候选 reason code、semantic normalization、structured current
+constraints、Reality snapshot 与 global context budget 仍需 Contract/implementation
+review；不因此修改 durable schema。
+
+```text
+IDR_V2_RESOLVER_DESIGN: CANDIDATE_PASS
+IDR_V2_CONTEXT_INTEGRATION_REVIEW: PASS_DESIGN_ONLY
+ARCHITECTURE_PLACEMENT: Harness.IDR.Resolver + Harness.Ingress & Context.IDR Admission
+RESOLVER_AND_CONTEXT_ADMISSION: SEPARATE
+INDIVIDUALIZED_DIRECTION: FUTURE_SEPARATE_STAGE
+MODEL_IN_RESOLVER: NO
+RESOLUTION_PERSISTENCE: NONE
+CONTEXTCOMPILER_BEHAVIOR: UNCHANGED
+RUNTIME_IMPLEMENTATION: NONE
+SCHEMA_CHANGE: NO
+AGENT_BEHAVIOR_CHANGED: NO
+NEXT: IDR_V2_RESOLVER_IMPLEMENTATION_REVIEW_NOT_IMPLEMENTED
+```
