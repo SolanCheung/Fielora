@@ -47,12 +47,12 @@
       "bytes": 12955
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "2c4a805ea9197e6d936208c615f8f807b944932b7c284978edf7acfb7d3ae220",
-      "bytes": 179013
+      "sha256": "b74afe2acc363dc4ac15ce995a0f20813347021caa2630b005a4c3c33dc65439",
+      "bytes": 181305
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "093bf94a43f374851fa296a48be35937a01e69569fed576d706146dce2334aad",
-      "bytes": 90811
+      "sha256": "3fe4483209ac60e3e5aac8505734c18bf2f9e07ef741ee68dacb24659d536d15",
+      "bytes": 91826
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
       "sha256": "0b4f9bd00ad5b9a198e4f3a6523503aaacbf8b5630aaa5d029577ee08abbc160",
@@ -79,8 +79,12 @@
       "bytes": 15764
     },
     "docs/architecture/FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md": {
-      "sha256": "5014cae001c56a7cdc9d44e253a126fe39fa3f5d51c174094a9e5c5970c65443",
-      "bytes": 40806
+      "sha256": "e4b95bfbbda14b25a8a5372a587d1280371c7c47480242754d0669a1d6c07a8d",
+      "bytes": 41077
+    },
+    "docs/architecture/FIELORA_IDR_V2_DESIGN_CANDIDATE.md": {
+      "sha256": "17dc84d89eeb7bb9d682ab2394606179c5f7314b2023f4a69c0be658548e8749",
+      "bytes": 35386
     },
     "docs/architecture/TECHNICAL_ARCHITECTURE_V0.1.md": {
       "sha256": "c57d97ae7c7b5d4d1a16cd992e4f16fd543193dcc7b1483d45e63a31f959f759",

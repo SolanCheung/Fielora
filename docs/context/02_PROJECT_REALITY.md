@@ -2159,3 +2159,46 @@ CODE_BEHAVIOR_CHANGE: NONE
 SCHEMA_CHANGE: NONE
 DEPENDENCY_CHANGE: NONE
 ```
+
+## 95. IDR V2 Design Candidate
+
+`docs/architecture/FIELORA_IDR_V2_DESIGN_CANDIDATE.md` 已形成 design-only
+Candidate，状态为 `DRAFT / CANDIDATE / NOT FROZEN`，Implementation 未授权。
+它不改变第 94 节的 Agent Framework，只细化 `Harness.IDR`。
+
+Candidate 将 Human Model 收敛为五种不重叠语义：`FACT`、`PREFERENCE`、
+`OBSERVATION`、`DISPOSITION` 与 `LONG_TERM_GOAL`。Behavioral Pattern、Working/
+Communication/Decision/Risk Style 属于 Preference/Disposition dimension；
+Feedback 属于 observation/correction evidence。Observation 不会静默变成
+Preference，Model inference 不能成为 User Fact。
+
+Provenance 使用 Fielora-owned source reference、source type/time 与必要的 bounded
+excerpt/digest，不复制完整 Conversation。Scope Candidate 使用 GLOBAL + 可选
+domain/project/task_type/interaction selector；confidence 将 explicit/observed/
+inferred evidence basis 与 HIGH/MEDIUM/LOW inference confidence 分离，拒绝伪精确
+浮点概率。Lifecycle Candidate 为 CANDIDATE、ACTIVE、WEAKENED、CONFLICTED、
+SUPERSEDED、REVOKED，并定义 remember/correct/remove/forget/reset/inspect
+contract-level semantics。
+
+Disposition Resolution 只消费当前 Work Scope/Context/Reality reference 与 Human
+Model snapshot，排除非 ACTIVE、scope mismatch、conflict、revoked/superseded 与
+Reality-invalid item；输出 bounded Relevant Disposition Set 和结构化
+Individualized Direction。Candidate Eval 默认上限为 8 个 Direction、每项 3 个
+support refs、4 KiB projection，值未冻结。Direction 永远是 soft signal，不能覆盖
+current instruction、Work Scope、Governance、Permission、Reality 或 Verification。
+
+Privacy 维持 local-first、inspect/correct/delete/reset、no secret、no raw transcript
+duplication；cloud/cross-device/multi-user sync 均 out of scope。Eval 必须以 same
+Model/Harness/Task/Tools 的 IDR disabled/enabled A/B 覆盖 explicit preference、
+inferred disposition 与 preference change，并把 authority/secret/Reality/scope
+leakage 设为 hard safety metrics。
+
+```text
+IDR_V2_DESIGN: CANDIDATE
+ONTOLOGY: 5_KINDS
+CONTRACT: NOT_STARTED
+SCHEMA_MIGRATION: NONE
+RUNTIME_CONTEXT_UI: NOT_IMPLEMENTED
+MODEL_REQUESTS: 0
+NEXT: USER_REVIEW_OF_DESIGN_PRECONDITIONS
+```

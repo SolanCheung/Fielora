@@ -584,6 +584,11 @@ IDR Runtime module. This specification defines semantic ownership only; it does
 not authorize implementation, schema, migration, `HumanProfileId`, Memory
 index, or an empty physical module.
 
+Detailed semantic, lifecycle, projection, privacy, and Eval design is tracked
+in `FIELORA_IDR_V2_DESIGN_CANDIDATE.md`. Its status is
+`DRAFT / CANDIDATE / NOT FROZEN`; it does not authorize Contract, Schema,
+Migration, Runtime, Context integration, or UI implementation.
+
 ---
 
 # 5. Supporting and cross-cutting concepts
