@@ -2202,3 +2202,40 @@ RUNTIME_CONTEXT_UI: NOT_IMPLEMENTED
 MODEL_REQUESTS: 0
 NEXT: USER_REVIEW_OF_DESIGN_PRECONDITIONS
 ```
+
+## 96. IDR V2 Contract Candidate
+
+`docs/architecture/FIELORA_IDR_V2_CONTRACT_CANDIDATE.md` 已将既有 IDR V2
+语义设计收敛为 minimum semantic Contract Candidate，状态为
+`DRAFT / CANDIDATE / NOT FROZEN`；Contract Freeze、Schema、Migration、Runtime、
+FIPC、Context integration 与 UI 均未授权。
+
+V2 继续采用 local primary human singleton，因此移除未产生产品行为的
+`HumanProfileId`。统一 `HumanModelItem` 保留五种 closed kind、bounded
+provenance、evidence basis、ordinal inference confidence、flat scope selectors 与
+显式 lifecycle。Model/inference 只能生成 update proposal；admission、transition、
+scope matching、precedence、bounds 与 authority 均由 deterministic Harness 规则拥有。
+
+Activation 采用 Conservative policy：explicit Fact/Preference/confirmed Goal 可在
+admission 后 Active，Observation 只作为 observation evidence，inferred Disposition
+必须先保持 Candidate 并经用户显式确认。`ASK_WHEN` 改名为
+`CLARIFY_WHEN`，且不产生 Governance ASK 或 Approval。
+
+Resolution 以 versioned structured snapshot 输入，输出 bounded、explainable 的
+RelevantDisposition projection 与 structured IndividualizedDirection；使用
+`contract_version + human_model_revision + resolution_profile_version +
+resolution_ref`，不保留无意义的 `resolution_revision`。Forget/erasure 统一为
+带 `DISABLE_USE / ERASE_IF_ALLOWED / RESET_PROFILE` mode 的请求，且不承诺删除
+Conversation、Reality 或其他 authority 持有的历史。
+
+```text
+IDR_V2_CONTRACT: CANDIDATE
+ARCHITECTURE_PLACEMENT: HARNESS_IDR
+HUMAN_PROFILE_ID: REMOVED_FOR_V2
+AUTOMATIC_ACTIVATION: CONSERVATIVE
+ASK_WHEN: RENAMED_TO_CLARIFY_WHEN
+SCHEMA_MIGRATION: NONE
+RUNTIME_CONTEXT_UI: NOT_IMPLEMENTED
+MODEL_REQUESTS: 0
+NEXT: USER_REVIEW_OF_CONTRACT_PRECONDITIONS
+```

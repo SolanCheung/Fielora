@@ -24,6 +24,11 @@ It does not freeze a Contract, Rust type, database schema, migration, Context
 integration, or UI. The canonical top-level Agent architecture remains defined
 by `FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md`.
 
+The detailed Contract Review output is tracked in
+`FIELORA_IDR_V2_CONTRACT_CANDIDATE.md`. It remains
+`DRAFT / CANDIDATE / NOT FROZEN` and authorizes no Schema, Migration, Runtime,
+Context integration, FIPC, or UI implementation.
+
 ---
 
 ## 2. Purpose
@@ -1035,6 +1040,10 @@ Memory boundary
 Privacy and user-control semantics
 Eval plan
 ```
+
+The 2026-08-28 `IDR V2 CONTRACT REVIEW` execution instruction satisfied this
+sequencing prerequisite for drafting the Contract Candidate only. It did not
+freeze the Design or Contract and did not authorize Schema or implementation.
 
 Only after that review may work proceed in this order:
 

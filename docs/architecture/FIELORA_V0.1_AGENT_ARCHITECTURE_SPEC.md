@@ -586,8 +586,12 @@ index, or an empty physical module.
 
 Detailed semantic, lifecycle, projection, privacy, and Eval design is tracked
 in `FIELORA_IDR_V2_DESIGN_CANDIDATE.md`. Its status is
-`DRAFT / CANDIDATE / NOT FROZEN`; it does not authorize Contract, Schema,
-Migration, Runtime, Context integration, or UI implementation.
+`DRAFT / CANDIDATE / NOT FROZEN`; it does not authorize Contract freeze,
+Schema, Migration, Runtime, Context integration, or UI implementation.
+
+The minimum semantic Contract Review is tracked in
+`FIELORA_IDR_V2_CONTRACT_CANDIDATE.md`. It is also
+`DRAFT / CANDIDATE / NOT FROZEN` and does not authorize Schema or implementation.
 
 ---
 
