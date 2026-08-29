@@ -104,11 +104,18 @@ const bridge: FieloraBridge = {
     reload: () => ipcRenderer.invoke(channels.browserReload),
     getState: () => ipcRenderer.invoke(channels.browserState),
     getContextCandidate: () => ipcRenderer.invoke(channels.browserContext),
+    captureScreenshot: () => ipcRenderer.invoke(channels.browserCaptureScreenshot),
     subscribe: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state);
       ipcRenderer.on(channels.browserEvent, wrapped);
       return () => ipcRenderer.removeListener(channels.browserEvent, wrapped);
     },
+  },
+  screenshot: {
+    get: (request) => ipcRenderer.invoke(channels.screenshotGet, request),
+    byRun: (request) => ipcRenderer.invoke(channels.screenshotByRun, request),
+    byVerification: (request) => ipcRenderer.invoke(channels.screenshotByVerification, request),
+    preview: (request) => ipcRenderer.invoke(channels.screenshotPreview, request),
   },
   clipboard: {
     writeText: (text) => ipcRenderer.invoke(channels.clipboardWriteText, text),

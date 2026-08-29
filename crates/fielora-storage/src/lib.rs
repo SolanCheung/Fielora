@@ -36,6 +36,7 @@ const MIGRATION_0010: &str = include_str!("../migrations/0010_durable_source_ass
 const MIGRATION_0011: &str = include_str!("../migrations/0011_artifact_archive_state.sql");
 const MIGRATION_0012: &str = include_str!("../migrations/0012_idr_v2_human_model.sql");
 const MIGRATION_0013: &str = include_str!("../migrations/0013_rich_result_typed_references.sql");
+const MIGRATION_0014: &str = include_str!("../migrations/0014_durable_screenshot_evidence.sql");
 const MIGRATION_0001_NAME: &str = "core";
 const MIGRATION_0002_NAME: &str = "phase02_reality";
 const MIGRATION_0004_NAME: &str = "phase04_entry";
@@ -48,6 +49,7 @@ const MIGRATION_0010_NAME: &str = "durable_source_assets";
 const MIGRATION_0011_NAME: &str = "artifact_archive_state";
 const MIGRATION_0012_NAME: &str = "idr_v2_human_model";
 const MIGRATION_0013_NAME: &str = "rich_result_typed_references";
+const MIGRATION_0014_NAME: &str = "durable_screenshot_evidence";
 const MIGRATION_0002_FROZEN_SHA256: &str =
     "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9";
 const MIGRATION_0004_FROZEN_SHA256: &str =
@@ -56,7 +58,7 @@ const MIGRATION_0005_FROZEN_SHA256: &str =
     "b7e1e586b47e50389502677e172741d69463e9518ed32211dfafe0dc910c1547";
 const MIGRATION_0006_FROZEN_SHA256: &str =
     "5257959801424a13426259ce10c9ed2d5037795ec7a3a207171c568bc80dbaae";
-const SCHEMA_VERSION: u32 = 13;
+const SCHEMA_VERSION: u32 = 14;
 const LOCAL_USER_NAME: &str = "Local user";
 const SYSTEM_NAME: &str = "Fielora system";
 
@@ -1076,6 +1078,110 @@ impl StorageHandle {
                 .query_map([&run_id.0], verification_receipt_from_row)
                 .map_err(storage_domain)?;
             rows.collect::<Result<Vec<_>, _>>().map_err(storage_domain)
+        })
+    }
+
+    pub fn create_screenshot_evidence(
+        &self,
+        evidence: ScreenshotEvidenceView,
+    ) -> Result<ScreenshotEvidenceView, DomainError> {
+        let owner = self.local_user.clone();
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            validate_screenshot_evidence(connection, &owner, &evidence)?;
+            connection.execute(
+                "INSERT INTO screenshot_evidence(id,profile_id,content_sha256,blob_ref,mime_type,byte_size,width,height,source_kind,page_id,navigation_generation,captured_url,captured_at,conversation_id,run_id,tool_call_id,verification_receipt_id,visibility,retention_class,status,export_policy,sync_policy,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
+                params![
+                    evidence.id.0,
+                    profile_id.0,
+                    evidence.content_sha256,
+                    evidence.blob_ref,
+                    evidence.mime_type,
+                    revision_to_domain(evidence.byte_size)?,
+                    i64::from(evidence.width),
+                    i64::from(evidence.height),
+                    wire(&evidence.source_kind),
+                    evidence.page_id,
+                    revision_to_domain(evidence.navigation_generation)?,
+                    evidence.captured_url,
+                    evidence.captured_at,
+                    evidence.conversation_id.as_ref().map(|value| value.0.as_str()),
+                    evidence.run_id.as_ref().map(|value| value.0.as_str()),
+                    evidence.tool_call_id.as_ref().map(|value| value.0.as_str()),
+                    evidence.verification_receipt_id.as_ref().map(|value| value.0.as_str()),
+                    wire(&evidence.visibility),
+                    wire(&evidence.retention_class),
+                    wire(&evidence.status),
+                    wire(&evidence.export_policy),
+                    wire(&evidence.sync_policy),
+                    evidence.created_at,
+                ],
+            ).map_err(storage_domain)?;
+            get_screenshot_evidence(connection, &profile_id, &evidence.id)
+        })
+    }
+
+    pub fn get_screenshot_evidence(
+        &self,
+        id: ScreenshotEvidenceId,
+    ) -> Result<ScreenshotEvidenceView, DomainError> {
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            get_screenshot_evidence(connection, &profile_id, &id)
+        })
+    }
+
+    pub fn list_screenshot_evidence_by_run(
+        &self,
+        run_id: AgentRunId,
+    ) -> Result<Vec<ScreenshotEvidenceView>, DomainError> {
+        let owner = self.local_user.clone();
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            get_agent_run(connection, &owner, &run_id)?;
+            list_screenshot_evidence(connection, &profile_id, "run_id", &run_id.0)
+        })
+    }
+
+    pub fn list_screenshot_evidence_by_verification(
+        &self,
+        verification_receipt_id: VerificationReceiptId,
+    ) -> Result<Vec<ScreenshotEvidenceView>, DomainError> {
+        let owner = self.local_user.clone();
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            get_agent_verification_receipt(connection, &owner, &verification_receipt_id)?;
+            list_screenshot_evidence(
+                connection,
+                &profile_id,
+                "verification_receipt_id",
+                &verification_receipt_id.0,
+            )
+        })
+    }
+
+    pub fn portable_blob_manifest(
+        &self,
+    ) -> Result<Vec<PortableBlobManifestEntryView>, DomainError> {
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            let mut statement = connection.prepare(
+                "SELECT blob_ref,content_sha256,byte_size FROM (SELECT blob_ref,content_hash AS content_sha256,size AS byte_size FROM library_objects WHERE profile_id=?1 AND kind='FILE' UNION SELECT blob_ref,content_sha256,byte_length AS byte_size FROM assets WHERE profile_id=?1) ORDER BY blob_ref ASC"
+            ).map_err(storage_domain)?;
+            statement
+                .query_map([&profile_id.0], |row| {
+                    Ok(PortableBlobManifestEntryView {
+                        blob_ref: row.get(0)?,
+                        content_sha256: row.get(1)?,
+                        byte_size: row
+                            .get::<_, i64>(2)?
+                            .try_into()
+                            .map_err(|_| conversion_error("portable blob size invalid".into()))?,
+                    })
+                })
+                .map_err(storage_domain)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(storage_domain)
         })
     }
 
@@ -3126,6 +3232,184 @@ fn verification_receipt_from_row(
     })
 }
 
+fn get_agent_verification_receipt(
+    connection: &Connection,
+    owner: &PrincipalId,
+    id: &VerificationReceiptId,
+) -> Result<VerificationReceiptView, DomainError> {
+    connection.query_row(
+        "SELECT v.id,v.run_id,v.tool_call_id,v.check_kind,v.outcome,v.summary,v.artifact_sha256,v.exit_code,v.created_at,v.subject_kind,v.subject_artifact_id,v.subject_revision_id,v.subject_sha256 FROM agent_verification_receipts v JOIN agent_runs r ON r.id=v.run_id JOIN fields f ON f.id=r.field_id WHERE v.id=?1 AND f.owner_principal_id=?2",
+        params![id.0, owner.0],
+        verification_receipt_from_row,
+    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
+fn screenshot_evidence_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ScreenshotEvidenceView> {
+    Ok(ScreenshotEvidenceView {
+        id: ScreenshotEvidenceId::new(row.get::<_, String>(0)?),
+        content_sha256: row.get(1)?,
+        blob_ref: row.get(2)?,
+        mime_type: row.get(3)?,
+        byte_size: row
+            .get::<_, i64>(4)?
+            .try_into()
+            .map_err(|_| conversion_error("screenshot byte size invalid".into()))?,
+        width: row
+            .get::<_, i64>(5)?
+            .try_into()
+            .map_err(|_| conversion_error("screenshot width invalid".into()))?,
+        height: row
+            .get::<_, i64>(6)?
+            .try_into()
+            .map_err(|_| conversion_error("screenshot height invalid".into()))?,
+        source_kind: parse_wire(row.get(7)?)?,
+        page_id: row.get(8)?,
+        navigation_generation: row
+            .get::<_, i64>(9)?
+            .try_into()
+            .map_err(|_| conversion_error("screenshot navigation generation invalid".into()))?,
+        captured_url: row.get(10)?,
+        captured_at: row.get(11)?,
+        conversation_id: row.get::<_, Option<String>>(12)?.map(ConversationId::new),
+        run_id: row.get::<_, Option<String>>(13)?.map(AgentRunId::new),
+        tool_call_id: row.get::<_, Option<String>>(14)?.map(ToolCallId::new),
+        verification_receipt_id: row
+            .get::<_, Option<String>>(15)?
+            .map(VerificationReceiptId::new),
+        visibility: parse_wire(row.get(16)?)?,
+        retention_class: parse_wire(row.get(17)?)?,
+        status: parse_wire(row.get(18)?)?,
+        export_policy: parse_wire(row.get(19)?)?,
+        sync_policy: parse_wire(row.get(20)?)?,
+        created_at: row.get(21)?,
+    })
+}
+
+const SCREENSHOT_EVIDENCE_COLUMNS: &str = "id,content_sha256,blob_ref,mime_type,byte_size,width,height,source_kind,page_id,navigation_generation,captured_url,captured_at,conversation_id,run_id,tool_call_id,verification_receipt_id,visibility,retention_class,status,export_policy,sync_policy,created_at";
+
+fn get_screenshot_evidence(
+    connection: &Connection,
+    profile_id: &ProfileId,
+    id: &ScreenshotEvidenceId,
+) -> Result<ScreenshotEvidenceView, DomainError> {
+    connection.query_row(
+        &format!("SELECT {SCREENSHOT_EVIDENCE_COLUMNS} FROM screenshot_evidence WHERE id=?1 AND profile_id=?2"),
+        params![id.0, profile_id.0],
+        screenshot_evidence_from_row,
+    ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
+fn list_screenshot_evidence(
+    connection: &Connection,
+    profile_id: &ProfileId,
+    relation_column: &str,
+    relation_id: &str,
+) -> Result<Vec<ScreenshotEvidenceView>, DomainError> {
+    if !matches!(relation_column, "run_id" | "verification_receipt_id") {
+        return Err(DomainError::Validation(
+            "SCREENSHOT_QUERY_RELATION_INVALID".into(),
+        ));
+    }
+    let sql = format!(
+        "SELECT {SCREENSHOT_EVIDENCE_COLUMNS} FROM screenshot_evidence WHERE profile_id=?1 AND {relation_column}=?2 ORDER BY captured_at ASC,id ASC"
+    );
+    let mut statement = connection.prepare(&sql).map_err(storage_domain)?;
+    statement
+        .query_map(
+            params![profile_id.0, relation_id],
+            screenshot_evidence_from_row,
+        )
+        .map_err(storage_domain)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(storage_domain)
+}
+
+fn validate_screenshot_evidence(
+    connection: &Connection,
+    owner: &PrincipalId,
+    evidence: &ScreenshotEvidenceView,
+) -> Result<(), DomainError> {
+    let expected_blob_ref = if valid_lower_sha256(&evidence.content_sha256) {
+        format!(
+            "blobs/objects/{}/{}",
+            &evidence.content_sha256[..2],
+            evidence.content_sha256
+        )
+    } else {
+        String::new()
+    };
+    if Uuid::parse_str(&evidence.id.0).is_err()
+        || evidence.blob_ref != expected_blob_ref
+        || evidence.mime_type != "image/png"
+        || !(1..=4 * 1024 * 1024).contains(&evidence.byte_size)
+        || evidence.width == 0
+        || evidence.width > 4096
+        || evidence.height == 0
+        || evidence.height > 4096
+        || u64::from(evidence.width) * u64::from(evidence.height) > 16_777_216
+        || evidence.source_kind != ScreenshotEvidenceSourceKind::BrowserViewport
+        || evidence.page_id.is_empty()
+        || evidence.page_id.len() > 128
+        || !evidence.page_id.starts_with("page_")
+        || evidence.captured_url.is_empty()
+        || evidence.captured_url.len() > 8192
+        || !matches!(
+            evidence.captured_url.split_once(':').map(|value| value.0),
+            Some("http" | "https" | "file")
+        )
+        || evidence.captured_at < 0
+        || evidence.created_at < 0
+        || evidence.visibility != ScreenshotEvidenceVisibility::Internal
+        || evidence.retention_class != ScreenshotEvidenceRetentionClass::LocalEvidence
+        || evidence.status != ScreenshotEvidenceStatus::Active
+        || evidence.export_policy != ScreenshotEvidenceExportPolicy::Excluded
+        || evidence.sync_policy != ScreenshotEvidenceSyncPolicy::LocalOnly
+        || (evidence.tool_call_id.is_some() && evidence.run_id.is_none())
+        || (evidence.verification_receipt_id.is_some() && evidence.run_id.is_none())
+    {
+        return Err(DomainError::Validation(
+            "SCREENSHOT_EVIDENCE_INVALID".into(),
+        ));
+    }
+    if let Some(conversation_id) = evidence.conversation_id.as_ref() {
+        get_conversation(connection, owner, conversation_id)?;
+    }
+    let run = evidence
+        .run_id
+        .as_ref()
+        .map(|run_id| get_agent_run(connection, owner, run_id))
+        .transpose()?;
+    if let (Some(conversation_id), Some(run)) = (evidence.conversation_id.as_ref(), run.as_ref())
+        && run.conversation_id != *conversation_id
+    {
+        return Err(DomainError::Validation(
+            "SCREENSHOT_EVIDENCE_PROVENANCE_INVALID".into(),
+        ));
+    }
+    if let Some(tool_call_id) = evidence.tool_call_id.as_ref() {
+        let tool = get_agent_tool_call(connection, owner, tool_call_id)?;
+        if evidence.run_id.as_ref() != Some(&tool.run_id) {
+            return Err(DomainError::Validation(
+                "SCREENSHOT_EVIDENCE_PROVENANCE_INVALID".into(),
+            ));
+        }
+    }
+    if let Some(receipt_id) = evidence.verification_receipt_id.as_ref() {
+        let receipt = get_agent_verification_receipt(connection, owner, receipt_id)?;
+        if evidence.run_id.as_ref() != Some(&receipt.run_id)
+            || evidence.tool_call_id.is_some()
+                && receipt.tool_call_id.as_ref() != evidence.tool_call_id.as_ref()
+        {
+            return Err(DomainError::Validation(
+                "SCREENSHOT_EVIDENCE_PROVENANCE_INVALID".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn agent_approval_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApprovalView> {
     Ok(ApprovalView {
         id: ApprovalId::new(row.get::<_, String>(0)?),
@@ -3291,6 +3575,7 @@ fn validate_result_references(
             ResultReferenceTarget::Image {
                 source,
                 library_object_id,
+                screenshot_evidence_id,
                 expected_sha256,
                 mime_type,
             } => {
@@ -3298,52 +3583,100 @@ fn validate_result_references(
                     "![{}](fielora-reference:{})",
                     reference.label, reference.id.0
                 );
-                if source != &ResultImageSource::Library
-                    || !valid_result_sha256(expected_sha256)
+                if !valid_result_sha256(expected_sha256)
                     || reference.label.contains('[')
                     || reference.label.contains(']')
                     || !content.lines().any(|line| line.trim() == image_marker)
-                    || !matches!(
-                        mime_type.as_str(),
-                        "image/png" | "image/jpeg" | "image/webp"
-                    )
                 {
                     return Err(DomainError::Validation(
                         "RESULT_REFERENCE_IMAGE_TARGET_INVALID".into(),
                     ));
                 }
-                let ResultReferenceProvenance::LibraryObject {
-                    library_object_id: source_id,
-                } = &reference.provenance
-                else {
-                    return Err(DomainError::Validation(
-                        "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
-                    ));
-                };
-                if source_id != library_object_id {
-                    return Err(DomainError::Validation(
-                        "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
-                    ));
-                }
-                let object = get_library_object(connection, library_object_id)?;
-                let expected_blob_ref = format!(
-                    "blobs/objects/{}/{}",
-                    &expected_sha256[..2],
-                    expected_sha256
-                );
-                if object.kind != LibraryObjectKind::File
-                    || object.media_kind != LibraryMediaKind::Image
-                    || object.lifecycle != LibraryLifecycle::Active
-                    || object.content_hash.as_deref() != Some(expected_sha256.as_str())
-                    || object.mime_type.as_deref() != Some(mime_type.as_str())
-                    || object.blob_ref.as_deref() != Some(expected_blob_ref.as_str())
-                    || object
-                        .size
-                        .is_none_or(|size| size == 0 || size > 8 * 1024 * 1024)
-                {
-                    return Err(DomainError::Validation(
-                        "RESULT_REFERENCE_IMAGE_TARGET_INVALID".into(),
-                    ));
+                match source {
+                    ResultImageSource::Library => {
+                        let (Some(library_object_id), None) =
+                            (library_object_id.as_ref(), screenshot_evidence_id.as_ref())
+                        else {
+                            return Err(DomainError::Validation(
+                                "RESULT_REFERENCE_IMAGE_TARGET_INVALID".into(),
+                            ));
+                        };
+                        let ResultReferenceProvenance::LibraryObject {
+                            library_object_id: source_id,
+                        } = &reference.provenance
+                        else {
+                            return Err(DomainError::Validation(
+                                "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+                            ));
+                        };
+                        if source_id != library_object_id
+                            || !matches!(
+                                mime_type.as_str(),
+                                "image/png" | "image/jpeg" | "image/webp"
+                            )
+                        {
+                            return Err(DomainError::Validation(
+                                "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+                            ));
+                        }
+                        let object = get_library_object(connection, library_object_id)?;
+                        let expected_blob_ref = format!(
+                            "blobs/objects/{}/{}",
+                            &expected_sha256[..2],
+                            expected_sha256
+                        );
+                        if object.kind != LibraryObjectKind::File
+                            || object.media_kind != LibraryMediaKind::Image
+                            || object.lifecycle != LibraryLifecycle::Active
+                            || object.content_hash.as_deref() != Some(expected_sha256.as_str())
+                            || object.mime_type.as_deref() != Some(mime_type.as_str())
+                            || object.blob_ref.as_deref() != Some(expected_blob_ref.as_str())
+                            || object
+                                .size
+                                .is_none_or(|size| size == 0 || size > 8 * 1024 * 1024)
+                        {
+                            return Err(DomainError::Validation(
+                                "RESULT_REFERENCE_IMAGE_TARGET_INVALID".into(),
+                            ));
+                        }
+                    }
+                    ResultImageSource::ScreenshotEvidence => {
+                        let (None, Some(screenshot_evidence_id)) =
+                            (library_object_id.as_ref(), screenshot_evidence_id.as_ref())
+                        else {
+                            return Err(DomainError::Validation(
+                                "RESULT_REFERENCE_IMAGE_TARGET_INVALID".into(),
+                            ));
+                        };
+                        let ResultReferenceProvenance::ScreenshotEvidence {
+                            screenshot_evidence_id: source_id,
+                        } = &reference.provenance
+                        else {
+                            return Err(DomainError::Validation(
+                                "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+                            ));
+                        };
+                        if source_id != screenshot_evidence_id || mime_type != "image/png" {
+                            return Err(DomainError::Validation(
+                                "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+                            ));
+                        }
+                        let screenshot = get_screenshot_evidence(
+                            connection,
+                            &current_profile_id(connection)?,
+                            screenshot_evidence_id,
+                        )?;
+                        if screenshot.status != ScreenshotEvidenceStatus::Active
+                            || screenshot.content_sha256 != *expected_sha256
+                            || screenshot.mime_type != *mime_type
+                            || screenshot.byte_size == 0
+                            || screenshot.byte_size > 4 * 1024 * 1024
+                        {
+                            return Err(DomainError::Validation(
+                                "RESULT_REFERENCE_IMAGE_TARGET_INVALID".into(),
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -3857,6 +4190,7 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     let checksum_0011 = migration_checksum(MIGRATION_0011);
     let checksum_0012 = migration_checksum(MIGRATION_0012);
     let checksum_0013 = migration_checksum(MIGRATION_0013);
+    let checksum_0014 = migration_checksum(MIGRATION_0014);
     if checksum_0002 != MIGRATION_0002_FROZEN_SHA256 {
         return Err(StorageError::MigrationChecksum { version: 2 });
     }
@@ -3993,7 +4327,31 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     if !migration_exists(connection, 13)? {
         apply_rich_result_reference_migration(connection, now, MIGRATION_0013, &checksum_0013)?;
     }
+    verify_applied_migration(connection, 14, MIGRATION_0014_NAME, &checksum_0014)?;
+    if !migration_exists(connection, 14)? {
+        apply_screenshot_evidence_migration(connection, now, MIGRATION_0014, &checksum_0014)?;
+    }
     validate_schema(connection)?;
+    Ok(())
+}
+
+fn apply_screenshot_evidence_migration(
+    connection: &mut Connection,
+    now: i64,
+    migration_sql: &str,
+    checksum: &str,
+) -> Result<(), StorageError> {
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if transaction.execute_batch(migration_sql).is_err() {
+        return Err(StorageError::MigrationIncompatibleData);
+    }
+    transaction.execute(
+        "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (14, ?1, ?2, ?3)",
+        params![MIGRATION_0014_NAME, checksum, now],
+    )?;
+    validate_schema(&transaction)?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -4648,6 +5006,95 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
     }
     if migration_exists(connection, 13)? {
         validate_rich_result_reference_schema(connection)?;
+    }
+    if migration_exists(connection, 14)? {
+        validate_screenshot_evidence_schema(connection)?;
+    }
+    Ok(())
+}
+
+fn validate_screenshot_evidence_schema(connection: &Connection) -> Result<(), StorageError> {
+    let exists: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='screenshot_evidence'",
+        [],
+        |row| row.get(0),
+    )?;
+    if exists != 1 {
+        return Err(StorageError::OpenGate(
+            "migration validation missing table screenshot_evidence".into(),
+        ));
+    }
+    for column in [
+        "profile_id",
+        "content_sha256",
+        "blob_ref",
+        "mime_type",
+        "byte_size",
+        "width",
+        "height",
+        "source_kind",
+        "page_id",
+        "navigation_generation",
+        "captured_url",
+        "captured_at",
+        "visibility",
+        "retention_class",
+        "status",
+        "export_policy",
+        "sync_policy",
+        "created_at",
+    ] {
+        let required: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('screenshot_evidence') WHERE name=?1 AND \"notnull\"=1",
+            [column],
+            |row| row.get(0),
+        )?;
+        if required != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required NOT NULL column missing: screenshot_evidence.{column}"
+            )));
+        }
+    }
+    let sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='screenshot_evidence'",
+        [],
+        |row| row.get(0),
+    )?;
+    let normalized = sql
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_uppercase();
+    for fragment in [
+        "MIME_TYPE = 'IMAGE/PNG'",
+        "BYTE_SIZE BETWEEN 1 AND 4194304",
+        "SOURCE_KIND = 'BROWSER_VIEWPORT'",
+        "VISIBILITY = 'INTERNAL'",
+        "RETENTION_CLASS = 'LOCAL_EVIDENCE'",
+        "EXPORT_POLICY = 'EXCLUDED'",
+        "SYNC_POLICY = 'LOCAL_ONLY'",
+        "WIDTH * HEIGHT <= 16777216",
+    ] {
+        if !normalized.contains(fragment) {
+            return Err(StorageError::OpenGate(format!(
+                "required screenshot evidence CHECK missing: {fragment}"
+            )));
+        }
+    }
+    for index in [
+        "idx_screenshot_evidence_run_captured",
+        "idx_screenshot_evidence_verification_captured",
+    ] {
+        let count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+            [index],
+            |row| row.get(0),
+        )?;
+        if count != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required index missing: {index}"
+            )));
+        }
     }
     Ok(())
 }
@@ -6717,6 +7164,7 @@ pub fn create_portable_snapshot(source: &Path, target: &Path) -> Result<(), Stor
     let transaction = connection.transaction()?;
     transaction.execute("DELETE FROM surface_snapshots", [])?;
     transaction.execute("DELETE FROM device_bindings", [])?;
+    transaction.execute("DELETE FROM screenshot_evidence", [])?;
     transaction.execute(
         "UPDATE library_objects SET original_source=NULL WHERE kind='FILE'",
         [],
@@ -6883,6 +7331,17 @@ mod tests {
             now + 4,
             MIGRATION_0012,
             &migration_checksum(MIGRATION_0012),
+        )
+        .unwrap();
+    }
+
+    fn apply_schema_through_13(connection: &mut Connection, now: i64) {
+        apply_schema_through_12(connection, now);
+        apply_rich_result_reference_migration(
+            connection,
+            now + 5,
+            MIGRATION_0013,
+            &migration_checksum(MIGRATION_0013),
         )
         .unwrap();
     }
@@ -7583,7 +8042,7 @@ mod tests {
             frozen_migration_checksum(MIGRATION_0006),
             MIGRATION_0006_FROZEN_SHA256
         );
-        assert_eq!(schema_version(), 13);
+        assert_eq!(schema_version(), 14);
     }
 
     #[test]
@@ -8290,7 +8749,7 @@ mod tests {
             [&message_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).unwrap();
-        assert_eq!(migrated, (13, "# Existing Markdown".into(), "[]".into()));
+        assert_eq!(migrated, (14, "# Existing Markdown".into(), "[]".into()));
         apply_migrations(&mut connection, 21).unwrap();
         validate_schema(&connection).unwrap();
         drop(connection);
@@ -8319,6 +8778,325 @@ mod tests {
         assert_eq!(rolled_back, (0, 0));
         drop(rollback);
         fs::remove_dir_all(rollback_root).unwrap();
+    }
+
+    #[test]
+    fn migration_0014_is_additive_old_database_compatible_and_atomic() {
+        let root = temporary_root();
+        let paths = PlatformPaths::from_root(root.clone()).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let mut connection = open_connection(&paths.database).unwrap();
+        apply_schema_through_13(&mut connection, 1);
+        bootstrap_records(&mut connection, &device, 10).unwrap();
+        apply_migrations(&mut connection, 20).unwrap();
+        let migrated: (i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT MAX(version) FROM schema_migrations), (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='screenshot_evidence')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(migrated, (14, 1));
+        apply_migrations(&mut connection, 21).unwrap();
+        validate_schema(&connection).unwrap();
+        drop(connection);
+        fs::remove_dir_all(root).unwrap();
+
+        let rollback_root = temporary_root();
+        let rollback_paths = PlatformPaths::from_root(rollback_root.clone()).unwrap();
+        let mut rollback = open_connection(&rollback_paths.database).unwrap();
+        apply_schema_through_13(&mut rollback, 1);
+        let failing_migration =
+            format!("{MIGRATION_0014}\nSELECT * FROM migration_0014_forced_failure;");
+        assert!(matches!(
+            apply_screenshot_evidence_migration(
+                &mut rollback,
+                20,
+                &failing_migration,
+                &migration_checksum(&failing_migration),
+            ),
+            Err(StorageError::MigrationIncompatibleData)
+        ));
+        let rolled_back: (i64, i64) = rollback
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM schema_migrations WHERE version=14), (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='screenshot_evidence')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(rolled_back, (0, 0));
+        drop(rollback);
+        fs::remove_dir_all(rollback_root).unwrap();
+    }
+
+    #[test]
+    fn screenshot_evidence_is_durable_profile_scoped_local_only_and_verification_bounded() {
+        let root = temporary_root();
+        let worker = start(&root, 1);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 10);
+        let tool = artifact_tool(
+            &handle,
+            run.id.clone(),
+            "browser.fixture.observe",
+            AgentToolEffect::Observe,
+            20,
+        );
+        let receipt = VerificationReceiptView {
+            id: VerificationReceiptId::new(Uuid::now_v7().to_string()),
+            run_id: run.id.clone(),
+            tool_call_id: Some(tool.id.clone()),
+            check_kind: "VISUAL_FIXTURE".into(),
+            outcome: VerificationOutcome::Fail,
+            summary: "The screenshot supports inspection but does not grant PASS".into(),
+            artifact_sha256: None,
+            subject: None,
+            exit_code: None,
+            created_at: 24,
+        };
+        handle.record_agent_verification(receipt.clone()).unwrap();
+        let content_sha256 = "a".repeat(64);
+        let screenshot = ScreenshotEvidenceView {
+            id: ScreenshotEvidenceId::new(Uuid::now_v7().to_string()),
+            content_sha256: content_sha256.clone(),
+            blob_ref: format!("blobs/objects/aa/{content_sha256}"),
+            mime_type: "image/png".into(),
+            byte_size: 128,
+            width: 16,
+            height: 8,
+            source_kind: ScreenshotEvidenceSourceKind::BrowserViewport,
+            page_id: format!("page_{}", Uuid::now_v7()),
+            navigation_generation: 3,
+            captured_url: "https://fixture.example/verified".into(),
+            captured_at: 25,
+            conversation_id: Some(conversation.id.clone()),
+            run_id: Some(run.id.clone()),
+            tool_call_id: Some(tool.id.clone()),
+            verification_receipt_id: Some(receipt.id.clone()),
+            visibility: ScreenshotEvidenceVisibility::Internal,
+            retention_class: ScreenshotEvidenceRetentionClass::LocalEvidence,
+            status: ScreenshotEvidenceStatus::Active,
+            export_policy: ScreenshotEvidenceExportPolicy::Excluded,
+            sync_policy: ScreenshotEvidenceSyncPolicy::LocalOnly,
+            created_at: 26,
+        };
+        let library_hash = "b".repeat(64);
+        let library = handle
+            .create_library_file(
+                CreateLibraryFileRequest {
+                    title: "Normal Library image".into(),
+                    original_source: root.join("normal.png").to_string_lossy().into_owned(),
+                    original_filename: "normal.png".into(),
+                    mime_type: Some("image/png".into()),
+                    media_kind: LibraryMediaKind::Image,
+                    size: 64,
+                    blob_ref: format!("blobs/objects/bb/{library_hash}"),
+                    content_hash: library_hash.clone(),
+                    metadata: json!({"fixture":true}),
+                },
+                25,
+            )
+            .unwrap();
+        let library_before = handle
+            .list_library_objects(ListLibraryObjectsRequest {
+                media_kind: None,
+                include_deleted: true,
+                limit: Some(500),
+            })
+            .unwrap()
+            .len();
+        let journal_before: i64 = open_connection(&handle.database_path)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM sync_change_journal", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let created = handle
+            .create_screenshot_evidence(screenshot.clone())
+            .unwrap();
+        assert_eq!(created, screenshot);
+        assert_eq!(
+            handle
+                .get_screenshot_evidence(screenshot.id.clone())
+                .unwrap(),
+            screenshot
+        );
+        assert_eq!(
+            handle
+                .list_screenshot_evidence_by_run(run.id.clone())
+                .unwrap(),
+            vec![screenshot.clone()]
+        );
+        assert_eq!(
+            handle
+                .list_screenshot_evidence_by_verification(receipt.id.clone())
+                .unwrap(),
+            vec![screenshot.clone()]
+        );
+        let mut same_pixels_later = screenshot.clone();
+        same_pixels_later.id = ScreenshotEvidenceId::new(Uuid::now_v7().to_string());
+        same_pixels_later.captured_at += 1;
+        same_pixels_later.created_at += 1;
+        let same_pixels_later = handle
+            .create_screenshot_evidence(same_pixels_later)
+            .unwrap();
+        assert_ne!(same_pixels_later.id, screenshot.id);
+        assert_eq!(same_pixels_later.content_sha256, screenshot.content_sha256);
+        let mut shared_with_library = screenshot.clone();
+        shared_with_library.id = ScreenshotEvidenceId::new(Uuid::now_v7().to_string());
+        shared_with_library.content_sha256 = library_hash.clone();
+        shared_with_library.blob_ref = format!("blobs/objects/bb/{library_hash}");
+        shared_with_library.captured_at += 2;
+        shared_with_library.created_at += 2;
+        let shared_with_library = handle
+            .create_screenshot_evidence(shared_with_library)
+            .unwrap();
+        assert_eq!(shared_with_library.content_sha256, library_hash);
+        let other_profile = StorageHandle {
+            sender: handle.sender.clone(),
+            local_user: handle.local_user.clone(),
+            device_id: handle.device_id.clone(),
+            profile_id: ProfileId::new("other-profile"),
+            database_path: handle.database_path.clone(),
+        };
+        assert_eq!(
+            other_profile
+                .get_screenshot_evidence(screenshot.id.clone())
+                .unwrap_err(),
+            DomainError::NotFound
+        );
+        drop(other_profile);
+        assert_eq!(receipt.outcome, VerificationOutcome::Fail);
+        assert_eq!(
+            handle
+                .list_library_objects(ListLibraryObjectsRequest {
+                    media_kind: None,
+                    include_deleted: true,
+                    limit: Some(500),
+                })
+                .unwrap()
+                .len(),
+            library_before
+        );
+        assert_eq!(
+            handle.portable_blob_manifest().unwrap(),
+            vec![PortableBlobManifestEntryView {
+                blob_ref: library.blob_ref.unwrap(),
+                content_sha256: library_hash.clone(),
+                byte_size: 64,
+            }]
+        );
+        let journal_after: i64 = open_connection(&handle.database_path)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM sync_change_journal", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(journal_after, journal_before);
+
+        let second_run = handle
+            .create_agent_run(
+                StartAgentRunRequest {
+                    field_id: project.field_id,
+                    conversation_id: conversation.id.clone(),
+                    user_message_id: None,
+                    provider_config_id: run.provider_config_id.clone(),
+                    model_id: Some(run.model_id.clone()),
+                    task: "Second run".into(),
+                    permission: AgentPermission::ReadOnly,
+                    max_steps: Some(2),
+                    attachments: None,
+                    active_work_surface: None,
+                },
+                30,
+            )
+            .unwrap()
+            .run;
+        let mut invalid = screenshot.clone();
+        invalid.id = ScreenshotEvidenceId::new(Uuid::now_v7().to_string());
+        invalid.run_id = Some(second_run.id);
+        assert!(matches!(
+            handle.create_screenshot_evidence(invalid),
+            Err(DomainError::Validation(code)) if code == "SCREENSHOT_EVIDENCE_PROVENANCE_INVALID"
+        ));
+
+        let reference_id = ResultReferenceId::new(format!("resultref_{}", "e".repeat(32)));
+        let markdown = format!(
+            "## 页面验证\n\n当前实际界面：\n\n![当前页面](fielora-reference:{reference_id})\n\n对应验证已记录。"
+        );
+        let message = handle
+            .create_conversation_message(
+                CreateConversationMessageRequest {
+                    conversation_id: conversation.id.clone(),
+                    role: ConversationMessageRole::Assistant,
+                    content: markdown,
+                    status: ConversationMessageStatus::Completed,
+                    provider_config_id: None,
+                    model_id: None,
+                    invocation_id: None,
+                    references: vec![ResultReference {
+                        id: reference_id,
+                        label: "当前页面".into(),
+                        target: ResultReferenceTarget::Image {
+                            source: ResultImageSource::ScreenshotEvidence,
+                            library_object_id: None,
+                            screenshot_evidence_id: Some(screenshot.id.clone()),
+                            expected_sha256: screenshot.content_sha256.clone(),
+                            mime_type: "image/png".into(),
+                        },
+                        provenance: ResultReferenceProvenance::ScreenshotEvidence {
+                            screenshot_evidence_id: screenshot.id.clone(),
+                        },
+                    }],
+                },
+                40,
+            )
+            .unwrap();
+        drop(handle);
+        drop(worker);
+
+        let reopened = start(&root, 50);
+        assert_eq!(
+            reopened
+                .handle()
+                .get_screenshot_evidence(screenshot.id.clone())
+                .unwrap(),
+            screenshot
+        );
+        assert_eq!(
+            reopened
+                .handle()
+                .list_conversation_messages(conversation.id)
+                .unwrap()
+                .last()
+                .unwrap(),
+            &message
+        );
+        drop(reopened);
+
+        let portable = root.join("portable.sqlite");
+        create_portable_snapshot(
+            &PlatformPaths::from_root(root.clone()).unwrap().database,
+            &portable,
+        )
+        .unwrap();
+        let portable_connection = open_connection(&portable).unwrap();
+        let screenshot_rows: i64 = portable_connection
+            .query_row("SELECT COUNT(*) FROM screenshot_evidence", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(screenshot_rows, 0);
+        let restored_references: String = portable_connection
+            .query_row(
+                "SELECT references_json FROM conversation_messages WHERE id=?1",
+                [&message.id.0],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(restored_references.contains(&screenshot.id.0));
+        drop(portable_connection);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -8932,7 +9710,8 @@ mod tests {
                     label: "布局裁切截图".into(),
                     target: ResultReferenceTarget::Image {
                         source: ResultImageSource::Library,
-                        library_object_id: image.id.clone(),
+                        library_object_id: Some(image.id.clone()),
+                        screenshot_evidence_id: None,
                         expected_sha256: image_hash.clone(),
                         mime_type: "image/png".into(),
                     },
@@ -8989,7 +9768,8 @@ mod tests {
                                     label: "unsafe image".into(),
                                     target: ResultReferenceTarget::Image {
                                         source: ResultImageSource::Library,
-                                        library_object_id: object_id,
+                                        library_object_id: Some(object_id),
+                                        screenshot_evidence_id: None,
                                         expected_sha256: image_hash.clone(),
                                         mime_type: mime_type.into(),
                                     },
@@ -9020,7 +9800,8 @@ mod tests {
                                 label: "layout".into(),
                                 target: ResultReferenceTarget::Image {
                                     source: ResultImageSource::Library,
-                                    library_object_id: image.id.clone(),
+                                    library_object_id: Some(image.id.clone()),
+                                    screenshot_evidence_id: None,
                                     expected_sha256: image_hash.clone(),
                                     mime_type: "image/png".into(),
                                 },

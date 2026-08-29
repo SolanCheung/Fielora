@@ -57,6 +57,9 @@ export interface LibraryImagePreviewView {
   data_url: string;
 }
 
+export type ScreenshotImagePreviewView = Omit<ScreenshotEvidencePreviewView, 'source'> & { source: 'SCREENSHOT_EVIDENCE' };
+export type ResultImagePreviewView = LibraryImagePreviewView | ScreenshotImagePreviewView;
+
 export type WorkspaceAttachmentStatus = 'READY' | 'UNSUPPORTED' | 'TOO_LARGE';
 export type WorkspaceAttachmentSource = 'clipboard' | 'file_picker' | 'drag_drop' | 'library';
 
@@ -140,3 +143,4 @@ export interface TerminalEvent {
   text: string | null;
   exit_code: number | null;
 }
+import type { ScreenshotEvidencePreviewView } from '@fielora/contracts';

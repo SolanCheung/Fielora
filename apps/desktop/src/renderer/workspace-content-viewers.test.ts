@@ -54,18 +54,19 @@ test('system navigation labels are consistently Chinese', () => {
   assert.doesNotMatch(navigation, /<span>(?:Now|Fields|Inbox|Browser)<\/span>/);
 });
 
-test('completed Markdown resolves only typed Library images in place and reuses the existing Lightbox', () => {
+test('completed Markdown resolves typed Library and ScreenshotEvidence images in place and reuses the existing Lightbox', () => {
   assert.match(markdown, /function controlledImageMarker/);
   assert.match(markdown, /reference\?\.target\.kind === 'IMAGE'/);
   assert.match(markdown, /window\.fielora\.library\.previewImage/);
-  assert.match(markdown, /resolved\.content_hash === reference\.target\.expected_sha256/);
+  assert.match(markdown, /window\.fielora\.screenshot\.preview/);
+  assert.match(markdown, /resolved\.content_sha256 === reference\.target\.expected_sha256/);
   assert.match(markdown, /resolved\.mime_type === reference\.target\.mime_type/);
   assert.match(markdown, /data-testid="markdown-inline-image"/);
   assert.match(markdown, />图片不可用</);
   assert.match(markdown, /className="markdown-reference-unavailable">\{imageMarker\.label\}/);
   assert.doesNotMatch(markdown, /file:\/\//);
   assert.doesNotMatch(markdown, /https\?:\/\/[^)]*image/);
-  assert.match(workspace, /setPreviewAttachment\(libraryImageAttachment\(preview\)\)/);
+  assert.match(workspace, /setPreviewAttachment\(resultImageAttachment\(preview\)\)/);
   assert.match(workspace, /<ImagePreview attachment=\{previewAttachment\}/);
   assert.match(attachments, /data-testid="image-preview"/);
   assert.doesNotMatch(workspace, /ResultImageModal|ScreenshotViewer/);

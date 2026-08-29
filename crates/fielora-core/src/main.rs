@@ -38,7 +38,7 @@ use uuid::Uuid;
 
 const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 const PROTOCOL: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
-const CAPABILITIES: [&str; 85] = [
+const CAPABILITIES: [&str; 91] = [
     "system.build_provenance",
     "field.create",
     "field.list",
@@ -104,6 +104,12 @@ const CAPABILITIES: [&str; 85] = [
     "conversation.archive",
     "conversation.message.create",
     "conversation.message.list",
+    "screenshot_evidence.create",
+    "screenshot_evidence.get",
+    "screenshot_evidence.by_run",
+    "screenshot_evidence.by_verification",
+    "screenshot_evidence.preview",
+    "profile.portable_blob_manifest",
     "agent.start",
     "agent.get",
     "agent.list",
@@ -579,6 +585,126 @@ fn dispatch_request(
                     .storage
                     .list_conversation_messages(params.conversation_id)?,
             )
+        }
+        "command.screenshot_evidence.create" => {
+            const MAX_SCREENSHOT_BYTES: usize = 4 * 1024 * 1024;
+            let params: CreateScreenshotEvidenceRequest = parse_params(&request.params)?;
+            let bytes = decode_png_data_url(&params.png_data_url, MAX_SCREENSHOT_BYTES)?;
+            let admitted = fielora_agent::png_admission::admit(bytes)
+                .map_err(|_| DomainError::Validation("SCREENSHOT_PNG_REJECTED".into()))?;
+            if admitted.byte_length > MAX_SCREENSHOT_BYTES as u64 {
+                return Err(DomainError::Validation("SCREENSHOT_PNG_TOO_LARGE".into()));
+            }
+            let blob_ref = fielora_agent::asset::ContentBlobStore::new(&runtime.content_blob_root)
+                .put_exact(admitted.bytes(), &admitted.content_sha256)
+                .map_err(|_| DomainError::Validation("SCREENSHOT_BLOB_WRITE_FAILED".into()))?;
+            let created_at = now_ms();
+            serialize(
+                runtime
+                    .storage
+                    .create_screenshot_evidence(ScreenshotEvidenceView {
+                        id: ScreenshotEvidenceId::new(Uuid::now_v7().to_string()),
+                        content_sha256: admitted.content_sha256,
+                        blob_ref,
+                        mime_type: fielora_agent::png_admission::AdmittedPng::MEDIA_TYPE.into(),
+                        byte_size: admitted.byte_length,
+                        width: admitted.width,
+                        height: admitted.height,
+                        source_kind: params.source_kind,
+                        page_id: params.page_id,
+                        navigation_generation: params.navigation_generation,
+                        captured_url: params.captured_url,
+                        captured_at: params.captured_at,
+                        conversation_id: params.conversation_id,
+                        run_id: params.run_id,
+                        tool_call_id: params.tool_call_id,
+                        verification_receipt_id: params.verification_receipt_id,
+                        visibility: ScreenshotEvidenceVisibility::Internal,
+                        retention_class: ScreenshotEvidenceRetentionClass::LocalEvidence,
+                        status: ScreenshotEvidenceStatus::Active,
+                        export_policy: ScreenshotEvidenceExportPolicy::Excluded,
+                        sync_policy: ScreenshotEvidenceSyncPolicy::LocalOnly,
+                        created_at,
+                    })?,
+            )
+        }
+        "query.screenshot_evidence.get" => {
+            let params: ScreenshotEvidenceRequest = parse_params(&request.params)?;
+            serialize(
+                runtime
+                    .storage
+                    .get_screenshot_evidence(params.screenshot_evidence_id)?,
+            )
+        }
+        "query.screenshot_evidence.by_run" => {
+            let params: ListScreenshotEvidenceByRunRequest = parse_params(&request.params)?;
+            serialize(
+                runtime
+                    .storage
+                    .list_screenshot_evidence_by_run(params.run_id)?,
+            )
+        }
+        "query.screenshot_evidence.by_verification" => {
+            let params: ListScreenshotEvidenceByVerificationRequest =
+                parse_params(&request.params)?;
+            serialize(
+                runtime
+                    .storage
+                    .list_screenshot_evidence_by_verification(params.verification_receipt_id)?,
+            )
+        }
+        "query.screenshot_evidence.preview" => {
+            const MAX_SCREENSHOT_BYTES: usize = 4 * 1024 * 1024;
+            let params: ScreenshotEvidencePreviewRequest = parse_params(&request.params)?;
+            if !valid_sha256(&params.expected_content_sha256) {
+                return Err(DomainError::Validation(
+                    "SCREENSHOT_PREVIEW_DIGEST_INVALID".into(),
+                ));
+            }
+            let screenshot = runtime
+                .storage
+                .get_screenshot_evidence(params.screenshot_evidence_id.clone())?;
+            if screenshot.status != ScreenshotEvidenceStatus::Active
+                || screenshot.content_sha256 != params.expected_content_sha256
+                || screenshot.mime_type != "image/png"
+                || screenshot.byte_size > MAX_SCREENSHOT_BYTES as u64
+            {
+                return Err(DomainError::Validation(
+                    "SCREENSHOT_PREVIEW_REJECTED".into(),
+                ));
+            }
+            let bytes = fielora_agent::asset::ContentBlobStore::new(&runtime.content_blob_root)
+                .read_verified(
+                    &screenshot.blob_ref,
+                    screenshot.byte_size,
+                    &screenshot.content_sha256,
+                    MAX_SCREENSHOT_BYTES,
+                )
+                .map_err(|_| DomainError::Validation("SCREENSHOT_PREVIEW_UNAVAILABLE".into()))?;
+            let admitted = fielora_agent::png_admission::admit(bytes)
+                .map_err(|_| DomainError::Validation("SCREENSHOT_PREVIEW_UNAVAILABLE".into()))?;
+            if admitted.content_sha256 != screenshot.content_sha256
+                || admitted.byte_length != screenshot.byte_size
+                || admitted.width != screenshot.width
+                || admitted.height != screenshot.height
+            {
+                return Err(DomainError::Validation(
+                    "SCREENSHOT_PREVIEW_INTEGRITY_FAILED".into(),
+                ));
+            }
+            serialize(ScreenshotEvidencePreviewView {
+                screenshot_evidence_id: screenshot.id,
+                source: ResultImageSource::ScreenshotEvidence,
+                mime_type: screenshot.mime_type,
+                byte_size: screenshot.byte_size,
+                width: screenshot.width,
+                height: screenshot.height,
+                content_sha256: screenshot.content_sha256,
+                data_url: data_url("image/png", admitted.bytes()),
+            })
+        }
+        "query.profile.portable_blob_manifest" => {
+            serialize(runtime.storage.portable_blob_manifest()?)
         }
         "query.artifact.list" => {
             let params: ListArtifactsRequest = parse_params(&request.params)?;
@@ -1626,6 +1752,73 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn decode_png_data_url(value: &str, max_bytes: usize) -> Result<Vec<u8>, DomainError> {
+    const PREFIX: &str = "data:image/png;base64,";
+    let encoded = value
+        .strip_prefix(PREFIX)
+        .ok_or_else(|| DomainError::Validation("SCREENSHOT_DATA_URL_INVALID".into()))?;
+    let max_encoded = max_bytes.div_ceil(3) * 4;
+    if encoded.is_empty() || encoded.len() > max_encoded || encoded.len() % 4 != 0 {
+        return Err(DomainError::Validation(
+            "SCREENSHOT_DATA_URL_INVALID".into(),
+        ));
+    }
+    let bytes = encoded.as_bytes();
+    let mut decoded = Vec::with_capacity(encoded.len() / 4 * 3);
+    for (index, chunk) in bytes.chunks_exact(4).enumerate() {
+        let final_chunk = index + 1 == bytes.len() / 4;
+        let padding = usize::from(chunk[3] == b'=') + usize::from(chunk[2] == b'=');
+        if (!final_chunk && padding != 0) || chunk[2] == b'=' && chunk[3] != b'=' || padding > 2 {
+            return Err(DomainError::Validation(
+                "SCREENSHOT_DATA_URL_INVALID".into(),
+            ));
+        }
+        let first = base64_value(chunk[0])?;
+        let second = base64_value(chunk[1])?;
+        let third = if chunk[2] == b'=' {
+            0
+        } else {
+            base64_value(chunk[2])?
+        };
+        let fourth = if chunk[3] == b'=' {
+            0
+        } else {
+            base64_value(chunk[3])?
+        };
+        if padding == 2 && second & 0x0f != 0 || padding == 1 && third & 0x03 != 0 {
+            return Err(DomainError::Validation(
+                "SCREENSHOT_DATA_URL_INVALID".into(),
+            ));
+        }
+        decoded.push((first << 2) | (second >> 4));
+        if padding < 2 {
+            decoded.push((second << 4) | (third >> 2));
+        }
+        if padding == 0 {
+            decoded.push((third << 6) | fourth);
+        }
+        if decoded.len() > max_bytes {
+            return Err(DomainError::Validation(
+                "SCREENSHOT_DATA_URL_INVALID".into(),
+            ));
+        }
+    }
+    Ok(decoded)
+}
+
+fn base64_value(value: u8) -> Result<u8, DomainError> {
+    match value {
+        b'A'..=b'Z' => Ok(value - b'A'),
+        b'a'..=b'z' => Ok(value - b'a' + 26),
+        b'0'..=b'9' => Ok(value - b'0' + 52),
+        b'+' => Ok(62),
+        b'/' => Ok(63),
+        _ => Err(DomainError::Validation(
+            "SCREENSHOT_DATA_URL_INVALID".into(),
+        )),
+    }
+}
+
 fn data_url(media_type: &str, bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -1918,6 +2111,18 @@ mod tests {
             ParsedFrame::Frame(frame) => assert_eq!(frame, b"{\"a\":1}"),
             ParsedFrame::Oversized => panic!("unexpected oversized frame"),
         }
+    }
+
+    #[test]
+    fn screenshot_png_data_url_decoder_is_strict_canonical_and_bounded() {
+        assert_eq!(
+            decode_png_data_url("data:image/png;base64,aGVsbG8=", 5).unwrap(),
+            b"hello"
+        );
+        assert!(decode_png_data_url("data:image/jpeg;base64,aGVsbG8=", 5).is_err());
+        assert!(decode_png_data_url("data:image/png;base64,aGVsbG8", 5).is_err());
+        assert!(decode_png_data_url("data:image/png;base64,aGVsbG9=", 8).is_err());
+        assert!(decode_png_data_url("data:image/png;base64,aGVsbG8=", 4).is_err());
     }
 
     #[test]

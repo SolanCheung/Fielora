@@ -50,6 +50,8 @@ export type ProfileId = string;
 
 export type LibraryObjectId = string;
 
+export type ScreenshotEvidenceId = string;
+
 export type SyncChangeId = string;
 
 export type ArtifactId = string;
@@ -302,6 +304,34 @@ export type DeleteLibraryObjectRequest = { library_object_id: LibraryObjectId, e
 
 export type ListLibraryObjectsRequest = { media_kind: LibraryMediaKind | null, include_deleted: boolean, limit: number | null, };
 
+export type ScreenshotEvidenceSourceKind = "BROWSER_VIEWPORT";
+
+export type ScreenshotEvidenceVisibility = "INTERNAL";
+
+export type ScreenshotEvidenceRetentionClass = "LOCAL_EVIDENCE";
+
+export type ScreenshotEvidenceStatus = "ACTIVE";
+
+export type ScreenshotEvidenceExportPolicy = "EXCLUDED";
+
+export type ScreenshotEvidenceSyncPolicy = "LOCAL_ONLY";
+
+export type ScreenshotEvidenceView = { id: ScreenshotEvidenceId, content_sha256: string, blob_ref: string, mime_type: string, byte_size: number, width: number, height: number, source_kind: ScreenshotEvidenceSourceKind, page_id: string, navigation_generation: number, captured_url: string, captured_at: number, conversation_id: ConversationId | null, run_id: AgentRunId | null, tool_call_id: ToolCallId | null, verification_receipt_id: VerificationReceiptId | null, visibility: ScreenshotEvidenceVisibility, retention_class: ScreenshotEvidenceRetentionClass, status: ScreenshotEvidenceStatus, export_policy: ScreenshotEvidenceExportPolicy, sync_policy: ScreenshotEvidenceSyncPolicy, created_at: number, };
+
+export type CreateScreenshotEvidenceRequest = { png_data_url: string, source_kind: ScreenshotEvidenceSourceKind, page_id: string, navigation_generation: number, captured_url: string, captured_at: number, conversation_id: ConversationId | null, run_id: AgentRunId | null, tool_call_id: ToolCallId | null, verification_receipt_id: VerificationReceiptId | null, };
+
+export type ScreenshotEvidenceRequest = { screenshot_evidence_id: ScreenshotEvidenceId, };
+
+export type ListScreenshotEvidenceByRunRequest = { run_id: AgentRunId, };
+
+export type ListScreenshotEvidenceByVerificationRequest = { verification_receipt_id: VerificationReceiptId, };
+
+export type ScreenshotEvidencePreviewRequest = { screenshot_evidence_id: ScreenshotEvidenceId, expected_content_sha256: string, };
+
+export type ScreenshotEvidencePreviewView = { screenshot_evidence_id: ScreenshotEvidenceId, source: ResultImageSource, mime_type: string, byte_size: number, width: number, height: number, content_sha256: string, data_url: string, };
+
+export type PortableBlobManifestEntryView = { blob_ref: string, content_sha256: string, byte_size: number, };
+
 export type ArtifactType = "DOCUMENT" | "PRESENTATION" | "DIAGRAM" | "SPREADSHEET";
 
 export type ArtifactRefV1 = { artifact_id: ArtifactId, revision_id: ArtifactRevisionId, expected_type: ArtifactType, semantic_sha256: string, };
@@ -458,11 +488,11 @@ export type ConversationMessageRole = "USER" | "ASSISTANT";
 
 export type ConversationMessageStatus = "COMPLETED" | "CANCELLED" | "FAILED";
 
-export type ResultImageSource = "LIBRARY";
+export type ResultImageSource = "LIBRARY" | "SCREENSHOT_EVIDENCE";
 
-export type ResultReferenceTarget = { "kind": "PROJECT_FILE", field_id: FieldId, relative_path: string, expected_sha256: string | null, } | { "kind": "CODE_RANGE", field_id: FieldId, relative_path: string, line_start: number, line_end: number, expected_sha256: string | null, } | { "kind": "WEB_REFERENCE", field_id: FieldId, reference_id: ObjectId, https_url: string, } | { "kind": "IMAGE", source: ResultImageSource, library_object_id: LibraryObjectId, expected_sha256: string, mime_type: string, };
+export type ResultReferenceTarget = { "kind": "PROJECT_FILE", field_id: FieldId, relative_path: string, expected_sha256: string | null, } | { "kind": "CODE_RANGE", field_id: FieldId, relative_path: string, line_start: number, line_end: number, expected_sha256: string | null, } | { "kind": "WEB_REFERENCE", field_id: FieldId, reference_id: ObjectId, https_url: string, } | { "kind": "IMAGE", source: ResultImageSource, library_object_id?: LibraryObjectId, screenshot_evidence_id?: ScreenshotEvidenceId, expected_sha256: string, mime_type: string, };
 
-export type ResultReferenceProvenance = { "kind": "PROJECT_CONTEXT" } | { "kind": "TOOL_RECEIPT", tool_call_id: ToolCallId, } | { "kind": "SAVED_REFERENCE", reference_id: ObjectId, } | { "kind": "LIBRARY_OBJECT", library_object_id: LibraryObjectId, };
+export type ResultReferenceProvenance = { "kind": "PROJECT_CONTEXT" } | { "kind": "TOOL_RECEIPT", tool_call_id: ToolCallId, } | { "kind": "SAVED_REFERENCE", reference_id: ObjectId, } | { "kind": "LIBRARY_OBJECT", library_object_id: LibraryObjectId, } | { "kind": "SCREENSHOT_EVIDENCE", screenshot_evidence_id: ScreenshotEvidenceId, };
 
 export type ResultReference = { id: ResultReferenceId, label: string, target: ResultReferenceTarget, provenance: ResultReferenceProvenance, };
 

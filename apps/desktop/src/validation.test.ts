@@ -103,9 +103,14 @@ test('Rich Result message bridge admits only bounded typed sidecars', () => {
   const range = { id:rangeId,label:'app.ts · L10–L20',target:{kind:'CODE_RANGE',field_id:fieldId,relative_path:'src/app.ts',line_start:10,line_end:20,expected_sha256:'a'.repeat(64)},provenance:{kind:'TOOL_RECEIPT',tool_call_id:fieldId} } as const;
   const web = { id:webId,label:'Architecture',target:{kind:'WEB_REFERENCE',field_id:fieldId,reference_id:fieldId,https_url:'https://example.com/architecture'},provenance:{kind:'SAVED_REFERENCE',reference_id:fieldId} } as const;
   const image = { id:imageId,label:'布局裁切截图',target:{kind:'IMAGE',source:'LIBRARY',library_object_id:fieldId,expected_sha256:'b'.repeat(64),mime_type:'image/png'},provenance:{kind:'LIBRARY_OBJECT',library_object_id:fieldId} } as const;
+  const screenshotImage = { id:`resultref_${'5'.repeat(32)}`,label:'当前页面',target:{kind:'IMAGE',source:'SCREENSHOT_EVIDENCE',screenshot_evidence_id:fieldId,expected_sha256:'c'.repeat(64),mime_type:'image/png'},provenance:{kind:'SCREENSHOT_EVIDENCE',screenshot_evidence_id:fieldId} } as const;
   const content=`## 实现位置\n\n[app.ts](fielora-reference:${fileId}) [app.ts · L10–L20](fielora-reference:${rangeId})\n\n![布局裁切截图](fielora-reference:${imageId})\n\n[Architecture](fielora-reference:${webId})`;
   const validated=validateCreateConversationMessage({conversation_id:fieldId,role:'ASSISTANT',content,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[file,range,image,web]});
   assert.equal(validated.references.length,4);
+  assert.equal(validateCreateConversationMessage({conversation_id:fieldId,role:'ASSISTANT',content:`![当前页面](fielora-reference:${screenshotImage.id})`,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[screenshotImage]}).references[0]?.target.kind,'IMAGE');
+  for(const target of [{...screenshotImage.target,mime_type:'image/jpeg'},{...screenshotImage.target,library_object_id:fieldId},{...screenshotImage.target,screenshot_evidence_id:'forged'}]){
+    assert.throws(()=>validateCreateConversationMessage({conversation_id:fieldId,role:'ASSISTANT',content:`![当前页面](fielora-reference:${screenshotImage.id})`,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[{...screenshotImage,target}]}));
+  }
   assert.equal(validateCreateConversationMessage({conversation_id:fieldId,role:'USER',content:'plain',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null}).references.length,0);
   assert.throws(()=>validateCreateConversationMessage({conversation_id:fieldId,role:'USER',content,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[file]}));
   assert.throws(()=>validateCreateConversationMessage({conversation_id:fieldId,role:'ASSISTANT',content:'missing marker',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[file]}));

@@ -1,6 +1,6 @@
 import { createElement, useEffect, useState, type ReactNode } from 'react';
 import type { ResultReference } from '@fielora/contracts';
-import type { LibraryImagePreviewView } from '../workspace-types';
+import type { ResultImagePreviewView } from '../workspace-types';
 
 interface MarkdownMessageProps {
   content: string;
@@ -8,7 +8,7 @@ interface MarkdownMessageProps {
   onCopyError?: (message: string) => void;
   references?: ResultReference[];
   onOpenReference?: (reference: ResultReference) => void;
-  onOpenImage?: (preview: LibraryImagePreviewView) => void;
+  onOpenImage?: (preview: ResultImagePreviewView) => void;
 }
 
 interface InlineMatch {
@@ -48,7 +48,7 @@ function firstInlineMatch(value: string): InlineMatch | null {
 interface ReferenceRenderContext {
   references: ReadonlyMap<string, ResultReference>;
   onOpenReference?: (reference: ResultReference) => void;
-  onOpenImage?: (preview: LibraryImagePreviewView) => void;
+  onOpenImage?: (preview: ResultImagePreviewView) => void;
 }
 
 function controlledImageMarker(line: string): { label: string; referenceId: string } | null {
@@ -57,29 +57,39 @@ function controlledImageMarker(line: string): { label: string; referenceId: stri
 }
 
 function InlineResultImage({ reference, context }: { reference: ResultReference & { target: Extract<ResultReference['target'], { kind: 'IMAGE' }> }; context: ReferenceRenderContext }) {
-  const [preview, setPreview] = useState<LibraryImagePreviewView | null>(null);
+  const [preview, setPreview] = useState<ResultImagePreviewView | null>(null);
   const [state, setState] = useState<'LOADING' | 'READY' | 'UNAVAILABLE'>('LOADING');
+  const sourceLabel = reference.target.source === 'SCREENSHOT_EVIDENCE' ? '页面截图' : '资料库';
   useEffect(() => {
     let live = true;
     setPreview(null);setState('LOADING');
-    void window.fielora.library.previewImage({ library_object_id: reference.target.library_object_id }).then((resolved) => {
-      const valid = resolved.library_object_id === reference.target.library_object_id
-        && resolved.source === 'LIBRARY'
-        && resolved.content_hash === reference.target.expected_sha256
+    const request = reference.target.source === 'SCREENSHOT_EVIDENCE' && reference.target.screenshot_evidence_id
+      ? window.fielora.screenshot.preview({ screenshot_evidence_id: reference.target.screenshot_evidence_id, expected_content_sha256: reference.target.expected_sha256 })
+      : reference.target.source === 'LIBRARY' && reference.target.library_object_id
+        ? window.fielora.library.previewImage({ library_object_id: reference.target.library_object_id })
+        : Promise.reject(new Error('Missing image source identity'));
+    void request.then((resolved) => {
+      const valid = resolved.source === reference.target.source
+        && (resolved.source === 'LIBRARY'
+          ? resolved.library_object_id === reference.target.library_object_id
+            && resolved.content_hash === reference.target.expected_sha256
+            && resolved.size > 0 && resolved.size <= 8 * 1024 * 1024
+          : resolved.screenshot_evidence_id === reference.target.screenshot_evidence_id
+            && resolved.content_sha256 === reference.target.expected_sha256
+            && resolved.byte_size > 0 && resolved.byte_size <= 4 * 1024 * 1024)
         && resolved.mime_type === reference.target.mime_type
-        && resolved.size > 0 && resolved.size <= 8 * 1024 * 1024
         && resolved.data_url.startsWith(`data:${resolved.mime_type};base64,`);
       if (!live) return;
       if (!valid) { setState('UNAVAILABLE'); return; }
       setPreview(resolved);setState('READY');
     }).catch(() => { if (live) setState('UNAVAILABLE'); });
     return () => { live = false; };
-  }, [reference.id, reference.target.expected_sha256, reference.target.library_object_id, reference.target.mime_type]);
-  if (state === 'LOADING') return <figure className="markdown-inline-image is-loading" data-testid="markdown-inline-image" data-reference-id={reference.id}><div role="status">正在加载图片…</div><figcaption>{reference.label}<span>资料库</span></figcaption></figure>;
-  if (!preview) return <figure className="markdown-inline-image is-unavailable" data-testid="markdown-inline-image" data-reference-id={reference.id}><div role="status">图片不可用</div><figcaption>{reference.label}<span>资料库</span></figcaption></figure>;
+  }, [reference.id, reference.target.expected_sha256, reference.target.library_object_id, reference.target.mime_type, reference.target.screenshot_evidence_id, reference.target.source]);
+  if (state === 'LOADING') return <figure className="markdown-inline-image is-loading" data-testid="markdown-inline-image" data-reference-id={reference.id}><div role="status">正在加载图片…</div><figcaption>{reference.label}<span>{sourceLabel}</span></figcaption></figure>;
+  if (!preview) return <figure className="markdown-inline-image is-unavailable" data-testid="markdown-inline-image" data-reference-id={reference.id}><div role="status">图片不可用</div><figcaption>{reference.label}<span>{sourceLabel}</span></figcaption></figure>;
   return <figure className="markdown-inline-image" data-testid="markdown-inline-image" data-reference-id={reference.id}>
     <button type="button" onClick={() => context.onOpenImage?.(preview)} aria-label={`放大 ${reference.label}`} disabled={!context.onOpenImage}><img src={preview.data_url} alt={reference.label}/></button>
-    <figcaption>{reference.label}<span>资料库</span></figcaption>
+    <figcaption>{reference.label}<span>{sourceLabel}</span></figcaption>
   </figure>;
 }
 

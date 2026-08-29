@@ -48,6 +48,8 @@ export const channels = {
   browserReload: 'fielora:browser:reload',
   browserState: 'fielora:browser:state',
   browserContext: 'fielora:browser:context',
+  browserCaptureScreenshot: 'fielora:browser:capture-screenshot',
+  screenshotGet: 'fielora:screenshot-evidence:get', screenshotByRun: 'fielora:screenshot-evidence:by-run', screenshotByVerification: 'fielora:screenshot-evidence:by-verification', screenshotPreview: 'fielora:screenshot-evidence:preview',
   clipboardWriteText: 'fielora:clipboard:write-text',
   windowTitlebarTheme: 'fielora:window:titlebar-theme',
   providerCreate: 'fielora:provider:create', providerUpdate: 'fielora:provider:update',

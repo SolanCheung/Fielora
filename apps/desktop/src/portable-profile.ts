@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { mkdir, open, stat } from 'node:fs/promises';
+import { lstat, mkdir, open, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
+import type { PortableBlobManifestEntryView } from '@fielora/contracts';
 
 const MAGIC = Buffer.from('FIELORA_PROFILE\0', 'ascii');
 const MAX_MANIFEST_BYTES = 1024 * 1024;
@@ -26,6 +27,37 @@ export interface PortableProfileManifest {
 export interface PortableInputFile {
   archive_path: string;
   source_path: string;
+}
+
+export async function portableLibraryInputs(
+  libraryRoot: string,
+  manifest: PortableBlobManifestEntryView[],
+): Promise<PortableInputFile[]> {
+  const root = await realpath(path.resolve(libraryRoot));
+  const seen = new Set<string>();
+  const inputs: PortableInputFile[] = [];
+  for (const item of manifest) {
+    const match = /^blobs\/objects\/([0-9a-f]{2})\/([0-9a-f]{64})$/u.exec(item.blob_ref);
+    if (!match || match[1] !== match[2]!.slice(0, 2) || match[2] !== item.content_sha256
+      || !Number.isSafeInteger(item.byte_size) || item.byte_size < 1 || seen.has(item.blob_ref)) {
+      throw new Error('Invalid portable blob manifest');
+    }
+    seen.add(item.blob_ref);
+    const candidate = path.join(root, ...item.blob_ref.split('/'));
+    const relative = path.relative(root, candidate);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Portable blob escaped LibraryRoot');
+    const linkInfo = await lstat(candidate);
+    if (!linkInfo.isFile() || linkInfo.isSymbolicLink()) throw new Error('Portable blob is not a regular file');
+    const target = await realpath(candidate);
+    const targetRelative = path.relative(root, target);
+    if (targetRelative.startsWith('..') || path.isAbsolute(targetRelative)) throw new Error('Portable blob escaped LibraryRoot');
+    const info = await stat(target);
+    if (!info.isFile() || info.size !== item.byte_size || await sha256File(target) !== item.content_sha256) {
+      throw new Error('Portable blob integrity check failed');
+    }
+    inputs.push({ archive_path: `library/${item.blob_ref}`, source_path: target });
+  }
+  return inputs;
 }
 
 async function sha256File(filePath: string): Promise<string> {

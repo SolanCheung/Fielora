@@ -9650,7 +9650,8 @@ fn resolve_terminal_reference_candidate(
         (
             ResultReferenceTarget::Image {
                 source: ResultImageSource::Library,
-                library_object_id: source.id.clone(),
+                library_object_id: Some(source.id.clone()),
+                screenshot_evidence_id: None,
                 expected_sha256: expected_sha256.to_owned(),
                 mime_type: source.mime_type.clone()?,
             },
@@ -16185,9 +16186,10 @@ mod tests {
             ResultReferenceTarget::Image {
                 source: ResultImageSource::Library,
                 library_object_id,
+                screenshot_evidence_id: None,
                 expected_sha256,
                 mime_type,
-            } if library_object_id == &image_id
+            } if library_object_id.as_ref() == Some(&image_id)
                 && expected_sha256 == &image_hash
                 && mime_type == "image/png"
         ));

@@ -6,7 +6,7 @@ import type {
   ConversationMessageStatus, ConversationMessageView, ConversationView, ProjectView, ProviderConfigView, ArtifactView, ResultReference,
 } from '@fielora/contracts';
 import type { AgentTextDeltaEvent } from '../types';
-import type { LibraryImagePreviewView, WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceFileEntry, WorkspaceFileView, WorkspaceImagePreview, WorkspaceProjectOpenTarget, WorkspaceProjectOpenTargetView } from '../workspace-types';
+import type { ResultImagePreviewView, WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceFileEntry, WorkspaceFileView, WorkspaceImagePreview, WorkspaceProjectOpenTarget, WorkspaceProjectOpenTargetView } from '../workspace-types';
 import { PrimaryNav, ShellIcon } from './PrimaryNav';
 import { BrowsePanel } from './BrowseScreen';
 import { AgentTurn } from './AgentTurn';
@@ -334,11 +334,15 @@ function workspaceImageAttachment(preview: WorkspaceImagePreview): WorkspaceAtta
   };
 }
 
-function libraryImageAttachment(preview: LibraryImagePreviewView): WorkspaceAttachmentView {
+function resultImageAttachment(preview: ResultImagePreviewView): WorkspaceAttachmentView {
+  const screenshot = preview.source === 'SCREENSHOT_EVIDENCE';
   return {
-    id: `library:${preview.library_object_id}`, name: preview.title, size: preview.size,
+    id: screenshot ? `screenshot:${preview.screenshot_evidence_id}` : `library:${preview.library_object_id}`,
+    name: screenshot ? '页面截图' : preview.title,
+    size: screenshot ? preview.byte_size : preview.size,
     kind: 'IMAGE', mime_type: preview.mime_type, status: 'READY', content: null, data_url: preview.data_url,
-    sha256: preview.content_hash, reason: null, width: null, height: null, source: 'library', content_ref: null,
+    sha256: screenshot ? preview.content_sha256 : preview.content_hash,
+    reason: null, width: screenshot ? preview.width : null, height: screenshot ? preview.height : null, source: 'library', content_ref: null,
   };
 }
 
@@ -481,7 +485,7 @@ function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copi
   onCopyError: (reason: string) => void;
   onReview: (selection: HistoricalReviewSelection) => void;
   onOpenReference: (reference: ResultReference) => void;
-  onOpenImage: (preview: LibraryImagePreviewView) => void;
+  onOpenImage: (preview: ResultImagePreviewView) => void;
 }) {
   const [run, setRun] = useState<AgentRunView | null>(null);
   const [events, setEvents] = useState<AgentEventView[]>([]);
@@ -1940,9 +1944,14 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const target = reference.target;
     if (target.kind === 'IMAGE') {
       try {
-        const preview = await window.fielora.library.previewImage({ library_object_id: target.library_object_id });
-        if (preview.content_hash !== target.expected_sha256 || preview.mime_type !== target.mime_type) throw new Error('Image identity changed');
-        setPreviewAttachment(libraryImageAttachment(preview));
+        const preview = target.source === 'SCREENSHOT_EVIDENCE' && target.screenshot_evidence_id
+          ? await window.fielora.screenshot.preview({ screenshot_evidence_id: target.screenshot_evidence_id, expected_content_sha256: target.expected_sha256 })
+          : target.source === 'LIBRARY' && target.library_object_id
+            ? await window.fielora.library.previewImage({ library_object_id: target.library_object_id })
+            : null;
+        if (!preview || preview.mime_type !== target.mime_type
+          || (preview.source === 'LIBRARY' ? preview.content_hash : preview.content_sha256) !== target.expected_sha256) throw new Error('Image identity changed');
+        setPreviewAttachment(resultImageAttachment(preview));
         setError('');
       } catch {
         setError('该图片暂时不可用。');
@@ -2194,7 +2203,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     onCopy={currentTerminalMessage ? () => void copyMessage(currentTerminalMessage) : undefined}
     onCopyError={(reason) => setError(`复制代码失败：${reason}`)}
     onOpenReference={(reference) => void openResultReference(reference)}
-    onOpenImage={(preview) => setPreviewAttachment(libraryImageAttachment(preview))}
+    onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))}
     mcpRuntime={mcpRuntime}
     mcpBusyConnectionId={mcpBusyConnectionId}
     onActivateMcp={(connectionId) => void activateMcpConnection(connectionId)}
@@ -2255,12 +2264,12 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
               if (message.role === 'ASSISTANT' && message.invocation_id) {
                 if (isCurrentAgentAssistant) return null;
                 const historicalUserMessage = [...visibleMessages.slice(0, index)].reverse().find((item) => item.role === 'USER') ?? null;
-                return <HistoricalAgentTurn key={message.id} terminalMessage={message} requestText={historicalUserMessage?.content ?? ''} userMessageId={historicalUserMessage?.id ?? null} copied={copiedMessageId === message.id} onReview={openHistoricalAgentReview} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(libraryImageAttachment(preview))} onCopy={() => void copyMessage(message)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/>;
+                return <HistoricalAgentTurn key={message.id} terminalMessage={message} requestText={historicalUserMessage?.content ?? ''} userMessageId={historicalUserMessage?.id ?? null} copied={copiedMessageId === message.id} onReview={openHistoricalAgentReview} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))} onCopy={() => void copyMessage(message)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/>;
               }
               const persistedImages = message.role === 'USER' ? messageAttachments(message.id) : [];
               const queuedFollowUp = message.role === 'USER' ? queuedFollowUps.find((item) => item.messageId === message.id) ?? null : null;
               return <Fragment key={message.id}>
-                <article data-message-id={message.id} className={`message ${message.role.toLowerCase()}${persistedImages.length ? ' has-image-attachments' : ''}`} data-testid={`message-${message.role.toLowerCase()}`}>{persistedImages.length > 0 && <ConversationImageGallery attachments={persistedImages} onOpen={openAttachmentInDock} onContextMenu={openImageContextMenu}/>}<div className="message-content"><MarkdownMessage content={message.content} references={message.references} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(libraryImageAttachment(preview))} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>{queuedFollowUp && <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={queuedFollowUp.afterRunId}><span aria-hidden="true"/>将在当前任务完成后继续处理</p>}<footer className={`message-actions ${copiedMessageId === message.id ? 'copy-confirmed' : ''}`}><time dateTime={new Date(message.created_at).toISOString()} title={new Date(message.created_at).toLocaleString('zh-CN')}>{messageTimeLabel(message.created_at)}</time>{message.status !== 'COMPLETED' && <span className="message-status">{messageStatusLabel(message.status)}</span>}<button type="button" className={copiedMessageId === message.id ? 'copied' : ''} aria-label={copiedMessageId === message.id ? '消息已复制' : '复制消息'} title={copiedMessageId === message.id ? '已复制' : '复制'} onClick={() => void copyMessage(message)} data-testid="message-copy"><ShellIcon name={copiedMessageId === message.id ? 'check' : 'copy'}/>{copiedMessageId === message.id && <span role="status" aria-live="polite">已复制</span>}</button></footer></article>
+                <article data-message-id={message.id} className={`message ${message.role.toLowerCase()}${persistedImages.length ? ' has-image-attachments' : ''}`} data-testid={`message-${message.role.toLowerCase()}`}>{persistedImages.length > 0 && <ConversationImageGallery attachments={persistedImages} onOpen={openAttachmentInDock} onContextMenu={openImageContextMenu}/>}<div className="message-content"><MarkdownMessage content={message.content} references={message.references} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>{queuedFollowUp && <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={queuedFollowUp.afterRunId}><span aria-hidden="true"/>将在当前任务完成后继续处理</p>}<footer className={`message-actions ${copiedMessageId === message.id ? 'copy-confirmed' : ''}`}><time dateTime={new Date(message.created_at).toISOString()} title={new Date(message.created_at).toLocaleString('zh-CN')}>{messageTimeLabel(message.created_at)}</time>{message.status !== 'COMPLETED' && <span className="message-status">{messageStatusLabel(message.status)}</span>}<button type="button" className={copiedMessageId === message.id ? 'copied' : ''} aria-label={copiedMessageId === message.id ? '消息已复制' : '复制消息'} title={copiedMessageId === message.id ? '已复制' : '复制'} onClick={() => void copyMessage(message)} data-testid="message-copy"><ShellIcon name={copiedMessageId === message.id ? 'check' : 'copy'}/>{copiedMessageId === message.id && <span role="status" aria-live="polite">已复制</span>}</button></footer></article>
                 {agentRun && agentTurn?.userMessageId === message.id && currentAgentTurn}
               </Fragment>;
             })}

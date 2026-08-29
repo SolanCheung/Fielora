@@ -12,7 +12,8 @@ import type {
   MutateCaptureRequest, AttachCaptureRequest, PromoteCaptureRequest, ListCapturesRequest, ContextChip, CaptureSource,
   CreateProjectRequest, UpdateProjectRequest, ArchiveProjectRequest, CreateConversationRequest, ConversationRequest, UpdateConversationRequest,
   ArchiveConversationRequest, CreateConversationMessageRequest, ListConversationMessagesRequest,
-  ResultReference,
+  ResultReference, ScreenshotEvidencePreviewRequest, ScreenshotEvidenceRequest,
+  ListScreenshotEvidenceByRunRequest, ListScreenshotEvidenceByVerificationRequest,
   SaveWebLibraryRequest, LibraryObjectRequest, DeleteLibraryObjectRequest, ListLibraryObjectsRequest,
   StartAgentRunRequest, AgentRunRequest, ListAgentRunsRequest, ListAgentEventsRequest,
   ResolveAgentApprovalRequest,
@@ -236,18 +237,26 @@ function validateResultReference(value:unknown):ResultReference{
     if(parsed.protocol!=='https:'||parsed.username||parsed.password)throw new Error('Invalid HTTPS reference');
     target={kind,field_id:id(targetInput.field_id,'Project'),reference_id:id(targetInput.reference_id,'Reference'),https_url:url};
   }else{
-    exact(targetInput,['kind','source','library_object_id','expected_sha256','mime_type']);
+    exact(targetInput,['kind','source','library_object_id','screenshot_evidence_id','expected_sha256','mime_type']);
     const hash=boundedUnicodeText(targetInput.expected_sha256,64,64,'image reference hash');
     if(!/^[0-9a-f]{64}$/.test(hash))throw new Error('Invalid image reference hash');
-    target={kind,source:enumValue(targetInput.source,new Set(['LIBRARY']),'image reference source') as 'LIBRARY',library_object_id:id(targetInput.library_object_id,'Library object'),expected_sha256:hash,mime_type:enumValue(targetInput.mime_type,new Set(['image/png','image/jpeg','image/webp']),'image reference MIME')};
+    const source=enumValue(targetInput.source,new Set(['LIBRARY','SCREENSHOT_EVIDENCE']),'image reference source') as 'LIBRARY'|'SCREENSHOT_EVIDENCE';
+    if(source==='LIBRARY'){
+      if(targetInput.screenshot_evidence_id!==undefined&&targetInput.screenshot_evidence_id!==null)throw new Error('Invalid image source identity');
+      target={kind,source,library_object_id:id(targetInput.library_object_id,'Library object'),expected_sha256:hash,mime_type:enumValue(targetInput.mime_type,new Set(['image/png','image/jpeg','image/webp']),'image reference MIME')};
+    }else{
+      if(targetInput.library_object_id!==undefined&&targetInput.library_object_id!==null)throw new Error('Invalid image source identity');
+      target={kind,source,screenshot_evidence_id:id(targetInput.screenshot_evidence_id,'Screenshot evidence'),expected_sha256:hash,mime_type:enumValue(targetInput.mime_type,new Set(['image/png']),'image reference MIME')};
+    }
   }
   const provenanceInput=object(input.provenance);
-  const provenanceKind=enumValue(provenanceInput.kind,new Set(['PROJECT_CONTEXT','TOOL_RECEIPT','SAVED_REFERENCE','LIBRARY_OBJECT']),'result reference provenance') as ResultReference['provenance']['kind'];
+  const provenanceKind=enumValue(provenanceInput.kind,new Set(['PROJECT_CONTEXT','TOOL_RECEIPT','SAVED_REFERENCE','LIBRARY_OBJECT','SCREENSHOT_EVIDENCE']),'result reference provenance') as ResultReference['provenance']['kind'];
   let provenance:ResultReference['provenance'];
   if(provenanceKind==='PROJECT_CONTEXT'){exact(provenanceInput,['kind']);provenance={kind:provenanceKind};}
   else if(provenanceKind==='TOOL_RECEIPT'){exact(provenanceInput,['kind','tool_call_id']);provenance={kind:provenanceKind,tool_call_id:id(provenanceInput.tool_call_id,'Tool call')};}
   else if(provenanceKind==='SAVED_REFERENCE'){exact(provenanceInput,['kind','reference_id']);provenance={kind:provenanceKind,reference_id:id(provenanceInput.reference_id,'Reference')};}
-  else{exact(provenanceInput,['kind','library_object_id']);provenance={kind:provenanceKind,library_object_id:id(provenanceInput.library_object_id,'Library object')};}
+  else if(provenanceKind==='LIBRARY_OBJECT'){exact(provenanceInput,['kind','library_object_id']);provenance={kind:provenanceKind,library_object_id:id(provenanceInput.library_object_id,'Library object')};}
+  else{exact(provenanceInput,['kind','screenshot_evidence_id']);provenance={kind:provenanceKind,screenshot_evidence_id:id(provenanceInput.screenshot_evidence_id,'Screenshot evidence')};}
   return{id:referenceId,label:boundedUnicodeText(input.label,256,1024,'reference label'),target,provenance};
 }
 export function validateCreateConversationMessage(value:unknown):CreateConversationMessageRequest{
@@ -265,6 +274,10 @@ export function validateCreateConversationMessage(value:unknown):CreateConversat
   return{conversation_id:id(input.conversation_id),role,content,status,provider_config_id:input.provider_config_id===null?null:id(input.provider_config_id),model_id:input.model_id===null?null:boundedUnicodeText(input.model_id,256,1024,'model'),invocation_id:input.invocation_id===null?null:id(input.invocation_id),references};
 }
 export function validateListConversationMessages(value:unknown):ListConversationMessagesRequest{const input=object(value);exact(input,['conversation_id']);return{conversation_id:id(input.conversation_id)};}
+export function validateScreenshotEvidence(value:unknown):ScreenshotEvidenceRequest{const input=object(value);exact(input,['screenshot_evidence_id']);return{screenshot_evidence_id:id(input.screenshot_evidence_id,'Screenshot evidence')};}
+export function validateScreenshotEvidencePreview(value:unknown):ScreenshotEvidencePreviewRequest{const input=object(value);exact(input,['screenshot_evidence_id','expected_content_sha256']);const digest=boundedUnicodeText(input.expected_content_sha256,64,64,'screenshot digest');if(!/^[0-9a-f]{64}$/.test(digest))throw new Error('Invalid screenshot digest');return{screenshot_evidence_id:id(input.screenshot_evidence_id,'Screenshot evidence'),expected_content_sha256:digest};}
+export function validateScreenshotEvidenceByRun(value:unknown):ListScreenshotEvidenceByRunRequest{const input=object(value);exact(input,['run_id']);return{run_id:id(input.run_id,'Agent run')};}
+export function validateScreenshotEvidenceByVerification(value:unknown):ListScreenshotEvidenceByVerificationRequest{const input=object(value);exact(input,['verification_receipt_id']);return{verification_receipt_id:id(input.verification_receipt_id,'Verification receipt')};}
 export function validateListArtifacts(value:unknown):ListArtifactsRequest{const input=object(value);exact(input,['cursor','limit','include_archived']);let cursor=null;if(input.cursor!=null){const raw=object(input.cursor);exact(raw,['updated_at','artifact_id']);cursor={updated_at:integer(raw.updated_at,0,Number.MAX_SAFE_INTEGER,'artifact cursor time'),artifact_id:id(raw.artifact_id,'Artifact')};}return{cursor,limit:input.limit==null?null:integer(input.limit,1,100,'artifact limit'),include_archived:boolean(input.include_archived,'include archived')};}
 export function validateReadArtifact(value:unknown):ReadArtifactRequest{const input=object(value);exact(input,['artifact_id','revision_id']);return{artifact_id:id(input.artifact_id,'Artifact'),revision_id:input.revision_id==null?null:id(input.revision_id,'Artifact revision')};}
 export function validateArtifactHistory(value:unknown):ArtifactHistoryRequest{const input=object(value);exact(input,['artifact_id','before_sequence','limit']);return{artifact_id:id(input.artifact_id,'Artifact'),before_sequence:input.before_sequence==null?null:integer(input.before_sequence,2,Number.MAX_SAFE_INTEGER,'Artifact revision sequence'),limit:input.limit==null?null:integer(input.limit,1,100,'artifact history limit')};}

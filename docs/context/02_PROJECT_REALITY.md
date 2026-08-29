@@ -2623,3 +2623,46 @@ IDR_V2_STATUS: FROZEN
 FREEZE_BLOCKERS: NONE
 NEXT: RETURN_TO_NORMAL_FIELORA_PRODUCT_DEVELOPMENT
 ```
+
+## 104. Durable Screenshot Evidence Foundation
+
+用户于 2026-08-30 授权在稳定基线 `a6065261f04c53bb119cee8bdc0c4abf116e4eef`
+上建立最小 durable Browser viewport screenshot evidence。实现使用 Electron 产品路径
+`WebContents.capturePage()` 捕获当前 active/visible、已完成导航的 Browse Page；捕获前后严格核对
+Page ID、WebContents、navigation generation、URL、loading 与 visibility，结果只接受 bounded PNG。
+Production 不使用 CDP；CDP 只用于确定性 Desktop E2E 断言。
+
+Migration 0014 将 local SQLite schema 13→14，新增 Profile-owned independent
+`ScreenshotEvidenceId` 与 bounded metadata/provenance。PNG bytes 复用既有
+`LibraryRoot/ContentBlobStore`，但 Screenshot Evidence 不是 `LibraryObject`、Artifact Asset、
+Attachment 或 Verification outcome。可选 Conversation/Run/Tool/Verification 关系要求 same
+Profile 且 causal IDs 一致；截图不能授予 PASS。ResultReference IMAGE 保留历史 `LIBRARY` wire
+source，并增加 typed `SCREENSHOT_EVIDENCE` source；Completed Markdown 复用现有 renderer、图片预览
+与 Lightbox，缺失或损坏时 fail-soft 显示不可用。
+
+Portable `include_library=true` 改由 Core 提供 eligible Library/Artifact blob manifest，物理上共用
+LibraryRoot 不再等于可导出；普通 Library image 继续导出，Screenshot Evidence record 与由它单独
+授权的 blob 均排除。Screenshot Evidence 为 `LOCAL_ONLY / EXCLUDED`，不写 sync journal，fixture
+external requests 为 0。LibraryRoot migration 仍复制 content-addressed bytes，因此迁移后同一
+ScreenshotEvidenceId 可恢复预览；Core restart 与 Conversation reopen 也保持 identity/reference。
+
+Targeted Gate 已覆盖 Contracts、migration/Storage/restart/profile scope/causal isolation/portable
+privacy/sync zero/verification non-authority、Browser capture bounds/cancel/stale navigation、Desktop
+validation/renderer、四个受影响 Rust crate strict Clippy、Desktop typecheck/lint，以及单一
+deterministic Desktop E2E。E2E 完整证明 capture → durable ID → completed Markdown inline image →
+existing Lightbox → LibraryRoot migration → portable exclusion → Core restart restore。Live Model/
+Provider request、Agent screenshot Tool、new runtime/blob store/viewer、auto/full-page/window/desktop
+capture、cloud sync 与 attachment migration 均为 0。
+
+```text
+DURABLE_SCREENSHOT_EVIDENCE_FOUNDATION: PASS
+BROWSER_PRODUCT_SCREENSHOT: YES
+SCREENSHOT_EVIDENCE_IDENTITY: INDEPENDENT / DURABLE
+LIBRARY_OBJECT_CREATED: NO
+PORTABLE_SCREENSHOT_EXPORT: EXCLUDED
+SYNC_JOURNAL_WRITES: 0
+VERIFICATION_AUTHORITY_GRANTED: NO
+AGENT_SCREENSHOT_TOOL: NOT_IMPLEMENTED
+LIVE_MODEL_CALLS: 0
+SCHEMA_VERSION: 14
+```

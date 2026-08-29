@@ -48,6 +48,7 @@ typed_id!(ContextSnapshotId);
 typed_id!(VerificationReceiptId);
 typed_id!(ProfileId);
 typed_id!(LibraryObjectId);
+typed_id!(ScreenshotEvidenceId);
 typed_id!(SyncChangeId);
 typed_id!(ArtifactId);
 typed_id!(ArtifactRevisionId);
@@ -1323,6 +1324,144 @@ pub struct ListLibraryObjectsRequest {
     pub limit: Option<u16>,
 }
 
+// ScreenshotEvidence owns visual-evidence identity and provenance. Immutable
+// bytes remain in the existing LibraryRoot ContentBlobStore; this contract does
+// not turn evidence into a LibraryObject or a Verification outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ScreenshotEvidenceSourceKind {
+    BrowserViewport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ScreenshotEvidenceVisibility {
+    Internal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ScreenshotEvidenceRetentionClass {
+    LocalEvidence,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ScreenshotEvidenceStatus {
+    Active,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ScreenshotEvidenceExportPolicy {
+    Excluded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ScreenshotEvidenceSyncPolicy {
+    LocalOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ScreenshotEvidenceView {
+    pub id: ScreenshotEvidenceId,
+    pub content_sha256: String,
+    pub blob_ref: String,
+    pub mime_type: String,
+    #[ts(type = "number")]
+    pub byte_size: u64,
+    pub width: u32,
+    pub height: u32,
+    pub source_kind: ScreenshotEvidenceSourceKind,
+    pub page_id: String,
+    #[ts(type = "number")]
+    pub navigation_generation: u64,
+    pub captured_url: String,
+    #[ts(type = "number")]
+    pub captured_at: i64,
+    pub conversation_id: Option<ConversationId>,
+    pub run_id: Option<AgentRunId>,
+    pub tool_call_id: Option<ToolCallId>,
+    pub verification_receipt_id: Option<VerificationReceiptId>,
+    pub visibility: ScreenshotEvidenceVisibility,
+    pub retention_class: ScreenshotEvidenceRetentionClass,
+    pub status: ScreenshotEvidenceStatus,
+    pub export_policy: ScreenshotEvidenceExportPolicy,
+    pub sync_policy: ScreenshotEvidenceSyncPolicy,
+    #[ts(type = "number")]
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CreateScreenshotEvidenceRequest {
+    pub png_data_url: String,
+    pub source_kind: ScreenshotEvidenceSourceKind,
+    pub page_id: String,
+    #[ts(type = "number")]
+    pub navigation_generation: u64,
+    pub captured_url: String,
+    #[ts(type = "number")]
+    pub captured_at: i64,
+    pub conversation_id: Option<ConversationId>,
+    pub run_id: Option<AgentRunId>,
+    pub tool_call_id: Option<ToolCallId>,
+    pub verification_receipt_id: Option<VerificationReceiptId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenshotEvidenceRequest {
+    pub screenshot_evidence_id: ScreenshotEvidenceId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ListScreenshotEvidenceByRunRequest {
+    pub run_id: AgentRunId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ListScreenshotEvidenceByVerificationRequest {
+    pub verification_receipt_id: VerificationReceiptId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenshotEvidencePreviewRequest {
+    pub screenshot_evidence_id: ScreenshotEvidenceId,
+    pub expected_content_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ScreenshotEvidencePreviewView {
+    pub screenshot_evidence_id: ScreenshotEvidenceId,
+    pub source: ResultImageSource,
+    pub mime_type: String,
+    #[ts(type = "number")]
+    pub byte_size: u64,
+    pub width: u32,
+    pub height: u32,
+    pub content_sha256: String,
+    pub data_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct PortableBlobManifestEntryView {
+    pub blob_ref: String,
+    pub content_sha256: String,
+    #[ts(type = "number")]
+    pub byte_size: u64,
+}
+
 // Durable semantic Artifact foundation. Artifact content is a closed,
 // Fielora-owned contract; renderer packages and arbitrary JSON are not part of
 // the persisted authority boundary.
@@ -2084,6 +2223,7 @@ pub enum ConversationMessageStatus {
 #[ts(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ResultImageSource {
     Library,
+    ScreenshotEvidence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -2109,7 +2249,12 @@ pub enum ResultReferenceTarget {
     },
     Image {
         source: ResultImageSource,
-        library_object_id: LibraryObjectId,
+        #[serde(default)]
+        #[ts(optional)]
+        library_object_id: Option<LibraryObjectId>,
+        #[serde(default)]
+        #[ts(optional)]
+        screenshot_evidence_id: Option<ScreenshotEvidenceId>,
         expected_sha256: String,
         mime_type: String,
     },
@@ -2122,9 +2267,18 @@ pub enum ResultReferenceTarget {
 #[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ResultReferenceProvenance {
     ProjectContext,
-    ToolReceipt { tool_call_id: ToolCallId },
-    SavedReference { reference_id: ObjectId },
-    LibraryObject { library_object_id: LibraryObjectId },
+    ToolReceipt {
+        tool_call_id: ToolCallId,
+    },
+    SavedReference {
+        reference_id: ObjectId,
+    },
+    LibraryObject {
+        library_object_id: LibraryObjectId,
+    },
+    ScreenshotEvidence {
+        screenshot_evidence_id: ScreenshotEvidenceId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -2799,7 +2953,8 @@ mod tests {
             label: "Layout clipping".into(),
             target: ResultReferenceTarget::Image {
                 source: ResultImageSource::Library,
-                library_object_id: object_id.clone(),
+                library_object_id: Some(object_id.clone()),
+                screenshot_evidence_id: None,
                 expected_sha256: "b".repeat(64),
                 mime_type: "image/png".into(),
             },
@@ -2828,5 +2983,62 @@ mod tests {
                 "library_object_id": "019c0000-0000-7000-8000-000000000001"
             }
         })).is_err());
+    }
+
+    #[test]
+    fn screenshot_evidence_wire_is_bounded_typed_local_only_and_not_verification() {
+        let screenshot_id = ScreenshotEvidenceId::new("019c0000-0000-7000-8000-000000000010");
+        let view = ScreenshotEvidenceView {
+            id: screenshot_id.clone(),
+            content_sha256: "c".repeat(64),
+            blob_ref: format!("blobs/objects/cc/{}", "c".repeat(64)),
+            mime_type: "image/png".into(),
+            byte_size: 1234,
+            width: 640,
+            height: 480,
+            source_kind: ScreenshotEvidenceSourceKind::BrowserViewport,
+            page_id: "page_019c0000-0000-7000-8000-000000000011".into(),
+            navigation_generation: 7,
+            captured_url: "https://fixture.example/page".into(),
+            captured_at: 100,
+            conversation_id: None,
+            run_id: None,
+            tool_call_id: None,
+            verification_receipt_id: None,
+            visibility: ScreenshotEvidenceVisibility::Internal,
+            retention_class: ScreenshotEvidenceRetentionClass::LocalEvidence,
+            status: ScreenshotEvidenceStatus::Active,
+            export_policy: ScreenshotEvidenceExportPolicy::Excluded,
+            sync_policy: ScreenshotEvidenceSyncPolicy::LocalOnly,
+            created_at: 101,
+        };
+        let wire = serde_json::to_value(&view).unwrap();
+        assert_eq!(wire["source_kind"], "BROWSER_VIEWPORT");
+        assert_eq!(wire["visibility"], "INTERNAL");
+        assert_eq!(wire["export_policy"], "EXCLUDED");
+        assert_eq!(wire["sync_policy"], "LOCAL_ONLY");
+        assert!(wire.get("outcome").is_none());
+        assert!(wire.get("absolute_path").is_none());
+
+        let reference = ResultReference {
+            id: ResultReferenceId::new(format!("resultref_{}", "f".repeat(32))),
+            label: "Current page".into(),
+            target: ResultReferenceTarget::Image {
+                source: ResultImageSource::ScreenshotEvidence,
+                library_object_id: None,
+                screenshot_evidence_id: Some(screenshot_id.clone()),
+                expected_sha256: "c".repeat(64),
+                mime_type: "image/png".into(),
+            },
+            provenance: ResultReferenceProvenance::ScreenshotEvidence {
+                screenshot_evidence_id: screenshot_id,
+            },
+        };
+        let reference_wire = serde_json::to_value(&reference).unwrap();
+        assert_eq!(reference_wire["target"]["kind"], "IMAGE");
+        assert_eq!(reference_wire["target"]["source"], "SCREENSHOT_EVIDENCE");
+        assert!(reference_wire["target"].get("library_object_id").is_some());
+        assert!(reference_wire["target"]["library_object_id"].is_null());
+        assert!(serde_json::from_value::<ResultReference>(reference_wire).is_ok());
     }
 }

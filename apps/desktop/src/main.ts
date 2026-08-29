@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, nativeImage, nativeTheme, protocol, shell } from 'electron';
 import type { ContextMenuParams, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
-import type { LibraryMediaKind, LibraryObjectView, ProfileView, ProjectView } from '@fielora/contracts';
+import type { LibraryMediaKind, LibraryObjectView, PortableBlobManifestEntryView, ProfileView, ProjectView, ScreenshotEvidenceView } from '@fielora/contracts';
 import type { LibraryImagePreviewView } from './workspace-types';
 import { BrowserRuntime } from './browser-runtime';
 import { channels } from './channels';
@@ -34,6 +34,7 @@ import {
   validateAssetPreview, validateDiagramPreview, validateSetArtifactArchiveState,
   validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment, validateStoreWorkspaceAttachment,
   validateSaveWebLibrary, validateLibraryObject, validateDeleteLibraryObject, validateListLibraryObjects,
+  validateScreenshotEvidence, validateScreenshotEvidenceByRun, validateScreenshotEvidenceByVerification, validateScreenshotEvidencePreview,
 } from './validation';
 import { WorkspaceRuntime } from './workspace-runtime';
 import { detectSafeRasterMime, loadSelectedAttachments, readStoredImage, storeImageAttachment } from './attachment-runtime';
@@ -41,7 +42,7 @@ import { focusUsableWindow, usableWindow, withUsableWindow } from './window-life
 import { desktopFoundationUserDataPath, hasExplicitUserDataDirectory } from './runtime-identity';
 import { windowSurfaceColors, type WindowSurfaceTheme } from './window-surface';
 import { StorageManager, directoryManifest, sha256File } from './storage-manager';
-import { createPortableProfile, extractPortableProfile, type PortableInputFile } from './portable-profile';
+import { createPortableProfile, extractPortableProfile, portableLibraryInputs, type PortableInputFile } from './portable-profile';
 import { normalizeAppPreferences } from './renderer/app-preferences';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
@@ -655,6 +656,9 @@ function registerBridgeHandlers(): void {
     const includeLibrary = (payload as { include_library: boolean }).include_library;
     const preferences = normalizeAppPreferences((payload as { preferences?: unknown }).preferences);
     const profile = await supervisor.request('query.profile.get') as ProfileView;
+    const portableBlobs = includeLibrary
+      ? await supervisor.request('query.profile.portable_blob_manifest') as PortableBlobManifestEntryView[]
+      : [];
     const selection = process.env.FIELORA_E2E === '1' && process.env.FIELORA_E2E_PROFILE_EXPORT_TARGET
       ? { canceled: false, filePath: path.resolve(process.env.FIELORA_E2E_PROFILE_EXPORT_TARGET) }
       : await dialog.showSaveDialog(appWindow, { title: '导出 Fielora', defaultPath: `Fielora-${new Date().toISOString().slice(0, 10)}.fielora`, filters: [{ name: 'Fielora Profile', extensions: ['fielora'] }] });
@@ -674,11 +678,7 @@ function registerBridgeHandlers(): void {
         { archive_path: 'data/app-preferences.json', source_path: preferencesFile },
       ];
       if (includeLibrary) {
-        const libraryRoot = storage().current().library_root;
-        for (const item of await directoryManifest(libraryRoot)) {
-          if (!item.relative_path.startsWith('blobs/objects/')) continue;
-          files.push({ archive_path: `library/${item.relative_path}`, source_path: path.join(libraryRoot, ...item.relative_path.split('/')) });
-        }
+        files.push(...await portableLibraryInputs(storage().current().library_root, portableBlobs));
       }
       await createPortableProfile(selection.filePath, {
         profile_id: profile.profile_id,
@@ -751,6 +751,23 @@ function registerBridgeHandlers(): void {
   ipcMain.handle(channels.browserReload, (event) => { assertBridgeEvent(event); return browser().reload(); });
   ipcMain.handle(channels.browserState, (event) => { assertBridgeEvent(event); return browser().getState(); });
   ipcMain.handle(channels.browserContext, (event) => { assertBridgeEvent(event); return browser().getContextCandidate(); });
+  ipcMain.handle(channels.browserCaptureScreenshot, async (event): Promise<ScreenshotEvidenceView> => {
+    assertBridgeEvent(event);
+    return durableMutation(async () => {
+      const capture = await browser().captureCurrentViewport();
+      return supervisor.request('command.screenshot_evidence.create', {
+        ...capture,
+        conversation_id: null,
+        run_id: null,
+        tool_call_id: null,
+        verification_receipt_id: null,
+      }) as Promise<ScreenshotEvidenceView>;
+    });
+  });
+  handle(channels.screenshotGet, validateScreenshotEvidence, 'query.screenshot_evidence.get');
+  handle(channels.screenshotByRun, validateScreenshotEvidenceByRun, 'query.screenshot_evidence.by_run');
+  handle(channels.screenshotByVerification, validateScreenshotEvidenceByVerification, 'query.screenshot_evidence.by_verification');
+  handle(channels.screenshotPreview, validateScreenshotEvidencePreview, 'query.screenshot_evidence.preview');
   ipcMain.handle(channels.coreHealth, (event) => { assertBridgeEvent(event); return supervisor.getHealth(); });
   ipcMain.handle(channels.coreBuildProvenance, (event) => { assertBridgeEvent(event); return supervisor.request('query.system.build_provenance'); });
   ipcMain.handle(channels.coreRetry, async (event) => { assertBridgeEvent(event); await supervisor.retry(); });

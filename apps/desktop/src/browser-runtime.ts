@@ -10,7 +10,8 @@ import {
 } from './browser-policy';
 import type { BrowserNavigationInitiator } from './browser-policy';
 import { UNTRUSTED_WEB_PREFERENCES } from './browser-security';
-import type { BrowserPage, BrowserPageState, BrowserViewBounds } from './browser-types';
+import { assertCaptureIdentityCurrent, assertScreenshotBounds, waitForBoundedCapture, type BrowserCaptureGuardOptions } from './browser-capture';
+import type { BrowserPage, BrowserPageState, BrowserViewBounds, BrowserViewportCapture } from './browser-types';
 
 interface RuntimePage {
   state: BrowserPage;
@@ -204,6 +205,42 @@ export class BrowserRuntime {
     const result=await page.view.webContents.executeJavaScript(`(()=>{const selection=String(window.getSelection?.()?.toString()||'').slice(0,65536);const raw=String(document.body?.innerText||'');return {selection_text:selection,page_text:raw.slice(0,131072),is_partial:raw.length>131072};})()`,true) as {selection_text:string;page_text:string;is_partial:boolean};
     if(this.activePageId!==capturedPageId||page.navigationGeneration!==capturedGeneration) throw new Error('Browse context became stale');
     return {page_id:capturedPageId,navigation_generation:capturedGeneration,url:page.state.url,title:page.state.title,page_text:result.page_text,selection_text:result.selection_text,is_partial:result.is_partial};
+  }
+
+  async captureCurrentViewport(options: BrowserCaptureGuardOptions = {}): Promise<BrowserViewportCapture> {
+    const page = this.activePage;
+    const view = page?.view;
+    const contents = view?.webContents;
+    if (!page || !view || !contents || contents.isDestroyed() || !page.state.url
+      || page.state.is_loading || !this.requestedVisible || this.visiblePageId !== page.state.id) {
+      throw new Error('No stable visible Browse page');
+    }
+    const captured = {
+      page_id: page.state.id,
+      navigation_generation: page.navigationGeneration,
+      url: contents.getURL(),
+    };
+    if (!captured.url || captured.url !== page.state.url) throw new Error('Browse screenshot context is unstable');
+    const image = await waitForBoundedCapture(contents.capturePage(), options);
+    const currentView = page.view;
+    const currentContents = currentView?.webContents;
+    assertCaptureIdentityCurrent(captured, this.isLivePage(page) && this.activePageId === page.state.id
+      && this.requestedVisible && this.visiblePageId === page.state.id && !page.state.is_loading
+      && currentContents === contents && !contents.isDestroyed()
+      ? { page_id: page.state.id, navigation_generation: page.navigationGeneration, url: contents.getURL() }
+      : null);
+    if (image.isEmpty()) throw new Error('Browse screenshot is empty');
+    const size = image.getSize();
+    const png = image.toPNG();
+    assertScreenshotBounds(png.byteLength, size.width, size.height);
+    return {
+      png_data_url: `data:image/png;base64,${png.toString('base64')}`,
+      source_kind: 'BROWSER_VIEWPORT',
+      page_id: captured.page_id,
+      navigation_generation: captured.navigation_generation,
+      captured_url: captured.url,
+      captured_at: Date.now(),
+    };
   }
 
   destroy(): void {

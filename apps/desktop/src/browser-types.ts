@@ -23,6 +23,15 @@ export interface BrowserContextCandidate {
   is_partial: boolean;
 }
 
+export interface BrowserViewportCapture {
+  png_data_url: string;
+  source_kind: 'BROWSER_VIEWPORT';
+  page_id: string;
+  navigation_generation: number;
+  captured_url: string;
+  captured_at: number;
+}
+
 export interface BrowserSurfaceState {
   app_view: 'BROWSE' | 'NOT_BROWSE';
   attached: boolean;

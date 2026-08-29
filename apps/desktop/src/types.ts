@@ -41,13 +41,15 @@ import type {
   ArtifactListView, ArtifactReadView, ArtifactHistoryView,
   AssetPreviewRequest, AssetPreviewView, DiagramPreviewRequest, DiagramPreviewView,
   SetArtifactArchiveStateCommandRequest,
+  ScreenshotEvidenceView, ScreenshotEvidenceRequest, ScreenshotEvidencePreviewRequest,
+  ListScreenshotEvidenceByRunRequest, ListScreenshotEvidenceByVerificationRequest,
 } from '@fielora/contracts';
 import type { StorageDetail, StorageInfo } from './storage-manager';
 import type { AppPreferences } from './renderer/app-preferences';
 import type { BrowserContextCandidate, BrowserNavigateRequest, BrowserPageRequest, BrowserPageState, BrowserViewBounds } from './browser-types';
 import type {
   ApplyWorkspaceFileRequest, CancelTerminalRequest, PickProjectRequest, RunTerminalRequest,
-  LibraryImagePreviewView, TerminalEvent, TerminalRunResult, WorkspaceFileEntry, WorkspaceFileRequest, WorkspaceFileView, WorkspaceImagePreview,
+  LibraryImagePreviewView, ScreenshotImagePreviewView, TerminalEvent, TerminalRunResult, WorkspaceFileEntry, WorkspaceFileRequest, WorkspaceFileView, WorkspaceImagePreview,
   OpenWorkspaceProjectRequest, WorkspaceProjectOpenTargetView,
   CopyWorkspaceAttachmentResult, ReadWorkspaceAttachmentRequest, SaveWorkspaceAttachmentRequest, SaveWorkspaceAttachmentResult, StoreWorkspaceAttachmentRequest,
   WorkspaceAttachmentSelection, WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceProjectRequest,
@@ -163,7 +165,14 @@ export interface FieloraBridge {
     reload(): Promise<BrowserPageState>;
     getState(): Promise<BrowserPageState>;
     getContextCandidate(): Promise<BrowserContextCandidate>;
+    captureScreenshot(): Promise<ScreenshotEvidenceView>;
     subscribe(listener: (state: BrowserPageState) => void): Unsubscribe;
+  };
+  screenshot: {
+    get(request: ScreenshotEvidenceRequest): Promise<ScreenshotEvidenceView>;
+    byRun(request: ListScreenshotEvidenceByRunRequest): Promise<ScreenshotEvidenceView[]>;
+    byVerification(request: ListScreenshotEvidenceByVerificationRequest): Promise<ScreenshotEvidenceView[]>;
+    preview(request: ScreenshotEvidencePreviewRequest): Promise<ScreenshotImagePreviewView>;
   };
   clipboard: {
     writeText(text: string): Promise<void>;

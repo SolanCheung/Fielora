@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AgentEventView, AgentRunView, AgentToolCallView, ApprovalView, ConversationMessageView, McpConnectionRuntimeView, ResultReference } from '@fielora/contracts';
-import type { LibraryImagePreviewView } from '../workspace-types';
+import type { ResultImagePreviewView } from '../workspace-types';
 import { appliedAgentReview, type AgentReviewSummary } from './agent-review';
 import {
   buildConversationActivityProjection,
@@ -46,7 +46,7 @@ interface AgentTurnProps {
   onCopy?: () => void;
   onCopyError?: (reason: string) => void;
   onOpenReference?: (reference: ResultReference) => void;
-  onOpenImage?: (preview: LibraryImagePreviewView) => void;
+  onOpenImage?: (preview: ResultImagePreviewView) => void;
   mcpRuntime?: McpConnectionRuntimeView | null;
   mcpBusyConnectionId?: string;
   onActivateMcp?: (connectionId: string) => void;
@@ -351,7 +351,7 @@ function AgentTerminalResult({ status, message, presentation, tools, canExpand, 
   onReview?: () => void;
   onReviewFile?: (path: string) => void;
   onOpenReference?: (reference: ResultReference) => void;
-  onOpenImage?: (preview: LibraryImagePreviewView) => void;
+  onOpenImage?: (preview: ResultImagePreviewView) => void;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const result = buildAgentResultViewModel(status, message?.content ?? '', presentation, tools);
