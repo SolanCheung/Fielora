@@ -17,6 +17,9 @@ const dataRoot = await mkdtemp(path.join(tmpdir(), 'fielora-inline-long-task-'))
 const projectRoot = path.join(dataRoot, 'project');
 const screenshotDir = path.join(desktopRoot, 'out', 'agent-inline-long-task-review');
 const screenshotPath = path.join(screenshotDir, 'long-task-activity-stream-visual-closeout.png');
+const visualEvidenceDir = process.env.FIELORA_AGENT_TURN_VISUAL_EVIDENCE_DIR
+  ? path.resolve(process.env.FIELORA_AGENT_TURN_VISUAL_EVIDENCE_DIR)
+  : null;
 const forgeEntry = path.join(root, 'node_modules', '@electron-forge', 'cli', 'dist', 'electron-forge.js');
 const runtimePath = [path.dirname(process.execPath), process.env.Path ?? process.env.PATH ?? ''].filter(Boolean).join(path.delimiter);
 const output = [];
@@ -30,6 +33,7 @@ function setValue(selector, value) {
 try {
   await mkdir(projectRoot, { recursive: true });
   await mkdir(screenshotDir, { recursive: true });
+  if (visualEvidenceDir) await mkdir(visualEvidenceDir, { recursive: true });
   await writeFile(path.join(projectRoot, 'README.md'), '# Long task fixture\n');
   const initialized = spawnSync('git.exe', ['init'], { cwd: projectRoot, windowsHide: true, encoding: 'utf8' });
   assert.equal(initialized.status, 0, initialized.stderr || initialized.stdout);
@@ -71,26 +75,34 @@ try {
   await waitForExpression(cdp, `document.querySelector('[data-testid="conversation-activity-stream"] [data-activity-entry]')`, { timeoutMs: 30_000, output });
   const firstActivityCount = await cdp.eval(`document.querySelectorAll('[data-testid="conversation-activity-stream"] [data-activity-entry]').length`);
   assert.equal(firstActivityCount, 1);
+  if (visualEvidenceDir) {
+    await cdp.eval(`document.querySelector('[data-testid="conversation-activity-stream"]')?.closest('[data-agent-turn="true"]')?.scrollIntoView({block:'center'})`);
+    await captureScreenshot(cdp, path.join(visualEvidenceDir, 'running-initial.png'));
+  }
   await waitForExpression(cdp, `document.querySelectorAll('[data-testid="conversation-activity-stream"] [data-activity-entry]').length>${firstActivityCount}`, { timeoutMs: 45_000, output });
   const secondActivityCount = await cdp.eval(`document.querySelectorAll('[data-testid="conversation-activity-stream"] [data-activity-entry]').length`);
   assert.ok(secondActivityCount > firstActivityCount);
-  await waitForExpression(cdp, `document.querySelectorAll('[data-testid="conversation-activity-stream"] [data-activity-entry]').length>=3`, { timeoutMs: 45_000, output });
+  await waitForExpression(cdp, `document.querySelectorAll('[data-testid="conversation-activity-stream"] [data-activity-entry]').length>=2&&document.querySelectorAll('[data-testid="conversation-activity-stream"] [data-testid="conversation-narrative"]').length>=3`, { timeoutMs: 45_000, output });
 
   const view = await cdp.eval(`(()=>{
     const stream=document.querySelector('[data-testid="conversation-activity-stream"]');
     const turn=stream?.closest('[data-agent-turn="true"]');
+    const status=turn?.querySelector('[data-testid="agent-execution-status"]');
     const summary=turn?.querySelector('[data-testid="agent-progress-summary"]');
     const composer=document.querySelector('[data-testid="conversation-composer"]');
     const messageList=document.querySelector('.message-list');
     const entries=[...stream.querySelectorAll('[data-activity-entry]')];
     const groups=[...stream.querySelectorAll('[data-testid="conversation-activity-group"]')];
+    const narratives=[...stream.querySelectorAll('[data-testid="conversation-narrative"]')];
     const completed=entries.filter((entry)=>entry.hasAttribute('data-completed-at'));
     const hoverTarget=completed.at(-1);
     hoverTarget.scrollIntoView({block:'center'});
-    const rect=hoverTarget.getBoundingClientRect();
     const internalScroll=[...turn.querySelectorAll('.conversation-activity-stream,.conversation-activity-group,.conversation-activity-entries,.agent-progress-summary')].filter((element)=>['auto','scroll'].includes(getComputedStyle(element).overflowY));
     const sequences=entries.map((entry)=>Number(entry.dataset.activitySequence));
     const completionLabels=[...stream.querySelectorAll('.agent-completion-time')];
+    const firstNarrative=narratives[0];
+    const creationEntry=entries.find((entry)=>entry.textContent?.includes('fielora-agent-fixture.txt'));
+    const groupIcons=groups.map((group)=>group.querySelector('.conversation-activity-group-summary > .shell-icon')).filter(Boolean);
     return {
       summary:summary?.innerText??'',
       streamText:stream?.innerText??'',
@@ -98,9 +110,15 @@ try {
       sameTurn:Boolean(turn&&turn.contains(stream)&&turn.contains(summary)),
       detailsVisible:Boolean(turn.querySelector('[data-testid="agent-run-details"]')),
       legacyHeadings:['操作记录','步骤','技术信息','本轮已更改文件'].filter((heading)=>turn.innerText.includes(heading)),
-      inventedProgress:turn.querySelectorAll('[data-testid="agent-narrative"],.conversation-activity-progress').length,
+      narrativeCount:narratives.length,
+      narrativeText:narratives.map((item)=>item.innerText),
+      inventedProgress:turn.querySelectorAll('.conversation-activity-progress').length,
       groupCount:groups.length,
       groupIconCount:groups.filter((group)=>group.querySelector('.conversation-activity-group-summary > .shell-icon')).length,
+      groupIconSizes:groupIcons.map((icon)=>getComputedStyle(icon).width),
+      childIconCount:stream.querySelectorAll('.conversation-activity-entries > li > .shell-icon').length,
+      creationEvidence:[creationEntry?.querySelector(':scope > span > strong')?.textContent,creationEntry?.querySelector(':scope > span > small')?.textContent].filter(Boolean).join(' '),
+      creationLayout:creationEntry?.querySelector(':scope > span')?.dataset.activityLayout??'',
       entryCount:entries.length,
       chronological:sequences.every((sequence,index)=>index===0||sequence>=sequences[index-1]),
       mainOverflow:getComputedStyle(messageList).overflowY,
@@ -111,14 +129,15 @@ try {
       visibleCompletionLabels:completionLabels.filter((label)=>getComputedStyle(label).visibility==='visible').length,
       streamBackground:getComputedStyle(stream).backgroundColor,
       summaryBackground:getComputedStyle(summary).backgroundColor,
+      statusTag:status?.tagName??'',
+      statusBorderRight:getComputedStyle(status).borderRightWidth,
+      contentAxis:[firstNarrative,stream,status].map((element)=>Math.round(element.getBoundingClientRect().left)),
       warningBackground:(()=>{const probe=document.createElement('i');probe.style.background='var(--fl-color-surface-warning)';document.body.append(probe);const value=getComputedStyle(probe).backgroundColor;probe.remove();return value;})(),
       streamWidth:stream.getBoundingClientRect().width,
       turnWidth:turn.getBoundingClientRect().width,
       completedCount:completed.length,
       allCompletedHaveLabels:completed.every((segment)=>/^\\d{4}\\/\\d{2}\\/\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(segment.title)),
       completionTitle:hoverTarget.title,
-      x:rect.left+Math.max(12,Math.min(rect.width-12,rect.width/2)),
-      y:rect.top+rect.height/2,
     };
   })()`);
 
@@ -127,9 +146,17 @@ try {
   assert.equal(view.detailsVisible, false);
   assert.deepEqual(view.legacyHeadings, []);
   assert.equal(view.inventedProgress, 0);
-  assert.ok(view.groupCount >= 3, JSON.stringify(view));
+  assert.equal(view.narrativeCount, 3, JSON.stringify(view));
+  assert.match(view.narrativeText[0], /isolated read-only repository investigation/);
+  assert.match(view.narrativeText[1], /create the requested fixture file/);
+  assert.match(view.narrativeText[2], /verify the result/);
+  assert.ok(view.groupCount >= 2, JSON.stringify(view));
   assert.equal(view.groupIconCount, view.groupCount);
-  assert.ok(view.entryCount >= 3, JSON.stringify(view));
+  assert.ok(view.groupIconSizes.every((size)=>['14px','15px','16px'].includes(size)), JSON.stringify(view));
+  assert.equal(view.childIconCount, 0);
+  assert.equal(view.creationEvidence, '创建 fielora-agent-fixture.txt');
+  assert.equal(view.creationLayout, 'inline');
+  assert.ok(view.entryCount >= 2, JSON.stringify(view));
   assert.equal(view.chronological, true);
   assert.equal(view.mainOverflow, 'auto');
   assert.ok(view.mainViewportHeight > 0);
@@ -138,36 +165,48 @@ try {
   assert.equal(view.itemCountLabels, 0);
   assert.equal(view.visibleCompletionLabels, 0);
   assert.equal(view.streamBackground, 'rgba(0, 0, 0, 0)');
-  assert.notEqual(view.summaryBackground, view.streamBackground);
+  assert.equal(view.summaryBackground, view.streamBackground);
+  assert.equal(view.statusTag, 'DIV');
+  assert.equal(view.statusBorderRight, '0px');
+  assert.ok(Math.max(...view.contentAxis)-Math.min(...view.contentAxis)<=1, JSON.stringify(view));
   assert.notEqual(view.summaryBackground, view.warningBackground);
   assert.ok(view.streamWidth > 650 && view.streamWidth <= view.turnWidth, JSON.stringify(view));
   assert.doesNotMatch(view.streamText, /\bdelegate readonly\b|Summarize the project tree with evidence\.|\d+\s*项|已完成/u);
-  assert.match(view.summary, /正在执行/);
-  assert.match(view.summary, /第 \d+ \/ \d+ 步/);
-  assert.ok(view.completedCount >= 2, JSON.stringify(view));
+  assert.match(view.summary, /正在执行|正在验证|正在整理结果/);
+  assert.doesNotMatch(view.summary, /第 \d+ \/ \d+ 步/);
+  assert.ok(view.completedCount >= 1, JSON.stringify(view));
   assert.equal(view.allCompletedHaveLabels, true);
   assert.match(view.completionTitle, /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/);
 
   const running = await cdp.eval(`window.fielora.agent.list({conversation_id:${JSON.stringify(setup.conversation.id)}}).then((runs)=>runs[0])`);
   assert.equal(running.status, 'RUNNING');
 
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: view.x, y: view.y });
   const completionTarget = `[...document.querySelectorAll('[data-activity-entry][data-completed-at]')].find((entry)=>entry.title===${JSON.stringify(view.completionTitle)})`;
+  await cdp.eval(`(()=>{const target=${completionTarget};target?.scrollIntoView({block:'center',behavior:'instant'});return new Promise((resolve)=>requestAnimationFrame(()=>resolve(Boolean(target))));})()`);
+  const hoverPoint = await cdp.eval(`(()=>{const target=${completionTarget};const rect=target?.getBoundingClientRect();return rect?{x:rect.left+Math.max(12,Math.min(rect.width-12,rect.width/2)),y:rect.top+rect.height/2}:null;})()`);
+  assert.ok(hoverPoint, 'Completed Activity evidence must remain available while the Run is active.');
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hoverPoint.x, y: hoverPoint.y });
   await waitForExpression(cdp, `(()=>{const target=${completionTarget};return target&&getComputedStyle(target.querySelector('.agent-completion-time')).visibility==='visible';})()`, { output });
   assert.equal(await cdp.eval(`${completionTarget}.querySelector('.agent-completion-time').innerText`), view.completionTitle);
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 });
   await waitForExpression(cdp, `(()=>{const target=${completionTarget};return target&&getComputedStyle(target.querySelector('.agent-completion-time')).visibility==='hidden';})()`, { output });
   await cdp.eval('new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
   await captureScreenshot(cdp, screenshotPath);
+  if (visualEvidenceDir) await captureScreenshot(cdp, path.join(visualEvidenceDir, 'running-middle.png'));
 
   await waitForExpression(cdp, `window.fielora.agent.get({run_id:${JSON.stringify(running.id)}}).then((run)=>run.status==='COMPLETED')`, { timeoutMs: 30_000, output });
   await waitForExpression(cdp, `document.querySelector('[data-agent-run-id="${running.id}"] [data-testid="agent-terminal-result"]')`, { timeoutMs: 30_000, output });
-  const completed = await cdp.eval(`(()=>{const turn=document.querySelector('[data-agent-run-id="${running.id}"]');const toggle=turn.querySelector('[data-testid="agent-execution-detail-toggle"]');return{activity:Boolean(turn.querySelector('[data-testid="conversation-activity-stream"]')),final:Boolean(turn.querySelector('[data-testid="agent-terminal-result"]')),details:Boolean(turn.querySelector('[data-testid="agent-execution-detail"]')),expanded:toggle?.getAttribute('aria-expanded')};})()`);
-  assert.deepEqual(completed, { activity: false, final: true, details: false, expanded: 'false' });
+  const completed = await cdp.eval(`(()=>{const turn=document.querySelector('[data-agent-run-id="${running.id}"]');const toggle=turn.querySelector('[data-testid="agent-execution-detail-toggle"]');const markdown=turn.querySelector('.agent-terminal-body');const changes=turn.querySelector('[data-testid="agent-result-changed-files"]');return{activity:Boolean(turn.querySelector('[data-testid="conversation-activity-stream"]')),final:Boolean(turn.querySelector('[data-testid="agent-terminal-result"]')),details:Boolean(turn.querySelector('[data-testid="agent-execution-detail"]')),expanded:toggle?.getAttribute('aria-expanded'),markdown:Boolean(markdown?.querySelector('h2')&&markdown.querySelector('li')&&markdown.querySelector('code')),changedFiles:Number(changes?.dataset.fileCount??0),review:Boolean(changes?.querySelector('.agent-full-review-action'))};})()`);
+  assert.deepEqual(completed, { activity: false, final: true, details: false, expanded: 'false', markdown: true, changedFiles: 1, review: true });
+  if (visualEvidenceDir) {
+    await cdp.eval(`document.querySelector('[data-agent-run-id="${running.id}"]')?.scrollIntoView({block:'center'})`);
+    await captureScreenshot(cdp, path.join(visualEvidenceDir, 'completed.png'));
+  }
   await cdp.eval(`document.querySelector('[data-agent-run-id="${running.id}"] [data-testid="agent-execution-detail-toggle"]')?.click()`);
   await waitForExpression(cdp, `document.querySelector('[data-agent-run-id="${running.id}"] [data-testid="agent-execution-detail"]')`, { output });
-  const history = await cdp.eval(`(()=>{const detail=document.querySelector('[data-agent-run-id="${running.id}"] [data-testid="agent-execution-detail"]');return{text:detail.innerText,activity:Boolean(detail.querySelector('[data-testid="conversation-activity-stream"]')),legacy:['操作记录','步骤','技术信息'].filter((heading)=>detail.innerText.includes(heading))};})()`);
+  const history = await cdp.eval(`(()=>{const detail=document.querySelector('[data-agent-run-id="${running.id}"] [data-testid="agent-execution-detail"]');return{text:detail.innerText,activity:Boolean(detail.querySelector('[data-testid="conversation-activity-stream"]')),narratives:detail.querySelectorAll('[data-testid="conversation-narrative"]').length,legacy:['操作记录','步骤','技术信息'].filter((heading)=>detail.innerText.includes(heading))};})()`);
   assert.equal(history.activity, true);
+  assert.equal(history.narratives, 3);
   assert.deepEqual(history.legacy, []);
   assert.doesNotMatch(history.text, /\bdelegate readonly\b|Summarize the project tree with evidence\.|\d+\s*项|已完成/u);
   console.log(`AGENT_CONVERSATION_ACTIVITY_STREAM_E2E: PASS\nSCREENSHOT: ${screenshotPath}`);

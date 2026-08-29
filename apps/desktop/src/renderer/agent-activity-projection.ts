@@ -1,6 +1,6 @@
 import type { AgentEventView, AgentToolCallView } from '@fielora/contracts';
 
-export type ConversationActivityGroupKind = 'INSPECT' | 'CHANGE' | 'VERIFY' | 'COMMAND' | 'VERSION' | 'NETWORK' | 'OTHER';
+export type ConversationActivityGroupKind = 'INSPECT' | 'CHANGE' | 'VERIFY' | 'COMMAND' | 'VERSION' | 'NETWORK' | 'OTHER' | 'MIXED';
 
 export interface ConversationToolActivityEntry {
   id: string;
@@ -8,6 +8,7 @@ export interface ConversationToolActivityEntry {
   sequence: number;
   occurredAt: number;
   completedAt: number | null;
+  activityKind: Exclude<ConversationActivityGroupKind, 'MIXED'>;
   tool: AgentToolCallView;
   status: AgentToolCallView['status'];
   toolId: string;
@@ -19,6 +20,7 @@ export interface ConversationVerificationActivityEntry {
   sequence: number;
   occurredAt: number;
   completedAt: number;
+  activityKind: 'VERIFY';
   title: string;
   detail: string;
   status: 'COMPLETED' | 'FAILED';
@@ -35,6 +37,15 @@ export interface ConversationActivityGroupItem {
   groupKind: ConversationActivityGroupKind;
   title: string;
   entries: ConversationActivityEntry[];
+}
+
+export interface ConversationActivityNarrativeItem {
+  id: string;
+  kind: 'NARRATIVE';
+  sequence: number;
+  occurredAt: number;
+  step: number;
+  text: string;
 }
 
 export interface ConversationActivityPhaseItem {
@@ -57,15 +68,17 @@ export interface ConversationActivityApprovalItem {
   decision: 'ALLOW_ONCE' | 'DENY' | null;
 }
 
-export interface ConversationActivityProgressItem {
-  id: string;
-  kind: 'PROGRESS';
-  sequence: number;
-  occurredAt: number;
-  text: string;
-}
+export type ConversationActivityItem = ConversationActivityGroupItem | ConversationActivityNarrativeItem | ConversationActivityPhaseItem | ConversationActivityApprovalItem;
 
-export type ConversationActivityItem = ConversationActivityGroupItem | ConversationActivityPhaseItem | ConversationActivityApprovalItem | ConversationActivityProgressItem;
+export function reconcileLiveNarrative(
+  items: readonly ConversationActivityItem[],
+  liveText: string,
+  step: number,
+): string {
+  if (!liveText.trim()) return '';
+  const durableTurnArrived = items.some((item) => item.kind === 'NARRATIVE' && item.step === step);
+  return durableTurnArrived ? '' : liveText;
+}
 
 type EventPayload = Record<string, unknown>;
 
@@ -77,6 +90,10 @@ function payloadOf(event: AgentEventView): EventPayload | null {
 
 function payloadString(payload: EventPayload | null, key: string): string {
   return typeof payload?.[key] === 'string' ? payload[key] as string : '';
+}
+
+function payloadNumber(payload: EventPayload | null, key: string): number {
+  return typeof payload?.[key] === 'number' && Number.isSafeInteger(payload[key]) ? payload[key] as number : 0;
 }
 
 function toolIdFor(event: AgentEventView): string {
@@ -99,7 +116,7 @@ function toolIsVerification(tool: AgentToolCallView, verificationToolIds: Readon
     && (tool.receipt as EventPayload).verification_eligible === true);
 }
 
-function groupKindFor(tool: AgentToolCallView, verificationToolIds: ReadonlySet<string>): ConversationActivityGroupKind {
+function activityKindFor(tool: AgentToolCallView, verificationToolIds: ReadonlySet<string>): Exclude<ConversationActivityGroupKind, 'MIXED'> {
   if (toolIsVerification(tool, verificationToolIds)) return 'VERIFY';
   if (tool.name.startsWith('git_')) return 'VERSION';
   if (tool.effect === 'OBSERVE') return 'INSPECT';
@@ -109,20 +126,54 @@ function groupKindFor(tool: AgentToolCallView, verificationToolIds: ReadonlySet<
   return 'OTHER';
 }
 
-function groupTitle(kind: ConversationActivityGroupKind, entries: readonly ConversationActivityEntry[]): string {
+function argumentPaths(tool: AgentToolCallView): string[] {
+  if (!tool.arguments || typeof tool.arguments !== 'object' || Array.isArray(tool.arguments)) return [];
+  const root = tool.arguments as Record<string, unknown>;
+  const paths = new Set<string>();
+  for (const key of ['path', 'from', 'to']) {
+    if (typeof root[key] === 'string' && root[key]) paths.add(root[key] as string);
+  }
+  if (Array.isArray(root.paths)) root.paths.forEach((path) => { if (typeof path === 'string' && path) paths.add(path); });
+  if (Array.isArray(root.patches)) root.patches.forEach((patch) => {
+    if (patch && typeof patch === 'object' && !Array.isArray(patch) && typeof (patch as EventPayload).path === 'string') {
+      paths.add((patch as EventPayload).path as string);
+    }
+  });
+  return [...paths];
+}
+
+function activityPhrase(kind: Exclude<ConversationActivityGroupKind, 'MIXED'>, entries: readonly ConversationActivityEntry[], active: boolean): string {
+  const matching = entries.filter((entry) => entry.activityKind === kind);
+  if (kind === 'INSPECT') {
+    const onlyFileInspection = matching.every((entry) => entry.kind !== 'TOOL' || ['list_files', 'read_file', 'search_text', 'stat_path'].includes(entry.tool.name));
+    return onlyFileInspection ? (active ? '正在读取相关文件' : '已读取相关文件') : (active ? '正在检查相关信息' : '检查了相关信息');
+  }
+  if (kind === 'CHANGE') {
+    const count = new Set(matching.flatMap((entry) => entry.kind === 'TOOL' ? argumentPaths(entry.tool) : [])).size;
+    return active ? '正在编辑文件' : count > 0 ? `已编辑 ${count} 个文件` : '已编辑文件';
+  }
+  if (kind === 'VERIFY') return active ? '正在运行针对性验证' : '运行了针对性验证';
+  if (kind === 'COMMAND') return active ? '正在运行命令' : '运行了命令';
+  if (kind === 'VERSION') {
+    const onlyRead = matching.every((entry) => entry.kind !== 'TOOL' || ['git_read', 'git_status'].includes(entry.tool.name));
+    return onlyRead ? (active ? '正在检查 Git 状态' : '检查了 Git 状态') : (active ? '正在处理版本变更' : '处理了版本变更');
+  }
+  if (kind === 'NETWORK') return active ? '正在访问外部服务' : '访问了外部服务';
+  return active ? '正在执行操作' : '执行了操作';
+}
+
+function groupTitle(entries: readonly ConversationActivityEntry[]): string {
   const active = entries.some((entry) => !['COMPLETED', 'FAILED', 'DENIED', 'CANCELLED', 'UNKNOWN'].includes(entry.status));
   const failed = entries.some((entry) => entry.status === 'FAILED' || entry.status === 'UNKNOWN');
-  const labels: Record<ConversationActivityGroupKind, [string, string]> = {
-    INSPECT: ['正在检查项目', '检查了项目'],
-    CHANGE: ['正在编辑文件', '编辑了文件'],
-    VERIFY: ['正在运行验证', '运行了验证'],
-    COMMAND: ['正在运行命令', '运行了命令'],
-    VERSION: ['正在处理版本变更', '处理了版本变更'],
-    NETWORK: ['正在访问外部服务', '访问了外部服务'],
-    OTHER: ['正在执行操作', '执行了操作'],
-  };
-  if (failed) return kind === 'VERIFY' ? '验证未通过' : `${labels[kind][1]}，其中有操作未完成`;
-  return labels[kind][active ? 0 : 1];
+  const kinds = [...new Set(entries.map((entry) => entry.activityKind))];
+  if (!active && failed && kinds.length === 1 && kinds[0] === 'VERIFY') return '针对性验证未通过';
+  const title = kinds.map((kind) => activityPhrase(kind, entries, active)).join('并');
+  return !active && failed ? `${title}，其中有操作未完成` : title;
+}
+
+function groupKind(entries: readonly ConversationActivityEntry[]): ConversationActivityGroupKind {
+  const kinds = [...new Set(entries.map((entry) => entry.activityKind))];
+  return kinds.length === 1 ? kinds[0] ?? 'OTHER' : 'MIXED';
 }
 
 function phaseMarker(event: AgentEventView): ConversationActivityPhaseItem | null {
@@ -146,11 +197,19 @@ function approvalIdentity(event: AgentEventView): { approvalId: string; toolCall
   return approvalId && toolCallId ? { approvalId, toolCallId } : null;
 }
 
-function progressText(event: AgentEventView): string {
-  if (event.kind !== 'MODEL_TEXT_DELTA') return '';
+function narrativeFor(event: AgentEventView): ConversationActivityNarrativeItem | null {
+  if (event.kind !== 'ASSISTANT_NARRATIVE') return null;
   const payload = payloadOf(event);
-  const text = payloadString(payload, 'text_delta') || payloadString(payload, 'text');
-  return text.trim();
+  const text = payloadString(payload, 'text').trim();
+  if (!text) return null;
+  return {
+    id: `narrative-${event.sequence}`,
+    kind: 'NARRATIVE',
+    sequence: event.sequence,
+    occurredAt: event.created_at,
+    step: payloadNumber(payload, 'step'),
+    text,
+  };
 }
 
 export function buildConversationActivityProjection(
@@ -161,9 +220,14 @@ export function buildConversationActivityProjection(
   const toolById = new Map(tools.map((tool) => [tool.id, tool]));
   const terminalByTool = new Map<string, AgentEventView>();
   const verificationToolIds = new Set<string>();
+  const approvalToolIds = new Set<string>();
   for (const event of ordered) {
     const toolId = toolIdFor(event);
     if (toolId && terminalToolEvent(event)) terminalByTool.set(toolId, event);
+    if (event.kind === 'APPROVAL_REQUESTED') {
+      const identity = approvalIdentity(event);
+      if (identity) approvalToolIds.add(identity.toolCallId);
+    }
     if (event.kind === 'VERIFICATION_RECORDED') {
       const receipt = payloadOf(event)?.receipt;
       if (receipt && typeof receipt === 'object' && !Array.isArray(receipt)) {
@@ -179,15 +243,15 @@ export function buildConversationActivityProjection(
   let currentGroup: ConversationActivityGroupItem | null = null;
   let lastPhase = '';
 
-  const appendEntry = (kind: ConversationActivityGroupKind, entry: ConversationActivityEntry) => {
-    if (!currentGroup || currentGroup.groupKind !== kind) {
+  const appendEntry = (entry: ConversationActivityEntry) => {
+    if (!currentGroup) {
       currentGroup = {
         id: `group-${entry.sequence}`,
         kind: 'GROUP',
         sequence: entry.sequence,
         occurredAt: entry.occurredAt,
         completedAt: null,
-        groupKind: kind,
+        groupKind: entry.activityKind,
         title: '',
         entries: [],
       };
@@ -198,14 +262,34 @@ export function buildConversationActivityProjection(
     currentGroup.completedAt = terminalTimes.every((value) => value !== null)
       ? Math.max(...terminalTimes as number[])
       : null;
-    currentGroup.title = groupTitle(kind, currentGroup.entries);
+    currentGroup.groupKind = groupKind(currentGroup.entries);
+    currentGroup.title = groupTitle(currentGroup.entries);
+  };
+
+  const appendTool = (event: AgentEventView) => {
+    const toolId = toolIdFor(event);
+    const tool = toolById.get(toolId);
+    if (!tool || projectedToolIds.has(tool.id) || tool.name === 'delegate_readonly') return;
+    projectedToolIds.add(tool.id);
+    const terminal = terminalByTool.get(tool.id);
+    appendEntry({
+      id: `tool-${tool.id}`,
+      kind: 'TOOL',
+      sequence: event.sequence,
+      occurredAt: event.created_at,
+      completedAt: terminal?.created_at ?? (['COMPLETED', 'FAILED', 'DENIED', 'CANCELLED', 'UNKNOWN'].includes(tool.status) ? tool.updated_at : null),
+      activityKind: activityKindFor(tool, verificationToolIds),
+      tool,
+      status: tool.status,
+      toolId: tool.id,
+    });
   };
 
   for (const event of ordered) {
-    const progress = progressText(event);
-    if (progress) {
+    const narrative = narrativeFor(event);
+    if (narrative) {
       currentGroup = null;
-      items.push({ id: `progress-${event.sequence}`, kind: 'PROGRESS', sequence: event.sequence, occurredAt: event.created_at, text: progress });
+      items.push(narrative);
       continue;
     }
 
@@ -225,27 +309,13 @@ export function buildConversationActivityProjection(
       continue;
     }
 
-    if (event.kind === 'MODEL_STARTED' || event.kind === 'MODEL_COMPLETED') {
-      currentGroup = null;
+    if (event.kind === 'TOOL_PROPOSED' && !approvalToolIds.has(toolIdFor(event))) {
+      appendTool(event);
       continue;
     }
 
-    if (event.kind === 'TOOL_PROPOSED') {
-      const toolId = toolIdFor(event);
-      const tool = toolById.get(toolId);
-      if (!tool || projectedToolIds.has(tool.id)) continue;
-      projectedToolIds.add(tool.id);
-      const terminal = terminalByTool.get(tool.id);
-      appendEntry(groupKindFor(tool, verificationToolIds), {
-        id: `tool-${tool.id}`,
-        kind: 'TOOL',
-        sequence: event.sequence,
-        occurredAt: event.created_at,
-        completedAt: terminal?.created_at ?? (['COMPLETED', 'FAILED', 'DENIED', 'CANCELLED', 'UNKNOWN'].includes(tool.status) ? tool.updated_at : null),
-        tool,
-        status: tool.status,
-        toolId: tool.id,
-      });
+    if (event.kind === 'TOOL_STARTED' && approvalToolIds.has(toolIdFor(event))) {
+      appendTool(event);
       continue;
     }
 
@@ -256,12 +326,13 @@ export function buildConversationActivityProjection(
         : '';
       if (receiptToolId && projectedToolIds.has(receiptToolId)) continue;
       const passed = verificationPassed(event);
-      appendEntry('VERIFY', {
+      appendEntry({
         id: `verification-${event.sequence}`,
         kind: 'VERIFICATION',
         sequence: event.sequence,
         occurredAt: event.created_at,
         completedAt: event.created_at,
+        activityKind: 'VERIFY',
         title: passed ? '验证通过' : '验证未通过',
         detail: passed ? '结果来自当前 workspace revision 的验证回执' : '验证回执没有证明当前修改通过',
         status: passed ? 'COMPLETED' : 'FAILED',

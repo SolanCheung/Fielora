@@ -529,6 +529,10 @@ impl ModelClient {
                 }
             }
         }
+        let tail = accumulator.flush_visible_text();
+        if !tail.is_empty() {
+            emit_text(&tail);
+        }
         accumulator.finish()
     }
 }
@@ -755,6 +759,7 @@ struct PendingAgentToolCall {
 struct AgentStreamAccumulator {
     kind: ProviderKind,
     text: String,
+    visible_text: VisibleTextDeltaFilter,
     calls: BTreeMap<u64, PendingAgentToolCall>,
     usage: Option<ModelUsage>,
     terminal: bool,
@@ -765,6 +770,7 @@ impl AgentStreamAccumulator {
         Self {
             kind,
             text: String::new(),
+            visible_text: VisibleTextDeltaFilter::default(),
             calls: BTreeMap::new(),
             usage: None,
             terminal: false,
@@ -945,8 +951,15 @@ impl AgentStreamAccumulator {
             return Err(ModelError::ProviderResponseTooLarge);
         }
         self.text.push_str(delta);
-        emitted.push(delta.to_owned());
+        let visible = self.visible_text.push(delta);
+        if !visible.is_empty() {
+            emitted.push(visible);
+        }
         Ok(())
+    }
+
+    fn flush_visible_text(&mut self) -> String {
+        self.visible_text.finish()
     }
 
     fn finish(self) -> Result<AgentModelTurn, ModelError> {
@@ -983,6 +996,71 @@ impl AgentStreamAccumulator {
             tool_calls,
             usage: self.usage,
         })
+    }
+}
+
+/// Incrementally excludes provider-emitted `<think>` blocks from transient
+/// presentation. Provider-private reasoning fields never enter this filter;
+/// adapters only feed their public text channels into `push_text`.
+#[derive(Default)]
+struct VisibleTextDeltaFilter {
+    hidden: bool,
+    pending_tag: String,
+}
+
+impl VisibleTextDeltaFilter {
+    fn push(&mut self, delta: &str) -> String {
+        let mut visible = String::new();
+        for character in delta.chars() {
+            if !self.pending_tag.is_empty() {
+                self.pending_tag.push(character);
+                if character == '>' {
+                    self.finish_tag(&mut visible);
+                } else if self.pending_tag.len() > 256 {
+                    let lower = self.pending_tag.to_ascii_lowercase();
+                    if lower.starts_with("<think") {
+                        self.hidden = true;
+                    } else if !self.hidden {
+                        visible.push_str(&self.pending_tag);
+                    }
+                    self.pending_tag.clear();
+                }
+                continue;
+            }
+            if character == '<' {
+                self.pending_tag.push(character);
+            } else if !self.hidden {
+                visible.push(character);
+            }
+        }
+        visible
+    }
+
+    fn finish(&mut self) -> String {
+        if self.pending_tag.is_empty() {
+            return String::new();
+        }
+        let lower = self.pending_tag.to_ascii_lowercase();
+        let visible =
+            if !self.hidden && !lower.starts_with("<think") && !lower.starts_with("</think") {
+                self.pending_tag.clone()
+            } else {
+                String::new()
+            };
+        self.pending_tag.clear();
+        visible
+    }
+
+    fn finish_tag(&mut self, visible: &mut String) {
+        let lower = self.pending_tag.to_ascii_lowercase();
+        if lower.starts_with("<think") {
+            self.hidden = true;
+        } else if lower.starts_with("</think") {
+            self.hidden = false;
+        } else if !self.hidden {
+            visible.push_str(&self.pending_tag);
+        }
+        self.pending_tag.clear();
     }
 }
 
@@ -1714,6 +1792,58 @@ mod tests {
             assert_eq!(turn.tool_calls[0].id, "call-1");
             assert_eq!(turn.tool_calls[0].name, "read_file");
             assert_eq!(turn.tool_calls[0].arguments, json!({"path":"src/lib.rs"}));
+        }
+    }
+
+    #[test]
+    fn public_text_with_tool_calls_is_visible_for_every_provider_while_private_reasoning_is_excluded()
+     {
+        let fixtures = [
+            (
+                ProviderKind::Openai,
+                vec![
+                    json!({"type":"response.reasoning_summary_text.delta","delta":"private reasoning_content"}),
+                    json!({"type":"response.output_text.delta","delta":"<thi"}),
+                    json!({"type":"response.output_text.delta","delta":"nk>private</think>我先确认相关实现。"}),
+                    json!({"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-1","name":"read_file","arguments":"{\"path\":\"src/lib.rs\"}"}}),
+                    json!({"type":"response.completed","response":{"usage":{"input_tokens":4,"output_tokens":2}}}),
+                ],
+            ),
+            (
+                ProviderKind::Anthropic,
+                vec![
+                    json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"private reasoning_content"}}),
+                    json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"<think>private</think>我先确认相关实现。"}}),
+                    json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call-1","name":"read_file","input":{"path":"src/lib.rs"}}}),
+                    json!({"type":"message_stop"}),
+                ],
+            ),
+            (
+                ProviderKind::OpenaiCompatible,
+                vec![
+                    json!({"choices":[{"delta":{"reasoning_content":"private reasoning_content"},"finish_reason":null}]}),
+                    json!({"choices":[{"delta":{"content":"<think>private</think>我先确认相关实现。"},"finish_reason":null}]}),
+                    json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read_file","arguments":"{\"path\":\"src/lib.rs\"}"}}]},"finish_reason":"tool_calls"}]}),
+                ],
+            ),
+        ];
+
+        for (kind, values) in fixtures {
+            let mut accumulator = AgentStreamAccumulator::new(kind);
+            let mut live = String::new();
+            for value in values {
+                for delta in accumulator.push(&value).unwrap() {
+                    live.push_str(&delta);
+                }
+            }
+            live.push_str(&accumulator.flush_visible_text());
+            let turn = accumulator.finish().unwrap();
+            assert_eq!(live, "我先确认相关实现。");
+            assert_eq!(turn.text, "我先确认相关实现。");
+            assert_eq!(turn.tool_calls.len(), 1);
+            assert_eq!(turn.tool_calls[0].name, "read_file");
+            assert!(!format!("{live}{}", turn.text).contains("private"));
+            assert!(!format!("{live}{}", turn.text).contains("<think>"));
         }
     }
 

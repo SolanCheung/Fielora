@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AgentEventView } from '@fielora/contracts';
-import { AGENT_PROJECTION_UNAVAILABLE_MESSAGE, mergeAgentEventPages } from './agent-projection.ts';
+import { AGENT_PROJECTION_UNAVAILABLE_MESSAGE, loadCompleteAgentEventSequence, mergeAgentEventPages } from './agent-projection.ts';
 
 function event(id: string, sequence: number): AgentEventView {
   return {
@@ -24,4 +24,20 @@ test('incremental event pages are ordered and de-duplicated', () => {
 test('projection failure copy does not expose transport errors or claim the run failed', () => {
   assert.equal(AGENT_PROJECTION_UNAVAILABLE_MESSAGE, '运行记录暂时无法更新，Agent 仍会继续工作。');
   assert.doesNotMatch(AGENT_PROJECTION_UNAVAILABLE_MESSAGE, /FIPC|timed out|失败|停止/);
+});
+
+test('historical replay follows bounded continuation until every event is restored in sequence', async () => {
+  const source = Array.from({ length: 437 }, (_, index) => event(`event-${index + 1}`, index + 1));
+  const requests: Array<{ after_sequence: number | null; limit: number | null }> = [];
+  const restored = await loadCompleteAgentEventSequence(async (request) => {
+    requests.push({ after_sequence: request.after_sequence, limit: request.limit });
+    return source.filter((item) => item.sequence > (request.after_sequence ?? 0)).slice(0, request.limit ?? 200);
+  }, 'run-1', null, 200);
+  assert.equal(restored.length, 437);
+  assert.deepEqual(restored.map((item) => item.sequence), source.map((item) => item.sequence));
+  assert.deepEqual(requests, [
+    { after_sequence: null, limit: 200 },
+    { after_sequence: 200, limit: 200 },
+    { after_sequence: 400, limit: 200 },
+  ]);
 });

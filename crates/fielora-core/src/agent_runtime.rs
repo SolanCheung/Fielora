@@ -26,7 +26,7 @@ use fielora_field::DomainError;
 use fielora_model::{
     AgentModelImage, AgentModelMessage, AgentModelRequest, AgentModelToolCall, AgentModelTurn,
     CodingBehaviorProfile, CodingModelFamily, ModelClient, ModelError, ProviderEndpoint,
-    coding_behavior_profile,
+    coding_behavior_profile, sanitize_agent_text,
 };
 use fielora_platform::{CredentialStore, ManagedChildSecretEnvironment, SecretBytes};
 use fielora_storage::idr::{
@@ -1094,7 +1094,8 @@ fn remap_tool_call_id(message: AgentModelMessage, call_id: String) -> AgentModel
     }
 }
 
-fn invoked_fixture_turn(turn: AgentModelTurn, started: Instant) -> InvokedModelTurn {
+fn invoked_fixture_turn(mut turn: AgentModelTurn, started: Instant) -> InvokedModelTurn {
+    turn.text = sanitize_agent_text(&turn.text);
     InvokedModelTurn {
         turn,
         first_token_ms: Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64),
@@ -4168,6 +4169,23 @@ impl AgentCoordinator {
                 }),
                 AgentProjectionUpdate::default(),
             );
+            if persist_tool_turn_narrative(
+                &self.storage,
+                &self.sender,
+                &prepared.run.id,
+                step,
+                &turn,
+            )
+            .is_err()
+            {
+                fail_run(
+                    &self.storage,
+                    &self.sender,
+                    run_id,
+                    "AGENT_NARRATIVE_PERSIST_FAILED",
+                );
+                return;
+            }
             if self.pause_at_boundary(&run_id, &cancellation, "MODEL_TURN_COMPLETED") {
                 return;
             }
@@ -5417,6 +5435,14 @@ impl AgentCoordinator {
                     json!({"step":step,"phase":phase,"text_bytes":invoked.turn.text.len(),"tool_calls":invoked.turn.tool_calls.len(),"usage":invoked.turn.usage,"duration_ms":started.elapsed().as_millis(),"first_token_ms":invoked.first_token_ms,"prompt":shape,"pipeline":FAST_EDIT_PIPELINE_VERSION}),
                     AgentProjectionUpdate::default(),
                 );
+                persist_tool_turn_narrative(
+                    &self.storage,
+                    &self.sender,
+                    &prepared.run.id,
+                    step,
+                    &invoked.turn,
+                )
+                .map_err(|_| ModelError::ProviderUnavailable)?;
                 Ok(invoked.turn)
             }
             Err(error) => {
@@ -7024,7 +7050,7 @@ impl AgentCoordinator {
             {
                 return Ok(invoked_fixture_turn(
                     AgentModelTurn {
-                        text: "I will create the requested fixture file.".into(),
+                        text: "<think>private fixture reasoning</think>I will create the requested fixture file.".into(),
                         tool_calls: vec![AgentModelToolCall {
                             id: format!("fixture-{step}"),
                             name: "create_file".into(),
@@ -7087,6 +7113,8 @@ impl AgentCoordinator {
             let emitted_delta_for_callback = emitted_delta.clone();
             let first_token = Arc::new(AtomicU64::new(0));
             let first_token_for_callback = first_token.clone();
+            let sender_for_callback = self.sender.clone();
+            let run_id_for_callback = prepared.run.id.clone();
             let client = ModelClient::new()?;
             match client
                 .invoke_agent_turn(
@@ -7095,7 +7123,7 @@ impl AgentCoordinator {
                     prepared.secret.expose(),
                     cancellation.clone(),
                     move |delta| {
-                        let _ = delta;
+                        emit_text_delta(&sender_for_callback, &run_id_for_callback, step, delta);
                         emitted_delta_for_callback.store(true, Ordering::Relaxed);
                         let elapsed = invocation_started
                             .elapsed()
@@ -8973,6 +9001,31 @@ fn emit_text_delta(sender: &SyncSender<Value>, run_id: &AgentRunId, step: u32, d
         "method":"event.agent.text_delta",
         "params":{"event":"event.agent.text_delta","run_id":run_id,"step":step,"text_delta":delta},
     }));
+}
+
+fn persist_tool_turn_narrative(
+    storage: &StorageHandle,
+    sender: &SyncSender<Value>,
+    run_id: &AgentRunId,
+    step: u32,
+    turn: &AgentModelTurn,
+) -> Result<(), DomainError> {
+    if turn.tool_calls.is_empty() {
+        return Ok(());
+    }
+    let text = sanitize_agent_text(&turn.text);
+    if text.is_empty() {
+        return Ok(());
+    }
+    append_event(
+        storage,
+        sender,
+        run_id.clone(),
+        AgentEventKind::AssistantNarrative,
+        json!({"step":step,"text":text}),
+        AgentProjectionUpdate::default(),
+    )?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

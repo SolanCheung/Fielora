@@ -2177,6 +2177,7 @@ pub enum AgentEventKind {
     ContextCompiled,
     ModelStarted,
     ModelTextDelta,
+    AssistantNarrative,
     ModelCompleted,
     ModelFailed,
     ToolProposed,

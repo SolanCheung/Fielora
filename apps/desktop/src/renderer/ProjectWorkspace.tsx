@@ -12,7 +12,7 @@ import { BrowsePanel } from './BrowseScreen';
 import { AgentTurn } from './AgentTurn';
 import { AgentHumanReview } from './AgentHumanReview';
 import { AttachmentThumbnail, ConversationImageGallery, ImageContextMenu, ImagePreview } from './AttachmentMedia';
-import { AGENT_PROJECTION_UNAVAILABLE_MESSAGE, mergeAgentEventPages } from './agent-projection';
+import { AGENT_PROJECTION_UNAVAILABLE_MESSAGE, loadCompleteAgentEventSequence, mergeAgentEventPages } from './agent-projection';
 import { buildAgentReview } from './agent-review';
 import { MarkdownMessage } from './MarkdownMessage';
 import { ResizableDivider } from './ResizableDivider';
@@ -68,6 +68,7 @@ interface ActiveAgent {
   runId: string;
   conversationId: string;
   output: string;
+  step: number;
 }
 
 interface QueuedFollowUp {
@@ -456,7 +457,7 @@ function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copi
     let current = true;
     void Promise.all([
       window.fielora.agent.get({ run_id: runId }),
-      window.fielora.agent.events({ run_id: runId, after_sequence: null, limit: 200 }),
+      loadCompleteAgentEventSequence((request) => window.fielora.agent.events(request), runId),
       window.fielora.agent.toolCalls({ run_id: runId }),
     ]).then(([nextRun, nextEvents, nextTools]) => {
       if (!current) return;
@@ -667,6 +668,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const [draft, setDraft] = useState<ReviewDraft | null>(null);
   const [undoChange, setUndoChange] = useState<UndoChange | null>(null);
   const [streamingOutput, setStreamingOutput] = useState('');
+  const [streamingStep, setStreamingStep] = useState(0);
   const [agentRun, setAgentRun] = useState<AgentRunView | null>(null);
   const [agentEvents, setAgentEvents] = useState<AgentEventView[]>([]);
   const [agentTools, setAgentTools] = useState<AgentToolCallView[]>([]);
@@ -949,7 +951,12 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const sameRun = agentRunIdRef.current === run.id;
     const existing = !reset && sameRun ? agentEventsRef.current : [];
     const afterSequence = existing.at(-1)?.sequence ?? null;
-    const incremental = await window.fielora.agent.events({ run_id: run.id, after_sequence: afterSequence, limit: reset ? 200 : 100 });
+    const incremental = await loadCompleteAgentEventSequence(
+      (request) => window.fielora.agent.events(request),
+      run.id,
+      afterSequence,
+      reset ? 200 : 100,
+    );
     const needsTools = reset || !sameRun || incremental.some((event) => event.kind.startsWith('TOOL_') || event.kind.startsWith('APPROVAL_'));
     const [tools, nextMcpRuntime] = await Promise.all([
       needsTools ? window.fielora.agent.toolCalls({ run_id: run.id }) : Promise.resolve(agentToolsRef.current),
@@ -967,7 +974,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     performance.clearMeasures('fielora.agent.projection');
     performance.measure('fielora.agent.projection', { start: projectionStarted });
     if (['QUEUED', 'RUNNING', 'WAITING_APPROVAL'].includes(run.status)) {
-      if (activeAgentRef.current?.runId !== run.id) activeAgentRef.current = { runId: run.id, conversationId: run.conversation_id, output: '' };
+      if (activeAgentRef.current?.runId !== run.id) activeAgentRef.current = { runId: run.id, conversationId: run.conversation_id, output: '', step: 0 };
     } else if (activeAgentRef.current?.runId === run.id) activeAgentRef.current = null;
   }, []);
   const refreshConversationAgent = useCallback(async (id: string) => {
@@ -1002,6 +1009,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   useEffect(() => {
     selectedConversationRef.current = conversationId;
     setStreamingOutput('');
+    setStreamingStep(0);
     setPrompt(''); setAttachments([]);
     setQueuedFollowUps(readQueuedFollowUps(conversationId));
     queuedFollowUpStartingRef.current = false;
@@ -1068,6 +1076,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
             terminalAgentRefreshRef.current.add(run.id);
             if (activeAgentRef.current?.runId === run.id) activeAgentRef.current = null;
             setStreamingOutput('');
+            setStreamingStep(0);
             await Promise.all([
               refreshMessages(run.conversation_id),
               refreshConversations(run.field_id, run.conversation_id),
@@ -1088,7 +1097,12 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       const delta = event as AgentTextDeltaEvent;
       const active = activeAgentRef.current;
       if (!active || active.runId !== delta.run_id) return;
+      if (active.step !== delta.step) {
+        active.step = delta.step;
+        active.output = '';
+      }
       active.output += delta.text_delta;
+      setStreamingStep(active.step);
       setStreamingOutput(active.output);
       return;
     }
@@ -1310,7 +1324,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
 
   async function resumeAgent() {
     if (!agentRun) return;
-    try { const next = await window.fielora.agent.resume({ run_id: agentRun.id }); activeAgentRef.current = { runId: next.id, conversationId: next.conversation_id, output: '' }; await loadAgentRun(next); }
+    try { const next = await window.fielora.agent.resume({ run_id: agentRun.id }); activeAgentRef.current = { runId: next.id, conversationId: next.conversation_id, output: '', step: 0 }; await loadAgentRun(next); }
     catch (reason) { setError(reasonMessage(reason)); }
   }
 
@@ -1363,9 +1377,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         active_work_surface: selectedActiveArtifactContext(),
       });
       foregroundAgentRunsRef.current.add(started.id);
-      activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '' };
+      activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '', step: 0 };
       agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
-      setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); setStreamingOutput('');
+      setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); setStreamingOutput(''); setStreamingStep(0);
       scrollToLatestAnswer();
     } catch (reason) { setError(reasonMessage(reason)); }
     finally { setBusy(false); }
@@ -1508,9 +1522,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       active_work_surface: selectedActiveArtifactContext(),
     });
     foregroundAgentRunsRef.current.add(started.id);
-    activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '' };
+    activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '', step: 0 };
     agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
-    setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); setStreamingOutput('');
+    setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); setStreamingOutput(''); setStreamingStep(0);
     scrollToLatestAnswer();
     setQueuedFollowUps((current) => {
       const next = current.filter((queued) => queued.messageId !== item.messageId);
@@ -1582,10 +1596,10 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         active_work_surface: selectedActiveArtifactContext(),
       });
       foregroundAgentRunsRef.current.add(started.id);
-      activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '' };
+      activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '', step: 0 };
       agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
       setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null);
-      setStreamingOutput(''); setPrompt(''); setAttachments([]);
+      setStreamingOutput(''); setStreamingStep(0); setPrompt(''); setAttachments([]);
       scrollToLatestAnswer();
     } catch (reason) { setError(reasonMessage(reason)); }
     finally { setBusy(false); }
@@ -2086,6 +2100,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     approvalSummary={approvalToolSummary}
     review={agentReview}
     streamingContent={streamingOutput}
+    streamingStep={streamingStep}
     busy={busy}
     copied={Boolean(currentTerminalMessage && copiedMessageId === currentTerminalMessage.id)}
     onResume={() => void resumeAgent()}
