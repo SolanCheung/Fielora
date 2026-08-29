@@ -579,13 +579,14 @@ interpretation, task planning, Tool selection authority, Permission, Approval,
 Execution, Verification, Reality, or final decision authority. It cannot become
 a second Agent or a second LLM.
 
-Current implementation has the schema-12 Human Model Candidate in the existing
-Fielora SQLite authority and `fielora-storage::idr`, the pure deterministic
-`fielora-core::idr_resolver::HumanModelResolverV1`, and standalone
-`fielora-agent::idr_context::IDRContextAdmissionV1`. It has no production
-ContextCompiler/AgentRun integration, Direction/Learning stage, FIPC/UI, or independent
-IDR service/Runtime module. These implemented components do not authorize
-`HumanProfileId`, a Memory index, or another physical Runtime.
+The frozen implementation keeps the schema-12 Human Model in the existing Fielora
+SQLite authority and `fielora-storage::idr`; the pure deterministic Resolver and
+trusted production builders live beside Harness composition in `fielora-core`; and
+bounded Context Admission and `ContextCompiler` remain in `fielora-agent`. The existing
+`AgentCoordinator` composes these owners into AgentRun startup, ephemeral invalidation,
+fail-soft behavior, existing Context Snapshot evidence, and the primary Model request.
+There is no FIPC/UI, independent IDR service/Runtime, `HumanProfileId`, Memory index,
+second Coordinator, second ContextCompiler, or second Model/classifier stream.
 
 `FIELORA_IDR_V2_FINAL_ARCHITECTURE_CLOSEOUT.md` closes all remaining V2
 architecture questions. Production integration is coordinated by Harness composition;
@@ -604,12 +605,12 @@ later Resolver execution instruction separately authorized the implemented Candi
 described below.
 
 The minimum semantic Contract Review is tracked in
-`FIELORA_IDR_V2_CONTRACT_CANDIDATE.md`. Storage, Resolver, and standalone Context
-Admission are implemented Candidates. Production Agent Context integration,
-acquisition, activation/correction paths, Agent Profile projection, and Eval remain
-unimplemented. Their V2 ownership, fail-soft behavior, authority boundaries, Freeze
-Gate, and implementation order are closed by the Final Architecture Closeout and do
-not require another architecture review.
+`FIELORA_IDR_V2_CONTRACT_CANDIDATE.md`. Storage, Resolver, Context Admission,
+production Agent Context integration, explicit acquisition, bounded Observation and
+Disposition Candidate creation, activation/correction/forget, Agent Profile projection,
+restart/recovery, and controlled OFF/ON Eval are implemented and targeted validated.
+The Final Architecture Closeout records the evidence-backed V2 Freeze; later changes do
+not require another architecture review while they preserve these authority boundaries.
 
 ---
 
@@ -1013,9 +1014,9 @@ The Renderer cannot invent successful execution or verification.
 | Governance | `PolicyEngine`, permission/effect contracts, Approval routing/nonce, executor invariants, completion authority |
 | Execution | coordinator lifecycle/dispatch/cancel/resume; Tokio infrastructure; ToolCall projection; process cancellation |
 | Verification & Evidence | Tool/Verification receipts, mutation invalidation, diff/test gates, completion evaluation |
-| IDR | schema-12 Human Model storage Candidate in `fielora-storage`; pure deterministic Resolver beside Harness composition in `fielora-core`; standalone Context Admission in `fielora-agent`; production Agent integration and Direction/Learning not implemented |
+| IDR | frozen schema-12 Human Model storage in `fielora-storage`; pure deterministic Resolver, trusted builders, production composition, acquisition, and Eval in `fielora-core`; bounded Context Admission in `fielora-agent`; existing Coordinator/ContextCompiler/Context Snapshot only, with no second Runtime or Model stream |
 | Entry Intent Resolver | historical Phase 04 bounded product-flow routing semantics; no independent IDR runtime |
-| Agent Profile | bundled/versioned product definition required by architecture; distinct runtime not implemented |
+| Agent Profile | bundled/versioned/code-owned `FieloraAgentProfileV1` projected through existing Ingress & Context; no distinct Profile Runtime by design |
 | Memory Domain | cross-cutting ownership across Continuity, Orchestration, IDR, and Reality; no independent Memory Runtime |
 | Agent coding Tool interface | `ToolExecutor` |
 | Agent coding Tool implementation | Rust `ToolRuntime`: Filesystem/Process/Git and bounded capability inspection |
@@ -1062,25 +1063,22 @@ reuse its Governance, Continuity, Execution, and Evidence.
 
 ## IDR
 
-- production builders for current constraints, normalized resolution context,
-  applicability, source availability, and authoritative Reality projections;
-- production Agent Context integration of the implemented bounded Context Admission,
-  including ephemeral invalidation/reuse, fail-soft diagnostics, and existing Context
-  Snapshot why-used evidence;
-- event-driven acquisition, deterministic admission, explicit activation,
-  correction/forget, and controlled A/B Eval.
+IDR V2 is frozen and targeted validated across schema-12 Human Model storage,
+deterministic Resolver, trusted Context/Reality/source builders, bounded Context
+Admission, production AgentRun/ContextCompiler integration, bundled Agent Profile,
+event-driven acquisition, deterministic mutation, explicit activation,
+correction/forget, restart/recovery, and controlled OFF/ON Eval. Its remaining product
+work is ordinary post-V2 enhancement rather than a missing runtime foundation.
 
-IDR V2 storage, deterministic Resolver, and standalone bounded Context Admission now
-exist as implemented Candidates. ContextCompiler/AgentRun integration,
-acquisition/Profile/Eval remain unimplemented, but their architecture is closed by
-`FIELORA_IDR_V2_FINAL_ARCHITECTURE_CLOSEOUT.md`. The implementation adds no Memory
-index, `HumanProfileId`, IDR service, parallel Runtime, second Model stream, Model
-authority, or Agent behavior change.
+The implementation adds no Memory index, `HumanProfileId`, IDR service, parallel
+Runtime, second Coordinator/ContextCompiler, second Model stream, Model authority,
+FIPC, or UI. Automatic Disposition activation, cloud sync, multi-profile/device merge,
+vector memory, dynamic registry/marketplace, IDR dashboard, and enterprise identity
+remain explicitly deferred and do not block the V2 Freeze.
 
 ## Supporting concepts
 
-- versioned bundled Agent Profile projection;
-- cross-cutting Memory retrieval/admission semantics without a Memory Runtime.
+- broader cross-cutting Memory retrieval/admission semantics without a Memory Runtime.
 
 ## Tools
 
@@ -1121,9 +1119,10 @@ Execution lifecycle
 → Evidence / Reconciliation
 ```
 
-IDR, Agent Profile, and richer Memory retrieval enter only alongside explicit
-product behavior and a separate reviewed Change Impact; architecture symmetry
-alone is not implementation pressure.
+Further IDR, Agent Profile, and richer Memory retrieval changes enter only alongside
+explicit product behavior and a separate reviewed Change Impact; architecture symmetry
+alone is not implementation pressure. The frozen IDR V2 baseline is not a mandate to
+add new product surfaces.
 
 ## Phase D — new Profiles
 

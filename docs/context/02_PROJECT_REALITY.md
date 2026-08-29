@@ -2574,3 +2574,52 @@ SCHEMA_CHANGED: NO
 DEPENDENCIES_CHANGED: NO
 NEXT: IDR_V2_IMPLEMENTATION_EXECUTION
 ```
+
+## 103. IDR V2 End-to-End Implementation and Freeze
+
+用户于 2026-08-29 授权在已关闭架构内连续完成 IDR V2，不再拆 Slice 或新增架构
+Review。实现提交 `6d17b62`、`23b6d88` 与 `958510c` 已将 trusted current-constraint、
+Project/active Artifact Reality、source-availability 与 normalized context builders，existing
+Core Resolver/Agent Admission/ContextCompiler/AgentCoordinator production chain，bundled
+`FieloraAgentProfileV1`、existing Context Snapshot WhyUsed/evidence、ephemeral invalidation/cache
+和 fail-soft Generic continuation 接通。自由文本 semantic projection 复用同一 primary Model
+stream 的 provider-neutral typed control plane；它不进入 executable Tool catalog，不获得
+Policy、Permission、Reality、Verification 或 Tool authority，且 IDR 不新增第二次 Model call。
+
+Human Model acquisition 已覆盖 explicit Fact/Preference/Long-term Goal、bounded Observation、
+Observation-supported inferred Disposition Candidate、explicit activation、atomic correction/
+supersession、disable、application-level semantic erasure 与 reset。所有 mutation 检查 expected
+Human Model revision；stale 返回 conflict，不 silent retry/rebase。高风险个人数据必须 explicit，
+secret/credential/secret-derived material 永不存储，也不生成 secret hash/prefix/last4/fingerprint。
+Automatic activation 继续不存在。
+
+Targeted Gate：Agent 132、office writer probe 8、Contracts 6、Storage 36、Core 69 全部 PASS；
+受影响四个 Rust crate strict Clippy `-D warnings` PASS；required IDR OFF/ON Eval 10/10 PASS。
+代表性 fixture 为 180 extra bytes（粗略约 45 tokens）、1,956 μs total（builder 420、Resolver
+983、Admission 553），preloaded Human Model read 为 0；生产路径会在 existing Context Snapshot
+单独记录实际 SQLite snapshot read μs。ON/OFF preference adherence 1/0，task success 1/1；
+七项 hard-zero counter 全为 0。Live Model/Provider request、schema/migration、dependency、FIPC/UI
+与 resolved-view persistence 均为 0；full premerge 因边界未跨越而 `NOT_RUN`。
+
+Evidence 位于 `artifacts/agent-v0.1/IDR_V2_END_TO_END_EVIDENCE.md`。Storage、Resolver、production
+Context、Acquisition、Profile、Recovery、Provider-neutral Eval、Privacy 与 hard-zero Gate 均 PASS，
+因此 `FIELORA_IDR_V2_FINAL_ARCHITECTURE_CLOSEOUT.md` 的最终状态为 `FROZEN`，blocker 为 0。
+Automatic activation、cloud sync、multi-profile/device、vector memory、dynamic registry/
+marketplace、IDR dashboard 与 enterprise identity 是 post-V2，不阻塞 Freeze。
+
+```text
+IDR_V2_END_TO_END_IMPLEMENTATION: PASS
+ARCHITECTURE: CLOSED / UNCHANGED
+PRODUCTION_CONTEXT_INTEGRATION: PASS
+ACQUISITION_AND_LIFECYCLE: PASS
+RESTART_RECOVERY: PASS
+REQUIRED_AB_EVAL: 10/10 PASS
+HARD_ZERO_INVARIANTS: PASS
+MODEL_REQUESTS: 0
+SCHEMA_CHANGED: NO
+DEPENDENCIES_CHANGED: NO
+FREEZE_GATE: PASS
+IDR_V2_STATUS: FROZEN
+FREEZE_BLOCKERS: NONE
+NEXT: RETURN_TO_NORMAL_FIELORA_PRODUCT_DEVELOPMENT
+```

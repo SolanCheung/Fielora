@@ -4,12 +4,13 @@
 
 ```text
 DOCUMENT: FIELORA_IDR_V2_FINAL_ARCHITECTURE_CLOSEOUT.md
-STATUS: FINAL ARCHITECTURE CANDIDATE
-IMPLEMENTATION ROADMAP: APPROVED FOR REVIEW
-FREEZE: NOT YET FROZEN
+STATUS: FROZEN
+IMPLEMENTATION: COMPLETE / TARGETED VALIDATED
+FREEZE: FROZEN
 BLOCKING_ARCHITECTURE_OPEN_QUESTIONS: 0
-RUNTIME CHANGE IN THIS CHANGESET: NONE
+RUNTIME CHANGE IN THIS CHANGESET: EXISTING HARNESS COMPOSITION ONLY
 SCHEMA CHANGE IN THIS CHANGESET: NONE
+DEPENDENCY CHANGE IN THIS CHANGESET: NONE
 DATE: 2026-08-29
 ```
 
@@ -24,9 +25,10 @@ reopen the canonical Agent formula or replace the detailed contracts already in:
 - `FIELORA_IDR_V2_CONTEXT_INTEGRATION_REVIEW.md`.
 
 Those documents retain their historical review state. Where their remaining
-questions or next-review markers differ from this document, this closeout is the
-final V2 architecture Candidate. Later work proceeds as implementation, testing,
-evaluation, and evidence-backed correction rather than another architecture phase.
+questions or next-review markers differ from this document, this frozen closeout is the
+canonical V2 state. Later enhancements proceed as ordinary reviewed product changes,
+testing, evaluation, and evidence-backed correction rather than another architecture
+phase.
 
 ---
 
@@ -571,12 +573,14 @@ Freeze does not require automatic Disposition activation, cloud sync,
 multi-user, multi-device merge, vector memory, marketplace registry, dynamic
 semantic registry, IDR dashboard, or enterprise identity.
 
+Section 15 records evidence that every required Freeze condition passed.
+
 ---
 
-## 14. Final implementation sequence
+## 14. Implemented sequence
 
-Physical dependencies require the builders to precede production wiring. The
-single implementation sequence is:
+Physical dependencies required the builders to precede production wiring. The
+single implementation sequence was completed as follows:
 
 1. Implement `CurrentConstraintProjectionV1`, authoritative Reality/source builders,
    `NormalizedResolutionContextBuilderV1`, and IDR participation input;
@@ -600,18 +604,70 @@ new architecture phase.
 
 ---
 
-## 15. Closeout
+## 15. Implementation and freeze evidence
+
+IDR V2 was implemented without reopening the architecture or introducing a second
+Runtime, Coordinator, ContextCompiler, Model stream, durable resolved-view store,
+FIPC surface, UI, schema migration, or dependency. The implementation changes are
+anchored by commits `6d17b62`, `23b6d88`, and `958510c`.
+
+The production chain now uses trusted builders for current constraints, Project and
+active Artifact Reality, source availability, and normalized resolution context. It
+loads the storage-owned Human Model snapshot, invokes the existing Core Resolver and
+standalone Admission, attaches the bounded non-authoritative contribution and bundled
+`FieloraAgentProfileV1` through the existing `ContextCompiler`, and records bounded
+WhyUsed and invalidation evidence in the existing Agent Context Snapshot ledger.
+Unsupported or contradictory inputs discard the current contribution and continue the
+Generic Agent without stale personalization.
+
+Acquisition now supports explicit Fact, Preference, and Long-term Goal proposals;
+bounded Observation evidence; inferred Disposition Candidate creation; explicit
+activation; atomic correction/supersession; disable; application-level semantic
+erasure; and reset. Every mutation checks the expected Human Model revision. Secrets
+and secret-derived values are denied, high-risk personal data requires explicit input
+and provenance, and automatic Disposition activation remains absent.
+
+Targeted validation evidence:
+
+- `fielora-agent`: 132 unit/integration tests PASS;
+- `fielora-contracts`: 6 tests PASS;
+- `fielora-storage`: 36 tests PASS;
+- `fielora-core --bin fielora-core`: 69 tests PASS;
+- affected Contracts/Storage/Agent/Core strict Clippy with `-D warnings`: PASS;
+- required IDR OFF/ON evaluation suites: 10/10 PASS;
+- all seven hard-zero invariant counters: 0 in every applicable suite;
+- live Model/Provider requests: 0;
+- schema, migration, dependency, FIPC, and UI changes: 0.
+
+The deterministic representative metrics fixture reported 180 extra serialized bytes
+(approximately 45 tokens using a rough four-bytes-per-token estimate), 1,956 microseconds
+total measured IDR preparation latency, split into 420 microseconds builder, 983
+microseconds Resolver, and 553 microseconds Admission. Its preloaded Human Model snapshot
+reported zero read overhead; the production path separately records actual SQLite
+snapshot-read microseconds in existing Context Snapshot evidence. These are local fixture
+measurements, not live-Provider performance claims. IDR ON improved the fixture's
+explicit preference adherence from 0 to 1 while task success remained 1 for both OFF
+and ON. Full premerge, Browser, packaged, portable, UI, and live-Provider gates were not
+run because this bounded freeze changes only the affected Rust and canonical-doc lanes.
+
+Detailed reproducible evidence is recorded in
+`artifacts/agent-v0.1/IDR_V2_END_TO_END_EVIDENCE.md`.
+
+---
+
+## 16. Closeout
 
 ```text
 IDR_V2_FINAL_ARCHITECTURE_CLOSEOUT: PASS
 BLOCKING_ARCHITECTURE_OPEN_QUESTIONS: 0
-CONTEXT_PRODUCTION_INTEGRATION: ARCHITECTURE_CLOSED / NOT_IMPLEMENTED
-ACQUISITION_PIPELINE: ARCHITECTURE_CLOSED / NOT_IMPLEMENTED
-AGENT_PROFILE: ARCHITECTURE_CLOSED / NOT_IMPLEMENTED
-FAILURE_POLICY: FAIL-SOFT
+CONTEXT_PRODUCTION_INTEGRATION: IMPLEMENTED / PASS
+ACQUISITION_PIPELINE: IMPLEMENTED / PASS
+AGENT_PROFILE: IMPLEMENTED / PASS
+FAILURE_POLICY: FAIL-SOFT / PASS
 AUTOMATIC_ACTIVATION: DEFERRED_POST_V2
-GENERIC_AGENT_WITHOUT_IDR: SUPPORTED
-FREEZE: NOT_YET
-NEXT: IDR_V2_IMPLEMENTATION_EXECUTION
+GENERIC_AGENT_WITHOUT_IDR: PASS
+FREEZE: FROZEN
+FREEZE_BLOCKERS: NONE
+NEXT: RETURN_TO_NORMAL_FIELORA_PRODUCT_DEVELOPMENT
 NO_FURTHER_ARCHITECTURE_REVIEW_REQUIRED: YES
 ```
