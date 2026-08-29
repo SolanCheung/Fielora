@@ -3749,8 +3749,12 @@ impl AgentCoordinator {
         };
         let active_work_surface = self.active_work_surface_for_run(&run_id);
         let context_snapshot_id = ContextSnapshotId::new(Uuid::now_v7().to_string());
-        let idr_prepared = match (
-            self.storage.read_human_model_snapshot(),
+        let human_model_read_started = Instant::now();
+        let human_model_snapshot = self.storage.read_human_model_snapshot();
+        let human_model_read_latency_micros =
+            u64::try_from(human_model_read_started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        let mut idr_prepared = match (
+            human_model_snapshot,
             self.storage.get_project(prepared.run.field_id.clone()),
         ) {
             (Ok(human_model), Ok(project)) => {
@@ -3795,6 +3799,7 @@ impl AgentCoordinator {
             }
             _ => IDRPreparationV1::disabled(Some("IDR_TRUSTED_INPUT_READ_FAILED")),
         };
+        idr_prepared.human_model_read_latency_micros = human_model_read_latency_micros;
         if (ContextCompiler {
             max_files: 0,
             max_bytes: 0,
@@ -15544,6 +15549,7 @@ mod tests {
             .unwrap();
         assert_eq!(snapshot.manifest["idr"]["participation"], "IDR_ENABLED");
         assert_eq!(snapshot.manifest["idr"]["human_model_revision"], 1);
+        assert!(snapshot.manifest["idr"]["metrics"]["human_model_read_latency_micros"].is_u64());
         assert!(snapshot.manifest["idr"]["why_used_manifest"].is_object());
         assert!(!snapshot.manifest.to_string().contains("minimal_delta"));
 
