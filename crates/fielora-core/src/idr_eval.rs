@@ -724,9 +724,12 @@ mod tests {
         assert!(off.metrics.hard_zero_passes());
         assert!(on.metrics.hard_zero_passes());
         println!(
-            "IDR_EVAL_METRICS token_overhead_bytes={} latency_overhead_micros={} preference_adherence_off={} preference_adherence_on={} task_success_off={} task_success_on={} hard_zero=PASS",
+            "IDR_EVAL_METRICS token_overhead_bytes={} latency_overhead_micros={} builder_micros={} resolver_micros={} admission_micros={} preference_adherence_off={} preference_adherence_on={} task_success_off={} task_success_on={} hard_zero=PASS",
             on.metrics.idr_token_overhead_bytes,
             on.metrics.idr_latency_overhead_micros,
+            on.preparation.builder_latency_micros,
+            on.preparation.resolver_latency_micros,
+            on.preparation.admission_latency_micros,
             off.metrics.preference_adherence,
             on.metrics.preference_adherence,
             off.metrics.task_success,
