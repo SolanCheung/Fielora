@@ -47,7 +47,7 @@ import type { AppPreferences } from './renderer/app-preferences';
 import type { BrowserContextCandidate, BrowserNavigateRequest, BrowserPageRequest, BrowserPageState, BrowserViewBounds } from './browser-types';
 import type {
   ApplyWorkspaceFileRequest, CancelTerminalRequest, PickProjectRequest, RunTerminalRequest,
-  TerminalEvent, TerminalRunResult, WorkspaceFileEntry, WorkspaceFileRequest, WorkspaceFileView, WorkspaceImagePreview,
+  LibraryImagePreviewView, TerminalEvent, TerminalRunResult, WorkspaceFileEntry, WorkspaceFileRequest, WorkspaceFileView, WorkspaceImagePreview,
   OpenWorkspaceProjectRequest, WorkspaceProjectOpenTargetView,
   CopyWorkspaceAttachmentResult, ReadWorkspaceAttachmentRequest, SaveWorkspaceAttachmentRequest, SaveWorkspaceAttachmentResult, StoreWorkspaceAttachmentRequest,
   WorkspaceAttachmentSelection, WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceProjectRequest,
@@ -218,6 +218,7 @@ export interface FieloraBridge {
     saveWeb(request: SaveWebLibraryRequest): Promise<LibraryObjectView>;
     list(request: ListLibraryObjectsRequest): Promise<LibraryObjectView[]>;
     get(request: LibraryObjectRequest): Promise<LibraryObjectView>;
+    previewImage(request: LibraryObjectRequest): Promise<LibraryImagePreviewView>;
     delete(request: DeleteLibraryObjectRequest): Promise<LibraryObjectView>;
     open(request: LibraryObjectRequest): Promise<null>;
     reveal(request: LibraryObjectRequest): Promise<null>;

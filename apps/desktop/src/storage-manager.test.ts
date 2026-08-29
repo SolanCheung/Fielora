@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -49,6 +49,34 @@ test('closed DataRoot and LibraryRoot migrations verify copies, retain source, a
     await manager.migrateLibraryRoot(libraryTarget);
     assert.deepEqual(await directoryManifest(libraryTarget), await directoryManifest(libraryA));
     assert.ok((await directoryManifest(libraryA)).length > 0, 'Library source is retained');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('verified Library blobs stay identity-addressed across root migration and fail safely when stale', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'fielora-verified-library-'));
+  try {
+    const manager = await StorageManager.open(root, path.join(root, 'isolated'));
+    const source = path.join(root, 'image.bin');
+    const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
+    await writeFile(source, bytes);
+    const stored = await manager.importFile(source);
+    assert.deepEqual(Buffer.from(await manager.readVerifiedBlob(stored.blob_ref, stored.content_hash, 1024)), bytes);
+    await assert.rejects(manager.readVerifiedBlob(stored.blob_ref, '0'.repeat(64), 1024), /integrity/u);
+    assert.throws(() => manager.resolveBlob('../outside.png'), /Invalid Library blob reference/u);
+    const storedPath = manager.resolveBlob(stored.blob_ref);
+    const storedDirectory = path.dirname(storedPath);
+    const escapedDirectory = path.join(root, 'escaped-blob-directory');
+    await mkdir(escapedDirectory);await writeFile(path.join(escapedDirectory, path.basename(storedPath)), bytes);
+    await rm(storedDirectory, { recursive: true, force: true });
+    await symlink(escapedDirectory, storedDirectory, process.platform === 'win32' ? 'junction' : 'dir');
+    await assert.rejects(manager.readVerifiedBlob(stored.blob_ref, stored.content_hash, 1024), /escaped LibraryRoot/u);
+    await rm(storedDirectory, { recursive: true, force: true });await mkdir(storedDirectory);await writeFile(storedPath, bytes);
+
+    const migrated = path.join(root, 'library-migrated');await mkdir(migrated);
+    await manager.migrateLibraryRoot(migrated);
+    assert.deepEqual(Buffer.from(await manager.readVerifiedBlob(stored.blob_ref, stored.content_hash, 1024)), bytes);
+    await unlink(manager.resolveBlob(stored.blob_ref));
+    await assert.rejects(manager.readVerifiedBlob(stored.blob_ref, stored.content_hash, 1024));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

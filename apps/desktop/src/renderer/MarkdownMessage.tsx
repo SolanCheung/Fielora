@@ -1,5 +1,6 @@
-import { createElement, useState, type ReactNode } from 'react';
+import { createElement, useEffect, useState, type ReactNode } from 'react';
 import type { ResultReference } from '@fielora/contracts';
+import type { LibraryImagePreviewView } from '../workspace-types';
 
 interface MarkdownMessageProps {
   content: string;
@@ -7,6 +8,7 @@ interface MarkdownMessageProps {
   onCopyError?: (message: string) => void;
   references?: ResultReference[];
   onOpenReference?: (reference: ResultReference) => void;
+  onOpenImage?: (preview: LibraryImagePreviewView) => void;
 }
 
 interface InlineMatch {
@@ -46,6 +48,39 @@ function firstInlineMatch(value: string): InlineMatch | null {
 interface ReferenceRenderContext {
   references: ReadonlyMap<string, ResultReference>;
   onOpenReference?: (reference: ResultReference) => void;
+  onOpenImage?: (preview: LibraryImagePreviewView) => void;
+}
+
+function controlledImageMarker(line: string): { label: string; referenceId: string } | null {
+  const match = /^\s*!\[([^\]\n]+)\]\(fielora-reference:(resultref_[0-9a-f]{32})\)\s*$/iu.exec(line);
+  return match ? { label: match[1] ?? '', referenceId: match[2] ?? '' } : null;
+}
+
+function InlineResultImage({ reference, context }: { reference: ResultReference & { target: Extract<ResultReference['target'], { kind: 'IMAGE' }> }; context: ReferenceRenderContext }) {
+  const [preview, setPreview] = useState<LibraryImagePreviewView | null>(null);
+  const [state, setState] = useState<'LOADING' | 'READY' | 'UNAVAILABLE'>('LOADING');
+  useEffect(() => {
+    let live = true;
+    setPreview(null);setState('LOADING');
+    void window.fielora.library.previewImage({ library_object_id: reference.target.library_object_id }).then((resolved) => {
+      const valid = resolved.library_object_id === reference.target.library_object_id
+        && resolved.source === 'LIBRARY'
+        && resolved.content_hash === reference.target.expected_sha256
+        && resolved.mime_type === reference.target.mime_type
+        && resolved.size > 0 && resolved.size <= 8 * 1024 * 1024
+        && resolved.data_url.startsWith(`data:${resolved.mime_type};base64,`);
+      if (!live) return;
+      if (!valid) { setState('UNAVAILABLE'); return; }
+      setPreview(resolved);setState('READY');
+    }).catch(() => { if (live) setState('UNAVAILABLE'); });
+    return () => { live = false; };
+  }, [reference.id, reference.target.expected_sha256, reference.target.library_object_id, reference.target.mime_type]);
+  if (state === 'LOADING') return <figure className="markdown-inline-image is-loading" data-testid="markdown-inline-image" data-reference-id={reference.id}><div role="status">正在加载图片…</div><figcaption>{reference.label}<span>资料库</span></figcaption></figure>;
+  if (!preview) return <figure className="markdown-inline-image is-unavailable" data-testid="markdown-inline-image" data-reference-id={reference.id}><div role="status">图片不可用</div><figcaption>{reference.label}<span>资料库</span></figcaption></figure>;
+  return <figure className="markdown-inline-image" data-testid="markdown-inline-image" data-reference-id={reference.id}>
+    <button type="button" onClick={() => context.onOpenImage?.(preview)} aria-label={`放大 ${reference.label}`} disabled={!context.onOpenImage}><img src={preview.data_url} alt={reference.label}/></button>
+    <figcaption>{reference.label}<span>资料库</span></figcaption>
+  </figure>;
 }
 
 function renderInline(value: string, keyPrefix: string, context?: ReferenceRenderContext): ReactNode[] {
@@ -105,7 +140,7 @@ function isList(line: string): boolean {
 function isBlockStart(lines: string[], index: number): boolean {
   const line = lines[index] ?? '';
   if (!line.trim()) return true;
-  if (isFence(line) || /^(#{1,6})\s+/.test(line) || /^\s*>\s?/.test(line) || isList(line) || /^\s*(?:---+|___+|\*\*\*+)\s*$/.test(line)) return true;
+  if (controlledImageMarker(line) || isFence(line) || /^(#{1,6})\s+/.test(line) || /^\s*>\s?/.test(line) || isList(line) || /^\s*(?:---+|___+|\*\*\*+)\s*$/.test(line)) return true;
   return index + 1 < lines.length && line.includes('|') && /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1] ?? '');
 }
 
@@ -121,6 +156,18 @@ function renderMarkdown(content: string, onCopyError?: (message: string) => void
   while (index < lines.length) {
     const line = lines[index] ?? '';
     if (!line.trim()) { index += 1; continue; }
+
+    const imageMarker = controlledImageMarker(line);
+    if (imageMarker) {
+      const reference = context?.references.get(imageMarker.referenceId);
+      if (context && reference?.target.kind === 'IMAGE' && reference.label === imageMarker.label) {
+        blocks.push(<InlineResultImage key={`image-${index}`} reference={reference as ResultReference & { target: Extract<ResultReference['target'], { kind: 'IMAGE' }> }} context={context}/>);
+      } else {
+        blocks.push(<p key={`image-unavailable-${index}`} className="markdown-reference-unavailable">{imageMarker.label}</p>);
+      }
+      index += 1;
+      continue;
+    }
 
     const fence = /^\s*```\s*([\w.+-]*)\s*$/.exec(line);
     if (fence) {
@@ -194,7 +241,7 @@ function renderMarkdown(content: string, onCopyError?: (message: string) => void
   return blocks;
 }
 
-export function MarkdownMessage({ content, streaming = false, onCopyError, references = [], onOpenReference }: MarkdownMessageProps) {
-  const context: ReferenceRenderContext = { references: new Map(references.map((reference) => [reference.id, reference])), onOpenReference };
+export function MarkdownMessage({ content, streaming = false, onCopyError, references = [], onOpenReference, onOpenImage }: MarkdownMessageProps) {
+  const context: ReferenceRenderContext = { references: new Map(references.map((reference) => [reference.id, reference])), onOpenReference, onOpenImage };
   return <div className={`markdown-body${streaming ? ' is-streaming' : ''}`}>{renderMarkdown(content, onCopyError, context)}</div>;
 }

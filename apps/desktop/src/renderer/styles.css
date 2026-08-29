@@ -269,6 +269,13 @@ button:disabled { opacity: .55; cursor: wait; }
 .markdown-body .markdown-typed-reference { display: inline; min-height: 0; padding: 0; border: 0; color: var(--fl-color-link); background: transparent; font: inherit; text-align: inherit; vertical-align: baseline; }
 .markdown-body .markdown-typed-reference:hover { text-decoration: underline; }
 .markdown-body .markdown-reference-unavailable { color: var(--fl-color-text-muted); }
+.markdown-body .markdown-inline-image { width: min(100%,720px); margin: 14px 0; color: var(--fl-color-text-muted); }
+.markdown-body .markdown-inline-image > button { max-width: 100%; display: block; padding: 0; overflow: hidden; border: 0; border-radius: 7px; background: transparent; cursor: zoom-in; }
+.markdown-body .markdown-inline-image > button:disabled { cursor: default; }
+.markdown-body .markdown-inline-image img { width: auto; max-width: 100%; max-height: 520px; display: block; object-fit: contain; }
+.markdown-body .markdown-inline-image > div { min-height: 104px; display: grid; place-items: center; border: 1px solid var(--fl-color-border-soft); border-radius: 7px; color: var(--fl-color-text-muted); background: transparent; font-size: var(--fl-font-size-agent-meta); }
+.markdown-body .markdown-inline-image figcaption { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; color: var(--fl-color-text-muted); font-size: var(--fl-font-size-agent-meta); line-height: 1.45; }
+.markdown-body .markdown-inline-image figcaption span::before { content: '· '; }
 .markdown-body blockquote { margin: 12px 0; padding: 2px 0 2px 14px; border-left: 3px solid var(--fl-color-border); color: var(--fl-color-text-muted); }
 .markdown-body hr { margin: 20px 0; border: 0; border-top: 1px solid var(--fl-color-border-soft); }
 .markdown-body :not(pre) > code { padding: 2px 5px; border: 1px solid var(--fl-color-border-soft); border-radius: 5px; color: var(--fl-color-text); background: var(--fl-color-surface-subtle); font-family: var(--fl-font-agent-mono); font-size: var(--fl-font-size-agent-meta); font-weight: var(--fl-font-weight-regular); line-height: 1.4; }

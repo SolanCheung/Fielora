@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
-  access, copyFile, mkdir, open, readFile, readdir, rename, rm, rmdir, stat, statfs, writeFile,
+  access, copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, rmdir, stat, statfs, writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -217,6 +217,24 @@ export class StorageManager {
     const resolved = path.join(this.roots.library_root, ...blobRef.split('/'));
     if (!inside(this.roots.library_root, resolved)) throw new Error('Library blob escaped LibraryRoot');
     return resolved;
+  }
+
+  async readVerifiedBlob(blobRef: string, contentHash: string, maxBytes: number): Promise<Uint8Array> {
+    if (!/^[0-9a-f]{64}$/u.test(contentHash) || !Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+      throw new Error('Invalid Library blob verification request');
+    }
+    const candidate = this.resolveBlob(blobRef);
+    const candidateInfo = await lstat(candidate);
+    if (!candidateInfo.isFile() || candidateInfo.isSymbolicLink()) throw new Error('Library blob is not a regular file');
+    const [root, target] = await Promise.all([realpath(this.roots.library_root), realpath(candidate)]);
+    if (!inside(root, target)) throw new Error('Library blob escaped LibraryRoot');
+    const targetInfo = await stat(target);
+    if (!targetInfo.isFile() || targetInfo.size < 1 || targetInfo.size > maxBytes) throw new Error('Library blob is unavailable or too large');
+    const bytes = await readFile(target);
+    if (bytes.byteLength !== targetInfo.size || createHash('sha256').update(bytes).digest('hex') !== contentHash) {
+      throw new Error('Library blob integrity check failed');
+    }
+    return bytes;
   }
 
   async importFile(sourcePath: string): Promise<{ blob_ref: string; content_hash: string; size: number }> {

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, nativeImage, nativeTheme, protocol, shell } from 'electron';
 import type { ContextMenuParams, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import type { LibraryMediaKind, LibraryObjectView, ProfileView, ProjectView } from '@fielora/contracts';
+import type { LibraryImagePreviewView } from './workspace-types';
 import { BrowserRuntime } from './browser-runtime';
 import { channels } from './channels';
 import { assertTrustedSender, isAllowedNavigation, trustedOriginFor } from './security';
@@ -35,7 +36,7 @@ import {
   validateSaveWebLibrary, validateLibraryObject, validateDeleteLibraryObject, validateListLibraryObjects,
 } from './validation';
 import { WorkspaceRuntime } from './workspace-runtime';
-import { loadSelectedAttachments, readStoredImage, storeImageAttachment } from './attachment-runtime';
+import { detectSafeRasterMime, loadSelectedAttachments, readStoredImage, storeImageAttachment } from './attachment-runtime';
 import { focusUsableWindow, usableWindow, withUsableWindow } from './window-lifecycle';
 import { desktopFoundationUserDataPath, hasExplicitUserDataDirectory } from './runtime-identity';
 import { windowSurfaceColors, type WindowSurfaceTheme } from './window-surface';
@@ -553,6 +554,27 @@ function registerBridgeHandlers(): void {
   });
   ipcMain.handle(channels.libraryList, (event, payload) => { assertBridgeEvent(event); return supervisor.request('query.library.list', validateListLibraryObjects(payload)); });
   ipcMain.handle(channels.libraryGet, (event, payload) => { assertBridgeEvent(event); return supervisor.request('query.library.get', validateLibraryObject(payload)); });
+  ipcMain.handle(channels.libraryPreviewImage, async (event, payload): Promise<LibraryImagePreviewView> => {
+    assertBridgeEvent(event);
+    const object = await supervisor.request('query.library.get', validateLibraryObject(payload)) as LibraryObjectView;
+    if (object.lifecycle !== 'ACTIVE' || object.kind !== 'FILE' || object.media_kind !== 'IMAGE'
+      || !object.blob_ref || !object.content_hash || !object.size
+      || !['image/png', 'image/jpeg', 'image/webp'].includes(object.mime_type ?? '')) {
+      throw new Error('Library image is unavailable');
+    }
+    const bytes = await storage().readVerifiedBlob(object.blob_ref, object.content_hash, 8 * 1024 * 1024);
+    const detectedMime = detectSafeRasterMime(bytes);
+    if (!detectedMime || bytes.byteLength !== object.size || detectedMime !== object.mime_type) throw new Error('Library image integrity check failed');
+    return {
+      library_object_id: object.id,
+      source: 'LIBRARY',
+      title: object.title,
+      mime_type: detectedMime,
+      size: bytes.byteLength,
+      content_hash: object.content_hash,
+      data_url: `data:${detectedMime};base64,${Buffer.from(bytes).toString('base64')}`,
+    };
+  });
   ipcMain.handle(channels.libraryDelete, (event, payload) => { assertBridgeEvent(event); return durableMutation(() => supervisor.request('command.library.delete', validateDeleteLibraryObject(payload))); });
   ipcMain.handle(channels.libraryOpen, async (event, payload) => {
     assertBridgeEvent(event);

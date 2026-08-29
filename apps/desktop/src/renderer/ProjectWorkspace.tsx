@@ -6,7 +6,7 @@ import type {
   ConversationMessageStatus, ConversationMessageView, ConversationView, ProjectView, ProviderConfigView, ArtifactView, ResultReference,
 } from '@fielora/contracts';
 import type { AgentTextDeltaEvent } from '../types';
-import type { WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceFileEntry, WorkspaceFileView, WorkspaceImagePreview, WorkspaceProjectOpenTarget, WorkspaceProjectOpenTargetView } from '../workspace-types';
+import type { LibraryImagePreviewView, WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceFileEntry, WorkspaceFileView, WorkspaceImagePreview, WorkspaceProjectOpenTarget, WorkspaceProjectOpenTargetView } from '../workspace-types';
 import { PrimaryNav, ShellIcon } from './PrimaryNav';
 import { BrowsePanel } from './BrowseScreen';
 import { AgentTurn } from './AgentTurn';
@@ -334,6 +334,14 @@ function workspaceImageAttachment(preview: WorkspaceImagePreview): WorkspaceAtta
   };
 }
 
+function libraryImageAttachment(preview: LibraryImagePreviewView): WorkspaceAttachmentView {
+  return {
+    id: `library:${preview.library_object_id}`, name: preview.title, size: preview.size,
+    kind: 'IMAGE', mime_type: preview.mime_type, status: 'READY', content: null, data_url: preview.data_url,
+    sha256: preview.content_hash, reason: null, width: null, height: null, source: 'library', content_ref: null,
+  };
+}
+
 interface SpeechRecognitionResultLike {
   0: { transcript: string };
   isFinal: boolean;
@@ -464,7 +472,7 @@ function pendingToolSummary(events: AgentEventView[], run: AgentRunView | null):
   return name;
 }
 
-function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copied, onCopy, onCopyError, onReview, onOpenReference }: {
+function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copied, onCopy, onCopyError, onReview, onOpenReference, onOpenImage }: {
   terminalMessage: ConversationMessageView;
   requestText: string;
   userMessageId: string | null;
@@ -473,6 +481,7 @@ function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copi
   onCopyError: (reason: string) => void;
   onReview: (selection: HistoricalReviewSelection) => void;
   onOpenReference: (reference: ResultReference) => void;
+  onOpenImage: (preview: LibraryImagePreviewView) => void;
 }) {
   const [run, setRun] = useState<AgentRunView | null>(null);
   const [events, setEvents] = useState<AgentEventView[]>([]);
@@ -512,6 +521,7 @@ function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copi
     onCopy={onCopy}
     onCopyError={onCopyError}
     onOpenReference={onOpenReference}
+    onOpenImage={onOpenImage}
   />;
 }
 
@@ -1928,6 +1938,17 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
 
   async function openResultReference(reference: ResultReference) {
     const target = reference.target;
+    if (target.kind === 'IMAGE') {
+      try {
+        const preview = await window.fielora.library.previewImage({ library_object_id: target.library_object_id });
+        if (preview.content_hash !== target.expected_sha256 || preview.mime_type !== target.mime_type) throw new Error('Image identity changed');
+        setPreviewAttachment(libraryImageAttachment(preview));
+        setError('');
+      } catch {
+        setError('该图片暂时不可用。');
+      }
+      return;
+    }
     if (!project || target.field_id !== project.field_id) {
       setError('该引用不属于当前 Project，无法打开。');
       return;
@@ -2173,6 +2194,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     onCopy={currentTerminalMessage ? () => void copyMessage(currentTerminalMessage) : undefined}
     onCopyError={(reason) => setError(`复制代码失败：${reason}`)}
     onOpenReference={(reference) => void openResultReference(reference)}
+    onOpenImage={(preview) => setPreviewAttachment(libraryImageAttachment(preview))}
     mcpRuntime={mcpRuntime}
     mcpBusyConnectionId={mcpBusyConnectionId}
     onActivateMcp={(connectionId) => void activateMcpConnection(connectionId)}
@@ -2233,12 +2255,12 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
               if (message.role === 'ASSISTANT' && message.invocation_id) {
                 if (isCurrentAgentAssistant) return null;
                 const historicalUserMessage = [...visibleMessages.slice(0, index)].reverse().find((item) => item.role === 'USER') ?? null;
-                return <HistoricalAgentTurn key={message.id} terminalMessage={message} requestText={historicalUserMessage?.content ?? ''} userMessageId={historicalUserMessage?.id ?? null} copied={copiedMessageId === message.id} onReview={openHistoricalAgentReview} onOpenReference={(reference) => void openResultReference(reference)} onCopy={() => void copyMessage(message)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/>;
+                return <HistoricalAgentTurn key={message.id} terminalMessage={message} requestText={historicalUserMessage?.content ?? ''} userMessageId={historicalUserMessage?.id ?? null} copied={copiedMessageId === message.id} onReview={openHistoricalAgentReview} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(libraryImageAttachment(preview))} onCopy={() => void copyMessage(message)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/>;
               }
               const persistedImages = message.role === 'USER' ? messageAttachments(message.id) : [];
               const queuedFollowUp = message.role === 'USER' ? queuedFollowUps.find((item) => item.messageId === message.id) ?? null : null;
               return <Fragment key={message.id}>
-                <article data-message-id={message.id} className={`message ${message.role.toLowerCase()}${persistedImages.length ? ' has-image-attachments' : ''}`} data-testid={`message-${message.role.toLowerCase()}`}>{persistedImages.length > 0 && <ConversationImageGallery attachments={persistedImages} onOpen={openAttachmentInDock} onContextMenu={openImageContextMenu}/>}<div className="message-content"><MarkdownMessage content={message.content} references={message.references} onOpenReference={(reference) => void openResultReference(reference)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>{queuedFollowUp && <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={queuedFollowUp.afterRunId}><span aria-hidden="true"/>将在当前任务完成后继续处理</p>}<footer className={`message-actions ${copiedMessageId === message.id ? 'copy-confirmed' : ''}`}><time dateTime={new Date(message.created_at).toISOString()} title={new Date(message.created_at).toLocaleString('zh-CN')}>{messageTimeLabel(message.created_at)}</time>{message.status !== 'COMPLETED' && <span className="message-status">{messageStatusLabel(message.status)}</span>}<button type="button" className={copiedMessageId === message.id ? 'copied' : ''} aria-label={copiedMessageId === message.id ? '消息已复制' : '复制消息'} title={copiedMessageId === message.id ? '已复制' : '复制'} onClick={() => void copyMessage(message)} data-testid="message-copy"><ShellIcon name={copiedMessageId === message.id ? 'check' : 'copy'}/>{copiedMessageId === message.id && <span role="status" aria-live="polite">已复制</span>}</button></footer></article>
+                <article data-message-id={message.id} className={`message ${message.role.toLowerCase()}${persistedImages.length ? ' has-image-attachments' : ''}`} data-testid={`message-${message.role.toLowerCase()}`}>{persistedImages.length > 0 && <ConversationImageGallery attachments={persistedImages} onOpen={openAttachmentInDock} onContextMenu={openImageContextMenu}/>}<div className="message-content"><MarkdownMessage content={message.content} references={message.references} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(libraryImageAttachment(preview))} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>{queuedFollowUp && <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={queuedFollowUp.afterRunId}><span aria-hidden="true"/>将在当前任务完成后继续处理</p>}<footer className={`message-actions ${copiedMessageId === message.id ? 'copy-confirmed' : ''}`}><time dateTime={new Date(message.created_at).toISOString()} title={new Date(message.created_at).toLocaleString('zh-CN')}>{messageTimeLabel(message.created_at)}</time>{message.status !== 'COMPLETED' && <span className="message-status">{messageStatusLabel(message.status)}</span>}<button type="button" className={copiedMessageId === message.id ? 'copied' : ''} aria-label={copiedMessageId === message.id ? '消息已复制' : '复制消息'} title={copiedMessageId === message.id ? '已复制' : '复制'} onClick={() => void copyMessage(message)} data-testid="message-copy"><ShellIcon name={copiedMessageId === message.id ? 'check' : 'copy'}/>{copiedMessageId === message.id && <span role="status" aria-live="polite">已复制</span>}</button></footer></article>
                 {agentRun && agentTurn?.userMessageId === message.id && currentAgentTurn}
               </Fragment>;
             })}
@@ -2317,7 +2339,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         onClose={closeDockTab}
       >{dockViews}</RightWorkspaceDock>}
     </WorkspaceSurface>
-    {previewAttachment && createPortal(<ImagePreview attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} onContextMenu={openImageContextMenu}/>, document.body)}
+    {previewAttachment && createPortal(<ImagePreview attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} onContextMenu={previewAttachment.source === 'library' ? undefined : openImageContextMenu}/>, document.body)}
     {imageContextMenu && createPortal(<ImageContextMenu {...imageContextMenu} locationLabel={project ? `${project.title} / 当前对话 / ${imageContextMenu.attachment.name}` : `当前对话 / ${imageContextMenu.attachment.name}`} onShow={(attachment) => { setImageContextMenu(null); openAttachmentInDock(attachment); }} onCopy={(attachment) => void copyImageAttachment(attachment)} onSave={(attachment) => void saveImageAttachment(attachment)} onClose={() => setImageContextMenu(null)}/>, document.body)}
     {environmentControl}
     {project && terminalLayer && createPortal(<>

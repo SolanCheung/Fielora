@@ -512,6 +512,17 @@ impl StorageHandle {
                 return Err(DomainError::TerminalResource);
             }
             ensure_provider_available(connection, &owner, request.provider_config_id.as_ref())?;
+            if request
+                .references
+                .iter()
+                .any(|reference| matches!(&reference.target, ResultReferenceTarget::Image { .. }))
+                && (request.role != ConversationMessageRole::Assistant
+                    || request.status != ConversationMessageStatus::Completed)
+            {
+                return Err(DomainError::Validation(
+                    "RESULT_IMAGE_COMPLETED_ASSISTANT_ONLY".into(),
+                ));
+            }
             validate_result_references(
                 connection,
                 &owner,
@@ -3277,6 +3288,64 @@ fn validate_result_references(
                     ));
                 }
             }
+            ResultReferenceTarget::Image {
+                source,
+                library_object_id,
+                expected_sha256,
+                mime_type,
+            } => {
+                let image_marker = format!(
+                    "![{}](fielora-reference:{})",
+                    reference.label, reference.id.0
+                );
+                if source != &ResultImageSource::Library
+                    || !valid_result_sha256(expected_sha256)
+                    || reference.label.contains('[')
+                    || reference.label.contains(']')
+                    || !content.lines().any(|line| line.trim() == image_marker)
+                    || !matches!(
+                        mime_type.as_str(),
+                        "image/png" | "image/jpeg" | "image/webp"
+                    )
+                {
+                    return Err(DomainError::Validation(
+                        "RESULT_REFERENCE_IMAGE_TARGET_INVALID".into(),
+                    ));
+                }
+                let ResultReferenceProvenance::LibraryObject {
+                    library_object_id: source_id,
+                } = &reference.provenance
+                else {
+                    return Err(DomainError::Validation(
+                        "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+                    ));
+                };
+                if source_id != library_object_id {
+                    return Err(DomainError::Validation(
+                        "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+                    ));
+                }
+                let object = get_library_object(connection, library_object_id)?;
+                let expected_blob_ref = format!(
+                    "blobs/objects/{}/{}",
+                    &expected_sha256[..2],
+                    expected_sha256
+                );
+                if object.kind != LibraryObjectKind::File
+                    || object.media_kind != LibraryMediaKind::Image
+                    || object.lifecycle != LibraryLifecycle::Active
+                    || object.content_hash.as_deref() != Some(expected_sha256.as_str())
+                    || object.mime_type.as_deref() != Some(mime_type.as_str())
+                    || object.blob_ref.as_deref() != Some(expected_blob_ref.as_str())
+                    || object
+                        .size
+                        .is_none_or(|size| size == 0 || size > 8 * 1024 * 1024)
+                {
+                    return Err(DomainError::Validation(
+                        "RESULT_REFERENCE_IMAGE_TARGET_INVALID".into(),
+                    ));
+                }
+            }
         }
     }
     Ok(())
@@ -3286,6 +3355,13 @@ fn valid_result_reference_id(value: &str) -> bool {
     value.len() == 42
         && value.starts_with("resultref_")
         && value[10..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn valid_result_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
@@ -8787,11 +8863,32 @@ mod tests {
                     23,
                 )
                 .unwrap();
+            let image_hash = "b".repeat(64);
+            let image = handle
+                .create_library_file(
+                    CreateLibraryFileRequest {
+                        title: "Layout clipping.png".into(),
+                        original_source: root
+                            .join("layout-clipping.png")
+                            .to_string_lossy()
+                            .into_owned(),
+                        original_filename: "layout-clipping.png".into(),
+                        mime_type: Some("image/png".into()),
+                        media_kind: LibraryMediaKind::Image,
+                        size: 128,
+                        blob_ref: format!("blobs/objects/bb/{image_hash}"),
+                        content_hash: image_hash.clone(),
+                        metadata: json!({"version":1}),
+                    },
+                    23,
+                )
+                .unwrap();
             let file_id = ResultReferenceId::new(format!("resultref_{}", "1".repeat(32)));
             let range_id = ResultReferenceId::new(format!("resultref_{}", "2".repeat(32)));
             let web_id = ResultReferenceId::new(format!("resultref_{}", "3".repeat(32)));
+            let image_id = ResultReferenceId::new(format!("resultref_{}", "9".repeat(32)));
             let markdown = format!(
-                "## 实现位置\n\n[lib.rs](fielora-reference:{file_id})\n\n[lib.rs · L10–L20](fielora-reference:{range_id})\n\n## 参考资料\n\n[Architecture](fielora-reference:{web_id})"
+                "## 实现位置\n\n[lib.rs](fielora-reference:{file_id})\n\n[lib.rs · L10–L20](fielora-reference:{range_id})\n\n右侧菜单在窄布局中发生裁切：\n\n![布局裁切截图](fielora-reference:{image_id})\n\n问题位于 overlay positioning。\n\n## 参考资料\n\n[Architecture](fielora-reference:{web_id})"
             );
             let references = vec![
                 ResultReference {
@@ -8830,6 +8927,19 @@ mod tests {
                         reference_id: saved.resource.id.clone(),
                     },
                 },
+                ResultReference {
+                    id: image_id,
+                    label: "布局裁切截图".into(),
+                    target: ResultReferenceTarget::Image {
+                        source: ResultImageSource::Library,
+                        library_object_id: image.id.clone(),
+                        expected_sha256: image_hash.clone(),
+                        mime_type: "image/png".into(),
+                    },
+                    provenance: ResultReferenceProvenance::LibraryObject {
+                        library_object_id: image.id.clone(),
+                    },
+                },
             ];
             let message = handle
                 .create_conversation_message(
@@ -8847,6 +8957,82 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(message.references, references);
+
+            for (object_id, mime_type, provenance_id) in [
+                (
+                    LibraryObjectId::new(Uuid::now_v7().to_string()),
+                    "image/png",
+                    image.id.clone(),
+                ),
+                (image.id.clone(), "image/svg+xml", image.id.clone()),
+                (
+                    image.id.clone(),
+                    "image/png",
+                    LibraryObjectId::new(Uuid::now_v7().to_string()),
+                ),
+            ] {
+                let invalid_id =
+                    ResultReferenceId::new(format!("resultref_{}", Uuid::now_v7().simple()));
+                assert!(
+                    handle
+                        .create_conversation_message(
+                            CreateConversationMessageRequest {
+                                conversation_id: conversation.id.clone(),
+                                role: ConversationMessageRole::Assistant,
+                                content: format!("![unsafe image](fielora-reference:{invalid_id})"),
+                                status: ConversationMessageStatus::Completed,
+                                provider_config_id: None,
+                                model_id: None,
+                                invocation_id: None,
+                                references: vec![ResultReference {
+                                    id: invalid_id,
+                                    label: "unsafe image".into(),
+                                    target: ResultReferenceTarget::Image {
+                                        source: ResultImageSource::Library,
+                                        library_object_id: object_id,
+                                        expected_sha256: image_hash.clone(),
+                                        mime_type: mime_type.into(),
+                                    },
+                                    provenance: ResultReferenceProvenance::LibraryObject {
+                                        library_object_id: provenance_id
+                                    },
+                                }],
+                            },
+                            24,
+                        )
+                        .is_err()
+                );
+            }
+            let non_terminal_id = ResultReferenceId::new(format!("resultref_{}", "d".repeat(32)));
+            assert!(
+                handle
+                    .create_conversation_message(
+                        CreateConversationMessageRequest {
+                            conversation_id: conversation.id.clone(),
+                            role: ConversationMessageRole::Assistant,
+                            content: format!("![layout](fielora-reference:{non_terminal_id})"),
+                            status: ConversationMessageStatus::Failed,
+                            provider_config_id: None,
+                            model_id: None,
+                            invocation_id: None,
+                            references: vec![ResultReference {
+                                id: non_terminal_id,
+                                label: "layout".into(),
+                                target: ResultReferenceTarget::Image {
+                                    source: ResultImageSource::Library,
+                                    library_object_id: image.id.clone(),
+                                    expected_sha256: image_hash.clone(),
+                                    mime_type: "image/png".into(),
+                                },
+                                provenance: ResultReferenceProvenance::LibraryObject {
+                                    library_object_id: image.id.clone()
+                                },
+                            }],
+                        },
+                        24,
+                    )
+                    .is_err()
+            );
 
             for invalid_path in ["../outside.rs", r"C:\Windows\secret.rs", "/etc/passwd"] {
                 let invalid_id = ResultReferenceId::new(format!("resultref_{}", "4".repeat(32)));
@@ -8997,6 +9183,16 @@ mod tests {
                 )
                 .unwrap();
             assert!(plain.references.is_empty());
+            let deleted = handle
+                .delete_library_object(
+                    DeleteLibraryObjectRequest {
+                        library_object_id: image.id,
+                        expected_revision: image.revision,
+                    },
+                    30,
+                )
+                .unwrap();
+            assert_eq!(deleted.lifecycle, LibraryLifecycle::Tombstone);
             conversation.id
         };
         {
@@ -9007,7 +9203,7 @@ mod tests {
                 .unwrap();
             let rich = messages
                 .iter()
-                .find(|message| message.references.len() == 3)
+                .find(|message| message.references.len() == 4)
                 .unwrap();
             assert!(rich.content.starts_with("## 实现位置"));
             assert_eq!(
@@ -9016,7 +9212,7 @@ mod tests {
                     .map(|reference| &reference.target)
                     .collect::<Vec<_>>()
                     .len(),
-                3
+                4
             );
         }
         fs::remove_dir_all(root).unwrap();

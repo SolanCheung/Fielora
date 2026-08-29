@@ -458,9 +458,11 @@ export type ConversationMessageRole = "USER" | "ASSISTANT";
 
 export type ConversationMessageStatus = "COMPLETED" | "CANCELLED" | "FAILED";
 
-export type ResultReferenceTarget = { "kind": "PROJECT_FILE", field_id: FieldId, relative_path: string, expected_sha256: string | null, } | { "kind": "CODE_RANGE", field_id: FieldId, relative_path: string, line_start: number, line_end: number, expected_sha256: string | null, } | { "kind": "WEB_REFERENCE", field_id: FieldId, reference_id: ObjectId, https_url: string, };
+export type ResultImageSource = "LIBRARY";
 
-export type ResultReferenceProvenance = { "kind": "PROJECT_CONTEXT" } | { "kind": "TOOL_RECEIPT", tool_call_id: ToolCallId, } | { "kind": "SAVED_REFERENCE", reference_id: ObjectId, };
+export type ResultReferenceTarget = { "kind": "PROJECT_FILE", field_id: FieldId, relative_path: string, expected_sha256: string | null, } | { "kind": "CODE_RANGE", field_id: FieldId, relative_path: string, line_start: number, line_end: number, expected_sha256: string | null, } | { "kind": "WEB_REFERENCE", field_id: FieldId, reference_id: ObjectId, https_url: string, } | { "kind": "IMAGE", source: ResultImageSource, library_object_id: LibraryObjectId, expected_sha256: string, mime_type: string, };
+
+export type ResultReferenceProvenance = { "kind": "PROJECT_CONTEXT" } | { "kind": "TOOL_RECEIPT", tool_call_id: ToolCallId, } | { "kind": "SAVED_REFERENCE", reference_id: ObjectId, } | { "kind": "LIBRARY_OBJECT", library_object_id: LibraryObjectId, };
 
 export type ResultReference = { id: ResultReferenceId, label: string, target: ResultReferenceTarget, provenance: ResultReferenceProvenance, };
 

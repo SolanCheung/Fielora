@@ -48,7 +48,7 @@ export function ConversationImageGallery({ attachments, onOpen, onContextMenu }:
 export function ImagePreview({ attachment, onClose, onContextMenu }: {
   attachment: WorkspaceAttachmentView;
   onClose: () => void;
-  onContextMenu: (event: ReactMouseEvent, attachment: WorkspaceAttachmentView) => void;
+  onContextMenu?: (event: ReactMouseEvent, attachment: WorkspaceAttachmentView) => void;
 }) {
   const [zoom, setZoom] = useState(1);
   useEffect(() => {
@@ -59,7 +59,7 @@ export function ImagePreview({ attachment, onClose, onContextMenu }: {
   return <div className="image-preview-backdrop" role="dialog" aria-modal="true" aria-label={`查看图片 ${attachment.name}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} data-testid="image-preview">
     <section className="image-preview-shell">
       <header><span>{attachment.name}</span><div><button type="button" onClick={() => setZoom((value) => Math.max(.5, value - .25))} aria-label="缩小图片">−</button><output>{Math.round(zoom * 100)}%</output><button type="button" onClick={() => setZoom((value) => Math.min(4, value + .25))} aria-label="放大图片">＋</button><button type="button" onClick={onClose} aria-label="关闭图片预览"><ShellIcon name="close"/></button></div></header>
-      <div className="image-preview-canvas"><img src={attachment.data_url ?? ''} alt={attachment.name} style={{ transform: `scale(${zoom})` }} onContextMenu={(event) => { event.preventDefault(); onContextMenu(event, attachment); }}/></div>
+      <div className="image-preview-canvas"><img src={attachment.data_url ?? ''} alt={attachment.name} style={{ transform: `scale(${zoom})` }} onContextMenu={onContextMenu ? (event) => { event.preventDefault(); onContextMenu(event, attachment); } : undefined}/></div>
     </section>
   </div>;
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AgentEventView, AgentRunView, AgentToolCallView, ApprovalView, ConversationMessageView, McpConnectionRuntimeView, ResultReference } from '@fielora/contracts';
+import type { LibraryImagePreviewView } from '../workspace-types';
 import { appliedAgentReview, type AgentReviewSummary } from './agent-review';
 import {
   buildConversationActivityProjection,
@@ -45,6 +46,7 @@ interface AgentTurnProps {
   onCopy?: () => void;
   onCopyError?: (reason: string) => void;
   onOpenReference?: (reference: ResultReference) => void;
+  onOpenImage?: (preview: LibraryImagePreviewView) => void;
   mcpRuntime?: McpConnectionRuntimeView | null;
   mcpBusyConnectionId?: string;
   onActivateMcp?: (connectionId: string) => void;
@@ -336,7 +338,7 @@ function ChangedFiles({ review, onReview, onReviewFile }: {
   </section>;
 }
 
-function AgentTerminalResult({ status, message, presentation, tools, canExpand, partial, review, executionDetail, onRetry, onReview, onReviewFile, onOpenReference }: {
+function AgentTerminalResult({ status, message, presentation, tools, canExpand, partial, review, executionDetail, onRetry, onReview, onReviewFile, onOpenReference, onOpenImage }: {
   status: AgentTerminalStatus;
   message: ConversationMessageView | null;
   presentation: AgentPresentation | null;
@@ -349,6 +351,7 @@ function AgentTerminalResult({ status, message, presentation, tools, canExpand, 
   onReview?: () => void;
   onReviewFile?: (path: string) => void;
   onOpenReference?: (reference: ResultReference) => void;
+  onOpenImage?: (preview: LibraryImagePreviewView) => void;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const result = buildAgentResultViewModel(status, message?.content ?? '', presentation, tools);
@@ -359,7 +362,7 @@ function AgentTerminalResult({ status, message, presentation, tools, canExpand, 
       ? <button type="button" className="agent-terminal-runtime" aria-expanded={detailOpen} data-testid="agent-execution-detail-toggle" onClick={() => setDetailOpen((value) => !value)}><span>耗时 {result.duration}</span><ShellIcon name="chevronDown"/></button>
       : <div className="agent-terminal-runtime"><span>耗时 {result.duration}</span></div>)}
     {detailOpen && executionDetail}
-    <div className="agent-terminal-body"><MarkdownMessage content={markdown} references={message?.references ?? []} onOpenReference={onOpenReference}/></div>
+    <div className="agent-terminal-body"><MarkdownMessage content={markdown} references={message?.references ?? []} onOpenReference={onOpenReference} onOpenImage={onOpenImage}/></div>
     {editedReview && editedReview.files.length > 0 && <ChangedFiles review={editedReview} onReview={onReview} onReviewFile={onReviewFile}/>}
     <div className="agent-terminal-actions">
       {result.evidence.map((item) => <span className="agent-terminal-meta" key={item}>{item}</span>)}
@@ -376,7 +379,7 @@ function CompletedActivityHistory({ items, tools }: { items: ConversationActivit
 
 export function AgentTurn({
   run, requestText = '', userMessageId, terminalMessage, events = [], tools = [], approval = null, approvalSummary = '', review = null,
-  streamingContent = '', streamingStep = 0, busy = false, copied = false, onResume, onDecision, onRetry, onReview, onReviewFile, onCopy, onCopyError, onOpenReference,
+  streamingContent = '', streamingStep = 0, busy = false, copied = false, onResume, onDecision, onRetry, onReview, onReviewFile, onCopy, onCopyError, onOpenReference, onOpenImage,
   mcpRuntime = null, mcpBusyConnectionId = '', onActivateMcp,
 }: AgentTurnProps) {
   const terminal = Boolean(terminalMessage) || isTerminalRun(run);
@@ -419,7 +422,7 @@ export function AgentTurn({
   >
     {answerOnly && <div className="agent-answer-body" data-testid="agent-answer">
       {(terminalMessage?.content || streamingContent) && (
-        <MarkdownMessage content={terminalMessage?.content || streamingContent} streaming={!terminal} onCopyError={onCopyError} references={terminalMessage?.references ?? []} onOpenReference={onOpenReference}/>
+        <MarkdownMessage content={terminalMessage?.content || streamingContent} streaming={!terminal} onCopyError={onCopyError} references={terminalMessage?.references ?? []} onOpenReference={onOpenReference} onOpenImage={onOpenImage}/>
       )}
     </div>}
     {!answerOnly && !terminal && run && presentation && <>
@@ -427,7 +430,7 @@ export function AgentTurn({
       <AgentProgressSummary run={run} presentation={presentation} events={events} tools={tools} review={review} thinking={thinking} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen((value) => !value)} onResume={onResume} onReviewFile={onReviewFile} mcpRuntime={mcpRuntime} mcpBusyConnectionId={mcpBusyConnectionId} onActivateMcp={onActivateMcp}/>
     </>}
     {!answerOnly && terminal && status && (
-      <AgentTerminalResult status={status} message={terminalMessage} presentation={presentation} tools={tools} canExpand={canExpand} partial={partial} review={review} executionDetail={run && presentation ? <CompletedActivityHistory items={activityItems} tools={tools}/> : null} onRetry={onRetry} onReview={onReview} onReviewFile={onReviewFile} onOpenReference={onOpenReference}/>
+      <AgentTerminalResult status={status} message={terminalMessage} presentation={presentation} tools={tools} canExpand={canExpand} partial={partial} review={review} executionDetail={run && presentation ? <CompletedActivityHistory items={activityItems} tools={tools}/> : null} onRetry={onRetry} onReview={onReview} onReviewFile={onReviewFile} onOpenReference={onOpenReference} onOpenImage={onOpenImage}/>
     )}
     {terminalMessage && onCopy && <footer className={`message-actions agent-turn-message-actions ${copied ? 'copy-confirmed' : ''}`}><button type="button" className={copied ? 'copied' : ''} aria-label={copied ? '消息已复制' : '复制消息'} title={copied ? '已复制' : '复制'} onClick={onCopy} data-testid="message-copy"><ShellIcon name={copied ? 'check' : 'copy'}/>{copied && <span role="status" aria-live="polite">已复制</span>}</button></footer>}
   </section>;

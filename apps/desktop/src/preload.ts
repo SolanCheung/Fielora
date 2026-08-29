@@ -163,6 +163,7 @@ const bridge: FieloraBridge = {
     saveWeb: (request) => ipcRenderer.invoke(channels.librarySaveWeb, request),
     list: (request) => ipcRenderer.invoke(channels.libraryList, request),
     get: (request) => ipcRenderer.invoke(channels.libraryGet, request),
+    previewImage: (request) => ipcRenderer.invoke(channels.libraryPreviewImage, request),
     delete: (request) => ipcRenderer.invoke(channels.libraryDelete, request),
     open: (request) => ipcRenderer.invoke(channels.libraryOpen, request),
     reveal: (request) => ipcRenderer.invoke(channels.libraryReveal, request),

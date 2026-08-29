@@ -2079,6 +2079,13 @@ pub enum ConversationMessageStatus {
 /// Durable, provider-neutral target metadata for one controlled reference in a
 /// completed Markdown result. `field_id` is the existing stable Project
 /// identity; device-local root paths never enter this contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ResultImageSource {
+    Library,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
 #[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
@@ -2100,6 +2107,12 @@ pub enum ResultReferenceTarget {
         reference_id: ObjectId,
         https_url: String,
     },
+    Image {
+        source: ResultImageSource,
+        library_object_id: LibraryObjectId,
+        expected_sha256: String,
+        mime_type: String,
+    },
 }
 
 /// Trusted source used by Core when resolving a model-visible reference.
@@ -2111,6 +2124,7 @@ pub enum ResultReferenceProvenance {
     ProjectContext,
     ToolReceipt { tool_call_id: ToolCallId },
     SavedReference { reference_id: ObjectId },
+    LibraryObject { library_object_id: LibraryObjectId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -2775,5 +2789,44 @@ mod tests {
         assert_eq!(layout.version, 1);
         assert_eq!(layout.primary.pane_id.0, "primary_task");
         assert!(layout.supporting.is_empty());
+    }
+
+    #[test]
+    fn rich_result_image_reference_is_provider_neutral_and_path_free() {
+        let object_id = LibraryObjectId::new("019c0000-0000-7000-8000-000000000001");
+        let reference = ResultReference {
+            id: ResultReferenceId::new(format!("resultref_{}", "a".repeat(32))),
+            label: "Layout clipping".into(),
+            target: ResultReferenceTarget::Image {
+                source: ResultImageSource::Library,
+                library_object_id: object_id.clone(),
+                expected_sha256: "b".repeat(64),
+                mime_type: "image/png".into(),
+            },
+            provenance: ResultReferenceProvenance::LibraryObject {
+                library_object_id: object_id,
+            },
+        };
+        let wire = serde_json::to_value(reference).unwrap();
+        assert_eq!(wire["target"]["kind"], "IMAGE");
+        assert_eq!(wire["target"]["source"], "LIBRARY");
+        assert!(wire["target"].get("path").is_none());
+        assert!(wire["target"].get("blob_ref").is_none());
+        assert!(serde_json::from_value::<ResultReference>(wire).is_ok());
+        assert!(serde_json::from_value::<ResultReference>(serde_json::json!({
+            "id": format!("resultref_{}", "a".repeat(32)),
+            "label": "unsafe",
+            "target": {
+                "kind": "IMAGE",
+                "source": "FILE_URL",
+                "library_object_id": "019c0000-0000-7000-8000-000000000001",
+                "expected_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "mime_type": "image/svg+xml"
+            },
+            "provenance": {
+                "kind": "LIBRARY_OBJECT",
+                "library_object_id": "019c0000-0000-7000-8000-000000000001"
+            }
+        })).is_err());
     }
 }

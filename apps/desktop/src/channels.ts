@@ -62,7 +62,7 @@ export const channels = {
   pluginLocalRegistry: 'fielora:plugin:local-registry', pluginRegisterLocal: 'fielora:plugin:register-local', pluginUnregisterLocal: 'fielora:plugin:unregister-local',
   captureCreate: 'fielora:capture:create', captureAttach: 'fielora:capture:attach', capturePromote: 'fielora:capture:promote',
   captureArchive: 'fielora:capture:archive', captureRestore: 'fielora:capture:restore', captureList: 'fielora:capture:list', captureGet: 'fielora:capture:get',
-  libraryAddFiles: 'fielora:library:add-files', librarySaveWeb: 'fielora:library:save-web', libraryList: 'fielora:library:list', libraryGet: 'fielora:library:get', libraryDelete: 'fielora:library:delete', libraryOpen: 'fielora:library:open', libraryReveal: 'fielora:library:reveal',
+  libraryAddFiles: 'fielora:library:add-files', librarySaveWeb: 'fielora:library:save-web', libraryList: 'fielora:library:list', libraryGet: 'fielora:library:get', libraryPreviewImage: 'fielora:library:preview-image', libraryDelete: 'fielora:library:delete', libraryOpen: 'fielora:library:open', libraryReveal: 'fielora:library:reveal',
   storageInfo: 'fielora:storage:info', storageOpen: 'fielora:storage:open', storageMigrateData: 'fielora:storage:migrate-data', storageMigrateLibrary: 'fielora:storage:migrate-library', storageClearCache: 'fielora:storage:clear-cache',
   profileGet: 'fielora:profile:get', profileExport: 'fielora:profile:export', profileImport: 'fielora:profile:import',
   browserEvent: 'fielora:browser:event',

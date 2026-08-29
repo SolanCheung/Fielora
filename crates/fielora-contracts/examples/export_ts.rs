@@ -242,6 +242,7 @@ fn main() {
         ArchiveConversationRequest::decl(&config),
         ConversationMessageRole::decl(&config),
         ConversationMessageStatus::decl(&config),
+        ResultImageSource::decl(&config),
         ResultReferenceTarget::decl(&config),
         ResultReferenceProvenance::decl(&config),
         ResultReference::decl(&config),

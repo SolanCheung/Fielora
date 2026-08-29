@@ -47,8 +47,18 @@ export interface WorkspaceImagePreview extends WorkspaceFileEntry {
   data_url: string;
 }
 
+export interface LibraryImagePreviewView {
+  library_object_id: string;
+  source: 'LIBRARY';
+  title: string;
+  mime_type: 'image/png' | 'image/jpeg' | 'image/webp';
+  size: number;
+  content_hash: string;
+  data_url: string;
+}
+
 export type WorkspaceAttachmentStatus = 'READY' | 'UNSUPPORTED' | 'TOO_LARGE';
-export type WorkspaceAttachmentSource = 'clipboard' | 'file_picker' | 'drag_drop';
+export type WorkspaceAttachmentSource = 'clipboard' | 'file_picker' | 'drag_drop' | 'library';
 
 export interface WorkspaceAttachmentView {
   id: string;
