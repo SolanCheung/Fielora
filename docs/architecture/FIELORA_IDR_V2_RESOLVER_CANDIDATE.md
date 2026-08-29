@@ -1,10 +1,10 @@
 # Fielora IDR V2 Resolver Candidate
 
-> Status: `IMPLEMENTATION REVIEW PASS / IMPLEMENTATION-READY CANDIDATE / NOT FROZEN`
+> Status: `IMPLEMENTED CANDIDATE / NOT FROZEN`
 >
 > Date: `2026-08-28`
 >
-> Runtime implementation: `NONE`
+> Runtime implementation: `DETERMINISTIC RESOLVER IMPLEMENTED / PRODUCTION AGENT INTEGRATION NOT IMPLEMENTED`
 >
 > Schema change: `NO`
 >
@@ -571,16 +571,16 @@ The previously open Resolver input/algorithm questions are closed for V1 by
 
 The current Agent path still lacks builders for normalized current constraints,
 interaction/applicability, generic non-Project Reality, and shared Context budget.
-Those are integration prerequisites, not unresolved Resolver semantics. Resolver V1
-can be implemented against explicit DTO inputs when separately authorized; Context
-Admission/Agent integration remains unauthorized.
+Those are production-integration prerequisites, not unresolved Resolver semantics.
+Resolver V1 and standalone Context Admission are implemented against explicit DTO
+inputs; ContextCompiler/AgentRun production integration remains unauthorized.
 
 ## 18. Candidate conclusion
 
 ```text
 IDR_V2_RESOLVER_DESIGN: IMPLEMENTATION_REVIEW_PASS
 IMPLEMENTATION_READY: YES
-IMPLEMENTATION_AUTHORIZED: NO
+IMPLEMENTATION_AUTHORIZED: GRANTED_AND_EXECUTED_FOR_RESOLVER_CHANGESET
 ARCHITECTURE_PLACEMENT: Harness.IDR.Resolver
 RESOLVER_AUTHORITY: deterministic semantic eligibility/conflict/suppression only
 CONTEXT_RETRIEVAL: NOT_THE_RESOLVER
@@ -588,8 +588,9 @@ MODEL_IN_RESOLVER: NO
 INDIVIDUALIZED_DIRECTION: FUTURE_SEPARATE_STAGE
 RESOLUTION_PERSISTENCE: NONE
 SCHEMA_CHANGE: NO
-RUNTIME_IMPLEMENTATION: NONE
+RUNTIME_IMPLEMENTATION: IMPLEMENTED_CANDIDATE
+CONTEXT_PRODUCTION_INTEGRATION: NOT_IMPLEMENTED
 AGENT_BEHAVIOR_CHANGED: NO
 STORAGE_CONTRACT_GAPS: NONE
-NEXT: USER_REVIEW_THEN_SEPARATE_RESOLVER_IMPLEMENTATION_AUTHORIZATION
+NEXT: IDR_V2_CONTEXT_PRODUCTION_INTEGRATION_REVIEW_NOT_AUTHORIZED
 ```

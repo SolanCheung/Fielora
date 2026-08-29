@@ -1,5 +1,6 @@
 mod agent_runtime;
 mod build_provenance;
+pub mod idr_resolver;
 
 use agent_runtime::AgentCoordinator;
 use fielora_contracts::*;

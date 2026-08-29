@@ -9,6 +9,7 @@ pub mod artifact;
 pub mod asset;
 mod diagram;
 mod file;
+pub mod idr_context;
 pub mod mcp;
 pub mod mcp_connections;
 mod plugins;

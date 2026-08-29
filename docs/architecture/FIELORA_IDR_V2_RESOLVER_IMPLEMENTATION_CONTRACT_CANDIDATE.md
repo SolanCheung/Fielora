@@ -1,12 +1,12 @@
 # Fielora IDR V2 Resolver Implementation Contract Candidate
 
-> Status: `IMPLEMENTATION REVIEW PASS / IMPLEMENTATION-READY CANDIDATE / NOT FROZEN`
+> Status: `IMPLEMENTED CANDIDATE / NOT FROZEN`
 >
-> Date: `2026-08-28`
+> Date: `2026-08-29`
 >
-> Implementation authorization: `NO`
+> Implementation authorization: `GRANTED AND EXECUTED FOR RESOLVER + STANDALONE CONTEXT ADMISSION`
 >
-> Runtime implementation: `NONE`
+> Runtime implementation: `RESOLVER + STANDALONE CONTEXT ADMISSION IMPLEMENTED / PRODUCTION AGENT INTEGRATION NOT IMPLEMENTED`
 >
 > Schema change: `NO`
 
@@ -16,10 +16,12 @@ This document freezes the inputs, semantic identity, fixed V1 registry,
 deterministic algorithm, output, and fail-closed behavior needed to implement the
 first IDR V2 Resolver without another design decision inside the coding task.
 
-It is a reviewed Candidate, not implementation authorization. It does not implement
-the Resolver, Context Admission, ContextCompiler integration, Direction, learning,
-Model extraction, automatic activation, FIPC/UI, persistence, Vector/FTS/Embedding,
-Provider, Tool, Permission, Reality, Verification, or Agent-loop behavior.
+It is a reviewed and now implemented Candidate, not a Frozen Contract. The authorized
+changeset implements the deterministic Resolver and standalone Context Admission
+component. It does not implement ContextCompiler/AgentRun production integration,
+Direction, learning, Model extraction, automatic activation, FIPC/UI, persistence,
+Vector/FTS/Embedding, Provider, Tool, Permission, Reality, Verification, or Agent-loop
+behavior.
 
 Normative ownership remains:
 
@@ -1003,7 +1005,7 @@ decision authority.
 
 ## 22. Minimum implementation test contract
 
-The next authorized Resolver implementation must prove at least:
+The implemented Candidate proves at least:
 
 1. supported/unsupported version and revision mismatch hard failures;
 2. all fixed registry keys/values plus unknown key/value suppression;
@@ -1025,15 +1027,15 @@ The next authorized Resolver implementation must prove at least:
 18. hard-zero effects on Storage, Permission, Tool, Reality, Verification, and Agent
     behavior.
 
-Tests are Resolver unit/contract tests only unless a later task separately authorizes
-Context or Agent integration.
+Tests remain Resolver, shared-contract, standalone Context Admission, and storage
+read-only tests. Production Context/Agent integration remains separately unauthorized.
 
 ## 23. Review conclusion
 
 ```text
 RESOLVER_IMPLEMENTATION_REVIEW: PASS
 IMPLEMENTATION_READY: YES
-IMPLEMENTATION_AUTHORIZED: NO
+IMPLEMENTATION_AUTHORIZED: GRANTED_AND_EXECUTED_FOR_THIS_CHANGESET
 ARCHITECTURE_PLACEMENT: Harness.IDR.Resolver
 RESOLVED_VIEW: EPHEMERAL_DERIVED_VIEW_V1
 SEMANTIC_REGISTRY: FIXED_CODE_OWNED_V1
@@ -1043,7 +1045,42 @@ RESOLUTION_PERSISTENCE: NONE
 STORAGE_CONTRACT_GAPS: NONE
 SCHEMA_CHANGE: NO
 MIGRATION: NONE
-RUNTIME_IMPLEMENTATION: NONE
+RESOLVER_RUNTIME_IMPLEMENTATION: IMPLEMENTED_CANDIDATE
+CONTEXT_ADMISSION_RUNTIME_IMPLEMENTATION: IMPLEMENTED_STANDALONE_CANDIDATE
+CONTEXT_PRODUCTION_INTEGRATION: NOT_IMPLEMENTED
 AGENT_BEHAVIOR_CHANGED: NO
-NEXT: USER_REVIEW_THEN_SEPARATE_RESOLVER_IMPLEMENTATION_AUTHORIZATION
+NEXT: IDR_V2_CONTEXT_PRODUCTION_INTEGRATION_REVIEW_NOT_AUTHORIZED
 ```
+
+## 24. Implemented Candidate mapping
+
+```text
+shared provider-neutral DTOs / canonical encoder:
+crates/fielora-contracts/src/idr.rs
+
+Harness.IDR.Resolver pure core:
+crates/fielora-core/src/idr_resolver.rs
+
+Harness.Ingress & Context standalone admission:
+crates/fielora-agent/src/idr_context.rs
+
+Human Model read seam:
+StorageHandle::read_human_model_snapshot()
+```
+
+The physical Resolver module is a sibling of Harness composition in `fielora-core`.
+It consumes the already committed immutable `fielora-storage::idr::HumanModelSnapshot`
+boundary without importing rows, connections, `StorageHandle`, or SQLite APIs. This
+placement avoids making persistence the semantic authority and requires no new crate or
+Cargo dependency. `HumanModelResolverV1` exposes no mutation API. `IDRContextAdmissionV1`
+remains a separate module beside the existing `ContextCompiler` and is not called by it,
+the Resolver, or `AgentCoordinator`.
+
+Targeted Candidate evidence on 2026-08-29 covers stable reason tokens and serialization,
+all fixed behavior registry dimensions, lifecycle exclusion, semantic-family isolation,
+Preference/Disposition authority, confidence limits, exact Scope, current constraints,
+Project/Artifact Reality, lineage hard failures, kind-specific conflict behavior,
+Observation exclusion, structural/diagnostic bounds, 128-iteration and insertion-order
+determinism, storage read-only behavior, Context item/per-kind/byte/ref bounds, neutral
+conflicts, whole-item omission, bounded why-used data, and malformed version/ref/budget
+failure. No product Model request or production Context Snapshot write occurs.

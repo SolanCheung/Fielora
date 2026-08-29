@@ -579,21 +579,25 @@ interpretation, task planning, Tool selection authority, Permission, Approval,
 Execution, Verification, Reality, or final decision authority. It cannot become
 a second Agent or a second LLM.
 
-Current implementation has the schema-12 storage-only Human Model Candidate in
-the existing Fielora SQLite authority and `fielora-storage::idr`; it has no
-Resolver, Direction/Learning stage, Context integration, FIPC/UI, or independent
-IDR service/Runtime module. Storage implementation does not authorize those
-missing behaviors, `HumanProfileId`, a Memory index, or an empty physical module.
+Current implementation has the schema-12 Human Model Candidate in the existing
+Fielora SQLite authority and `fielora-storage::idr`, the pure deterministic
+`fielora-core::idr_resolver::HumanModelResolverV1`, and standalone
+`fielora-agent::idr_context::IDRContextAdmissionV1`. It has no production
+ContextCompiler/AgentRun integration, Direction/Learning stage, FIPC/UI, or independent
+IDR service/Runtime module. These implemented components do not authorize
+`HumanProfileId`, a Memory index, or another physical Runtime.
 
 Detailed semantic, lifecycle, projection, privacy, and Eval design is tracked
 in `FIELORA_IDR_V2_DESIGN_CANDIDATE.md`. Its status is
-`DRAFT / CANDIDATE / NOT FROZEN`; it does not authorize Contract freeze,
-Resolver Runtime, Context integration, or UI implementation.
+`DRAFT / CANDIDATE / NOT FROZEN`; that design document did not itself authorize
+Contract freeze, Resolver Runtime, Context integration, or UI implementation. The
+later Resolver execution instruction separately authorized the implemented Candidate
+described below.
 
 The minimum semantic Contract Review is tracked in
-`FIELORA_IDR_V2_CONTRACT_CANDIDATE.md`. The storage mapping is an implemented
-Candidate; Resolver input/output and Context Admission are implementation-ready
-Candidates in their dedicated review documents, but remain unimplemented and
+`FIELORA_IDR_V2_CONTRACT_CANDIDATE.md`. Storage, Resolver, and standalone Context
+Admission are implemented Candidates. Production Agent Context integration,
+Direction/Learning, activation, and UI remain unimplemented and separately
 unauthorized.
 
 ---
@@ -993,7 +997,7 @@ The Renderer cannot invent successful execution or verification.
 | Governance | `PolicyEngine`, permission/effect contracts, Approval routing/nonce, executor invariants, completion authority |
 | Execution | coordinator lifecycle/dispatch/cancel/resume; Tokio infrastructure; ToolCall projection; process cancellation |
 | Verification & Evidence | Tool/Verification receipts, mutation invalidation, diff/test gates, completion evaluation |
-| IDR | schema-12 Human Model storage Candidate implemented in existing `fielora-storage`; Resolver/Direction/Learning/Context integration not implemented |
+| IDR | schema-12 Human Model storage Candidate in `fielora-storage`; pure deterministic Resolver beside Harness composition in `fielora-core`; standalone Context Admission in `fielora-agent`; production Agent integration and Direction/Learning not implemented |
 | Entry Intent Resolver | historical Phase 04 bounded product-flow routing semantics; no independent IDR runtime |
 | Agent Profile | bundled/versioned product definition required by architecture; distinct runtime not implemented |
 | Memory Domain | cross-cutting ownership across Continuity, Orchestration, IDR, and Reality; no independent Memory Runtime |
@@ -1042,13 +1046,17 @@ reuse its Governance, Continuity, Execution, and Evidence.
 
 ## IDR
 
-- deterministic Resolver Runtime over the implemented typed Human Model snapshot;
-- separate bounded Context Admission and future Individualized Direction;
-- future governed proposal/learning behavior and user inspection/correction surface.
+- production builders for normalized current constraints, applicability, source
+  availability, and authoritative Reality projections;
+- production Agent Context integration of the implemented bounded Context Admission;
+- future Individualized Direction, governed proposal/learning behavior, and user
+  inspection/correction surface.
 
-IDR V2 storage exists, but Resolver/Context/Direction/Learning/UI remain unimplemented.
-The reviewed Resolver Contract does not authorize code, a new schema, a Memory index,
-`HumanProfileId`, an IDR service, or a parallel Runtime.
+IDR V2 storage, deterministic Resolver, and standalone bounded Context Admission now
+exist as implemented Candidates. ContextCompiler/AgentRun integration,
+Direction/Learning/UI remain unimplemented. The implementation adds no schema, Memory
+index, `HumanProfileId`, IDR service, parallel Runtime, Model authority, or Agent
+behavior change.
 
 ## Supporting concepts
 

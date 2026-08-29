@@ -2478,3 +2478,48 @@ RUNTIME_IMPLEMENTATION: NONE
 AGENT_BEHAVIOR_CHANGED: NO
 NEXT: IDR_V2_RESOLVER_IMPLEMENTATION_AUTHORIZATION_NOT_GRANTED
 ```
+
+## 101. IDR V2 Resolver + Standalone Context Admission Implemented Candidate
+
+用户于 2026-08-29 单独授权 `Harness.IDR.Resolver` 与
+`Harness.Ingress & Context` deterministic IDR Context Admission，但明确不授权真实
+AgentRun/ContextCompiler/Model request 主路径接入。上一轮八文件设计 changeset 已先独立
+提交为 `568668264b1a55736d4f93f3f2c27b2ca7671925`，提交后 worktree clean，随后才开始代码。
+
+Provider-neutral V1 DTO、stable hard/suppression reason tokens 与 shared canonical byte
+encoder 位于 `fielora-contracts::idr`；纯 `HumanModelResolverV1` 位于现有
+`fielora-core::idr_resolver`，只消费 storage-owned immutable `HumanModelSnapshot` 与 caller-supplied
+normalized Context/Reality/source projections，不执行 SQLite I/O，也不暴露 Human Model
+mutation；`IDRContextAdmissionV1` 位于 `fielora-agent::idr_context`，与现有
+`ContextCompiler` 同 crate 但没有调用或修改它。
+
+Resolver 已实现 fixed `IDR_SEMANTIC_REGISTRY_V1`、四类隔离 SemanticKey、only-Active
+eligibility、exact Scope AND/specificity、provenance authority、source availability、显式
+lineage、kind-specific conflicts、Disposition-only confidence、Reality VALID/STALE/
+UNRESOLVED、structured current-constraint precedence、bounded diagnostics、canonical stable
+ordering/result digest/resolution ref。Context Admission 只窄化 compatible resolved items，
+执行 8-entry/4-KiB/per-kind/3-provenance-ref/2-neutral-conflict bounds、whole-item omission与
+16-KiB `WhyUsedManifestV1`；model-facing structured entries 不含 item/provenance ID 或
+conflict digest，这些只存在 why-used evidence。
+
+Targeted Candidate tests 当前覆盖 Contracts 3、Resolver 19、Admission 8；包括 128 次重复/
+插入顺序独立、Project/Artifact known fingerprint vectors、lineage self/cycle/fork hard fail、
+read-only real storage snapshot、Context bounds/neutral conflict/manifest privacy，以及 Resolver/
+Admission 静态依赖边界。受影响三 crate Clippy `-D warnings` PASS。未新增 dependency、schema、
+migration、table/index、Model request、
+Provider branch、FIPC/UI、Context Snapshot 写入或 Governance effect。
+
+```text
+IDR_V2_RESOLVER_IMPLEMENTATION: IMPLEMENTED_CANDIDATE / NOT_FROZEN
+CONTEXT_ADMISSION: IMPLEMENTED_STANDALONE_CANDIDATE
+CONTEXT_PRODUCTION_INTEGRATION: NOT_IMPLEMENTED
+RESOLUTION_PERSISTENCE: NONE
+HUMAN_MODEL_MUTATION: NONE
+MODEL_IN_RESOLVER: NO
+MODEL_IN_CONTEXT_ADMISSION: NO
+PRODUCT_MODEL_REQUESTS: 0
+SCHEMA_CHANGE: NO
+DEPENDENCY_CHANGE: NO
+AGENT_BEHAVIOR_CHANGED: NO
+NEXT: IDR_V2_CONTEXT_PRODUCTION_INTEGRATION_REVIEW_NOT_AUTHORIZED
+```

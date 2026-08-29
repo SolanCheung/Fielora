@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
+pub mod idr;
+
 macro_rules! typed_id {
     ($name:ident) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
