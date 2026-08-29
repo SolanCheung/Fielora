@@ -1,5 +1,10 @@
 # Fielora IDR V2 Context Integration Review
 
+> Historical review note: remaining production-integration, acquisition, Agent Profile,
+> failure, privacy, Eval, Freeze, and implementation-order decisions are superseded by
+> `FIELORA_IDR_V2_FINAL_ARCHITECTURE_CLOSEOUT.md`. This document remains the detailed
+> historical input for the implemented standalone Admission contract.
+
 > Status: `STANDALONE CONTEXT ADMISSION IMPLEMENTED CANDIDATE / NOT FROZEN / PRODUCTION INTEGRATION NOT IMPLEMENTED`
 >
 > Date: `2026-08-29`

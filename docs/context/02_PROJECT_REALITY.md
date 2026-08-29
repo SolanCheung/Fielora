@@ -2523,3 +2523,54 @@ DEPENDENCY_CHANGE: NO
 AGENT_BEHAVIOR_CHANGED: NO
 NEXT: IDR_V2_CONTEXT_PRODUCTION_INTEGRATION_REVIEW_NOT_AUTHORIZED
 ```
+
+## 102. IDR V2 Final Architecture Closeout
+
+用户于 2026-08-29 要求一次性关闭 IDR V2 剩余架构问题，不再拆分 Context、Acquisition、
+Agent Profile、Memory、Identity、Runtime 或 Eval Review。最终入口为
+`docs/architecture/FIELORA_IDR_V2_FINAL_ARCHITECTURE_CLOSEOUT.md`，状态为
+`FINAL ARCHITECTURE CANDIDATE / IMPLEMENTATION ROADMAP APPROVED FOR REVIEW / NOT YET
+FROZEN`，`BLOCKING_ARCHITECTURE_OPEN_QUESTIONS=0`。
+
+最终 production chain 固定为 trusted Work Scope/Reality/current-constraint projection +
+storage-owned `HumanModelSnapshot` → `fielora-core::idr_resolver` → ephemeral
+`ResolvedHumanModelViewV1` → `fielora-agent::idr_context::IDRContextAdmissionV1` →
+existing Ingress & Context → primary Model stream。`AgentCoordinator` 只协调 builder、
+invalidation、ephemeral reuse、fail-soft degradation 与 existing Context Snapshot evidence；
+不成为 IDR semantic authority。自由文本 current constraint 与 acquisition proposal 复用
+同一 primary Model semantic stream，不新增 classifier/model call；首轮尚无可信 projection 的
+key 标记 unavailable 并省略对应 personalization，Generic Agent 继续。
+
+Acquisition 固定为 event-driven/bounded proposal → deterministic admission → atomic Human
+Model mutation。Current instruction 与 durable Preference 分离；Observation 只是 evidence；
+inferred Disposition 只进入 Candidate，V2 只能经显式用户 `ACTIVATE_DISPOSITION` 激活。
+Correction 复用 supersession/revoke/replacement；forget 继续使用 `DISABLE_USE /
+ERASE_IF_ALLOWED / RESET_PROFILE`。Sensitive policy 固定为 `ALLOW / REQUIRE_EXPLICIT /
+DENY`，secret 及任何 secret-derived value 永不进入 Human Model。
+
+最小 `FieloraAgentProfileV1` 是 bundled/versioned/code-owned stable self definition，Agent
+Identity 与 Model/Provider Identity 分离。Memory 仍为 cross-cutting Domain；Reality 保持当前
+truth authority，且 `Current Reality > historical Memory > IDR inference`。IDR production
+policy 为 fail-soft；无数据、部分输入或 integrity failure 都禁用当前 Run 的 stale/invalid
+personalization并记录 bounded diagnostic，Generic Agent 继续。IDR on/off 只控制
+participation，不执行 forget。
+
+Freeze 必须等待 Context production integration、acquisition/activation/correction/forget、
+Agent Profile、restart/recovery、controlled IDR OFF/ON A-B Eval、provider-neutral evidence、
+privacy 与 hard-zero invariants 全部 PASS。本轮仅修改架构文档，不改 Runtime、Schema、
+Migration、依赖、Agent behavior 或 Model requests；下一步直接按 Closeout 的 12 步顺序进入
+IDR V2 implementation execution，不再要求新的 architecture review。
+
+```text
+IDR_V2_FINAL_ARCHITECTURE_CLOSEOUT: PASS
+BLOCKING_ARCHITECTURE_OPEN_QUESTIONS: 0
+CONTEXT_PRODUCTION_INTEGRATION: ARCHITECTURE_CLOSED / NOT_IMPLEMENTED
+ACQUISITION_PIPELINE: ARCHITECTURE_CLOSED / NOT_IMPLEMENTED
+AGENT_PROFILE: ARCHITECTURE_CLOSED / NOT_IMPLEMENTED
+FAILURE_POLICY: FAIL-SOFT
+FREEZE: NOT_YET
+RUNTIME_CHANGED: NO
+SCHEMA_CHANGED: NO
+DEPENDENCIES_CHANGED: NO
+NEXT: IDR_V2_IMPLEMENTATION_EXECUTION
+```

@@ -587,6 +587,15 @@ ContextCompiler/AgentRun integration, Direction/Learning stage, FIPC/UI, or inde
 IDR service/Runtime module. These implemented components do not authorize
 `HumanProfileId`, a Memory index, or another physical Runtime.
 
+`FIELORA_IDR_V2_FINAL_ARCHITECTURE_CLOSEOUT.md` closes all remaining V2
+architecture questions. Production integration is coordinated by Harness composition;
+`NormalizedResolutionContextBuilderV1` assembles only trusted structured state;
+free-form current constraints and acquisition proposals reuse the primary Model stream
+without a second classifier call; unresolved inputs omit personalization and the generic
+Agent continues. V2 Individualized Direction is the bounded, non-authoritative semantic
+projection admitted into Context, not a separate Model, durable object, service, or
+Runtime stage.
+
 Detailed semantic, lifecycle, projection, privacy, and Eval design is tracked
 in `FIELORA_IDR_V2_DESIGN_CANDIDATE.md`. Its status is
 `DRAFT / CANDIDATE / NOT FROZEN`; that design document did not itself authorize
@@ -597,8 +606,10 @@ described below.
 The minimum semantic Contract Review is tracked in
 `FIELORA_IDR_V2_CONTRACT_CANDIDATE.md`. Storage, Resolver, and standalone Context
 Admission are implemented Candidates. Production Agent Context integration,
-Direction/Learning, activation, and UI remain unimplemented and separately
-unauthorized.
+acquisition, activation/correction paths, Agent Profile projection, and Eval remain
+unimplemented. Their V2 ownership, fail-soft behavior, authority boundaries, Freeze
+Gate, and implementation order are closed by the Final Architecture Closeout and do
+not require another architecture review.
 
 ---
 
@@ -608,6 +619,11 @@ unauthorized.
 
 Agent Profile is a thin, Fielora-owned, versioned, bundled product definition.
 It answers `Who am I?` and is neither a top-level Harness domain nor a Runtime.
+
+The V2 minimum projection is `FieloraAgentProfileV1`: `name=Fielora`,
+`product=Fielora`, `role=local AI workspace agent`, a bounded purpose, stable semantic
+boundaries, and `profile_version`. It enters Ingress & Context as stable self-definition.
+Provider/Model identity remains separate and cannot alter this profile.
 
 ```text
 AgentProfile
@@ -1046,17 +1062,20 @@ reuse its Governance, Continuity, Execution, and Evidence.
 
 ## IDR
 
-- production builders for normalized current constraints, applicability, source
-  availability, and authoritative Reality projections;
-- production Agent Context integration of the implemented bounded Context Admission;
-- future Individualized Direction, governed proposal/learning behavior, and user
-  inspection/correction surface.
+- production builders for current constraints, normalized resolution context,
+  applicability, source availability, and authoritative Reality projections;
+- production Agent Context integration of the implemented bounded Context Admission,
+  including ephemeral invalidation/reuse, fail-soft diagnostics, and existing Context
+  Snapshot why-used evidence;
+- event-driven acquisition, deterministic admission, explicit activation,
+  correction/forget, and controlled A/B Eval.
 
 IDR V2 storage, deterministic Resolver, and standalone bounded Context Admission now
 exist as implemented Candidates. ContextCompiler/AgentRun integration,
-Direction/Learning/UI remain unimplemented. The implementation adds no schema, Memory
-index, `HumanProfileId`, IDR service, parallel Runtime, Model authority, or Agent
-behavior change.
+acquisition/Profile/Eval remain unimplemented, but their architecture is closed by
+`FIELORA_IDR_V2_FINAL_ARCHITECTURE_CLOSEOUT.md`. The implementation adds no Memory
+index, `HumanProfileId`, IDR service, parallel Runtime, second Model stream, Model
+authority, or Agent behavior change.
 
 ## Supporting concepts
 
