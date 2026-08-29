@@ -9,6 +9,7 @@ IMPLEMENTATION: STORAGE + MIGRATION IMPLEMENTED CANDIDATE
 SCHEMA: IMPLEMENTED CANDIDATE / NOT FROZEN
 MIGRATION: 0012_idr_v2_human_model
 RUNTIME: NOT IMPLEMENTED
+RESOLVER CONTRACT: IMPLEMENTATION-READY CANDIDATE / NOT IMPLEMENTED
 FIPC: NOT DESIGNED
 UI: OUT OF SCOPE
 DATE: 2026-08-28
@@ -123,12 +124,12 @@ Direction kind can be interpreted as permission.
 | `HumanModelUpdateProposal` | `KEEP` | Non-authoritative update request from Model/inference/deterministic detectors. |
 | `HumanModelCorrection` | `KEEP` | Explicit human-authoritative correction has different semantics from a proposal. |
 | `HumanModelForgetRequest` | `KEEP` | Unified disable/erasure/reset request. |
-| `RelevantDisposition` | `KEEP` | Bounded resolver projection; prevents exposure of full items. |
-| `IndividualizedDirection` | `KEEP` | Core structured personalization output. |
-| `IndividualizedDirectionItem` | `KEEP` | Closed structured guidance item. |
-| `DispositionResolutionInput` | `KEEP` | Versioned deterministic input snapshot. |
-| `DispositionResolutionResult` | `KEEP` | Explainable included/excluded result plus Direction. |
-| `IDRProjection` | `KEEP` | Context-facing bounded envelope controlled by Ingress & Context. |
+| `RelevantDisposition` | `REPLACE FOR RESOLVER V1` | `ResolvedHumanModelItemV1` carries bounded effective Fact/Preference/Disposition/Goal semantics without Direction. |
+| `IndividualizedDirection` | `DEFER / FUTURE SEPARATE STAGE` | It may consume a resolved view later; it is not Resolver V1 output. |
+| `IndividualizedDirectionItem` | `DEFER WITH DIRECTION` | No Direction item is implemented in the Resolver slice. |
+| `DispositionResolutionInput` | `REPLACE FOR RESOLVER V1` | `ResolveHumanModelInputV1` uses normalized Context, Reality, source availability, fixed registry, and snapshot revision. |
+| `DispositionResolutionResult` | `REPLACE FOR RESOLVER V1` | `ResolvedHumanModelViewV1` is the ephemeral deterministic output; it contains no Direction. |
+| `IDRProjection` | `REPLACE FOR CONTEXT SEAM V1` | `IDRContextContributionV1 + WhyUsedManifestV1` belong to separate Ingress & Context admission. |
 
 ### 5.2 Additional minimum contracts
 
@@ -688,6 +689,13 @@ excluded and deterministically proposed for weakening/revocation.
 
 ## 18. Resolution input
 
+> Implementation Review amendment: Sections 18–23 below preserve the earlier
+> conceptual Direction design. For Resolver V1 implementation, the normative
+> Candidate is `FIELORA_IDR_V2_RESOLVER_IMPLEMENTATION_CONTRACT_CANDIDATE.md`;
+> Context-facing admission is defined by
+> `FIELORA_IDR_V2_CONTEXT_INTEGRATION_REVIEW.md`. Their split DTOs and comparators
+> supersede the bundled input/result/Direction shape below. Direction remains future.
+
 ```text
 DispositionResolutionInput
 ├── contract_version
@@ -1176,6 +1184,12 @@ NOT_DIRECTION_ELIGIBLE
 EXTERNAL_HISTORY_NOT_AFFECTED
 ```
 
+Resolver V1's complete hard-failure versus item-suppression taxonomy is frozen in
+`FIELORA_IDR_V2_RESOLVER_IMPLEMENTATION_CONTRACT_CANDIDATE.md` Section 19. It retains
+the existing compatible codes and adds exact fail-closed codes for unsupported
+semantic/scope values, unavailable selector/Reality/source input, lineage,
+current-constraint override, duplicate/conflict, and bounded diagnostics.
+
 An exclusion is not automatically a failed resolution. Bounded omissions and
 invalid items are reported with refs/counts; the safe result may be an empty
 Direction. Invalid versions/revisions/transitions fail the requested Contract
@@ -1278,7 +1292,6 @@ revision/versioning: Contract + HumanModel + profile + ResolutionRef
 Still deferred:
 
 ```text
-exact dimension/value vocabulary and registry
 exact evidence independence/count/age/decay algorithm
 automatic durable remember-intent detection implementation
 fact-eligible independently supported source registry
@@ -1286,8 +1299,19 @@ sensitive-data classifier and detailed category policy
 Eval corpus, thresholds, non-inferiority, and overhead limits
 provider-neutral extraction prompt/model quality
 physical storage/event/tombstone/encryption layout
-Context/FIPC/UI contracts
+FIPC/UI contracts
 bounded automatic activation in a future Contract version
+```
+
+Closed by the Resolver Implementation Review Candidate:
+
+```text
+fixed V1 semantic key/dimension/value registry
+NormalizedResolutionContextV1
+RealityValidationProjectionV1
+NormalizedCurrentConstraintsV1
+Resolver hard/suppression reason codes
+Context Admission V1 seam/budget/why-used manifest
 ```
 
 Implementation must not invent defaults for deferred semantics.
@@ -1307,3 +1331,40 @@ authorize Resolver semantics, Individualized Direction generation, Context or
 AgentCoordinator integration, Model extraction, automatic learning/activation,
 FIPC, UI, or Eval. Any such step requires a separate design/integration review;
 stored version-1 rows must not be silently reinterpreted.
+
+---
+
+## 35. Resolver Implementation Review amendment
+
+The reviewed implementation Candidate now consists of:
+
+```text
+FIELORA_IDR_V2_RESOLVER_IMPLEMENTATION_CONTRACT_CANDIDATE.md
+→ exact Resolver DTOs, SemanticKey/registry, pipeline, comparators, Reality,
+  constraints, determinism, errors, storage compatibility, and tests
+
+FIELORA_IDR_V2_CONTEXT_INTEGRATION_REVIEW.md Sections 18–20
+→ Context Admission V1, 8-entry/4-KiB budget, presentation, why-used, failure modes
+```
+
+It makes these semantic amendments:
+
+1. Resolver V1 returns ephemeral `ResolvedHumanModelViewV1`, not Direction.
+2. Preference and Disposition compare only through the same registered Behavior key.
+3. Long-term Goal resolves only against the same registered Goal key in V1; it is not
+   forced into the Behavior winner pool without a stored/registered mapping.
+4. Disposition confidence cannot select a winner between conflicting values.
+5. Current constraints use structured coverage; unresolved applicability may remain in
+   the internal resolved view but is always excluded by Context Admission.
+6. Unknown registry/scope values and unresolved Reality/source state fail closed.
+7. Resolution remains Model-free, random-free, ephemeral, and schema-neutral.
+
+```text
+RESOLVER_IMPLEMENTATION_REVIEW: PASS
+IMPLEMENTATION_READY: YES
+IMPLEMENTATION_AUTHORIZED: NO
+STORAGE_CONTRACT_GAPS: NONE
+SCHEMA_CHANGE: NO
+MIGRATION: NONE
+RUNTIME_IMPLEMENTATION: NONE
+```

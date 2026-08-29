@@ -1,6 +1,6 @@
 # Fielora IDR V2 Resolver Candidate
 
-> Status: `DRAFT / CANDIDATE / DESIGN ONLY / NOT FROZEN`
+> Status: `IMPLEMENTATION REVIEW PASS / IMPLEMENTATION-READY CANDIDATE / NOT FROZEN`
 >
 > Date: `2026-08-28`
 >
@@ -58,7 +58,8 @@ second Runtime, retrieval system, memory database, or Model invocation.
 
 This design preserves the existing Contract Candidate's lifecycle, scope,
 precedence, boundedness, reason-code, authority, and ephemeral-resolution rules.
-It proposes one important separation before implementation review:
+The initial design proposed, and the Implementation Review now accepts, one important
+separation:
 
 - the Resolver returns a provider/model-neutral `ResolvedHumanModelViewV1`;
 - it does **not** generate `IndividualizedDirection`;
@@ -67,9 +68,10 @@ It proposes one important separation before implementation review:
   future contract, a bounded Direction produced by that later stage.
 
 The current Contract Candidate places an inline `direction` in
-`DispositionResolutionResult`. Implementing this Candidate therefore requires a
-prior Contract amendment that splits deterministic Human Model resolution from
-future Direction generation. No durable schema change follows from that split.
+`DispositionResolutionResult`. The Implementation Review freezes the split in
+`FIELORA_IDR_V2_RESOLVER_IMPLEMENTATION_CONTRACT_CANDIDATE.md`: deterministic
+Human Model resolution returns `ResolvedHumanModelViewV1`; future Direction is a
+separate stage. No durable schema change follows from that split.
 
 ## 3. Resolver profile and structured input
 
@@ -110,13 +112,13 @@ global scope, no conflict, or live Reality.
 | Project revision | Available on current Project view | May validate a Project Reality revision dependency when explicitly supplied |
 | Conversation and Run identity | Available | Diagnostic/binding only; neither grants semantic authority |
 | Current task text | Available as a raw string | Not parsed by Resolver; cannot substitute for normalized constraints |
-| Current task type | Only private `FAST_EDIT / FOCUSED_EDIT / GENERAL` orchestration classification exists | `PARTIAL`; not yet a stable IDR selector contract |
-| Domain selector | No stable normalized Agent/IDR domain projection | `UNAVAILABLE` |
+| Current task type | Private `FAST_EDIT / FOCUSED_EDIT / GENERAL` orchestration classification exists | `PARTIAL`; V1 mapping is frozen but not exposed to an IDR caller |
+| Domain selector | Current Harness profile is `CODING_V0.1` | `PARTIAL`; V1 maps it to `CODING`, but no IDR caller exists |
 | Interaction kind | No stable IDR interaction contract | `UNAVAILABLE`; do not assume every invocation is `CHAT` |
 | Current instruction constraints | No stable structured projection; current user text exists only as raw task/message | `UNAVAILABLE` for deterministic conflict checks |
 | Active Artifact identity/revision | Available only when `ActiveArtifactContext` is supplied | Exact current-artifact dependency may be validated |
 | General non-Project Reality snapshot | No provider-neutral live projection for Decision, Verification, FieldObject, or other refs | `UNAVAILABLE` |
-| Dimension/value registry | Kinds are typed, but no frozen shared semantic-key/value registry exists | Required before runtime for cross-item conflicts |
+| Dimension/value registry | No runtime registry exists | Fixed code-owned V1 registry is now frozen in the Implementation Contract Candidate |
 | Evaluation time/freshness policy | Item timestamps exist; no accepted decay/freshness semantics exist | Not used for precedence or aging |
 
 Consequences:
@@ -134,8 +136,8 @@ Consequences:
 
 ### 3.3 Candidate reason-code additions
 
-The following fail-closed reason codes are required by this design but are not yet
-all frozen in the IDR V2 Contract Candidate:
+The following original fail-closed additions are retained. The complete reviewed V1
+taxonomy is frozen in the Implementation Contract Candidate Section 19:
 
 | Code | Meaning |
 |---|---|
@@ -144,28 +146,21 @@ all frozen in the IDR V2 Contract Candidate:
 | `REALITY_UNRESOLVED` | The relevant Reality authority or current projection was not supplied |
 | `LOWER_PRECEDENCE` | A valid item is suppressed by a higher-authority or more-specific valid item |
 
-These must be accepted into the Contract before runtime work. Existing reason codes,
-including `SOURCE_CONFLICT`, `SCOPE_MISMATCH`, `STALE_REALITY_REF`,
-`SUPERSEDED_ITEM`, `REVOKED_ITEM`, and projection-limit reasons, remain applicable.
+Existing reason codes, including `SOURCE_CONFLICT`, `SCOPE_MISMATCH`,
+`STALE_REALITY_REF`, `SUPERSEDED_ITEM`, `REVOKED_ITEM`, and projection-limit reasons,
+remain applicable. `CURRENT_CONSTRAINTS_UNAVAILABLE` is represented by an unresolved
+constraint state plus this stable suppression reason; Context Admission always omits
+that item.
 
 ## 4. Resolution stages
 
-For a fixed input and profile version the Resolver executes these stages in order:
-
-1. validate input versions, aggregate revision, bounds, and canonical structure;
-2. validate item shape already guaranteed by storage and reject unknown versions;
-3. classify lifecycle eligibility;
-4. evaluate all populated scope selectors with exact AND semantics;
-5. evaluate supplied Reality dependencies as `VALID`, `STALE`, or `UNRESOLVED`;
-6. apply current instruction, current Reality, governance, and work-scope overrides
-   supplied by the caller;
-7. construct kind-specific semantic keys;
-8. resolve correction/supersession lineage;
-9. apply kind authority, explicit-versus-inferred rules, scope specificity, and the
-   narrowly permitted Disposition confidence tie-break;
-10. preserve unresolved contradictions as a structured conflict set;
-11. apply deterministic bounds and ordering;
-12. emit an ephemeral resolved view and canonical `resolution_ref`.
+For a fixed input and profile version the Resolver uses the exact 15-stage sequence in
+`FIELORA_IDR_V2_RESOLVER_IMPLEMENTATION_CONTRACT_CANDIDATE.md` Section 17:
+envelope/snapshot/context validation → registry projection → lineage → lifecycle →
+Scope → source/Reality/current constraints → semantic grouping → kind-specific
+authority/specificity → conflicts → stable output/reference. That reviewed ordering
+supersedes the earlier high-level sequence and ensures lineage is resolved before
+semantic grouping while current constraints remain a structured input.
 
 There is no Model call, embedding lookup, fuzzy ranking, probabilistic threshold,
 wall-clock-dependent decay, or silent last-write-wins at any stage.
@@ -295,14 +290,14 @@ The five kinds are not generic memory chunks and do not share one ranking rule.
 - Replacement should use correction/supersession lineage. A newer timestamp alone
   does not replace an older Goal.
 - Independent non-contradictory Goals may coexist within bounds. Contradictory Goals
-  with the same goal/behavior key and no lineage form a structured conflict.
+  with the same registered Goal key and no lineage form a structured conflict.
 - A Goal never establishes Project completion, Verification, Permission, or Reality.
 
 ## 8. Semantic keys and conflicts
 
-Runtime implementation requires a closed/versioned normalization contract for the
-semantic key and normalized value of each payload kind. The schema's typed payload
-alone is not yet a full cross-item conflict registry.
+The Implementation Review freezes a closed/versioned normalization Contract for each
+payload kind. Storage's typed payload remains the durable envelope; the fixed registry
+is code-owned application Contract state, not a database table.
 
 Candidate grouping keys are:
 
@@ -310,9 +305,9 @@ Candidate grouping keys are:
 |---|---|
 | `FACT` | normalized fact subject/key |
 | `PREFERENCE` | normalized preference dimension |
-| `OBSERVATION` | observed dimension plus evidence relation |
+| `OBSERVATION` | unique Observation item identity; never a winner pool |
 | `DISPOSITION` | normalized disposition dimension |
-| `LONG_TERM_GOAL` | normalized goal key or affected behavioral dimension |
+| `LONG_TERM_GOAL` | registered Goal key only |
 
 The Resolver returns a structured conflict set. It does not silently collapse
 contradictions.
@@ -379,9 +374,9 @@ stack.
 - Confidence does not activate a Candidate.
 - Confidence does not override explicit Preference, confirmed Goal, current user
   instruction, current Reality, or scope specificity.
-- It may rank two otherwise equal-scope, equal-authority, inferred, Active
-  Dispositions on the same dimension.
-- If those items contradict and confidence is equal, the result is a conflict.
+- It may select the representative among otherwise equal-scope, equal-authority,
+  inferred, Active Dispositions only when their normalized semantic value is equal.
+- Different values remain a structured conflict regardless of confidence.
 - Confidence may be exposed to Context Admission as bounded metadata, but admission
   cannot use it to bypass any rule above.
 
@@ -444,6 +439,10 @@ deterministic boundary semantics, privacy review, and regression evidence.
 
 ### 13.1 `ResolvedHumanModelViewV1`
 
+The shape below is the original high-level projection. The exact field-level DTO,
+canonical encoding, bounds, and ordering in the Implementation Contract Candidate
+Section 18 are normative for Resolver V1 and use one `effective_items[]` collection.
+
 ```text
 ResolvedHumanModelViewV1
   contract_version
@@ -498,16 +497,11 @@ Model-visible.
 
 ### 13.3 Bounds
 
-Resolver output itself is bounded by a versioned profile. The existing Contract
-Candidate's default remains the design baseline:
-
-- at most 8 semantic candidates offered to later admission;
-- at most 3 support/provenance refs per offered item;
-- at most 4 KiB for the later model-facing IDR projection.
-
-Resolver diagnostics may use a separate bounded internal envelope, but Model context
-never receives the entire diagnostic set. Exact diagnostic limits require Contract
-freeze before implementation.
+Resolver uses the structural input/reference/lineage/diagnostic bounds frozen in the
+Implementation Contract. It does not own the 8-entry/4-KiB Model-context budget.
+`IDRContextAdmissionV1` separately limits the model-facing contribution to 8 total
+entries, 3 provenance refs per admitted item, and 4 KiB UTF-8. Resolver diagnostics
+never enter Model context as a whole.
 
 ## 14. Deterministic ordering and reference
 
@@ -559,30 +553,34 @@ All three layers reject credentials, API keys, Authorization, passwords, private
 source transcript copies, webpage/file bodies, Provider reasoning, and hidden
 chain-of-thought. A provenance ref is not permission to inline its source body.
 
-## 17. Implementation preconditions and open questions
+## 17. Implementation Review disposition
 
-Resolver runtime review is blocked on design decisions, not storage work:
+The previously open Resolver input/algorithm questions are closed for V1 by
+`FIELORA_IDR_V2_RESOLVER_IMPLEMENTATION_CONTRACT_CANDIDATE.md`:
 
-1. accept the split between `ResolvedHumanModelViewV1` and future Direction;
-2. freeze the four fail-closed reason-code additions in section 3.3;
-3. define a closed/versioned semantic key and normalized value registry per kind;
-4. expose normalized current-instruction constraints without parsing raw prompt text;
-5. decide whether the current private task classification becomes a stable IDR
-   `task_type` projection or IDR V1 excludes task-scoped items;
-6. define domain and interaction selector authorities or keep them unavailable;
-7. define provider-neutral Reality snapshot refs/revisions and source availability;
-8. define exact Project fingerprint input if `FINGERPRINT_MATCH` is retained;
-9. freeze Resolver diagnostic bounds and canonical serialization;
-10. decide whether an unavailable current-constraint projection excludes all
-    potentially behavioral items or only dimensions explicitly marked as conflicting.
+- a fixed code-owned semantic registry and exact SemanticKey families;
+- fixed domain/task/interaction selector vocabulary and tri-state availability;
+- provider-neutral current constraints, source availability, and Reality projection;
+- Project/Artifact fingerprint preimages;
+- a formal Scope tuple and kind-specific comparator;
+- explicit lineage/missing-predecessor behavior;
+- hard-error versus item-suppression reason codes;
+- canonical byte encoding, result ordering, structural bounds, and test vectors;
+- `ResolvedHumanModelViewV1` as an ephemeral derived view;
+- no Direction generation, Model, randomness, persistence, schema, or Agent integration.
 
-None of these questions authorizes implementation, schema changes, Model extraction,
-automatic activation, or a second Runtime.
+The current Agent path still lacks builders for normalized current constraints,
+interaction/applicability, generic non-Project Reality, and shared Context budget.
+Those are integration prerequisites, not unresolved Resolver semantics. Resolver V1
+can be implemented against explicit DTO inputs when separately authorized; Context
+Admission/Agent integration remains unauthorized.
 
 ## 18. Candidate conclusion
 
 ```text
-IDR_V2_RESOLVER_DESIGN: CANDIDATE_PASS
+IDR_V2_RESOLVER_DESIGN: IMPLEMENTATION_REVIEW_PASS
+IMPLEMENTATION_READY: YES
+IMPLEMENTATION_AUTHORIZED: NO
 ARCHITECTURE_PLACEMENT: Harness.IDR.Resolver
 RESOLVER_AUTHORITY: deterministic semantic eligibility/conflict/suppression only
 CONTEXT_RETRIEVAL: NOT_THE_RESOLVER
@@ -592,5 +590,6 @@ RESOLUTION_PERSISTENCE: NONE
 SCHEMA_CHANGE: NO
 RUNTIME_IMPLEMENTATION: NONE
 AGENT_BEHAVIOR_CHANGED: NO
-NEXT: CONTRACT_AMENDMENT_AND_RESOLVER_IMPLEMENTATION_REVIEW
+STORAGE_CONTRACT_GAPS: NONE
+NEXT: USER_REVIEW_THEN_SEPARATE_RESOLVER_IMPLEMENTATION_AUTHORIZATION
 ```

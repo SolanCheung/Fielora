@@ -1,6 +1,6 @@
 # Fielora IDR V2 Context Integration Review
 
-> Status: `DRAFT / CANDIDATE / DESIGN ONLY / NOT FROZEN`
+> Status: `IMPLEMENTATION REVIEW PASS / IMPLEMENTATION-READY SEAM / NOT FROZEN`
 >
 > Date: `2026-08-28`
 >
@@ -232,11 +232,11 @@ This review applies the 8-entry limit across all model-facing Fact, Preference,
 Disposition, and Goal entries, not eight per kind. Observation never consumes a
 model-facing entry.
 
-The effective budget is:
+The V1 admission budget is:
 
 ```text
 B_idr = min(
-  frozen IDR projection byte/token limit,
+  4096 serialized UTF-8 bytes,
   caller-supplied remaining_context_budget
 )
 ```
@@ -253,9 +253,13 @@ one of the following under a reviewed contract:
 1. a deterministic remaining-context budget after mandatory current inputs; or
 2. a small fixed IDR sub-budget reserved within an explicit global budget plan.
 
-This review does not choose or implement that allocator.
+Section 18 freezes the IDR sub-budget and exact UTF-8 accounting. This review does not
+choose or implement the caller's global allocator.
 
 ## 8. Model-facing projection
+
+The conceptual presentation below is retained for rationale. The normative V1 wire
+envelope is frozen in Section 18.5 and supersedes this illustrative prose form.
 
 When admitted, the projection must be clearly delimited and rendered after the
 current task/current constraints have already established authority:
@@ -272,7 +276,7 @@ Governance, Permission, or Verification.
 END_PERSONALIZATION_SIGNAL
 ```
 
-The exact wire format must be frozen before implementation. Required properties:
+The exact V1 wire format is frozen in Section 18.5. Its required properties are:
 
 - provider/model-neutral;
 - deterministic serialization;
@@ -454,32 +458,26 @@ The integration continues to prohibit:
 The Model sees only the bounded semantic projection required for the current
 invocation. Internal excluded/conflict diagnostics are not automatically Model-facing.
 
-## 16. Required contract changes before implementation
+## 16. Implementation Review disposition
 
-Before an implementation review can authorize code, the following must be accepted:
+The Resolver/Direction split, fixed semantic registry, normalized selectors/current
+constraints, Reality projection, reason codes, canonical serialization, and Resolver
+test contract are frozen as an implementation-ready Candidate in
+`FIELORA_IDR_V2_RESOLVER_IMPLEMENTATION_CONTRACT_CANDIDATE.md`.
 
-1. split deterministic `ResolvedHumanModelViewV1` from future
-   `IndividualizedDirection`;
-2. freeze Resolver and Admission input/output versions and canonical serialization;
-3. freeze `SCOPE_INPUT_UNAVAILABLE`, `CURRENT_CONSTRAINTS_UNAVAILABLE`,
-   `REALITY_UNRESOLVED`, and `LOWER_PRECEDENCE` semantics;
-4. freeze semantic key/value normalization per Human Model kind;
-5. define normalized current-instruction/current-work-scope constraint projection;
-6. define stable domain/task-type/interaction selectors or explicitly leave them
-   unsupported for the first implementation;
-7. define provider-neutral Project/non-Project Reality snapshot bindings;
-8. choose deterministic global/remaining context budget ownership;
-9. freeze `IDRProjectionV1` rendering and why-used manifest bounds;
-10. define context snapshot retention/redaction for IDR refs/digests;
-11. specify exact tests proving precedence, Project isolation, lifecycle exclusion,
-    conflict preservation, stale/unresolved handling, budget bounds, determinism, and
-    zero forbidden body/secret leakage.
+Sections 18–20 below freeze the Context Admission seam, V1 budget, why-used manifest,
+and failure-mode result. The current repository still lacks a deterministic builder
+for normalized current constraints/applicability and a shared caller-owned context
+budget. Those are runtime integration prerequisites, not unresolved Resolver semantic
+questions and not authority to parse raw task text inside Resolver.
 
-No item on this list requires a new database table. If later evidence shows an
-unavoidable schema impact, it requires a new Change Impact review rather than being
-smuggled into context work.
+No reviewed Contract requires a database table or migration. Any later schema impact
+requires a separate Change Impact rather than being smuggled into Context work.
 
-## 17. Review conclusion
+## 17. Initial design conclusion
+
+This block records the design-only gate that preceded the formal Implementation
+Review. Section 21 is the current conclusion.
 
 ```text
 IDR_V2_CONTEXT_INTEGRATION_REVIEW: PASS_DESIGN_ONLY
@@ -494,5 +492,271 @@ MODEL_EXTRACTION_OR_LEARNING: NONE
 RUNTIME_IMPLEMENTATION: NONE
 SCHEMA_CHANGE: NO
 AGENT_BEHAVIOR_CHANGED: NO
-NEXT: IDR_V2_RESOLVER_IMPLEMENTATION_REVIEW_NOT_IMPLEMENTED
+NEXT: SUPERSEDED_BY_SECTION_21_IMPLEMENTATION_REVIEW_RESULT
+```
+
+## 18. `IDRContextAdmissionV1`
+
+### 18.1 Fixed profile
+
+```text
+admission_contract_version: 1
+admission_version: IDR_CONTEXT_ADMISSION_V1
+trust_class: PERSONALIZATION_SIGNAL_NON_AUTHORITATIVE
+
+max total model-facing entries: 8
+max model-facing UTF-8 bytes: 4096
+max provenance refs carried per admitted item: 3
+max Fact entries: 2
+max Preference entries: 3
+max Disposition entries: 2
+max Long-term Goal entries: 2
+max neutral conflict notices: 2
+max why-used manifest UTF-8 bytes: 16384
+```
+
+Per-kind caps and conflict notices are all subordinate to the total 8-entry cap.
+Observation has a cap of zero. The caller may request a lower item/byte budget but
+cannot raise these V1 maxima. The 4 KiB limit covers the complete model-facing IDR
+block, including delimiters and neutral conflict notices. Why-used evidence is not
+Model-facing and has its own 16 KiB bound within the existing Context Snapshot's
+1 MiB manifest guard.
+
+V1 deliberately uses exact serialized UTF-8 bytes, not Provider token counting.
+The caller must reserve those bytes within its global context plan before admission.
+Resolver never owns this budget.
+
+### 18.2 Input
+
+```text
+IDRContextAdmissionInputV1
+  admission_contract_version: 1
+  admission_version: IDR_CONTEXT_ADMISSION_V1
+  resolved_view: ResolvedHumanModelViewV1
+  expected_resolution_ref
+  expected_resolution_context_fingerprint
+  applicability: IDRApplicabilityProjectionV1
+  requested_budget
+    max_entries: 0..8
+    max_serialized_utf8_bytes: 0..4096
+  invocation_binding
+    run_ref
+    conversation_ref
+    project_ref
+    context_snapshot_ref
+```
+
+```text
+IDRApplicabilityProjectionV1
+  contract_version: 1
+  projection_ref
+  entries[]
+    semantic_key
+    materiality: REQUIRED | RELEVANT | NOT_RELEVANT
+    deterministic_order: u16
+    source_ref
+  projection_digest
+```
+
+Applicability is a structured Harness-owned input. It is not inferred by the Model or
+by fuzzy matching inside Admission. Duplicate `(semantic_key, deterministic_order)` or
+contradictory materiality is invalid input. Current code has no such builder; until it
+exists, safe admission is an empty contribution.
+
+### 18.3 Admission filters
+
+An item may be admitted only when all conditions hold:
+
+1. it is in `resolved_view.effective_items`;
+2. lifecycle is Active and kind is Fact, Preference, Disposition, or Long-term Goal;
+3. all Reality states are `VALID`;
+4. `current_constraint_state == COMPATIBLE`;
+5. applicability is `REQUIRED` or `RELEVANT` for its exact SemanticKey;
+6. no unresolved Resolver conflict blocks that key/value;
+7. kind and total caps permit the complete entry;
+8. the complete serialized block remains within requested and V1 byte bounds;
+9. a bounded why-used record can be produced.
+
+Candidate, Weakened, Conflicted values, Superseded, Revoked, Observation, stale or
+unresolved Reality, current-constraint Override/Unresolved, unknown semantic data, and
+not-relevant items can never enter Model Context.
+
+Admission only narrows Resolver output. It cannot change SemanticKey, select a new
+conflict winner, reinterpret confidence, broaden scope, or revive an excluded item.
+
+### 18.4 Deterministic selection and overflow
+
+Eligible candidates sort by:
+
+1. materiality: `REQUIRED` before `RELEVANT`;
+2. `deterministic_order` ascending;
+3. matched scope-specificity tuple descending;
+4. explicit basis before inferred basis only as Context allocation, not semantic truth;
+5. kind order: Fact, Preference, Long-term Goal, Disposition;
+6. canonical SemanticKey;
+7. item ID.
+
+For each candidate in order, Admission attempts to append one complete entry. If a
+per-kind, total-entry, or byte cap would be exceeded, it omits the whole entry with
+`PROJECTION_LIMIT`; it never truncates a field, summarizes through a Model, samples,
+or changes an earlier semantic decision.
+
+An unresolved conflict may generate one neutral notice only when its exact key is
+REQUIRED/RELEVANT. Notices sort by the same materiality/order/key rules, contain no
+competing values, count against both the 2-notice and 8-total caps, and consume bytes.
+
+### 18.5 Model-facing contribution
+
+```text
+IDRContextContributionV1
+  admission_contract_version: 1
+  admission_version: IDR_CONTEXT_ADMISSION_V1
+  trust_class: PERSONALIZATION_SIGNAL_NON_AUTHORITATIVE
+  resolution_ref
+  source_human_model_revision
+  entries[]
+  conflict_notices[]
+  omitted_count
+  serialized_utf8_bytes
+  content_sha256
+  why_used_manifest
+```
+
+Canonical presentation uses only registry tokens and this exact envelope:
+
+```text
+<IDR_CONTEXT_V1 trust="PERSONALIZATION_SIGNAL_NON_AUTHORITATIVE">
+FACT key=<key> value=<canonical-value>
+PREFERENCE key=<key> relation=<PREFER|AVOID> value=<canonical-value>
+DISPOSITION key=<key> value=<canonical-value>
+LONG_TERM_GOAL key=<key> value=<canonical-value>
+CONFLICT key=<key> applied=none
+</IDR_CONTEXT_V1>
+```
+
+Only present entry kinds emit lines; one LF separates lines and terminates the closing
+line. Tokens come from the fixed registry, so arbitrary escaping/prose is absent.
+Item IDs and provenance refs are not Model-facing.
+
+Future Agent assembly must place the already-admitted current user task/constraints
+and current Reality before this block. Repository excerpts remain untrusted Project
+data and `ContextCompiler` remains unchanged. Exact assembly is not implemented here.
+
+### 18.6 Admission errors and safe degradation
+
+Hard Admission errors are:
+
+```text
+UNSUPPORTED_ADMISSION_VERSION
+RESOLUTION_REF_MISMATCH
+RESOLUTION_CONTEXT_MISMATCH
+INVALID_APPLICABILITY_PROJECTION
+INVALID_CONTEXT_BUDGET
+WHY_USED_MANIFEST_INVALID
+```
+
+IDR unavailability, zero budget, no eligible item, or all items omitted produces a
+valid empty contribution. It does not fail an otherwise valid Agent run and does not
+retry with weaker rules.
+
+## 19. `WhyUsedManifestV1`
+
+```text
+WhyUsedManifestV1
+  contract_version: 1
+  admission_version: IDR_CONTEXT_ADMISSION_V1
+  resolver_version: IDR_RESOLVER_V1
+  semantic_registry_version: IDR_SEMANTIC_REGISTRY_V1
+  resolution_ref
+  human_model_revision
+  resolution_context_fingerprint
+  reality_projection_ref
+  reality_projection_digest
+  current_constraints_ref
+  current_constraints_digest
+  applicability_projection_ref
+  applicability_projection_digest
+  invocation_binding
+  admitted[]
+    projection_index
+    item_id
+    kind
+    semantic_key
+    canonical_value_digest
+    matched_scope
+    lifecycle: ACTIVE
+    evidence_basis
+    inference_confidence?
+    admission_reason: REQUIRED | RELEVANT
+    provenance_ref_ids[]          # sorted, max 3
+    reality_refs[]
+      reality_kind
+      reality_ref
+      validation_state: VALID
+    current_constraint_state: COMPATIBLE
+    serialized_entry_bytes
+  conflict_notices[]
+    semantic_key
+    conflict_record_digest
+    admission_reason
+  omitted_count
+  omitted_reason_counts
+  projection_entry_count
+  projection_utf8_bytes
+  projection_digest
+```
+
+Manifest field names above are semantic Contract names; exact future JSON casing may
+be chosen only once and tested before Context runtime integration. The manifest is
+evidence/explainability, not thought logging or a new durable IDR authority.
+
+It records no raw canonical value, source support, transcript/message body, webpage/
+file body, Provider response/reasoning, Project path, credential, cookie/session, or
+private chain-of-thought. `canonical_value_digest` and the complete projection digest
+prove binding without copying semantic/source bodies into durable run evidence.
+
+The existing `AgentContextSnapshotView.manifest: Value` and
+`agent_context_snapshots.manifest_json` are the correct future owner. No new table,
+migration, or `idr_run_contexts` is required.
+
+## 20. Formal failure-mode review
+
+| Failure | Prevention layer | Fail-closed result |
+|---|---|---|
+| Old Preference overrides current explicit instruction | Normalized Current Constraints + Context Admission | Resolver marks `CURRENT_INSTRUCTION_OVERRIDE` or Unresolved; Admission excludes anything not COMPATIBLE |
+| Inferred Disposition is treated as Fact | SemanticKey family + kind-specific output | It remains `DISPOSITION + INFERRED`; never emitted as Fact/Reality |
+| Candidate is automatically used | Resolver lifecycle gate | `LIFECYCLE_EXCLUDED`; no effective/admitted item |
+| Weakened item returns as Active | Resolver lifecycle gate | `LIFECYCLE_EXCLUDED`; no fallback |
+| Revoked item reappears | Storage terminal state + Resolver lifecycle gate | `REVOKED_ITEM`; never effective |
+| Superseded predecessor reappears | Explicit lineage elimination + lifecycle gate | `SUPERSEDED_ITEM`; lineage ref only |
+| Project A item affects Project B | Exact Project selector match | `SCOPE_MISMATCH`; no cross-Project fallback |
+| Global item overrides narrower valid item | Same-key/same-authority specificity tuple | Global item `LOWER_PRECEDENCE`; narrow match owns current scope |
+| Incompatible kinds are compared as one semantic item | `SemanticKeyV1` family isolation | Separate groups; no winner selection across Fact/Behavior/Observation/Goal |
+| Stale Reality is treated as current truth | Reality tri-state relation evaluation | `STALE_REALITY_REF`; item excluded |
+| Unresolved Reality is treated as valid | Reality tri-state relation evaluation | `REALITY_UNRESOLVED`; item excluded |
+| Conflicting Facts are silently collapsed | Fact comparator | No winner; `SEMANTIC_CONFLICT` structured record |
+| Observation becomes permanent personality | Observation unique identity + non-effective rule | `NOT_EFFECTIVE_KIND`; support/diagnostic only |
+| Confidence becomes a generic truth score | Disposition-only confidence contract | Used only for equal-value duplicate representation and explainability |
+| Recency becomes implicit last-write-wins | Pipeline excludes timestamp from comparator | Conflict or explicit lineage required; timestamps ignored |
+| Human Model floods Model Context | Context Admission fixed item/per-kind/byte caps | Complete lower-order entries omitted with `PROJECTION_LIMIT` |
+| Resolver output changes nondeterministically | Fixed registry/pipeline/canonical encoding | Known-vector mismatch fails tests; same input yields same reference |
+| Model participates in semantic authority | Resolver/Admission are Model-free | No Model seam/call; invalid external suggestion cannot choose a winner |
+| Source/transcript body leaks into resolved view | Resolver output allowlist | Body is absent; only refs/tokens/digests survive |
+| Why-used exposes private reasoning | Why-used allowlist and 16 KiB bound | Manifest rejects forbidden/unbounded fields; empty contribution on invalid manifest |
+
+## 21. Updated conclusion
+
+```text
+IDR_V2_CONTEXT_INTEGRATION_REVIEW: PASS
+CONTEXT_ADMISSION_CONTRACT: IMPLEMENTATION_READY_SEAM_V1
+CONTEXT_ADMISSION_RUNTIME: NOT_IMPLEMENTED
+MODEL_IN_CONTEXT_ADMISSION_V1: NO
+CONTEXTCOMPILER_BEHAVIOR: UNCHANGED
+MAX_MODEL_FACING_ITEMS: 8
+MAX_MODEL_FACING_UTF8_BYTES: 4096
+MAX_WHY_USED_UTF8_BYTES: 16384
+CURRENT_INPUT_PRECEDENCE: CURRENT_USER_INPUT > CURRENT_REALITY > HUMAN_MODEL
+RESOLUTION_PERSISTENCE: NONE
+SCHEMA_CHANGE: NO
+AGENT_BEHAVIOR_CHANGED: NO
 ```

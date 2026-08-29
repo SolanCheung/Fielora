@@ -2403,3 +2403,78 @@ SCHEMA_CHANGE: NO
 AGENT_BEHAVIOR_CHANGED: NO
 NEXT: IDR_V2_RESOLVER_IMPLEMENTATION_REVIEW_NOT_IMPLEMENTED
 ```
+
+## 100. IDR V2 Resolver Implementation Review
+
+Resolver/Context design changeset 已按用户要求独立提交为
+`eb09432d91deb5ea25d54bac9413e6a705b83791`，提交后 worktree clean。随后进行的
+Implementation Review 仍为 docs/contract only：没有实现 Resolver、Context Admission、
+Direction/Learning、Model extraction/activation、ContextCompiler/Agent loop、FIPC/UI，
+也没有修改 schema 12 storage、migration、dependency、Provider 或 Tool。
+
+`FIELORA_IDR_V2_RESOLVER_IMPLEMENTATION_CONTRACT_CANDIDATE.md` 把下一轮 Resolver
+可编码输入收敛为 `ResolveHumanModelInputV1`，输出为 ephemeral
+`ResolvedHumanModelViewV1`。Resolver 版本为 `IDR_RESOLVER_V1`，使用 code-owned
+`IDR_SEMANTIC_REGISTRY_V1`、tri-state normalized selectors、structured current
+constraints、source availability 与 Reality validation projection；Model、randomness、
+wall-clock decay、fuzzy equivalence、source retrieval 与 raw task parsing 均为 0。
+
+`SemanticKeyV1` 使用四个隔离 family：Human Fact subject、Preference/Disposition
+共享 Behavior dimension、Observation item identity 与 Long-term Goal key。只有真正
+共享 Behavior key 的 Preference/Disposition 可跨 kind 比较；Fact、Goal、Observation
+不得被强行塞进同一 winner pool。V1 registry 固定八个既有 Candidate behavior
+dimensions 及 bounded values、三类 Fact subjects、五类 Observation classification、
+三类 Goal keys，以及 `CODING / FAST_EDIT|FOCUSED_EDIT|GENERAL /
+TASK_EXECUTION|FINAL_RESPONSE|APPROVAL_EXPLANATION` Scope vocabulary。Unknown key/value/
+selector 均 fail closed；registry 不进入数据库、Plugin 或 Marketplace。
+
+Resolution pipeline 固定为 version/snapshot/context validation → registry projection →
+lineage → lifecycle → exact Scope → source/Reality/current constraints → semantic
+grouping → kind-specific comparator → conflicts → canonical output/ref。只有 Active
+可 effective；Candidate/Weakened/Conflicted/Superseded/Revoked 不可用，terminal
+predecessor 永不 fallback。Missing/erased predecessor 只产生 incomplete-lineage
+diagnostic，不否定具有独立 payload/provenance 的 current successor；present cycle、
+fork/self/impossible lineage hard fail。Confidence 只可在 same-value Disposition
+duplicate 中选择 representation，不能为 conflicting values 选 winner，也不推广成
+generic memory/truth score。
+
+Reality Contract 使用 `VALID / STALE_REALITY_REF / REALITY_UNRESOLVED`。Project 可由
+`FieldId + ProjectView.revision` 验证；Project fingerprint 只 hash identity/revision。
+Active Artifact 可由 `ArtifactId + current ArtifactRevisionId` 形成 fingerprint，不伪造
+numeric revision。Decision/Verification/FieldObject 与 non-active Artifact 当前没有通用
+live projection，缺失 authority 必须 unresolved。Current constraints 明确保持
+`CURRENT EXPLICIT USER INPUT > CURRENT AUTHORITATIVE REALITY > CURRENT TASK/PROJECT
+CONSTRAINTS > DURABLE HUMAN MODEL`；Resolver 暴露 COMPATIBLE/OVERRIDDEN/UNRESOLVED，
+Context Admission 只允许 COMPATIBLE。
+
+`IDRContextAdmissionV1` 独立属于 `Harness.Ingress & Context`，固定最多 8 个
+model-facing entries、4 KiB complete UTF-8 block、Fact/Preference/Disposition/Goal
+per-kind cap 与最多 2 个 neutral conflict notices；Observation cap 为 0。Selection 只用
+structured applicability、scope、kind 与 stable IDs，不用 Model。`WhyUsedManifestV1`
+最多 16 KiB，记录 item/kind/SemanticKey/scope/lifecycle/revision/version/ref/digest/
+admission reason/Reality state，不记录 raw semantic/source/transcript/file/web/provider
+body、Project path、secret 或 chain-of-thought。未来 owner 仍为 existing
+`AgentContextSnapshotView.manifest`，不新增 `idr_run_contexts`。
+
+已提交 `HumanModelSnapshot` 包含 Resolver 所需 typed payload、scope、basis/confidence、
+lineage、provenance 与 Reality dependency；fixed registry/current projections 都是
+versioned application input。Tradeoff、unknown/open value、missing source/Reality 可以
+安全 suppress，无需重写已存 rows。因此本轮 storage compatibility 结论为
+`STORAGE_CONTRACT_GAPS: NONE`、`SCHEMA_CHANGE: NO`、`MIGRATION: NONE`。
+
+```text
+DESIGN_COMMIT: eb09432d91deb5ea25d54bac9413e6a705b83791
+RESOLVER_IMPLEMENTATION_REVIEW: PASS
+IMPLEMENTATION_READY: YES
+IMPLEMENTATION_AUTHORIZED: NO
+ARCHITECTURE_PLACEMENT: Harness.IDR.Resolver
+CONTEXT_ADMISSION: Harness.Ingress & Context / CONTRACT_ONLY
+RESOLUTION_PERSISTENCE: NONE
+MODEL_IN_RESOLVER: NO
+MODEL_IN_CONTEXT_ADMISSION_V1: NO
+STORAGE_CONTRACT_GAPS: NONE
+SCHEMA_CHANGE: NO
+RUNTIME_IMPLEMENTATION: NONE
+AGENT_BEHAVIOR_CHANGED: NO
+NEXT: IDR_V2_RESOLVER_IMPLEMENTATION_AUTHORIZATION_NOT_GRANTED
+```

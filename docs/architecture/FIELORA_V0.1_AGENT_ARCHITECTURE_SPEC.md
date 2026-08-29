@@ -579,19 +579,22 @@ interpretation, task planning, Tool selection authority, Permission, Approval,
 Execution, Verification, Reality, or final decision authority. It cannot become
 a second Agent or a second LLM.
 
-Current implementation has no durable Human Model, IDR store, IDR service, or
-IDR Runtime module. This specification defines semantic ownership only; it does
-not authorize implementation, schema, migration, `HumanProfileId`, Memory
-index, or an empty physical module.
+Current implementation has the schema-12 storage-only Human Model Candidate in
+the existing Fielora SQLite authority and `fielora-storage::idr`; it has no
+Resolver, Direction/Learning stage, Context integration, FIPC/UI, or independent
+IDR service/Runtime module. Storage implementation does not authorize those
+missing behaviors, `HumanProfileId`, a Memory index, or an empty physical module.
 
 Detailed semantic, lifecycle, projection, privacy, and Eval design is tracked
 in `FIELORA_IDR_V2_DESIGN_CANDIDATE.md`. Its status is
 `DRAFT / CANDIDATE / NOT FROZEN`; it does not authorize Contract freeze,
-Schema, Migration, Runtime, Context integration, or UI implementation.
+Resolver Runtime, Context integration, or UI implementation.
 
 The minimum semantic Contract Review is tracked in
-`FIELORA_IDR_V2_CONTRACT_CANDIDATE.md`. It is also
-`DRAFT / CANDIDATE / NOT FROZEN` and does not authorize Schema or implementation.
+`FIELORA_IDR_V2_CONTRACT_CANDIDATE.md`. The storage mapping is an implemented
+Candidate; Resolver input/output and Context Admission are implementation-ready
+Candidates in their dedicated review documents, but remain unimplemented and
+unauthorized.
 
 ---
 
@@ -709,10 +712,9 @@ Local Fielora Installation
 
 Do not add Tenant Identity, Organization Identity, an enterprise principal
 directory, multi-user subject runtime, Aegis-style full Identity Authority, or
-identity-delegation Runtime. A future IDR implementation may use a minimal
-`HumanProfileId` solely as local Human Model data reference; it would not be a
-security Identity Authority. Multi-user, remote execution, enterprise accounts,
-or cross-device profiles require a separate Change Impact.
+identity-delegation Runtime. IDR V2 uses the database-local primary-human singleton
+and no `HumanProfileId`. Multi-user, remote execution, enterprise accounts, or
+cross-device profiles require a separate Change Impact and later Contract version.
 
 ## 5.5 Aegis
 
@@ -991,7 +993,7 @@ The Renderer cannot invent successful execution or verification.
 | Governance | `PolicyEngine`, permission/effect contracts, Approval routing/nonce, executor invariants, completion authority |
 | Execution | coordinator lifecycle/dispatch/cancel/resume; Tokio infrastructure; ToolCall projection; process cancellation |
 | Verification & Evidence | Tool/Verification receipts, mutation invalidation, diff/test gates, completion evaluation |
-| IDR | semantic domain defined; Individualized Disposition Runtime and Human Model not implemented |
+| IDR | schema-12 Human Model storage Candidate implemented in existing `fielora-storage`; Resolver/Direction/Learning/Context integration not implemented |
 | Entry Intent Resolver | historical Phase 04 bounded product-flow routing semantics; no independent IDR runtime |
 | Agent Profile | bundled/versioned product definition required by architecture; distinct runtime not implemented |
 | Memory Domain | cross-cutting ownership across Continuity, Orchestration, IDR, and Reality; no independent Memory Runtime |
@@ -1040,12 +1042,12 @@ reuse its Governance, Continuity, Execution, and Evidence.
 
 ## IDR
 
-- governed Human Model with distinct Fact/Observation/Preference/Inference;
-- provenance, scope, confidence, and lifecycle;
-- disposition resolution and bounded Individualized Direction;
-- user inspection and correction behavior.
+- deterministic Resolver Runtime over the implemented typed Human Model snapshot;
+- separate bounded Context Admission and future Individualized Direction;
+- future governed proposal/learning behavior and user inspection/correction surface.
 
-IDR V2 remains design-only. These gaps do not authorize schema, a Memory index,
+IDR V2 storage exists, but Resolver/Context/Direction/Learning/UI remain unimplemented.
+The reviewed Resolver Contract does not authorize code, a new schema, a Memory index,
 `HumanProfileId`, an IDR service, or a parallel Runtime.
 
 ## Supporting concepts
