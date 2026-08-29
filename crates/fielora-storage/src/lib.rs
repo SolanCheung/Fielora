@@ -11,12 +11,13 @@ pub mod sync;
 use fielora_contracts::*;
 use fielora_field::{
     Activity, DomainError, Field, FieldRepository, RealityRepository, SurfaceRepository,
-    SurfaceSnapshot, parse_persisted_focus, validate_surface_layout,
+    SurfaceSnapshot, canonicalize_https_url, parse_persisted_focus, validate_surface_layout,
 };
 use fielora_platform::DeviceIdentity;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
@@ -34,6 +35,7 @@ const MIGRATION_0009: &str = include_str!("../migrations/0009_artifact_type_exte
 const MIGRATION_0010: &str = include_str!("../migrations/0010_durable_source_assets.sql");
 const MIGRATION_0011: &str = include_str!("../migrations/0011_artifact_archive_state.sql");
 const MIGRATION_0012: &str = include_str!("../migrations/0012_idr_v2_human_model.sql");
+const MIGRATION_0013: &str = include_str!("../migrations/0013_rich_result_typed_references.sql");
 const MIGRATION_0001_NAME: &str = "core";
 const MIGRATION_0002_NAME: &str = "phase02_reality";
 const MIGRATION_0004_NAME: &str = "phase04_entry";
@@ -45,6 +47,7 @@ const MIGRATION_0009_NAME: &str = "artifact_type_extensibility";
 const MIGRATION_0010_NAME: &str = "durable_source_assets";
 const MIGRATION_0011_NAME: &str = "artifact_archive_state";
 const MIGRATION_0012_NAME: &str = "idr_v2_human_model";
+const MIGRATION_0013_NAME: &str = "rich_result_typed_references";
 const MIGRATION_0002_FROZEN_SHA256: &str =
     "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9";
 const MIGRATION_0004_FROZEN_SHA256: &str =
@@ -53,7 +56,7 @@ const MIGRATION_0005_FROZEN_SHA256: &str =
     "b7e1e586b47e50389502677e172741d69463e9518ed32211dfafe0dc910c1547";
 const MIGRATION_0006_FROZEN_SHA256: &str =
     "5257959801424a13426259ce10c9ed2d5037795ec7a3a207171c568bc80dbaae";
-const SCHEMA_VERSION: u32 = 12;
+const SCHEMA_VERSION: u32 = 13;
 const LOCAL_USER_NAME: &str = "Local user";
 const SYSTEM_NAME: &str = "Fielora system";
 
@@ -509,11 +512,25 @@ impl StorageHandle {
                 return Err(DomainError::TerminalResource);
             }
             ensure_provider_available(connection, &owner, request.provider_config_id.as_ref())?;
+            validate_result_references(
+                connection,
+                &owner,
+                &conversation,
+                &request.content,
+                &request.references,
+            )?;
+            let references_json = serde_json::to_string(&request.references)
+                .map_err(|error| DomainError::Validation(error.to_string()))?;
+            if references_json.len() > 1_048_576 {
+                return Err(DomainError::Validation(
+                    "RESULT_REFERENCE_SIDECAR_TOO_LARGE".into(),
+                ));
+            }
             let id = MessageId::new(Uuid::now_v7().to_string());
             let transaction = connection.transaction().map_err(storage_domain)?;
             transaction.execute(
-                "INSERT INTO conversation_messages(id,conversation_id,role,content,status,provider_config_id,model_id,invocation_id,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-                params![id.0, request.conversation_id.0, wire(&request.role), request.content, wire(&request.status), request.provider_config_id.map(|value| value.0), request.model_id, request.invocation_id.map(|value| value.0), now],
+                "INSERT INTO conversation_messages(id,conversation_id,role,content,status,provider_config_id,model_id,invocation_id,references_json,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                params![id.0, request.conversation_id.0, wire(&request.role), request.content, wire(&request.status), request.provider_config_id.map(|value| value.0), request.model_id, request.invocation_id.map(|value| value.0), references_json, now],
             ).map_err(storage_domain)?;
             transaction
                 .execute(
@@ -534,7 +551,7 @@ impl StorageHandle {
         request_task(&self.sender, move |connection| {
             get_conversation(connection, &owner, &conversation_id)?;
             let mut statement = connection.prepare(
-                "SELECT m.id,m.conversation_id,m.role,m.content,m.status,m.provider_config_id,m.model_id,m.invocation_id,m.created_at FROM conversation_messages m JOIN conversations c ON c.id=m.conversation_id JOIN fields f ON f.id=c.field_id WHERE m.conversation_id=?1 AND f.owner_principal_id=?2 ORDER BY m.created_at ASC,m.id ASC"
+                "SELECT m.id,m.conversation_id,m.role,m.content,m.status,m.provider_config_id,m.model_id,m.invocation_id,m.references_json,m.created_at FROM conversation_messages m JOIN conversations c ON c.id=m.conversation_id JOIN fields f ON f.id=c.field_id WHERE m.conversation_id=?1 AND f.owner_principal_id=?2 ORDER BY m.created_at ASC,m.id ASC"
             ).map_err(storage_domain)?;
             let rows = statement
                 .query_map(
@@ -2959,6 +2976,7 @@ fn conversation_revision_or_not_found(
 fn conversation_message_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<ConversationMessageView> {
+    let references_json = row.get::<_, String>(8)?;
     Ok(ConversationMessageView {
         id: MessageId::new(row.get::<_, String>(0)?),
         conversation_id: ConversationId::new(row.get::<_, String>(1)?),
@@ -2968,8 +2986,19 @@ fn conversation_message_from_row(
         provider_config_id: row.get::<_, Option<String>>(5)?.map(ProviderConfigId::new),
         model_id: row.get(6)?,
         invocation_id: row.get::<_, Option<String>>(7)?.map(ModelInvocationId::new),
-        created_at: row.get(8)?,
+        references: decode_result_references(&references_json),
+        created_at: row.get(9)?,
     })
+}
+
+fn decode_result_references(value: &str) -> Vec<ResultReference> {
+    if value.len() > 1_048_576 {
+        return vec![];
+    }
+    match serde_json::from_str::<Vec<ResultReference>>(value) {
+        Ok(references) if references.len() <= 64 => references,
+        _ => vec![],
+    }
 }
 
 fn agent_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRunView> {
@@ -3119,10 +3148,244 @@ fn get_conversation_message(
     id: &MessageId,
 ) -> Result<ConversationMessageView, DomainError> {
     connection.query_row(
-        "SELECT m.id,m.conversation_id,m.role,m.content,m.status,m.provider_config_id,m.model_id,m.invocation_id,m.created_at FROM conversation_messages m JOIN conversations c ON c.id=m.conversation_id JOIN fields f ON f.id=c.field_id WHERE m.id=?1 AND f.owner_principal_id=?2",
+        "SELECT m.id,m.conversation_id,m.role,m.content,m.status,m.provider_config_id,m.model_id,m.invocation_id,m.references_json,m.created_at FROM conversation_messages m JOIN conversations c ON c.id=m.conversation_id JOIN fields f ON f.id=c.field_id WHERE m.id=?1 AND f.owner_principal_id=?2",
         params![id.0, owner.0],
         conversation_message_from_row,
     ).optional().map_err(storage_domain)?.ok_or(DomainError::NotFound)
+}
+
+fn validate_result_references(
+    connection: &Connection,
+    owner: &PrincipalId,
+    conversation: &ConversationView,
+    content: &str,
+    references: &[ResultReference],
+) -> Result<(), DomainError> {
+    if references.len() > 64 {
+        return Err(DomainError::Validation(
+            "RESULT_REFERENCE_LIMIT_EXCEEDED".into(),
+        ));
+    }
+    let mut ids = HashSet::with_capacity(references.len());
+    for reference in references {
+        if !valid_result_reference_id(&reference.id.0) || !ids.insert(reference.id.0.as_str()) {
+            return Err(DomainError::Validation(
+                "RESULT_REFERENCE_ID_INVALID".into(),
+            ));
+        }
+        if reference.label.trim().is_empty()
+            || reference.label.chars().count() > 256
+            || reference.label.len() > 1_024
+            || reference.label.chars().any(char::is_control)
+        {
+            return Err(DomainError::Validation(
+                "RESULT_REFERENCE_LABEL_INVALID".into(),
+            ));
+        }
+        let marker = format!("](fielora-reference:{})", reference.id.0);
+        if !content.contains(&marker) {
+            return Err(DomainError::Validation(
+                "RESULT_REFERENCE_MARKER_MISSING".into(),
+            ));
+        }
+        match &reference.target {
+            ResultReferenceTarget::ProjectFile {
+                field_id,
+                relative_path,
+                expected_sha256,
+            } => {
+                validate_result_file_target(
+                    conversation,
+                    field_id,
+                    relative_path,
+                    expected_sha256.as_deref(),
+                )?;
+                validate_result_file_provenance(
+                    connection,
+                    owner,
+                    conversation,
+                    relative_path,
+                    None,
+                    expected_sha256.as_deref(),
+                    &reference.provenance,
+                )?;
+            }
+            ResultReferenceTarget::CodeRange {
+                field_id,
+                relative_path,
+                line_start,
+                line_end,
+                expected_sha256,
+            } => {
+                validate_result_file_target(
+                    conversation,
+                    field_id,
+                    relative_path,
+                    expected_sha256.as_deref(),
+                )?;
+                if *line_start == 0
+                    || *line_end < *line_start
+                    || *line_end > 1_000_000
+                    || line_end.saturating_sub(*line_start) > 100_000
+                {
+                    return Err(DomainError::Validation(
+                        "RESULT_REFERENCE_LINE_RANGE_INVALID".into(),
+                    ));
+                }
+                validate_result_file_provenance(
+                    connection,
+                    owner,
+                    conversation,
+                    relative_path,
+                    Some((*line_start, *line_end)),
+                    expected_sha256.as_deref(),
+                    &reference.provenance,
+                )?;
+            }
+            ResultReferenceTarget::WebReference {
+                field_id,
+                reference_id,
+                https_url,
+            } => {
+                if field_id != &conversation.field_id
+                    || canonicalize_https_url(https_url)? != *https_url
+                {
+                    return Err(DomainError::Validation(
+                        "RESULT_REFERENCE_WEB_TARGET_INVALID".into(),
+                    ));
+                }
+                let ResultReferenceProvenance::SavedReference {
+                    reference_id: source_id,
+                } = &reference.provenance
+                else {
+                    return Err(DomainError::Validation(
+                        "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+                    ));
+                };
+                if source_id != reference_id {
+                    return Err(DomainError::Validation(
+                        "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+                    ));
+                }
+                let source = get_reference(connection, field_id, reference_id)?;
+                if source.lifecycle != ObjectLifecycle::Active
+                    || source.reference_type != ReferenceType::HttpsUrl
+                    || source.canonical_url != *https_url
+                {
+                    return Err(DomainError::Validation(
+                        "RESULT_REFERENCE_WEB_TARGET_INVALID".into(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn valid_result_reference_id(value: &str) -> bool {
+    value.len() == 42
+        && value.starts_with("resultref_")
+        && value[10..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn validate_result_file_target(
+    conversation: &ConversationView,
+    field_id: &FieldId,
+    relative_path: &str,
+    expected_sha256: Option<&str>,
+) -> Result<(), DomainError> {
+    if field_id != &conversation.field_id || !valid_result_relative_path(relative_path) {
+        return Err(DomainError::Validation(
+            "RESULT_REFERENCE_PROJECT_SCOPE_INVALID".into(),
+        ));
+    }
+    if expected_sha256.is_some_and(|hash| {
+        hash.len() != 64
+            || hash
+                .bytes()
+                .any(|byte| !byte.is_ascii_hexdigit() || byte.is_ascii_uppercase())
+    }) {
+        return Err(DomainError::Validation(
+            "RESULT_REFERENCE_HASH_INVALID".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn valid_result_relative_path(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 16_384
+        && !value.starts_with('/')
+        && !value.starts_with('\\')
+        && !value.contains('\\')
+        && !value.contains(':')
+        && !value.chars().any(char::is_control)
+        && value
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+fn validate_result_file_provenance(
+    connection: &Connection,
+    owner: &PrincipalId,
+    conversation: &ConversationView,
+    relative_path: &str,
+    line_range: Option<(u32, u32)>,
+    expected_sha256: Option<&str>,
+    provenance: &ResultReferenceProvenance,
+) -> Result<(), DomainError> {
+    let ResultReferenceProvenance::ToolReceipt { tool_call_id } = provenance else {
+        return if provenance == &ResultReferenceProvenance::ProjectContext && line_range.is_none() {
+            Ok(())
+        } else {
+            Err(DomainError::Validation(
+                "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+            ))
+        };
+    };
+    let tool = get_agent_tool_call(connection, owner, tool_call_id)?;
+    let run = get_agent_run(connection, owner, &tool.run_id)?;
+    if run.conversation_id != conversation.id || tool.status != AgentToolStatus::Completed {
+        return Err(DomainError::Validation(
+            "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+        ));
+    }
+    let Some(receipt) = tool.receipt.as_ref() else {
+        return Err(DomainError::Validation(
+            "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+        ));
+    };
+    let receipt_path = receipt
+        .get("path")
+        .and_then(Value::as_str)
+        .or_else(|| tool.arguments.get("path").and_then(Value::as_str));
+    if receipt_path != Some(relative_path) {
+        return Err(DomainError::Validation(
+            "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+        ));
+    }
+    if let Some((line_start, line_end)) = line_range
+        && (tool.name != "read_file"
+            || receipt.get("line_start").and_then(Value::as_u64) != Some(u64::from(line_start))
+            || receipt.get("line_end").and_then(Value::as_u64) != Some(u64::from(line_end)))
+    {
+        return Err(DomainError::Validation(
+            "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+        ));
+    }
+    if let Some(expected) = expected_sha256 {
+        let receipt_hash = ["sha256", "after_sha256", "content_sha256"]
+            .into_iter()
+            .find_map(|key| receipt.get(key).and_then(Value::as_str));
+        if receipt_hash != Some(expected) {
+            return Err(DomainError::Validation(
+                "RESULT_REFERENCE_PROVENANCE_INVALID".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn ensure_provider_available(
@@ -3517,6 +3780,7 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     let checksum_0010 = migration_checksum(MIGRATION_0010);
     let checksum_0011 = migration_checksum(MIGRATION_0011);
     let checksum_0012 = migration_checksum(MIGRATION_0012);
+    let checksum_0013 = migration_checksum(MIGRATION_0013);
     if checksum_0002 != MIGRATION_0002_FROZEN_SHA256 {
         return Err(StorageError::MigrationChecksum { version: 2 });
     }
@@ -3649,7 +3913,31 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     if !migration_exists(connection, 12)? {
         apply_idr_v2_storage_migration(connection, now, MIGRATION_0012, &checksum_0012)?;
     }
+    verify_applied_migration(connection, 13, MIGRATION_0013_NAME, &checksum_0013)?;
+    if !migration_exists(connection, 13)? {
+        apply_rich_result_reference_migration(connection, now, MIGRATION_0013, &checksum_0013)?;
+    }
     validate_schema(connection)?;
+    Ok(())
+}
+
+fn apply_rich_result_reference_migration(
+    connection: &mut Connection,
+    now: i64,
+    migration_sql: &str,
+    checksum: &str,
+) -> Result<(), StorageError> {
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if transaction.execute_batch(migration_sql).is_err() {
+        return Err(StorageError::MigrationIncompatibleData);
+    }
+    transaction.execute(
+        "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (13, ?1, ?2, ?3)",
+        params![MIGRATION_0013_NAME, checksum, now],
+    )?;
+    validate_schema(&transaction)?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -4281,6 +4569,44 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
     }
     if migration_exists(connection, 12)? {
         validate_idr_v2_schema(connection)?;
+    }
+    if migration_exists(connection, 13)? {
+        validate_rich_result_reference_schema(connection)?;
+    }
+    Ok(())
+}
+
+fn validate_rich_result_reference_schema(connection: &Connection) -> Result<(), StorageError> {
+    let required: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('conversation_messages') WHERE name='references_json' AND \"notnull\"=1 AND dflt_value='''[]'''",
+        [],
+        |row| row.get(0),
+    )?;
+    if required != 1 {
+        return Err(StorageError::OpenGate(
+            "required typed-reference column missing: conversation_messages.references_json".into(),
+        ));
+    }
+    let sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='conversation_messages'",
+        [],
+        |row| row.get(0),
+    )?;
+    let normalized = sql
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_uppercase();
+    for fragment in [
+        "JSON_VALID(REFERENCES_JSON)",
+        "JSON_TYPE(REFERENCES_JSON) = 'ARRAY'",
+        "LENGTH(CAST(REFERENCES_JSON AS BLOB)) BETWEEN 2 AND 1048576",
+    ] {
+        if !normalized.contains(fragment) {
+            return Err(StorageError::OpenGate(format!(
+                "required typed-reference CHECK missing: {fragment}"
+            )));
+        }
     }
     Ok(())
 }
@@ -6474,6 +6800,17 @@ mod tests {
         .unwrap();
     }
 
+    fn apply_schema_through_12(connection: &mut Connection, now: i64) {
+        apply_schema_through_11(connection, now);
+        apply_idr_v2_storage_migration(
+            connection,
+            now + 4,
+            MIGRATION_0012,
+            &migration_checksum(MIGRATION_0012),
+        )
+        .unwrap();
+    }
+
     fn start_pre_migrated_worker(
         mut connection: Connection,
         database_path: PathBuf,
@@ -7170,7 +7507,7 @@ mod tests {
             frozen_migration_checksum(MIGRATION_0006),
             MIGRATION_0006_FROZEN_SHA256
         );
-        assert_eq!(schema_version(), 12);
+        assert_eq!(schema_version(), 13);
     }
 
     #[test]
@@ -7802,7 +8139,13 @@ mod tests {
             .unwrap();
         assert_eq!(before, (11, 0));
 
-        apply_migrations(&mut connection, 10).unwrap();
+        apply_idr_v2_storage_migration(
+            &mut connection,
+            10,
+            MIGRATION_0012,
+            &migration_checksum(MIGRATION_0012),
+        )
+        .unwrap();
         let after: (i64, i64, i64, i64) = connection
             .query_row(
                 &format!(
@@ -7846,6 +8189,58 @@ mod tests {
             )
             .unwrap();
         assert_eq!(rolled_back, (11, 0, 0));
+        drop(rollback);
+        fs::remove_dir_all(rollback_root).unwrap();
+    }
+
+    #[test]
+    fn migration_0013_preserves_markdown_adds_empty_sidecar_and_rolls_back_atomically() {
+        let root = temporary_root();
+        let paths = PlatformPaths::from_root(root.clone()).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let mut connection = open_connection(&paths.database).unwrap();
+        apply_schema_through_12(&mut connection, 1);
+        let user = bootstrap_records(&mut connection, &device, 10).unwrap();
+        let field_id = Uuid::now_v7().to_string();
+        let conversation_id = Uuid::now_v7().to_string();
+        let message_id = Uuid::now_v7().to_string();
+        connection.execute("INSERT INTO fields(id,owner_principal_id,title,lifecycle_status,revision,created_at,updated_at) VALUES(?1,?2,'Rich Result','ACTIVE',1,10,10)",params![field_id,user.0]).unwrap();
+        connection.execute("INSERT INTO conversations(id,field_id,title,provider_config_id,model_id,lifecycle_status,revision,created_at,updated_at) VALUES(?1,?2,'Typed result',NULL,NULL,'ACTIVE',1,11,11)",params![conversation_id,field_id]).unwrap();
+        connection.execute("INSERT INTO conversation_messages(id,conversation_id,role,content,status,provider_config_id,model_id,invocation_id,created_at) VALUES(?1,?2,'ASSISTANT','# Existing Markdown','COMPLETED',NULL,NULL,NULL,12)",params![message_id,conversation_id]).unwrap();
+
+        apply_migrations(&mut connection, 20).unwrap();
+        let migrated: (i64, String, String) = connection.query_row(
+            "SELECT (SELECT MAX(version) FROM schema_migrations),content,references_json FROM conversation_messages WHERE id=?1",
+            [&message_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(migrated, (13, "# Existing Markdown".into(), "[]".into()));
+        apply_migrations(&mut connection, 21).unwrap();
+        validate_schema(&connection).unwrap();
+        drop(connection);
+        fs::remove_dir_all(root).unwrap();
+
+        let rollback_root = temporary_root();
+        let rollback_paths = PlatformPaths::from_root(rollback_root.clone()).unwrap();
+        let mut rollback = open_connection(&rollback_paths.database).unwrap();
+        apply_schema_through_12(&mut rollback, 1);
+        let failing_migration =
+            format!("{MIGRATION_0013}\nSELECT * FROM migration_0013_forced_failure;");
+        assert!(matches!(
+            apply_rich_result_reference_migration(
+                &mut rollback,
+                20,
+                &failing_migration,
+                &migration_checksum(&failing_migration),
+            ),
+            Err(StorageError::MigrationIncompatibleData)
+        ));
+        let rolled_back: (i64, i64) = rollback.query_row(
+            "SELECT (SELECT COUNT(*) FROM schema_migrations WHERE version=13), (SELECT COUNT(*) FROM pragma_table_info('conversation_messages') WHERE name='references_json')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(rolled_back, (0, 0));
         drop(rollback);
         fs::remove_dir_all(rollback_root).unwrap();
     }
@@ -8317,6 +8712,7 @@ mod tests {
                         provider_config_id: None,
                         model_id: None,
                         invocation_id: None,
+                        references: vec![],
                     },
                     4,
                 )
@@ -8334,6 +8730,422 @@ mod tests {
             assert_eq!(messages.len(), 1);
             assert_eq!(messages[0].content, "Inspect the project");
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rich_result_references_round_trip_reopen_and_reject_unsafe_targets() {
+        let root = temporary_root();
+        let conversation_id = {
+            let worker = start(&root, 1);
+            let handle = worker.handle();
+            let (project, conversation, run) = artifact_run_fixture(&handle, &root, 10);
+            fs::create_dir_all(root.join("workspace/src")).unwrap();
+            fs::write(
+                root.join("workspace/src/lib.rs"),
+                (1..=30)
+                    .map(|line| format!("line {line}\n"))
+                    .collect::<String>(),
+            )
+            .unwrap();
+            let digest = "a".repeat(64);
+            let tool = handle
+                .create_agent_tool_call(
+                    run.id.clone(),
+                    "read_file".into(),
+                    AgentToolEffect::Observe,
+                    AgentPolicyDecision::Allow,
+                    json!({"path":"src/lib.rs","line_start":10,"line_end":20}),
+                    20,
+                )
+                .unwrap();
+            handle
+                .update_agent_tool_call(tool.id.clone(), AgentToolStatus::Running, None, None, 21)
+                .unwrap();
+            handle
+                .update_agent_tool_call(
+                    tool.id.clone(),
+                    AgentToolStatus::Completed,
+                    Some(json!({"kind":"FILE_READ","path":"src/lib.rs","sha256":digest,"line_start":10,"line_end":20})),
+                    None,
+                    22,
+                )
+                .unwrap();
+            let reality = RealityService::new(
+                handle.clone(),
+                handle.local_user.clone(),
+                handle.device_id.clone(),
+            );
+            let (saved, _) = reality
+                .create_reference(
+                    CreateReferenceRequest {
+                        field_id: project.field_id.clone(),
+                        title: "Architecture".into(),
+                        url: "https://example.com/architecture".into(),
+                    },
+                    TraceId::new(Uuid::now_v7().to_string()),
+                    23,
+                )
+                .unwrap();
+            let file_id = ResultReferenceId::new(format!("resultref_{}", "1".repeat(32)));
+            let range_id = ResultReferenceId::new(format!("resultref_{}", "2".repeat(32)));
+            let web_id = ResultReferenceId::new(format!("resultref_{}", "3".repeat(32)));
+            let markdown = format!(
+                "## 实现位置\n\n[lib.rs](fielora-reference:{file_id})\n\n[lib.rs · L10–L20](fielora-reference:{range_id})\n\n## 参考资料\n\n[Architecture](fielora-reference:{web_id})"
+            );
+            let references = vec![
+                ResultReference {
+                    id: file_id,
+                    label: "lib.rs".into(),
+                    target: ResultReferenceTarget::ProjectFile {
+                        field_id: project.field_id.clone(),
+                        relative_path: "src/lib.rs".into(),
+                        expected_sha256: None,
+                    },
+                    provenance: ResultReferenceProvenance::ProjectContext,
+                },
+                ResultReference {
+                    id: range_id,
+                    label: "lib.rs · L10–L20".into(),
+                    target: ResultReferenceTarget::CodeRange {
+                        field_id: project.field_id.clone(),
+                        relative_path: "src/lib.rs".into(),
+                        line_start: 10,
+                        line_end: 20,
+                        expected_sha256: Some("a".repeat(64)),
+                    },
+                    provenance: ResultReferenceProvenance::ToolReceipt {
+                        tool_call_id: tool.id.clone(),
+                    },
+                },
+                ResultReference {
+                    id: web_id,
+                    label: "Architecture".into(),
+                    target: ResultReferenceTarget::WebReference {
+                        field_id: project.field_id.clone(),
+                        reference_id: saved.resource.id.clone(),
+                        https_url: saved.resource.canonical_url.clone(),
+                    },
+                    provenance: ResultReferenceProvenance::SavedReference {
+                        reference_id: saved.resource.id.clone(),
+                    },
+                },
+            ];
+            let message = handle
+                .create_conversation_message(
+                    CreateConversationMessageRequest {
+                        conversation_id: conversation.id.clone(),
+                        role: ConversationMessageRole::Assistant,
+                        content: markdown.clone(),
+                        status: ConversationMessageStatus::Completed,
+                        provider_config_id: Some(run.provider_config_id.clone()),
+                        model_id: Some(run.model_id.clone()),
+                        invocation_id: Some(ModelInvocationId::new(run.id.0.clone())),
+                        references: references.clone(),
+                    },
+                    24,
+                )
+                .unwrap();
+            assert_eq!(message.references, references);
+
+            for invalid_path in ["../outside.rs", r"C:\Windows\secret.rs", "/etc/passwd"] {
+                let invalid_id = ResultReferenceId::new(format!("resultref_{}", "4".repeat(32)));
+                let error = handle
+                    .create_conversation_message(
+                        CreateConversationMessageRequest {
+                            conversation_id: conversation.id.clone(),
+                            role: ConversationMessageRole::Assistant,
+                            content: format!("[unsafe](fielora-reference:{invalid_id})"),
+                            status: ConversationMessageStatus::Completed,
+                            provider_config_id: None,
+                            model_id: None,
+                            invocation_id: None,
+                            references: vec![ResultReference {
+                                id: invalid_id,
+                                label: "unsafe".into(),
+                                target: ResultReferenceTarget::ProjectFile {
+                                    field_id: project.field_id.clone(),
+                                    relative_path: invalid_path.into(),
+                                    expected_sha256: None,
+                                },
+                                provenance: ResultReferenceProvenance::ProjectContext,
+                            }],
+                        },
+                        25,
+                    )
+                    .unwrap_err();
+                assert!(matches!(error, DomainError::Validation(_)));
+            }
+            let other_project = handle
+                .create_project(
+                    CreateProjectRequest {
+                        title: "Other Project".into(),
+                        goal: None,
+                        root_path: root.join("other-workspace").to_string_lossy().into_owned(),
+                    },
+                    26,
+                )
+                .unwrap();
+            let cross_id = ResultReferenceId::new(format!("resultref_{}", "6".repeat(32)));
+            assert!(matches!(
+                handle.create_conversation_message(
+                    CreateConversationMessageRequest {
+                        conversation_id: conversation.id.clone(),
+                        role: ConversationMessageRole::Assistant,
+                        content: format!("[cross](fielora-reference:{cross_id})"),
+                        status: ConversationMessageStatus::Completed,
+                        provider_config_id: None,
+                        model_id: None,
+                        invocation_id: None,
+                        references: vec![ResultReference {
+                            id: cross_id,
+                            label: "cross".into(),
+                            target: ResultReferenceTarget::ProjectFile {
+                                field_id: other_project.field_id,
+                                relative_path: "src/lib.rs".into(),
+                                expected_sha256: None,
+                            },
+                            provenance: ResultReferenceProvenance::ProjectContext,
+                        }],
+                    },
+                    27,
+                ),
+                Err(DomainError::Validation(_))
+            ));
+            for unsafe_url in [
+                "http://example.com/architecture",
+                "file:///C:/Windows/secret",
+                "javascript:alert(1)",
+                "fielora://app",
+            ] {
+                let invalid_id = ResultReferenceId::new(format!("resultref_{}", "8".repeat(32)));
+                assert!(
+                    handle
+                        .create_conversation_message(
+                            CreateConversationMessageRequest {
+                                conversation_id: conversation.id.clone(),
+                                role: ConversationMessageRole::Assistant,
+                                content: format!("[web](fielora-reference:{invalid_id})"),
+                                status: ConversationMessageStatus::Completed,
+                                provider_config_id: None,
+                                model_id: None,
+                                invocation_id: None,
+                                references: vec![ResultReference {
+                                    id: invalid_id,
+                                    label: "web".into(),
+                                    target: ResultReferenceTarget::WebReference {
+                                        field_id: project.field_id.clone(),
+                                        reference_id: saved.resource.id.clone(),
+                                        https_url: unsafe_url.into(),
+                                    },
+                                    provenance: ResultReferenceProvenance::SavedReference {
+                                        reference_id: saved.resource.id.clone(),
+                                    },
+                                }],
+                            },
+                            28,
+                        )
+                        .is_err(),
+                    "unsafe Web reference unexpectedly accepted: {unsafe_url}"
+                );
+            }
+            for (line_start, line_end) in [(0, 20), (20, 10), (1, 1_000_001)] {
+                let invalid_id = ResultReferenceId::new(format!("resultref_{}", "7".repeat(32)));
+                assert!(matches!(
+                    handle.create_conversation_message(
+                        CreateConversationMessageRequest {
+                            conversation_id: conversation.id.clone(),
+                            role: ConversationMessageRole::Assistant,
+                            content: format!("[range](fielora-reference:{invalid_id})"),
+                            status: ConversationMessageStatus::Completed,
+                            provider_config_id: None,
+                            model_id: None,
+                            invocation_id: None,
+                            references: vec![ResultReference {
+                                id: invalid_id,
+                                label: "range".into(),
+                                target: ResultReferenceTarget::CodeRange {
+                                    field_id: project.field_id.clone(),
+                                    relative_path: "src/lib.rs".into(),
+                                    line_start,
+                                    line_end,
+                                    expected_sha256: Some("a".repeat(64)),
+                                },
+                                provenance: ResultReferenceProvenance::ToolReceipt {
+                                    tool_call_id: tool.id.clone(),
+                                },
+                            }],
+                        },
+                        28,
+                    ),
+                    Err(DomainError::Validation(_))
+                ));
+            }
+            let plain = handle
+                .create_conversation_message(
+                    CreateConversationMessageRequest {
+                        conversation_id: conversation.id.clone(),
+                        role: ConversationMessageRole::Assistant,
+                        content: "[Important](file:///C:/Windows/System32/config) src/app.ts:20 [fake](fielora-reference:resultref_55555555555555555555555555555555)".into(),
+                        status: ConversationMessageStatus::Completed,
+                        provider_config_id: None,
+                        model_id: None,
+                        invocation_id: None,
+                        references: vec![],
+                    },
+                    29,
+                )
+                .unwrap();
+            assert!(plain.references.is_empty());
+            conversation.id
+        };
+        {
+            let worker = start(&root, 30);
+            let messages = worker
+                .handle()
+                .list_conversation_messages(conversation_id)
+                .unwrap();
+            let rich = messages
+                .iter()
+                .find(|message| message.references.len() == 3)
+                .unwrap();
+            assert!(rich.content.starts_with("## 实现位置"));
+            assert_eq!(
+                rich.references
+                    .iter()
+                    .map(|reference| &reference.target)
+                    .collect::<Vec<_>>()
+                    .len(),
+                3
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn malformed_and_oversized_reference_sidecars_fail_soft_per_message() {
+        let root = temporary_root();
+        let (conversation_id, malformed_id, oversized_id) = {
+            let worker = start(&root, 1);
+            let handle = worker.handle();
+            let project = handle
+                .create_project(
+                    CreateProjectRequest {
+                        title: "Sidecar recovery".into(),
+                        goal: None,
+                        root_path: root.join("workspace").to_string_lossy().into_owned(),
+                    },
+                    2,
+                )
+                .unwrap();
+            let conversation = handle
+                .create_conversation(
+                    CreateConversationRequest {
+                        field_id: project.field_id.clone(),
+                        title: "Reference recovery".into(),
+                        provider_config_id: None,
+                        model_id: None,
+                    },
+                    3,
+                )
+                .unwrap();
+            let create_plain = |content: &str, now| {
+                handle
+                    .create_conversation_message(
+                        CreateConversationMessageRequest {
+                            conversation_id: conversation.id.clone(),
+                            role: ConversationMessageRole::Assistant,
+                            content: content.into(),
+                            status: ConversationMessageStatus::Completed,
+                            provider_config_id: None,
+                            model_id: None,
+                            invocation_id: None,
+                            references: vec![],
+                        },
+                        now,
+                    )
+                    .unwrap()
+            };
+            let malformed = create_plain("Malformed sidecar message", 4);
+            let oversized = create_plain("Oversized sidecar message", 5);
+            create_plain("Unaffected message", 6);
+
+            let long_path = format!("{}.rs", "a".repeat(16_376));
+            let references = (1..=64)
+                .map(|index| ResultReference {
+                    id: ResultReferenceId::new(format!("resultref_{index:032x}")),
+                    label: "large".into(),
+                    target: ResultReferenceTarget::ProjectFile {
+                        field_id: project.field_id.clone(),
+                        relative_path: long_path.clone(),
+                        expected_sha256: None,
+                    },
+                    provenance: ResultReferenceProvenance::ProjectContext,
+                })
+                .collect::<Vec<_>>();
+            let content = references
+                .iter()
+                .map(|reference| format!("[large](fielora-reference:{})", reference.id.0))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(matches!(
+                handle.create_conversation_message(
+                    CreateConversationMessageRequest {
+                        conversation_id: conversation.id.clone(),
+                        role: ConversationMessageRole::Assistant,
+                        content,
+                        status: ConversationMessageStatus::Completed,
+                        provider_config_id: None,
+                        model_id: None,
+                        invocation_id: None,
+                        references,
+                    },
+                    7,
+                ),
+                Err(DomainError::Validation(message)) if message == "RESULT_REFERENCE_SIDECAR_TOO_LARGE"
+            ));
+            (conversation.id, malformed.id, oversized.id)
+        };
+
+        let database = PlatformPaths::from_root(root.clone()).unwrap().database;
+        let connection = open_connection(&database).unwrap();
+        connection
+            .execute_batch("PRAGMA ignore_check_constraints = ON;")
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE conversation_messages SET references_json=?1 WHERE id=?2",
+                params!["{not-json", malformed_id.0],
+            )
+            .unwrap();
+        let oversized_json = format!("[\"{}\"]", "x".repeat(1_048_576));
+        connection
+            .execute(
+                "UPDATE conversation_messages SET references_json=?1 WHERE id=?2",
+                params![oversized_json, oversized_id.0],
+            )
+            .unwrap();
+        drop(connection);
+
+        let worker = start(&root, 8);
+        let messages = worker
+            .handle()
+            .list_conversation_messages(conversation_id)
+            .unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(
+            messages
+                .iter()
+                .map(|message| message.content.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Malformed sidecar message",
+                "Oversized sidecar message",
+                "Unaffected message"
+            ]
+        );
+        assert!(messages.iter().all(|message| message.references.is_empty()));
+        drop(worker);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -9528,6 +10340,7 @@ mod tests {
                         provider_config_id: None,
                         model_id: None,
                         invocation_id: None,
+                        references: vec![],
                     },
                     6,
                 )

@@ -243,7 +243,7 @@ test('terminal duration leads collapsed chronology and the exact result Markdown
   assert.match(turn, /<CompletedActivityHistory items=\{activityItems\} tools=\{tools\}\/>/);
   const terminalRuntime = turn.indexOf('<button type="button" className="agent-terminal-runtime"');
   const terminalDetail = turn.indexOf('{detailOpen && executionDetail}', terminalRuntime);
-  const terminalMarkdown = turn.indexOf('<MarkdownMessage content={markdown}/>', terminalDetail);
+  const terminalMarkdown = turn.indexOf('<MarkdownMessage content={markdown} references={message?.references ?? []} onOpenReference={onOpenReference}/>', terminalDetail);
   assert.ok(terminalRuntime >= 0 && terminalRuntime < terminalDetail && terminalDetail < terminalMarkdown);
   assert.doesNotMatch(turn, /function ResultText|naturalResultParagraph|stripAnswerHeading/);
   assert.match(turn, /const markdown = message\?\.content \|\| result\.detail/);

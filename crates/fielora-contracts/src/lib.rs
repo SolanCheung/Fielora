@@ -39,6 +39,7 @@ typed_id!(ContextPackageId);
 typed_id!(ModelInvocationId);
 typed_id!(ConversationId);
 typed_id!(MessageId);
+typed_id!(ResultReferenceId);
 typed_id!(AgentRunId);
 typed_id!(AgentEventId);
 typed_id!(ToolCallId);
@@ -2075,6 +2076,52 @@ pub enum ConversationMessageStatus {
     Failed,
 }
 
+/// Durable, provider-neutral target metadata for one controlled reference in a
+/// completed Markdown result. `field_id` is the existing stable Project
+/// identity; device-local root paths never enter this contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
+#[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ResultReferenceTarget {
+    ProjectFile {
+        field_id: FieldId,
+        relative_path: String,
+        expected_sha256: Option<String>,
+    },
+    CodeRange {
+        field_id: FieldId,
+        relative_path: String,
+        line_start: u32,
+        line_end: u32,
+        expected_sha256: Option<String>,
+    },
+    WebReference {
+        field_id: FieldId,
+        reference_id: ObjectId,
+        https_url: String,
+    },
+}
+
+/// Trusted source used by Core when resolving a model-visible reference.
+/// Provider/model output never supplies database identities directly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
+#[ts(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ResultReferenceProvenance {
+    ProjectContext,
+    ToolReceipt { tool_call_id: ToolCallId },
+    SavedReference { reference_id: ObjectId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ResultReference {
+    pub id: ResultReferenceId,
+    pub label: String,
+    pub target: ResultReferenceTarget,
+    pub provenance: ResultReferenceProvenance,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct ConversationMessageView {
     pub id: MessageId,
@@ -2085,6 +2132,8 @@ pub struct ConversationMessageView {
     pub provider_config_id: Option<ProviderConfigId>,
     pub model_id: Option<String>,
     pub invocation_id: Option<ModelInvocationId>,
+    #[serde(default)]
+    pub references: Vec<ResultReference>,
     #[ts(type = "number")]
     pub created_at: i64,
 }
@@ -2099,6 +2148,8 @@ pub struct CreateConversationMessageRequest {
     pub provider_config_id: Option<ProviderConfigId>,
     pub model_id: Option<String>,
     pub invocation_id: Option<ModelInvocationId>,
+    #[serde(default)]
+    pub references: Vec<ResultReference>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

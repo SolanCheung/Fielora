@@ -94,6 +94,32 @@ test('Desktop Foundation bridge keeps Project, Conversation, file, and terminal 
   assert.throws(() => validateRunTerminal({ field_id: fieldId, command: 'pnpm test' }));
 });
 
+test('Rich Result message bridge admits only bounded typed sidecars', () => {
+  const fileId = `resultref_${'1'.repeat(32)}`;
+  const rangeId = `resultref_${'2'.repeat(32)}`;
+  const webId = `resultref_${'3'.repeat(32)}`;
+  const file = { id:fileId,label:'app.ts',target:{kind:'PROJECT_FILE',field_id:fieldId,relative_path:'src/app.ts',expected_sha256:null},provenance:{kind:'PROJECT_CONTEXT'} } as const;
+  const range = { id:rangeId,label:'app.ts · L10–L20',target:{kind:'CODE_RANGE',field_id:fieldId,relative_path:'src/app.ts',line_start:10,line_end:20,expected_sha256:'a'.repeat(64)},provenance:{kind:'TOOL_RECEIPT',tool_call_id:fieldId} } as const;
+  const web = { id:webId,label:'Architecture',target:{kind:'WEB_REFERENCE',field_id:fieldId,reference_id:fieldId,https_url:'https://example.com/architecture'},provenance:{kind:'SAVED_REFERENCE',reference_id:fieldId} } as const;
+  const content=`## 实现位置\n\n[app.ts](fielora-reference:${fileId}) [app.ts · L10–L20](fielora-reference:${rangeId}) [Architecture](fielora-reference:${webId})`;
+  const validated=validateCreateConversationMessage({conversation_id:fieldId,role:'ASSISTANT',content,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[file,range,web]});
+  assert.equal(validated.references.length,3);
+  assert.equal(validateCreateConversationMessage({conversation_id:fieldId,role:'USER',content:'plain',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null}).references.length,0);
+  assert.throws(()=>validateCreateConversationMessage({conversation_id:fieldId,role:'USER',content,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[file]}));
+  assert.throws(()=>validateCreateConversationMessage({conversation_id:fieldId,role:'ASSISTANT',content:'missing marker',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[file]}));
+  for(const relative_path of ['../outside.ts','C:\\Windows\\secret.ts','/etc/passwd']){
+    assert.throws(()=>validateCreateConversationMessage({conversation_id:fieldId,role:'ASSISTANT',content:`[unsafe](fielora-reference:${fileId})`,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[{...file,target:{...file.target,relative_path}}]}));
+  }
+  for(const target of [{...range.target,line_start:-1},{...range.target,line_start:0},{...range.target,line_start:20,line_end:10},{...range.target,line_end:1000001}]){
+    assert.throws(()=>validateCreateConversationMessage({conversation_id:fieldId,role:'ASSISTANT',content:`[range](fielora-reference:${rangeId})`,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[{...range,target}]}));
+  }
+  for(const https_url of ['http://example.com','file:///C:/secret','javascript:alert(1)','fielora://app','https://user@example.com/private']){
+    assert.throws(()=>validateCreateConversationMessage({conversation_id:fieldId,role:'ASSISTANT',content:`[web](fielora-reference:${webId})`,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[{...web,target:{...web.target,https_url}}]}));
+  }
+  const spoof=validateCreateConversationMessage({conversation_id:fieldId,role:'ASSISTANT',content:'[Important](file:///C:/Windows/System32) src/app.ts:20',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[]});
+  assert.deepEqual(spoof.references,[]);
+});
+
 test('Complete Agent bridge accepts only bounded typed execution and approval payloads', () => {
   const start={field_id:fieldId,conversation_id:fieldId,provider_config_id:fieldId,model_id:'gpt-test',task:'Fix the failing test',permission:'REVIEW_CHANGES',max_steps:24} as const;
   assert.equal(validateStartAgent(start).permission,'REVIEW_CHANGES');

@@ -1,9 +1,12 @@
 import { createElement, useState, type ReactNode } from 'react';
+import type { ResultReference } from '@fielora/contracts';
 
 interface MarkdownMessageProps {
   content: string;
   streaming?: boolean;
   onCopyError?: (message: string) => void;
+  references?: ResultReference[];
+  onOpenReference?: (reference: ResultReference) => void;
 }
 
 interface InlineMatch {
@@ -18,7 +21,7 @@ function firstInlineMatch(value: string): InlineMatch | null {
   const candidates: InlineMatch[] = [];
   const patterns: Array<[InlineMatch['kind'], RegExp]> = [
     ['code', /`([^`\n]+)`/],
-    ['link', /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/i],
+    ['link', /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+|fielora-reference:resultref_[0-9a-f]{32})\)/i],
     ['strong', /\*\*([^*\n]+)\*\*/],
     ['strike', /~~([^~\n]+)~~/],
     ['emphasis', /(^|[^*])\*([^*\n]+)\*/],
@@ -40,7 +43,12 @@ function firstInlineMatch(value: string): InlineMatch | null {
   return candidates.sort((left, right) => left.index - right.index || left.length - right.length)[0] ?? null;
 }
 
-function renderInline(value: string, keyPrefix: string): ReactNode[] {
+interface ReferenceRenderContext {
+  references: ReadonlyMap<string, ResultReference>;
+  onOpenReference?: (reference: ResultReference) => void;
+}
+
+function renderInline(value: string, keyPrefix: string, context?: ReferenceRenderContext): ReactNode[] {
   const result: ReactNode[] = [];
   let remaining = value;
   let sequence = 0;
@@ -53,10 +61,17 @@ function renderInline(value: string, keyPrefix: string): ReactNode[] {
     if (match.index > 0) result.push(remaining.slice(0, match.index));
     const key = `${keyPrefix}-${sequence++}`;
     if (match.kind === 'code') result.push(<code key={key}>{match.label}</code>);
-    if (match.kind === 'strong') result.push(<strong key={key}>{renderInline(match.label, key)}</strong>);
-    if (match.kind === 'strike') result.push(<del key={key}>{renderInline(match.label, key)}</del>);
-    if (match.kind === 'emphasis') result.push(<em key={key}>{renderInline(match.label, key)}</em>);
-    if (match.kind === 'link') result.push(<a key={key} href={match.target} target="_blank" rel="noreferrer noopener">{renderInline(match.label, key)}</a>);
+    if (match.kind === 'strong') result.push(<strong key={key}>{renderInline(match.label, key, context)}</strong>);
+    if (match.kind === 'strike') result.push(<del key={key}>{renderInline(match.label, key, context)}</del>);
+    if (match.kind === 'emphasis') result.push(<em key={key}>{renderInline(match.label, key, context)}</em>);
+    if (match.kind === 'link' && match.target?.startsWith('fielora-reference:')) {
+      const reference = context?.references.get(match.target.slice('fielora-reference:'.length));
+      if (reference) {
+        result.push(<button key={key} type="button" className="markdown-typed-reference" data-reference-kind={reference.target.kind} data-reference-id={reference.id} onClick={() => context?.onOpenReference?.(reference)} disabled={!context?.onOpenReference}>{renderInline(match.label, key, context)}</button>);
+      } else {
+        result.push(<span key={key} className="markdown-reference-unavailable">{renderInline(match.label, key, context)}</span>);
+      }
+    } else if (match.kind === 'link') result.push(<a key={key} href={match.target} target="_blank" rel="noreferrer noopener">{renderInline(match.label, key, context)}</a>);
     remaining = remaining.slice(match.index + match.length);
   }
   return result;
@@ -98,7 +113,7 @@ function tableCells(line: string): string[] {
   return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
 }
 
-function renderMarkdown(content: string, onCopyError?: (message: string) => void): ReactNode[] {
+function renderMarkdown(content: string, onCopyError?: (message: string) => void, context?: ReferenceRenderContext): ReactNode[] {
   const lines = content.replace(/\r\n?/g, '\n').split('\n');
   const blocks: ReactNode[] = [];
   let index = 0;
@@ -123,7 +138,7 @@ function renderMarkdown(content: string, onCopyError?: (message: string) => void
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     if (heading) {
       const level = (heading[1] ?? '#').length;
-      blocks.push(createElement(`h${level}`, { key: `heading-${index}` }, renderInline(heading[2] ?? '', `heading-${index}`)));
+      blocks.push(createElement(`h${level}`, { key: `heading-${index}` }, renderInline(heading[2] ?? '', `heading-${index}`, context)));
       index += 1;
       continue;
     }
@@ -140,7 +155,7 @@ function renderMarkdown(content: string, onCopyError?: (message: string) => void
         quote.push((lines[index] ?? '').replace(/^\s*>\s?/, ''));
         index += 1;
       }
-      blocks.push(<blockquote key={`quote-${index}`}>{renderInline(quote.join('\n'), `quote-${index}`)}</blockquote>);
+      blocks.push(<blockquote key={`quote-${index}`}>{renderInline(quote.join('\n'), `quote-${index}`, context)}</blockquote>);
       continue;
     }
 
@@ -149,7 +164,7 @@ function renderMarkdown(content: string, onCopyError?: (message: string) => void
       const items: ReactNode[] = [];
       while (index < lines.length && (ordered ? /^\s*\d+[.)]\s+/.test(lines[index] ?? '') : /^\s*[-+*]\s+/.test(lines[index] ?? ''))) {
         const item = (lines[index] ?? '').replace(ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-+*]\s+/, '');
-        items.push(<li key={`item-${index}`}>{renderInline(item, `item-${index}`)}</li>);
+        items.push(<li key={`item-${index}`}>{renderInline(item, `item-${index}`, context)}</li>);
         index += 1;
       }
       blocks.push(createElement(ordered ? 'ol' : 'ul', { key: `list-${index}` }, items));
@@ -164,7 +179,7 @@ function renderMarkdown(content: string, onCopyError?: (message: string) => void
         rows.push(tableCells(lines[index] ?? ''));
         index += 1;
       }
-      blocks.push(<div className="markdown-table-wrap" key={`table-${index}`}><table><thead><tr>{headings.map((cell, cellIndex) => <th key={cellIndex}>{renderInline(cell, `th-${index}-${cellIndex}`)}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{headings.map((_, cellIndex) => <td key={cellIndex}>{renderInline(row[cellIndex] ?? '', `td-${index}-${rowIndex}-${cellIndex}`)}</td>)}</tr>)}</tbody></table></div>);
+      blocks.push(<div className="markdown-table-wrap" key={`table-${index}`}><table><thead><tr>{headings.map((cell, cellIndex) => <th key={cellIndex}>{renderInline(cell, `th-${index}-${cellIndex}`, context)}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{headings.map((_, cellIndex) => <td key={cellIndex}>{renderInline(row[cellIndex] ?? '', `td-${index}-${rowIndex}-${cellIndex}`, context)}</td>)}</tr>)}</tbody></table></div>);
       continue;
     }
 
@@ -174,11 +189,12 @@ function renderMarkdown(content: string, onCopyError?: (message: string) => void
       paragraph.push(lines[index] ?? '');
       index += 1;
     }
-    blocks.push(<p key={`paragraph-${index}`}>{paragraph.flatMap((item, paragraphIndex) => [paragraphIndex > 0 ? <br key={`br-${index}-${paragraphIndex}`}/> : null, ...renderInline(item, `paragraph-${index}-${paragraphIndex}`)])}</p>);
+    blocks.push(<p key={`paragraph-${index}`}>{paragraph.flatMap((item, paragraphIndex) => [paragraphIndex > 0 ? <br key={`br-${index}-${paragraphIndex}`}/> : null, ...renderInline(item, `paragraph-${index}-${paragraphIndex}`, context)])}</p>);
   }
   return blocks;
 }
 
-export function MarkdownMessage({ content, streaming = false, onCopyError }: MarkdownMessageProps) {
-  return <div className={`markdown-body${streaming ? ' is-streaming' : ''}`}>{renderMarkdown(content, onCopyError)}</div>;
+export function MarkdownMessage({ content, streaming = false, onCopyError, references = [], onOpenReference }: MarkdownMessageProps) {
+  const context: ReferenceRenderContext = { references: new Map(references.map((reference) => [reference.id, reference])), onOpenReference };
+  return <div className={`markdown-body${streaming ? ' is-streaming' : ''}`}>{renderMarkdown(content, onCopyError, context)}</div>;
 }

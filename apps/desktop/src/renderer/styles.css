@@ -266,6 +266,9 @@ button:disabled { opacity: .55; cursor: wait; }
 .markdown-body strong { color: var(--fl-color-text-strong); font-weight: var(--fl-font-weight-semibold); }
 .markdown-body a { color: var(--fl-color-link); text-decoration: none; }
 .markdown-body a:hover { text-decoration: underline; }
+.markdown-body .markdown-typed-reference { display: inline; min-height: 0; padding: 0; border: 0; color: var(--fl-color-link); background: transparent; font: inherit; text-align: inherit; vertical-align: baseline; }
+.markdown-body .markdown-typed-reference:hover { text-decoration: underline; }
+.markdown-body .markdown-reference-unavailable { color: var(--fl-color-text-muted); }
 .markdown-body blockquote { margin: 12px 0; padding: 2px 0 2px 14px; border-left: 3px solid var(--fl-color-border); color: var(--fl-color-text-muted); }
 .markdown-body hr { margin: 20px 0; border: 0; border-top: 1px solid var(--fl-color-border-soft); }
 .markdown-body :not(pre) > code { padding: 2px 5px; border: 1px solid var(--fl-color-border-soft); border-radius: 5px; color: var(--fl-color-text); background: var(--fl-color-surface-subtle); font-family: var(--fl-font-agent-mono); font-size: var(--fl-font-size-agent-meta); font-weight: var(--fl-font-weight-regular); line-height: 1.4; }

@@ -32,6 +32,8 @@ export type ConversationId = string;
 
 export type MessageId = string;
 
+export type ResultReferenceId = string;
+
 export type AgentRunId = string;
 
 export type AgentEventId = string;
@@ -456,9 +458,15 @@ export type ConversationMessageRole = "USER" | "ASSISTANT";
 
 export type ConversationMessageStatus = "COMPLETED" | "CANCELLED" | "FAILED";
 
-export type ConversationMessageView = { id: MessageId, conversation_id: ConversationId, role: ConversationMessageRole, content: string, status: ConversationMessageStatus, provider_config_id: ProviderConfigId | null, model_id: string | null, invocation_id: ModelInvocationId | null, created_at: number, };
+export type ResultReferenceTarget = { "kind": "PROJECT_FILE", field_id: FieldId, relative_path: string, expected_sha256: string | null, } | { "kind": "CODE_RANGE", field_id: FieldId, relative_path: string, line_start: number, line_end: number, expected_sha256: string | null, } | { "kind": "WEB_REFERENCE", field_id: FieldId, reference_id: ObjectId, https_url: string, };
 
-export type CreateConversationMessageRequest = { conversation_id: ConversationId, role: ConversationMessageRole, content: string, status: ConversationMessageStatus, provider_config_id: ProviderConfigId | null, model_id: string | null, invocation_id: ModelInvocationId | null, };
+export type ResultReferenceProvenance = { "kind": "PROJECT_CONTEXT" } | { "kind": "TOOL_RECEIPT", tool_call_id: ToolCallId, } | { "kind": "SAVED_REFERENCE", reference_id: ObjectId, };
+
+export type ResultReference = { id: ResultReferenceId, label: string, target: ResultReferenceTarget, provenance: ResultReferenceProvenance, };
+
+export type ConversationMessageView = { id: MessageId, conversation_id: ConversationId, role: ConversationMessageRole, content: string, status: ConversationMessageStatus, provider_config_id: ProviderConfigId | null, model_id: string | null, invocation_id: ModelInvocationId | null, references: Array<ResultReference>, created_at: number, };
+
+export type CreateConversationMessageRequest = { conversation_id: ConversationId, role: ConversationMessageRole, content: string, status: ConversationMessageStatus, provider_config_id: ProviderConfigId | null, model_id: string | null, invocation_id: ModelInvocationId | null, references: Array<ResultReference>, };
 
 export type ListConversationMessagesRequest = { conversation_id: ConversationId, };
 

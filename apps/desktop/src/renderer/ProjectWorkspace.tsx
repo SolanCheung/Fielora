@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type {
   AgentChangedEvent, AgentEventView, AgentPermission, AgentRunView, AgentToolCallView, ApprovalView,
   McpConnectionRuntimeView,
-  ConversationMessageStatus, ConversationMessageView, ConversationView, ProjectView, ProviderConfigView, ArtifactView,
+  ConversationMessageStatus, ConversationMessageView, ConversationView, ProjectView, ProviderConfigView, ArtifactView, ResultReference,
 } from '@fielora/contracts';
 import type { AgentTextDeltaEvent } from '../types';
 import type { WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceFileEntry, WorkspaceFileView, WorkspaceImagePreview, WorkspaceProjectOpenTarget, WorkspaceProjectOpenTargetView } from '../workspace-types';
@@ -152,6 +152,7 @@ interface FileDockSession {
   preview: FilePreviewState;
   content: string;
   markdownMode?: 'PREVIEW' | 'SOURCE';
+  reveal?: { lineStart: number; lineEnd: number; nonce: number };
 }
 
 function fileTabLabel(relativePath: string): string {
@@ -208,13 +209,37 @@ function syntaxTokens(line: string, language: SyntaxLanguage, lineIndex: number)
   return result;
 }
 
-function SyntaxCodeEditor({ value, relativePath, onChange }: { value: string; relativePath: string; onChange: (content: string) => void }) {
+function lineRangeOffsets(value: string, lineStart: number, lineEnd: number): { start: number; end: number } {
+  const lines = value.split('\n');
+  const startLine = Math.min(Math.max(1, lineStart), Math.max(1, lines.length));
+  const endLine = Math.min(Math.max(startLine, lineEnd), Math.max(1, lines.length));
+  let start = 0;
+  for (let index = 1; index < startLine; index += 1) start += (lines[index - 1]?.length ?? 0) + 1;
+  let end = start;
+  for (let index = startLine; index <= endLine; index += 1) end += (lines[index - 1]?.length ?? 0) + (index < lines.length ? 1 : 0);
+  return { start, end };
+}
+
+function SyntaxCodeEditor({ value, relativePath, reveal, onChange }: { value: string; relativePath: string; reveal?: FileDockSession['reveal']; onChange: (content: string) => void }) {
   const highlightRef = useRef<HTMLPreElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const appliedRevealNonceRef = useRef<number | null>(null);
   const language = syntaxLanguage(relativePath);
   const lines = value.split('\n');
-  return <div className="dock-code-editor-surface" data-language={language.toLowerCase()} data-testid="syntax-code-editor">
+  useEffect(() => {
+    if (!reveal || !inputRef.current || appliedRevealNonceRef.current === reveal.nonce) return;
+    appliedRevealNonceRef.current = reveal.nonce;
+    const offsets = lineRangeOffsets(value, reveal.lineStart, reveal.lineEnd);
+    const input = inputRef.current;
+    input.focus();
+    input.setSelectionRange(offsets.start, offsets.end);
+    input.scrollTop = Math.max(0, (reveal.lineStart - 3) * 21);
+    if (highlightRef.current) highlightRef.current.scrollTop = input.scrollTop;
+  }, [reveal?.nonce, reveal?.lineEnd, reveal?.lineStart, value]);
+  return <div className="dock-code-editor-surface" data-language={language.toLowerCase()} data-reveal-line-start={reveal?.lineStart} data-reveal-line-end={reveal?.lineEnd} data-testid="syntax-code-editor">
     <pre ref={highlightRef} className="dock-code-highlight" aria-hidden="true"><code>{lines.map((line, index) => <span className="dock-code-line" key={`${index}:${line}`}><i>{index + 1}</i><span>{line.length > 0 ? syntaxTokens(line, language, index) : '\u200b'}</span></span>)}</code></pre>
     <textarea
+      ref={inputRef}
       className="dock-code-input"
       value={value}
       wrap="soft"
@@ -439,7 +464,7 @@ function pendingToolSummary(events: AgentEventView[], run: AgentRunView | null):
   return name;
 }
 
-function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copied, onCopy, onCopyError, onReview }: {
+function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copied, onCopy, onCopyError, onReview, onOpenReference }: {
   terminalMessage: ConversationMessageView;
   requestText: string;
   userMessageId: string | null;
@@ -447,6 +472,7 @@ function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copi
   onCopy: () => void;
   onCopyError: (reason: string) => void;
   onReview: (selection: HistoricalReviewSelection) => void;
+  onOpenReference: (reference: ResultReference) => void;
 }) {
   const [run, setRun] = useState<AgentRunView | null>(null);
   const [events, setEvents] = useState<AgentEventView[]>([]);
@@ -485,6 +511,7 @@ function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copi
     onReviewFile={(path) => onReview(reviewSelection(path))}
     onCopy={onCopy}
     onCopyError={onCopyError}
+    onOpenReference={onOpenReference}
   />;
 }
 
@@ -640,6 +667,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const [dockTabs, setDockTabs] = useState<ProjectDockTab[]>([]);
   const [activeDockTabId, setActiveDockTabId] = useState('');
   const [fileDockSessions, setFileDockSessions] = useState<Record<string, FileDockSession>>({});
+  const fileRevealNonceRef = useRef(0);
   const [artifactSessions, setArtifactSessions] = useState<Record<string, ArtifactSurfaceSession>>({});
   const [artifactRefreshToken, setArtifactRefreshToken] = useState(0);
   const [artifactCommandBusy, setArtifactCommandBusy] = useState(false);
@@ -1486,7 +1514,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     try {
       const message = await window.fielora.conversation.createMessage({
         conversation_id: conversation.id, role: 'USER', content: userText, status: 'COMPLETED',
-        provider_config_id: null, model_id: null, invocation_id: null,
+        provider_config_id: null, model_id: null, invocation_id: null, references: [],
       });
       const queued: QueuedFollowUp = {
         messageId: message.id,
@@ -1559,7 +1587,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       const visibleMessage = readyTextAttachments.length > 0 ? `${userText}\n\n附件：${readyTextAttachments.map((item) => item.name).join('、')}` : userText;
       const userMessage = await window.fielora.conversation.createMessage({
         conversation_id: conversation.id, role: 'USER', content: visibleMessage, status: 'COMPLETED',
-        provider_config_id: null, model_id: null, invocation_id: null,
+        provider_config_id: null, model_id: null, invocation_id: null, references: [],
       });
       persistMessageAttachments(userMessage.id, readyImageAttachments);
       await refreshMessages(conversation.id);
@@ -1797,12 +1825,15 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     ensureDockTab({ id: `image:${attachment.id}`, kind: 'IMAGE', label: attachment.name, icon: 'image', attachment });
   }
 
-  async function openFile(entry: WorkspaceFileEntry) {
+  async function openFile(entry: WorkspaceFileEntry, options?: { lineStart?: number; lineEnd?: number; expectedSha256?: string | null }) {
     if (!project) return;
     setFileTreeSelection(entry.relative_path);
     const tabId = `file:${entry.relative_path}`;
     const existing = fileDockSessions[tabId];
-    if (existing) {
+    const reveal = options?.lineStart && options.lineEnd
+      ? { lineStart: options.lineStart, lineEnd: options.lineEnd, nonce: ++fileRevealNonceRef.current }
+      : undefined;
+    if (existing && !reveal && !options?.expectedSha256) {
       syncFileSession(tabId);
       ensureDockTab({ id: tabId, kind: existing.preview?.kind === 'IMAGE' ? 'IMAGE' : 'FILE', label: fileTabLabel(entry.relative_path), icon: existing.preview?.kind === 'IMAGE' ? 'image' : 'files', relativePath: entry.relative_path });
       return;
@@ -1825,8 +1856,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         return;
       }
       const file = await window.fielora.workspace.readFile({ field_id: project.field_id, relative_path: entry.relative_path });
-      setFileDockSessions((current) => ({ ...current, [tabId]: { file, preview: null, content: file.content, markdownMode: isMarkdownFile(file.relative_path) ? 'PREVIEW' : undefined } }));
-      setSelectedFile(file); setFilePreview(null); setEditorContent(file.content); setDraft(null); setError('');
+      setFileDockSessions((current) => ({ ...current, [tabId]: { file, preview: null, content: file.content, markdownMode: reveal ? 'SOURCE' : isMarkdownFile(file.relative_path) ? 'PREVIEW' : undefined, reveal } }));
+      setSelectedFile(file); setFilePreview(null); setEditorContent(file.content); setDraft(null);
+      setError(options?.expectedSha256 && options.expectedSha256 !== file.sha256 ? '引用创建后文件内容已变化；当前已打开最新内容。' : '');
       ensureDockTab({ id: tabId, kind: 'FILE', label: fileTabLabel(entry.relative_path), icon: 'files', relativePath: entry.relative_path });
     } catch (reason) {
       const preview: FilePreviewState = { kind: 'UNSUPPORTED', relativePath: entry.relative_path, message: friendlyFilePreviewFailure(reason) };
@@ -1892,6 +1924,36 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   async function openAgentReviewFile(relativePath: string) {
     const entry = files.find((file) => file.relative_path === relativePath) ?? { relative_path: relativePath, size: 0 };
     await openFile(entry);
+  }
+
+  async function openResultReference(reference: ResultReference) {
+    const target = reference.target;
+    if (!project || target.field_id !== project.field_id) {
+      setError('该引用不属于当前 Project，无法打开。');
+      return;
+    }
+    if (target.kind === 'PROJECT_FILE') {
+      const entry = files.find((file) => file.relative_path === target.relative_path) ?? { relative_path: target.relative_path, size: 0 };
+      await openFile(entry, { expectedSha256: target.expected_sha256 });
+      return;
+    }
+    if (target.kind === 'CODE_RANGE') {
+      const entry = files.find((file) => file.relative_path === target.relative_path) ?? { relative_path: target.relative_path, size: 0 };
+      await openFile(entry, { lineStart: target.line_start, lineEnd: target.line_end, expectedSha256: target.expected_sha256 });
+      return;
+    }
+    try {
+      const source = await window.fielora.reference.get({ field_id: project.field_id, object_id: target.reference_id });
+      if (source.lifecycle !== 'ACTIVE' || source.canonical_url !== target.https_url) {
+        setError('该网页引用已变更或不可用。');
+        return;
+      }
+      openDockTool('BROWSER');
+      await window.fielora.browser.navigate({ url: target.https_url });
+      setError('');
+    } catch {
+      setError('该网页引用暂时不可用。');
+    }
   }
 
   function openAgentReview(relativePath = '') {
@@ -2070,7 +2132,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         <>
           {session?.file && <div className={`file-editor dock-file-editor ${undoChange?.relativePath === session.file.relative_path ? 'has-undo' : ''}`}>{undoChange?.relativePath === session.file.relative_path && <header><span/><button onClick={() => void undoAcceptedChange()} data-testid="undo-change">撤销已接受变更</button></header>}{isMarkdownFile(session.file.relative_path) && (session.markdownMode ?? 'PREVIEW') === 'PREVIEW'
             ? <div className="dock-markdown-preview" data-testid="markdown-preview"><MarkdownMessage content={session.content} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>
-            : <SyntaxCodeEditor value={session.content} relativePath={session.file.relative_path} onChange={(content) => { setFileDockSessions((current) => ({ ...current, [tab.id]: { ...session, content } })); if (tab.id === activeDockTabId) setEditorContent(content); }}/>}</div>}
+            : <SyntaxCodeEditor value={session.content} relativePath={session.file.relative_path} reveal={session.reveal} onChange={(content) => { setFileDockSessions((current) => ({ ...current, [tab.id]: { ...session, content } })); if (tab.id === activeDockTabId) setEditorContent(content); }}/>}</div>}
           {session?.preview?.kind === 'UNSUPPORTED' && <div className="file-unsupported-preview" data-testid="file-unsupported-preview"><ShellIcon name="files"/><h3>无法在此预览</h3><strong>{session.preview.relativePath}</strong><p>{session.preview.message}</p></div>}
         </>
       </DockResourceLayout>}
@@ -2110,6 +2172,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     onDecision={(decision) => void decideApproval(decision)}
     onCopy={currentTerminalMessage ? () => void copyMessage(currentTerminalMessage) : undefined}
     onCopyError={(reason) => setError(`复制代码失败：${reason}`)}
+    onOpenReference={(reference) => void openResultReference(reference)}
     mcpRuntime={mcpRuntime}
     mcpBusyConnectionId={mcpBusyConnectionId}
     onActivateMcp={(connectionId) => void activateMcpConnection(connectionId)}
@@ -2170,12 +2233,12 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
               if (message.role === 'ASSISTANT' && message.invocation_id) {
                 if (isCurrentAgentAssistant) return null;
                 const historicalUserMessage = [...visibleMessages.slice(0, index)].reverse().find((item) => item.role === 'USER') ?? null;
-                return <HistoricalAgentTurn key={message.id} terminalMessage={message} requestText={historicalUserMessage?.content ?? ''} userMessageId={historicalUserMessage?.id ?? null} copied={copiedMessageId === message.id} onReview={openHistoricalAgentReview} onCopy={() => void copyMessage(message)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/>;
+                return <HistoricalAgentTurn key={message.id} terminalMessage={message} requestText={historicalUserMessage?.content ?? ''} userMessageId={historicalUserMessage?.id ?? null} copied={copiedMessageId === message.id} onReview={openHistoricalAgentReview} onOpenReference={(reference) => void openResultReference(reference)} onCopy={() => void copyMessage(message)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/>;
               }
               const persistedImages = message.role === 'USER' ? messageAttachments(message.id) : [];
               const queuedFollowUp = message.role === 'USER' ? queuedFollowUps.find((item) => item.messageId === message.id) ?? null : null;
               return <Fragment key={message.id}>
-                <article data-message-id={message.id} className={`message ${message.role.toLowerCase()}${persistedImages.length ? ' has-image-attachments' : ''}`} data-testid={`message-${message.role.toLowerCase()}`}>{persistedImages.length > 0 && <ConversationImageGallery attachments={persistedImages} onOpen={openAttachmentInDock} onContextMenu={openImageContextMenu}/>}<div className="message-content"><MarkdownMessage content={message.content} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>{queuedFollowUp && <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={queuedFollowUp.afterRunId}><span aria-hidden="true"/>将在当前任务完成后继续处理</p>}<footer className={`message-actions ${copiedMessageId === message.id ? 'copy-confirmed' : ''}`}><time dateTime={new Date(message.created_at).toISOString()} title={new Date(message.created_at).toLocaleString('zh-CN')}>{messageTimeLabel(message.created_at)}</time>{message.status !== 'COMPLETED' && <span className="message-status">{messageStatusLabel(message.status)}</span>}<button type="button" className={copiedMessageId === message.id ? 'copied' : ''} aria-label={copiedMessageId === message.id ? '消息已复制' : '复制消息'} title={copiedMessageId === message.id ? '已复制' : '复制'} onClick={() => void copyMessage(message)} data-testid="message-copy"><ShellIcon name={copiedMessageId === message.id ? 'check' : 'copy'}/>{copiedMessageId === message.id && <span role="status" aria-live="polite">已复制</span>}</button></footer></article>
+                <article data-message-id={message.id} className={`message ${message.role.toLowerCase()}${persistedImages.length ? ' has-image-attachments' : ''}`} data-testid={`message-${message.role.toLowerCase()}`}>{persistedImages.length > 0 && <ConversationImageGallery attachments={persistedImages} onOpen={openAttachmentInDock} onContextMenu={openImageContextMenu}/>}<div className="message-content"><MarkdownMessage content={message.content} references={message.references} onOpenReference={(reference) => void openResultReference(reference)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>{queuedFollowUp && <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={queuedFollowUp.afterRunId}><span aria-hidden="true"/>将在当前任务完成后继续处理</p>}<footer className={`message-actions ${copiedMessageId === message.id ? 'copy-confirmed' : ''}`}><time dateTime={new Date(message.created_at).toISOString()} title={new Date(message.created_at).toLocaleString('zh-CN')}>{messageTimeLabel(message.created_at)}</time>{message.status !== 'COMPLETED' && <span className="message-status">{messageStatusLabel(message.status)}</span>}<button type="button" className={copiedMessageId === message.id ? 'copied' : ''} aria-label={copiedMessageId === message.id ? '消息已复制' : '复制消息'} title={copiedMessageId === message.id ? '已复制' : '复制'} onClick={() => void copyMessage(message)} data-testid="message-copy"><ShellIcon name={copiedMessageId === message.id ? 'check' : 'copy'}/>{copiedMessageId === message.id && <span role="status" aria-live="polite">已复制</span>}</button></footer></article>
                 {agentRun && agentTurn?.userMessageId === message.id && currentAgentTurn}
               </Fragment>;
             })}

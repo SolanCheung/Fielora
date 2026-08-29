@@ -1203,10 +1203,16 @@ fn validate_create_conversation_message(
     if request.role == ConversationMessageRole::User
         && (request.provider_config_id.is_some()
             || request.model_id.is_some()
-            || request.invocation_id.is_some())
+            || request.invocation_id.is_some()
+            || !request.references.is_empty())
     {
         return Err(DomainError::Validation(
-            "user message cannot claim provider provenance".into(),
+            "user message cannot claim provider or result provenance".into(),
+        ));
+    }
+    if request.references.len() > 64 {
+        return Err(DomainError::Validation(
+            "RESULT_REFERENCE_LIMIT_EXCEEDED".into(),
         ));
     }
     Ok(())

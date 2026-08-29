@@ -9,7 +9,7 @@ const navigation = readFileSync(path.join(rendererRoot, 'PrimaryNav.tsx'), 'utf8
 const styles = readFileSync(path.join(rendererRoot, 'styles.css'), 'utf8');
 
 test('markdown files default to responsive preview and keep a source toggle in the shared dock toolbar', () => {
-  assert.match(workspace, /markdownMode: isMarkdownFile\(file\.relative_path\) \? 'PREVIEW' : undefined/);
+  assert.match(workspace, /markdownMode: reveal \? 'SOURCE' : isMarkdownFile\(file\.relative_path\) \? 'PREVIEW' : undefined/);
   assert.match(workspace, /data-testid="markdown-view-toggle"/);
   assert.match(workspace, /data-testid="markdown-preview-toggle">预览<\/button>/);
   assert.match(workspace, /data-testid="markdown-source-toggle">源代码<\/button>/);
