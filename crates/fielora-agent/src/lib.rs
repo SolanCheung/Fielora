@@ -28,6 +28,7 @@ pub use skills::{
     SkillDiagnostic, SkillSourceKind,
 };
 
+use fielora_contracts::idr::{FieloraAgentProfileV1, IDRContextContributionV1};
 use fielora_contracts::{
     AgentPermission, AgentPolicyDecision, AgentRunStatus, AgentToolEffect, ModelToolDefinition,
 };
@@ -1170,6 +1171,9 @@ pub struct CompiledContext {
     pub repository_index_invalidated_files: u32,
     pub stable_context_sha256: String,
     pub dynamic_context_sha256: String,
+    pub agent_profile_block: String,
+    pub personalization_context: Option<String>,
+    pub ingress_context_sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1212,6 +1216,43 @@ impl Default for ContextCompiler {
 }
 
 impl ContextCompiler {
+    /// Attaches bounded trusted Harness ingress projections without folding
+    /// them into untrusted repository excerpts. The caller still decides their
+    /// final precedence in the Model request.
+    pub fn attach_ingress_context(
+        &self,
+        compiled: &mut CompiledContext,
+        profile: &FieloraAgentProfileV1,
+        personalization: Option<&IDRContextContributionV1>,
+    ) -> Result<(), AgentError> {
+        let profile_json = serde_json::to_string(profile).map_err(|_| AgentError::IoFailed)?;
+        let agent_profile_block = format!(
+            "<FIELORA_AGENT_PROFILE_V1 trust=\"CODE_OWNED_SELF_DEFINITION\">\n{profile_json}\n</FIELORA_AGENT_PROFILE_V1>"
+        );
+        let personalization_context = personalization.map(|value| value.serialized_block.clone());
+        let mut ingress = agent_profile_block.clone();
+        if let Some(value) = personalization_context.as_deref() {
+            ingress.push('\n');
+            ingress.push_str(value);
+        }
+        let previous_ingress_chars = compiled.agent_profile_block.chars().count()
+            + compiled
+                .personalization_context
+                .as_deref()
+                .map(|value| value.chars().count())
+                .unwrap_or(0)
+            + usize::from(compiled.personalization_context.is_some());
+        let previous_ingress_tokens = previous_ingress_chars.div_ceil(4) as u32;
+        compiled.ingress_context_sha256 = sha256(ingress.as_bytes());
+        compiled.estimated_tokens = compiled
+            .estimated_tokens
+            .saturating_sub(previous_ingress_tokens)
+            .saturating_add(ingress.chars().count().div_ceil(4) as u32);
+        compiled.agent_profile_block = agent_profile_block;
+        compiled.personalization_context = personalization_context;
+        Ok(())
+    }
+
     pub fn compile(
         &self,
         project_root: &Path,
@@ -1339,6 +1380,9 @@ impl ContextCompiler {
             repository_index_invalidated_files: prepared_index.invalidated_files,
             stable_context_sha256,
             dynamic_context_sha256,
+            agent_profile_block: String::new(),
+            personalization_context: None,
+            ingress_context_sha256: sha256(&[]),
         })
     }
 }

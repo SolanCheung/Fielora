@@ -652,6 +652,31 @@ fn project_semantics(
     }
 }
 
+/// Admission-time semantic registry check shared by the bounded acquisition
+/// path. It projects only the typed payload and performs no storage I/O.
+pub fn validate_registered_payload_v1(
+    payload: &HumanModelPayloadV1,
+) -> Result<(), ResolverReasonCodeV1> {
+    let record = HumanModelItemRecord {
+        item_id: "proposal-semantic-check".into(),
+        contract_version: IDR_CONTRACT_VERSION,
+        payload_schema_version: IDR_PAYLOAD_SCHEMA_VERSION,
+        payload: payload.clone(),
+        lifecycle: HumanModelLifecycle::Candidate,
+        evidence_basis: EvidenceBasis::Explicit,
+        inference_confidence: None,
+        scope: DispositionScope::default(),
+        supersedes_item_id: None,
+        created_human_model_revision: 0,
+        updated_human_model_revision: 0,
+        created_at: 0,
+        updated_at: 0,
+        provenance_refs: Vec::new(),
+        reality_dependencies: Vec::new(),
+    };
+    project_semantics(&record).map(|_| ())
+}
+
 fn semantic_key_registered(key: &SemanticKeyV1) -> bool {
     match key {
         SemanticKeyV1::HumanFact(key) => matches!(

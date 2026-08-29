@@ -1,5 +1,8 @@
 mod agent_runtime;
 mod build_provenance;
+pub mod idr_acquisition;
+pub mod idr_eval;
+pub mod idr_integration;
 pub mod idr_resolver;
 
 use agent_runtime::AgentCoordinator;

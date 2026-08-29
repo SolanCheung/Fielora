@@ -952,6 +952,37 @@ impl StorageHandle {
         })
     }
 
+    pub fn get_agent_context_snapshot(
+        &self,
+        run_id: AgentRunId,
+        step: u32,
+    ) -> Result<AgentContextSnapshotView, DomainError> {
+        let owner = self.local_user.clone();
+        request_task(&self.sender, move |connection| {
+            get_agent_run(connection, &owner, &run_id)?;
+            connection
+                .query_row(
+                    "SELECT id,project_root_hash,selected_files,estimated_tokens,content_sha256,manifest_json,created_at FROM agent_context_snapshots WHERE run_id=?1 AND step=?2",
+                    params![run_id.0, i64::from(step)],
+                    |row| {
+                        let manifest: String = row.get(5)?;
+                        Ok(AgentContextSnapshotView {
+                            id: ContextSnapshotId::new(row.get::<_, String>(0)?),
+                            run_id: run_id.clone(),
+                            step,
+                            project_root_hash: row.get(1)?,
+                            selected_files: row.get::<_, u32>(2)?,
+                            estimated_tokens: row.get::<_, u32>(3)?,
+                            content_sha256: row.get(4)?,
+                            manifest: serde_json::from_str(&manifest).unwrap_or(Value::Null),
+                            created_at: row.get(6)?,
+                        })
+                    },
+                )
+                .map_err(storage_domain)
+        })
+    }
+
     pub fn record_agent_verification(
         &self,
         receipt: VerificationReceiptView,

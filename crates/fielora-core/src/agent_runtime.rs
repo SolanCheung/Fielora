@@ -16,6 +16,11 @@ use fielora_agent::{
     ToolProviderAvailability, ToolProviderError, ToolReconciliationStatus, ToolRuntime, ToolSpec,
     coding_tool_catalog, coding_tool_catalog_with_providers,
 };
+use fielora_contracts::idr::{
+    CanonicalSemanticValueV1, CurrentConstraintAuthorityV1, CurrentConstraintOperationV1,
+    CurrentConstraintProjectionV1, CurrentSemanticConstraintV1, FieloraAgentProfileV1,
+    IDRParticipationV1, InteractionKindV1, SemanticKeyV1, TaskTypeV1,
+};
 use fielora_contracts::*;
 use fielora_field::DomainError;
 use fielora_model::{
@@ -24,6 +29,12 @@ use fielora_model::{
     coding_behavior_profile,
 };
 use fielora_platform::{CredentialStore, ManagedChildSecretEnvironment, SecretBytes};
+use fielora_storage::idr::{
+    AdmittedHumanModelItem, DispositionScope, EvidenceBasis, HumanModelLifecycle,
+    HumanModelPayloadV1, IDR_CONTRACT_VERSION, IDR_PAYLOAD_SCHEMA_VERSION, InferenceConfidence,
+    ProvenanceAdmissionRelation, ProvenanceRefInput, ProvenanceSourceRefKind,
+    ProvenanceSourceStatus, ProvenanceSourceType,
+};
 use fielora_storage::{AgentEventCommit, AgentProjectionUpdate, StorageHandle};
 use fielora_storage::{
     CreateArtifactRecord, CreateAssetRecord, SetArtifactArchiveStateRecord, UpdateArtifactRecord,
@@ -45,10 +56,80 @@ use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::idr_acquisition::{
+    DispositionInferenceInputV1, HumanModelAcquisitionV1, HumanModelUpdateProposalV1,
+    SensitiveAdmissionClassV1,
+};
+use crate::idr_integration::{
+    CurrentConstraintProjectionBuilderV1, IDRPreparationV1, IDRProductionIntegrationV1,
+    TrustedIDRContextInputV1,
+};
+
 const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 4_096;
 const USER_PLUGIN_REGISTRY_FILENAME: &str = "local-plugins.json";
 const USER_PLUGIN_REGISTRY_VERSION: u16 = 1;
 const MAX_USER_PLUGIN_REGISTRY_BYTES: u64 = 64 * 1024;
+const IDR_PRIMARY_SEMANTIC_PROJECTION_TOOL: &str = "idr.submit_primary_semantic_projection";
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrimarySemanticProjectionArgsV1 {
+    contract_version: u16,
+    current_constraints: Option<PrimaryCurrentConstraintsV1>,
+    human_model_proposal: Option<PrimaryHumanModelProposalV1>,
+    expected_human_model_revision: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrimaryCurrentConstraintsV1 {
+    covered_semantic_keys: Vec<SemanticKeyV1>,
+    entries: Vec<PrimaryCurrentConstraintEntryV1>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrimaryCurrentConstraintEntryV1 {
+    authority: CurrentConstraintAuthorityV1,
+    semantic_key: SemanticKeyV1,
+    operation: CurrentConstraintOperationV1,
+    canonical_value: Option<CanonicalSemanticValueV1>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrimaryHumanModelProposalV1 {
+    item_id: String,
+    payload: HumanModelPayloadV1,
+    scope: PrimaryDispositionScopeV1,
+    durable_intent_explicit: bool,
+    sensitive_class: SensitiveAdmissionClassV1,
+    explicit_sensitive_confirmation: bool,
+    source_type: PrimaryAcquisitionSourceV1,
+    inference_confidence: Option<InferenceConfidence>,
+    supporting_observation_item_ids: Vec<String>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrimaryDispositionScopeV1 {
+    domain: Option<String>,
+    project_ref: Option<String>,
+    task_type: Option<String>,
+    interaction_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum PrimaryAcquisitionSourceV1 {
+    ExplicitUserStatement,
+    ExplicitUserSetting,
+    UserCorrection,
+    UserAction,
+    AgentOutcome,
+    SystemInference,
+    UserApprovedImport,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -105,6 +186,9 @@ pub struct AgentCoordinator {
     user_plugin_registry_path: Option<PathBuf>,
     user_mcp_config_path: Option<PathBuf>,
     run_mcp_states: Arc<Mutex<HashMap<String, RunMcpState>>>,
+    idr_participation: Option<IDRParticipationV1>,
+    idr_contexts: Arc<Mutex<HashMap<String, IDRPreparationV1>>>,
+    current_constraint_projections: Arc<Mutex<HashMap<String, CurrentConstraintProjectionV1>>>,
 }
 
 struct RunMcpState {
@@ -1247,6 +1331,68 @@ fn fast_edit_no_change_tool() -> ModelToolDefinition {
     }
 }
 
+fn idr_primary_semantic_projection_tool() -> ModelToolDefinition {
+    let semantic_key = json!({
+        "type":"object",
+        "properties":{
+            "family":{"type":"string","enum":["HUMAN_FACT","BEHAVIOR_DIMENSION","OBSERVATION_ITEM","LONG_TERM_GOAL"]},
+            "key":{"type":"string","minLength":1,"maxLength":256}
+        },
+        "required":["family","key"],
+        "additionalProperties":false
+    });
+    ModelToolDefinition {
+        name: IDR_PRIMARY_SEMANTIC_PROJECTION_TOOL.into(),
+        description: "Submit an optional provider-neutral current-constraint projection and at most one bounded Human Model proposal from this same primary Model turn. Use only when semantics and durable user intent are explicit; omit uncertain fields. This is not an execution capability and never grants permission.".into(),
+        input_schema: json!({
+            "type":"object",
+            "properties":{
+                "contract_version":{"type":"integer","enum":[1]},
+                "current_constraints":{
+                    "type":"object",
+                    "properties":{
+                        "covered_semantic_keys":{"type":"array","items":semantic_key.clone(),"maxItems":16,"uniqueItems":true},
+                        "entries":{
+                            "type":"array","maxItems":16,"items":{
+                                "type":"object",
+                                "properties":{
+                                    "authority":{"type":"string","enum":["CURRENT_EXPLICIT_USER","CURRENT_REALITY","CURRENT_TASK_PROJECT"]},
+                                    "semantic_key":semantic_key,
+                                    "operation":{"type":"string","enum":["REQUIRE_VALUE","FORBID_VALUE","SUPPRESS_DURABLE_KEY"]},
+                                    "canonical_value":{"type":"object","properties":{"type":{"type":"string","enum":["TOKEN","BOOLEAN"]},"value":{}},"required":["type","value"],"additionalProperties":false}
+                                },
+                                "required":["authority","semantic_key","operation"],
+                                "additionalProperties":false
+                            }
+                        }
+                    },
+                    "required":["covered_semantic_keys","entries"],
+                    "additionalProperties":false
+                },
+                "human_model_proposal":{
+                    "type":"object",
+                    "properties":{
+                        "item_id":{"type":"string","minLength":1,"maxLength":512},
+                        "payload":{"type":"object","properties":{"kind":{"type":"string","enum":["FACT","PREFERENCE","OBSERVATION","DISPOSITION","LONG_TERM_GOAL"]},"data":{"type":"object"}},"required":["kind","data"],"additionalProperties":false},
+                        "scope":{"type":"object","properties":{"domain":{"type":"string"},"project_ref":{"type":"string"},"task_type":{"type":"string"},"interaction_kind":{"type":"string"}},"additionalProperties":false},
+                        "durable_intent_explicit":{"type":"boolean"},
+                        "sensitive_class":{"type":"string","enum":["ORDINARY_BOUNDED_PREFERENCE","HIGH_RISK_PERSONAL_DATA","CREDENTIAL_OR_SECRET","SECRET_DERIVED_DATA"]},
+                        "explicit_sensitive_confirmation":{"type":"boolean"},
+                        "source_type":{"type":"string","enum":["EXPLICIT_USER_STATEMENT","EXPLICIT_USER_SETTING","USER_CORRECTION","USER_ACTION","AGENT_OUTCOME","SYSTEM_INFERENCE","USER_APPROVED_IMPORT"]},
+                        "inference_confidence":{"type":"string","enum":["LOW","MEDIUM","HIGH"]},
+                        "supporting_observation_item_ids":{"type":"array","items":{"type":"string","minLength":1,"maxLength":512},"maxItems":8,"uniqueItems":true}
+                    },
+                    "required":["item_id","payload","scope","durable_intent_explicit","sensitive_class","explicit_sensitive_confirmation","source_type","supporting_observation_item_ids"],
+                    "additionalProperties":false
+                },
+                "expected_human_model_revision":{"type":"integer","minimum":0}
+            },
+            "required":["contract_version"],
+            "additionalProperties":false
+        }),
+    }
+}
+
 fn emit_fast_edit_phase(
     storage: &StorageHandle,
     sender: &SyncSender<Value>,
@@ -1360,6 +1506,14 @@ impl AgentCoordinator {
         self
     }
 
+    /// Internal product/evaluation participation control. This is not FIPC and
+    /// does not erase or mutate the Human Model when disabled.
+    #[allow(dead_code)] // Used by embedding/evaluation callers; product default is explicitly enabled.
+    pub fn with_idr_participation(mut self, participation: Option<IDRParticipationV1>) -> Self {
+        self.idr_participation = participation;
+        self
+    }
+
     fn build(
         storage: StorageHandle,
         credentials: Arc<dyn CredentialStore>,
@@ -1388,6 +1542,9 @@ impl AgentCoordinator {
             user_plugin_registry_path: None,
             user_mcp_config_path: None,
             run_mcp_states: Arc::new(Mutex::new(HashMap::new())),
+            idr_participation: Some(IDRParticipationV1::Enabled),
+            idr_contexts: Arc::new(Mutex::new(HashMap::new())),
+            current_constraint_projections: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -1505,6 +1662,298 @@ impl AgentCoordinator {
                 .insert(run_id.0.clone(), value.clone());
         }
         restored
+    }
+
+    fn ingress_system_prompt_for_run(&self, run_id: &AgentRunId, base: String) -> String {
+        match self.compiled_contexts.lock().unwrap().get(&run_id.0) {
+            Some(context) => ingress_context_system_prompt(base, context),
+            None => base,
+        }
+    }
+
+    fn handle_primary_semantic_projection(
+        &self,
+        prepared: &PreparedRun,
+        step: u32,
+        arguments: Value,
+    ) -> (String, bool) {
+        let args = match serde_json::from_value::<PrimarySemanticProjectionArgsV1>(arguments) {
+            Ok(value) if value.contract_version == 1 => value,
+            _ => return ("IDR_PRIMARY_PROJECTION_INVALID".into(), true),
+        };
+        if args.current_constraints.is_none() && args.human_model_proposal.is_none() {
+            return ("IDR_PRIMARY_PROJECTION_EMPTY".into(), true);
+        }
+        if self.idr_participation != Some(IDRParticipationV1::Enabled) {
+            return (
+                json!({
+                    "kind":"IDR_PRIMARY_SEMANTIC_PROJECTION_RESULT_V1",
+                    "participation":"IDR_DISABLED",
+                    "current_constraints":"NOT_ADMITTED",
+                    "human_model_proposal":"NOT_ADMITTED"
+                })
+                .to_string(),
+                false,
+            );
+        }
+        let run_id = &prepared.run.id;
+        let mut current_constraints_admitted = false;
+        let mut proposal_status = "NOT_PROPOSED";
+        let mut resulting_revision = None;
+        if let Some(current) = args.current_constraints
+            && current.covered_semantic_keys.len() <= 16
+            && current.entries.len() <= 16
+            && current
+                .entries
+                .iter()
+                .all(|entry| current.covered_semantic_keys.contains(&entry.semantic_key))
+        {
+            let source_ref = format!("primary-semantic:{}:{step}", run_id.0);
+            let entries = current
+                .entries
+                .into_iter()
+                .map(|entry| {
+                    let source_digest = serde_json::to_vec(&entry)
+                        .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+                        .unwrap_or_else(|_| format!("{:x}", Sha256::digest(b"invalid")));
+                    CurrentSemanticConstraintV1 {
+                        authority: entry.authority,
+                        semantic_key: entry.semantic_key,
+                        operation: entry.operation,
+                        canonical_value: entry.canonical_value,
+                        source_ref: source_ref.clone(),
+                        source_digest,
+                    }
+                })
+                .collect();
+            let projection = CurrentConstraintProjectionBuilderV1.build(
+                format!("current-constraints:{}:{step}", run_id.0),
+                source_ref,
+                current.covered_semantic_keys,
+                entries,
+            );
+            self.current_constraint_projections
+                .lock()
+                .unwrap()
+                .insert(run_id.0.clone(), projection);
+            current_constraints_admitted = true;
+        }
+        if let Some(proposal) = args.human_model_proposal {
+            proposal_status = "REJECTED";
+            if let Some(expected_revision) = args.expected_human_model_revision {
+                let (source_type, admission_relation) =
+                    primary_acquisition_source(proposal.source_type);
+                let acquisition = HumanModelAcquisitionV1::new(self.storage.clone());
+                let scope = DispositionScope {
+                    domain: proposal.scope.domain,
+                    project_ref: proposal.scope.project_ref,
+                    task_type: proposal.scope.task_type,
+                    interaction_kind: proposal.scope.interaction_kind,
+                };
+                let result = match proposal.payload {
+                    HumanModelPayloadV1::Disposition(disposition)
+                        if matches!(
+                            proposal.source_type,
+                            PrimaryAcquisitionSourceV1::SystemInference
+                        ) && proposal.sensitive_class
+                            == SensitiveAdmissionClassV1::OrdinaryBoundedPreference =>
+                    {
+                        proposal.inference_confidence.map_or(
+                            Err(crate::idr_acquisition::AcquisitionAdmissionErrorV1::InvalidProposalShape),
+                            |confidence| {
+                                acquisition.infer_disposition_candidate(
+                                    DispositionInferenceInputV1 {
+                                        item_id: proposal.item_id,
+                                        dimension: disposition.dimension,
+                                        normalized_value: disposition.normalized_value,
+                                        confidence,
+                                        scope,
+                                        observation_item_ids: proposal
+                                            .supporting_observation_item_ids,
+                                    },
+                                    expected_revision,
+                                    format!("primary-semantic:{}:{step}", run_id.0),
+                                    now_ms(),
+                                )
+                            },
+                        )
+                    }
+                    payload => {
+                        let payload_kind = payload.kind();
+                        let (lifecycle, evidence_basis) = match payload_kind {
+                            fielora_storage::idr::HumanModelKind::Observation => (
+                                HumanModelLifecycle::Active,
+                                EvidenceBasis::Observed,
+                            ),
+                            _ => (HumanModelLifecycle::Active, EvidenceBasis::Explicit),
+                        };
+                        let provenance = ProvenanceRefInput {
+                            provenance_ref_id: format!(
+                                "primary-proposal:{}:{step}:{}",
+                                run_id.0, proposal.item_id
+                            ),
+                            source_type,
+                            source_ref_kind: ProvenanceSourceRefKind::Conversation,
+                            source_ref_id: prepared.run.conversation_id.0.clone(),
+                            observed_at: now_ms(),
+                            bounded_support: None,
+                            source_digest: None,
+                            admission_relation: Some(admission_relation),
+                            source_status_at_admission: ProvenanceSourceStatus::Available,
+                        };
+                        acquisition.admit_and_commit(
+                            HumanModelUpdateProposalV1 {
+                                item: AdmittedHumanModelItem {
+                                    item_id: proposal.item_id,
+                                    contract_version: IDR_CONTRACT_VERSION,
+                                    payload_schema_version: IDR_PAYLOAD_SCHEMA_VERSION,
+                                    payload,
+                                    lifecycle,
+                                    evidence_basis,
+                                    inference_confidence: None,
+                                    scope,
+                                    provenance_refs: vec![provenance],
+                                    reality_dependencies: Vec::new(),
+                                },
+                                durable_intent_explicit: proposal.durable_intent_explicit,
+                                sensitive_class: proposal.sensitive_class,
+                                explicit_sensitive_confirmation: proposal.explicit_sensitive_confirmation,
+                            },
+                            expected_revision,
+                            format!("primary-semantic:{}:{step}", run_id.0),
+                            now_ms(),
+                        )
+                    }
+                };
+                if let Ok(result) = result {
+                    proposal_status = "ADMITTED";
+                    resulting_revision = Some(result.human_model_revision);
+                }
+            }
+        }
+        let refreshed = self.refresh_idr_context(prepared, step);
+        let refresh_status = if refreshed
+            .as_ref()
+            .is_some_and(|value| value.contribution.is_some())
+        {
+            "PERSONALIZED"
+        } else {
+            "GENERIC"
+        };
+        let payload = json!({
+            "kind":"IDR_PRIMARY_SEMANTIC_PROJECTION_RESULT_V1",
+            "current_constraints":if current_constraints_admitted { "ADMITTED" } else { "UNAVAILABLE_OR_REJECTED" },
+            "human_model_proposal":proposal_status,
+            "human_model_revision":resulting_revision,
+            "context":refresh_status,
+        });
+        let _ = append_event(
+            &self.storage,
+            &self.sender,
+            run_id.clone(),
+            AgentEventKind::CheckpointCreated,
+            payload.clone(),
+            AgentProjectionUpdate::default(),
+        );
+        (payload.to_string(), false)
+    }
+
+    fn refresh_idr_context(&self, prepared: &PreparedRun, step: u32) -> Option<IDRPreparationV1> {
+        let run_id = &prepared.run.id;
+        let human_model = self.storage.read_human_model_snapshot().ok()?;
+        let project = self
+            .storage
+            .get_project(prepared.run.field_id.clone())
+            .ok()?;
+        let active_artifact = self.active_work_surface_for_run(run_id);
+        let current_constraints = self
+            .current_constraint_projections
+            .lock()
+            .unwrap()
+            .get(&run_id.0)
+            .cloned();
+        let snapshot_id = ContextSnapshotId::new(Uuid::now_v7().to_string());
+        let task_class = CodingHarnessProfile::for_task(&prepared.run.task).task_class;
+        let prepared_idr = IDRProductionIntegrationV1.prepare(TrustedIDRContextInputV1 {
+            participation: self.idr_participation,
+            run_ref: &run_id.0,
+            conversation_ref: &prepared.run.conversation_id.0,
+            context_snapshot_ref: &snapshot_id.0,
+            project: &project,
+            active_artifact: active_artifact.as_ref(),
+            task_type: idr_task_type(task_class),
+            interaction_kind: InteractionKindV1::TaskExecution,
+            current_constraints: current_constraints.as_ref(),
+            snapshot: &human_model,
+        });
+        let mut compiled = self
+            .compiled_contexts
+            .lock()
+            .unwrap()
+            .get(&run_id.0)
+            .cloned()?;
+        if (ContextCompiler {
+            max_files: 0,
+            max_bytes: 0,
+        })
+        .attach_ingress_context(
+            &mut compiled,
+            &FieloraAgentProfileV1::bundled(),
+            prepared_idr.contribution.as_ref(),
+        )
+        .is_err()
+        {
+            compiled.personalization_context = None;
+        }
+        self.compiled_contexts
+            .lock()
+            .unwrap()
+            .insert(run_id.0.clone(), compiled.clone());
+        self.idr_contexts
+            .lock()
+            .unwrap()
+            .insert(run_id.0.clone(), prepared_idr.clone());
+        let active_json = serde_json::to_string(&active_artifact).unwrap_or_else(|_| "null".into());
+        let content_sha256 = format!(
+            "{:x}",
+            Sha256::digest(
+                format!(
+                    "{}\n{}\n{}",
+                    compiled.content_sha256, active_json, compiled.ingress_context_sha256
+                )
+                .as_bytes()
+            )
+        );
+        let manifest = json!({
+            "files":compiled.files.iter().map(|file| json!({"path":file.path,"sha256":file.sha256,"bytes":file.bytes,"score":file.score,"complete":file.complete})).collect::<Vec<_>>(),
+            "active_work_surface":active_artifact,
+            "agent_profile":{
+                "profile_version":FieloraAgentProfileV1::bundled().profile_version,
+                "content_sha256":format!("{:x}", Sha256::digest(compiled.agent_profile_block.as_bytes())),
+            },
+            "idr":prepared_idr.snapshot_evidence(),
+            "recovery_semantics":"RESOLVED_VIEW_EPHEMERAL_REBUILD_FROM_AUTHORITATIVE_INPUTS",
+        });
+        if !self
+            .storage
+            .has_agent_context_snapshot(run_id.clone(), step)
+            .unwrap_or(false)
+        {
+            let _ = self
+                .storage
+                .save_agent_context_snapshot(AgentContextSnapshotView {
+                    id: snapshot_id,
+                    run_id: run_id.clone(),
+                    step,
+                    project_root_hash: compiled.project_root_hash.clone(),
+                    selected_files: compiled.files.len() as u32,
+                    estimated_tokens: compiled.estimated_tokens,
+                    content_sha256,
+                    manifest,
+                    created_at: now_ms(),
+                });
+        }
+        Some(prepared_idr)
     }
 
     fn configured_plugin_roots(&self) -> Vec<PathBuf> {
@@ -3148,6 +3597,12 @@ impl AgentCoordinator {
                 coordinator.skill_catalogs.lock().unwrap().remove(&id);
                 coordinator.transcripts.lock().unwrap().remove(&id);
                 coordinator.active_work_surfaces.lock().unwrap().remove(&id);
+                coordinator.idr_contexts.lock().unwrap().remove(&id);
+                coordinator
+                    .current_constraint_projections
+                    .lock()
+                    .unwrap()
+                    .remove(&id);
                 coordinator.remove_run_mcp_state(&id);
             }
         });
@@ -3240,7 +3695,7 @@ impl AgentCoordinator {
             .unwrap()
             .get(&run_id.0)
             .cloned();
-        let (compiled, context_cache_hit) = if let Some(compiled) = cached_context {
+        let (mut compiled, context_cache_hit) = if let Some(compiled) = cached_context {
             (compiled, true)
         } else {
             let task = prepared.run.task.clone();
@@ -3293,17 +3748,85 @@ impl AgentCoordinator {
             None
         };
         let active_work_surface = self.active_work_surface_for_run(&run_id);
+        let context_snapshot_id = ContextSnapshotId::new(Uuid::now_v7().to_string());
+        let idr_prepared = match (
+            self.storage.read_human_model_snapshot(),
+            self.storage.get_project(prepared.run.field_id.clone()),
+        ) {
+            (Ok(human_model), Ok(project)) => {
+                let current_constraints = self
+                    .current_constraint_projections
+                    .lock()
+                    .unwrap()
+                    .get(&run_id.0)
+                    .cloned();
+                let candidate = IDRProductionIntegrationV1.prepare(TrustedIDRContextInputV1 {
+                    participation: self.idr_participation,
+                    run_ref: &run_id.0,
+                    conversation_ref: &prepared.run.conversation_id.0,
+                    context_snapshot_ref: &context_snapshot_id.0,
+                    project: &project,
+                    active_artifact: active_work_surface.as_ref(),
+                    task_type: idr_task_type(task_class),
+                    interaction_kind: InteractionKindV1::TaskExecution,
+                    current_constraints: current_constraints.as_ref(),
+                    snapshot: &human_model,
+                });
+                let mut cache = self.idr_contexts.lock().unwrap();
+                if let Some(existing) = cache.get(&run_id.0)
+                    && existing.invalidation_fingerprint == candidate.invalidation_fingerprint
+                {
+                    let mut reused = existing.clone();
+                    if let (Some(reused_contribution), Some(candidate_contribution)) = (
+                        reused.contribution.as_mut(),
+                        candidate.contribution.as_ref(),
+                    ) {
+                        reused_contribution.why_used_manifest.invocation_binding =
+                            candidate_contribution
+                                .why_used_manifest
+                                .invocation_binding
+                                .clone();
+                    }
+                    reused
+                } else {
+                    cache.insert(run_id.0.clone(), candidate.clone());
+                    candidate
+                }
+            }
+            _ => IDRPreparationV1::disabled(Some("IDR_TRUSTED_INPUT_READ_FAILED")),
+        };
+        if (ContextCompiler {
+            max_files: 0,
+            max_bytes: 0,
+        })
+        .attach_ingress_context(
+            &mut compiled,
+            &FieloraAgentProfileV1::bundled(),
+            idr_prepared.contribution.as_ref(),
+        )
+        .is_err()
+        {
+            compiled.personalization_context = None;
+        }
+        self.compiled_contexts
+            .lock()
+            .unwrap()
+            .insert(run_id.0.clone(), compiled.clone());
         let active_context_json =
             serde_json::to_string(&active_work_surface).unwrap_or_else(|_| "null".into());
         let snapshot_content_sha256 = format!(
             "{:x}",
             Sha256::digest(
-                format!("{}\n{}", compiled.content_sha256, active_context_json).as_bytes()
+                format!(
+                    "{}\n{}\n{}",
+                    compiled.content_sha256, active_context_json, compiled.ingress_context_sha256
+                )
+                .as_bytes()
             )
         );
         let active_context_tokens = active_context_json.chars().count().div_ceil(4) as u32;
         let snapshot = AgentContextSnapshotView {
-            id: ContextSnapshotId::new(Uuid::now_v7().to_string()),
+            id: context_snapshot_id,
             run_id: run_id.clone(),
             step: prepared.run.current_step,
             project_root_hash: compiled.project_root_hash.clone(),
@@ -3316,6 +3839,11 @@ impl AgentCoordinator {
                 "files":manifest,
                 "skills":skill_catalog.snapshot_manifest(),
                 "active_work_surface":active_work_surface,
+                "agent_profile":{
+                    "profile_version":FieloraAgentProfileV1::bundled().profile_version,
+                    "content_sha256":format!("{:x}", Sha256::digest(compiled.agent_profile_block.as_bytes())),
+                },
+                "idr":idr_prepared.snapshot_evidence(),
             }),
             created_at: now_ms(),
         };
@@ -3323,10 +3851,7 @@ impl AgentCoordinator {
             .storage
             .has_agent_context_snapshot(run_id.clone(), prepared.run.current_step)
             .unwrap_or(false);
-        if !context_cache_hit
-            && !context_snapshot_exists
-            && self.storage.save_agent_context_snapshot(snapshot).is_err()
-        {
+        if !context_snapshot_exists && self.storage.save_agent_context_snapshot(snapshot).is_err() {
             fail_run(
                 &self.storage,
                 &self.sender,
@@ -3361,6 +3886,12 @@ impl AgentCoordinator {
                 "skill_catalog_diagnostic_count":skill_catalog.diagnostics().len(),
                 "skill_catalog":skill_catalog.tier_one_metadata(),
                 "active_work_surface_present":active_work_surface.is_some(),
+                "idr_participation":idr_prepared.snapshot_evidence().get("participation").cloned().unwrap_or(Value::Null),
+                "idr_contribution_present":idr_prepared.contribution.is_some(),
+                "idr_human_model_revision":idr_prepared.human_model_revision,
+                "idr_resolution_ref":idr_prepared.resolution_ref,
+                "idr_invalidation_fingerprint":idr_prepared.invalidation_fingerprint,
+                "idr_diagnostic":idr_prepared.bounded_diagnostic,
                 "decision":context_confidence.map(|confidence| if confidence == "HIGH" { "READY_TO_EDIT" } else { "NEED_MORE_EVIDENCE" }),
             }),
             AgentProjectionUpdate::default(),
@@ -3537,6 +4068,13 @@ impl AgentCoordinator {
                     tools.retain(|tool| tool.name == "git_read");
                 }
             }
+            if phase == "ACT"
+                && !tools
+                    .iter()
+                    .any(|tool| tool.name == IDR_PRIMARY_SEMANTIC_PROJECTION_TOOL)
+            {
+                tools.push(idr_primary_semantic_projection_tool());
+            }
             if append_event(
                 &self.storage,
                 &self.sender,
@@ -3554,9 +4092,12 @@ impl AgentCoordinator {
             }
             let request = AgentModelRequest {
                 model_id: prepared.run.model_id.clone(),
-                system: active_work_surface_system_prompt(
-                    agent_system_prompt(prepared.run.permission, behavior, task_class),
-                    active_work_surface.as_ref(),
+                system: self.ingress_system_prompt_for_run(
+                    &run_id,
+                    active_work_surface_system_prompt(
+                        agent_system_prompt(prepared.run.permission, behavior, task_class),
+                        active_work_surface.as_ref(),
+                    ),
                 ),
                 messages: messages.clone(),
                 tools: tools.clone(),
@@ -3821,6 +4362,20 @@ impl AgentCoordinator {
             }
             for proposed in turn.tool_calls {
                 let model_call_id = proposed.id.clone();
+                if proposed.name == IDR_PRIMARY_SEMANTIC_PROJECTION_TOOL {
+                    let (content, is_error) = self.handle_primary_semantic_projection(
+                        &prepared,
+                        step,
+                        proposed.arguments,
+                    );
+                    messages.push(AgentModelMessage::ToolResult {
+                        call_id: model_call_id,
+                        name: IDR_PRIMARY_SEMANTIC_PROJECTION_TOOL.into(),
+                        content,
+                        is_error,
+                    });
+                    continue;
+                }
                 if !tools
                     .iter()
                     .any(|definition| definition.name == proposed.name)
@@ -4135,13 +4690,16 @@ impl AgentCoordinator {
                 }
                 let system = format!(
                     "{}\n\nAdaptive FAST_EDIT pipeline ({FAST_EDIT_PIPELINE_VERSION}). Return exactly one formal decision tool call. If evidence is sufficient, return READY_TO_EDIT by calling apply_patches with the complete minimum necessary change set, or no_change_needed when the exact requested state is already satisfied. If evidence is insufficient, return NEED_MORE_EVIDENCE by calling request_evidence once. Current context confidence: {}. Never infer a broad cleanup from a narrow UI request. The named page, panel, menu, checkbox, or control is the scope boundary: preserve adjacent controls, table columns, business logic, and similarly named settings unless changing them is strictly necessary for that exact surface. Use trusted complete=true context or read_file receipts for expected_sha256. Never submit an unobserved path, stale hash, no-op, ambiguous multi-control deletion, or partial change set. This is patch attempt {}/2; {}",
-                    active_work_surface_system_prompt(
-                        agent_system_prompt(
-                            prepared.run.permission,
-                            behavior,
-                            AgentTaskClass::FastEdit
+                    self.ingress_system_prompt_for_run(
+                        &run_id,
+                        active_work_surface_system_prompt(
+                            agent_system_prompt(
+                                prepared.run.permission,
+                                behavior,
+                                AgentTaskClass::FastEdit
+                            ),
+                            self.active_work_surface_for_run(&run_id).as_ref(),
                         ),
-                        self.active_work_surface_for_run(&run_id).as_ref(),
                     ),
                     if evidence_ready {
                         "HIGH"
@@ -4764,7 +5322,7 @@ impl AgentCoordinator {
                     prepared,
                     &messages,
                     vec![],
-                    format!("{}\n\nFINALIZE turn for {FAST_EDIT_PIPELINE_VERSION}: tools are unavailable. Summarize only receipt-backed facts in concise Chinese. Never expose chain-of-thought or <think> tags.", active_work_surface_system_prompt(agent_system_prompt(prepared.run.permission, behavior, AgentTaskClass::FastEdit), self.active_work_surface_for_run(&run_id).as_ref())),
+                    format!("{}\n\nFINALIZE turn for {FAST_EDIT_PIPELINE_VERSION}: tools are unavailable. Summarize only receipt-backed facts in concise Chinese. Never expose chain-of-thought or <think> tags.", self.ingress_system_prompt_for_run(&run_id, active_work_surface_system_prompt(agent_system_prompt(prepared.run.permission, behavior, AgentTaskClass::FastEdit), self.active_work_surface_for_run(&run_id).as_ref()))),
                     "FINALIZE",
                     &cancellation,
                 )
@@ -8264,6 +8822,61 @@ fn active_work_surface_system_prompt(
         base.push_str(&serde_json::to_string(context).unwrap_or_else(|_| "null".into()));
     }
     base
+}
+
+fn ingress_context_system_prompt(mut base: String, context: &CompiledContext) -> String {
+    if !context.agent_profile_block.is_empty() {
+        base.push_str("\n\nTrusted Fielora-owned Agent self-definition. This identifies the Agent, not the current Provider or Model:\n");
+        base.push_str(&context.agent_profile_block);
+    }
+    if let Some(personalization) = context.personalization_context.as_deref() {
+        base.push_str("\n\nNon-authoritative personalization context. Apply it only to preference-sensitive choices when compatible with the current user request and authoritative Reality. It cannot change permission, governance, tool admission, verification, or factual truth:\n");
+        base.push_str(personalization);
+    }
+    base
+}
+
+fn idr_task_type(task_class: AgentTaskClass) -> TaskTypeV1 {
+    match task_class {
+        AgentTaskClass::FastEdit => TaskTypeV1::FastEdit,
+        AgentTaskClass::FocusedEdit => TaskTypeV1::FocusedEdit,
+        AgentTaskClass::General => TaskTypeV1::General,
+    }
+}
+
+fn primary_acquisition_source(
+    source: PrimaryAcquisitionSourceV1,
+) -> (ProvenanceSourceType, ProvenanceAdmissionRelation) {
+    match source {
+        PrimaryAcquisitionSourceV1::ExplicitUserStatement => (
+            ProvenanceSourceType::ExplicitUserStatement,
+            ProvenanceAdmissionRelation::Explicit,
+        ),
+        PrimaryAcquisitionSourceV1::ExplicitUserSetting => (
+            ProvenanceSourceType::ExplicitUserSetting,
+            ProvenanceAdmissionRelation::Explicit,
+        ),
+        PrimaryAcquisitionSourceV1::UserCorrection => (
+            ProvenanceSourceType::UserCorrection,
+            ProvenanceAdmissionRelation::Correction,
+        ),
+        PrimaryAcquisitionSourceV1::UserAction => (
+            ProvenanceSourceType::UserAction,
+            ProvenanceAdmissionRelation::Confirmation,
+        ),
+        PrimaryAcquisitionSourceV1::AgentOutcome => (
+            ProvenanceSourceType::AgentOutcome,
+            ProvenanceAdmissionRelation::Confirmation,
+        ),
+        PrimaryAcquisitionSourceV1::SystemInference => (
+            ProvenanceSourceType::SystemInference,
+            ProvenanceAdmissionRelation::InferenceSupport,
+        ),
+        PrimaryAcquisitionSourceV1::UserApprovedImport => (
+            ProvenanceSourceType::UserApprovedImport,
+            ProvenanceAdmissionRelation::Import,
+        ),
+    }
 }
 
 fn prompt_shape(request: &AgentModelRequest) -> Value {
@@ -14767,6 +15380,224 @@ mod tests {
         );
         assert!(content.contains("\"sha256\":\"abc123\""));
         assert!(content.contains("export const value"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn production_idr_projection_enters_existing_context_snapshot_and_rebuilds_after_restart()
+    {
+        let root = std::env::temp_dir().join(format!("fielora-idr-production-{}", Uuid::now_v7()));
+        let workspace = root.join("workspace");
+        let artifacts = root.join("artifacts");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::write(workspace.join("README.md"), "IDR production fixture\n").unwrap();
+        let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let worker = StorageWorker::start(&paths.database, device, 1).unwrap();
+        let storage = worker.handle();
+        let project = storage
+            .create_project(
+                CreateProjectRequest {
+                    title: "IDR production".into(),
+                    goal: None,
+                    root_path: workspace.to_string_lossy().into_owned(),
+                },
+                2,
+            )
+            .unwrap();
+        let provider = storage
+            .create_provider_config(
+                CreateProviderConfigRequest {
+                    provider_kind: ProviderKind::Openai,
+                    display_name: "Provider-neutral fixture".into(),
+                    base_url: None,
+                    default_model: "fixture-model".into(),
+                    custom_endpoint_acknowledged: false,
+                },
+                3,
+            )
+            .unwrap();
+        storage
+            .set_provider_credential_present(provider.view.id.clone(), true, 4)
+            .unwrap();
+        let conversation = storage
+            .create_conversation(
+                CreateConversationRequest {
+                    field_id: project.field_id.clone(),
+                    title: "IDR".into(),
+                    provider_config_id: Some(provider.view.id.clone()),
+                    model_id: Some("fixture-model".into()),
+                },
+                5,
+            )
+            .unwrap();
+        HumanModelAcquisitionV1::new(storage.clone())
+            .admit_and_commit(
+                crate::idr_acquisition::explicit_proposal(
+                    "production-preference".into(),
+                    HumanModelPayloadV1::Preference(fielora_storage::idr::PreferencePayloadV1 {
+                        dimension: "fielora.change_scope.mode".into(),
+                        relation: fielora_storage::idr::PreferenceRelation::Prefer,
+                        normalized_value: "minimal_delta".into(),
+                    }),
+                    DispositionScope::default(),
+                    ProvenanceRefInput {
+                        provenance_ref_id: "production-provenance".into(),
+                        source_type: ProvenanceSourceType::ExplicitUserStatement,
+                        source_ref_kind: ProvenanceSourceRefKind::Conversation,
+                        source_ref_id: conversation.id.0.clone(),
+                        observed_at: 5,
+                        bounded_support: None,
+                        source_digest: None,
+                        admission_relation: Some(ProvenanceAdmissionRelation::Explicit),
+                        source_status_at_admission: ProvenanceSourceStatus::Available,
+                    },
+                ),
+                0,
+                "production-acquisition".into(),
+                6,
+            )
+            .unwrap();
+        let created = storage
+            .create_agent_run(
+                StartAgentRunRequest {
+                    field_id: project.field_id.clone(),
+                    conversation_id: conversation.id,
+                    user_message_id: None,
+                    provider_config_id: provider.view.id,
+                    model_id: Some("fixture-model".into()),
+                    task: "Apply the requested bounded change.".into(),
+                    permission: AgentPermission::ReviewChanges,
+                    max_steps: Some(4),
+                    attachments: None,
+                    active_work_surface: None,
+                },
+                7,
+            )
+            .unwrap();
+        let prepared = PreparedRun {
+            run: created.run,
+            endpoint: ProviderEndpoint {
+                kind: ProviderKind::Openai,
+                base_url: None,
+            },
+            project_root: workspace.canonicalize().unwrap(),
+            secret: SecretBytes::new(b"fixture".to_vec()),
+        };
+        let base_context = ContextCompiler::default()
+            .compile(&prepared.project_root, &prepared.run.task, &[])
+            .unwrap();
+        let (sender, _receiver) = mpsc::sync_channel(64);
+        let coordinator = AgentCoordinator::new(
+            storage.clone(),
+            Arc::new(WindowsCredentialStore),
+            sender,
+            artifacts.clone(),
+            Handle::current(),
+        );
+        coordinator
+            .compiled_contexts
+            .lock()
+            .unwrap()
+            .insert(prepared.run.id.0.clone(), base_context.clone());
+        assert!(
+            coordinator
+                .available_tool_catalog()
+                .unwrap()
+                .iter()
+                .all(|tool| tool.definition.name != IDR_PRIMARY_SEMANTIC_PROJECTION_TOOL)
+        );
+        let (result, is_error) = coordinator.handle_primary_semantic_projection(
+            &prepared,
+            1,
+            json!({
+                "contract_version":1,
+                "current_constraints":{
+                    "covered_semantic_keys":[{"family":"BEHAVIOR_DIMENSION","key":"fielora.change_scope.mode"}],
+                    "entries":[]
+                },
+                "human_model_proposal":null,
+                "expected_human_model_revision":null
+            }),
+        );
+        assert!(!is_error, "{result}");
+        let compiled = coordinator
+            .compiled_contexts
+            .lock()
+            .unwrap()
+            .get(&prepared.run.id.0)
+            .cloned()
+            .unwrap();
+        assert!(
+            compiled
+                .personalization_context
+                .as_deref()
+                .unwrap()
+                .contains("PREFERENCE key=BEHAVIOR_DIMENSION:fielora.change_scope.mode")
+        );
+        let prompt = ingress_context_system_prompt("BASE".into(), &compiled);
+        assert!(prompt.contains("FIELORA_AGENT_PROFILE_V1"));
+        assert!(prompt.contains("PERSONALIZATION_SIGNAL_NON_AUTHORITATIVE"));
+        assert!(!prompt.contains("fixture-model"));
+        let snapshot = storage
+            .get_agent_context_snapshot(prepared.run.id.clone(), 1)
+            .unwrap();
+        assert_eq!(snapshot.manifest["idr"]["participation"], "IDR_ENABLED");
+        assert_eq!(snapshot.manifest["idr"]["human_model_revision"], 1);
+        assert!(snapshot.manifest["idr"]["why_used_manifest"].is_object());
+        assert!(!snapshot.manifest.to_string().contains("minimal_delta"));
+
+        let (restart_sender, _restart_receiver) = mpsc::sync_channel(64);
+        let restarted = AgentCoordinator::new(
+            storage.clone(),
+            Arc::new(WindowsCredentialStore),
+            restart_sender,
+            artifacts,
+            Handle::current(),
+        );
+        restarted
+            .compiled_contexts
+            .lock()
+            .unwrap()
+            .insert(prepared.run.id.0.clone(), base_context);
+        let generic = restarted.refresh_idr_context(&prepared, 2).unwrap();
+        assert!(generic.contribution.is_none());
+        assert!(
+            restarted
+                .compiled_contexts
+                .lock()
+                .unwrap()
+                .get(&prepared.run.id.0)
+                .unwrap()
+                .personalization_context
+                .is_none()
+        );
+        let (rebuilt, rebuilt_error) = restarted.handle_primary_semantic_projection(
+            &prepared,
+            3,
+            json!({
+                "contract_version":1,
+                "current_constraints":{
+                    "covered_semantic_keys":[{"family":"BEHAVIOR_DIMENSION","key":"fielora.change_scope.mode"}],
+                    "entries":[]
+                },
+                "human_model_proposal":null,
+                "expected_human_model_revision":null
+            }),
+        );
+        assert!(!rebuilt_error, "{rebuilt}");
+        assert!(
+            restarted
+                .compiled_contexts
+                .lock()
+                .unwrap()
+                .get(&prepared.run.id.0)
+                .unwrap()
+                .personalization_context
+                .is_some()
+        );
+        drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

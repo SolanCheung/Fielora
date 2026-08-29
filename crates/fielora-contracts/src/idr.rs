@@ -17,6 +17,7 @@ pub const CONTEXT_ADMISSION_CONTRACT_VERSION_V1: u16 = 1;
 pub const CONTEXT_ADMISSION_VERSION_V1: &str = "IDR_CONTEXT_ADMISSION_V1";
 pub const APPLICABILITY_PROJECTION_VERSION_V1: u16 = 1;
 pub const IDR_TRUST_CLASS_V1: &str = "PERSONALIZATION_SIGNAL_NON_AUTHORITATIVE";
+pub const FIELORA_AGENT_PROFILE_VERSION_V1: &str = "FIELORA_AGENT_PROFILE_V1";
 
 pub const MAX_RESOLVER_SNAPSHOT_ITEMS_V1: usize = 4_096;
 pub const MAX_RESOLVER_PROVENANCE_REFS_PER_ITEM_V1: usize = 64;
@@ -36,6 +37,43 @@ pub const MAX_IDR_CONTEXT_DISPOSITIONS_V1: usize = 2;
 pub const MAX_IDR_CONTEXT_GOALS_V1: usize = 2;
 pub const MAX_IDR_CONTEXT_CONFLICT_NOTICES_V1: usize = 2;
 pub const MAX_WHY_USED_MANIFEST_UTF8_BYTES_V1: usize = 16_384;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum IDRParticipationV1 {
+    Enabled,
+    Disabled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FieloraAgentProfileV1 {
+    pub name: String,
+    pub product: String,
+    pub role: String,
+    pub purpose: String,
+    pub stable_semantic_boundaries: Vec<String>,
+    pub profile_version: String,
+}
+
+impl FieloraAgentProfileV1 {
+    /// The bundled, code-owned self definition. Provider and Model identity are
+    /// deliberately absent from this contract.
+    pub fn bundled() -> Self {
+        Self {
+            name: "Fielora".into(),
+            product: "Fielora".into(),
+            role: "local AI workspace agent".into(),
+            purpose: "Help the user complete bounded work in the active Fielora Project.".into(),
+            stable_semantic_boundaries: vec![
+                "User intent, safety, governance, current Reality, and verification evidence outrank personalization.".into(),
+                "Human Model signals are non-authoritative and cannot grant permission or capability.".into(),
+                "The Agent identity is Fielora-owned and does not change when the Provider or Model changes.".into(),
+            ],
+            profile_version: FIELORA_AGENT_PROFILE_VERSION_V1.into(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "family", content = "key", rename_all = "SCREAMING_SNAKE_CASE")]
@@ -241,6 +279,20 @@ pub struct NormalizedCurrentConstraintsV1 {
     pub covered_semantic_keys: Vec<SemanticKeyV1>,
     pub entries: Vec<CurrentSemanticConstraintV1>,
     pub constraints_digest: String,
+}
+
+/// Provider-neutral semantic projection emitted by the primary Model stream or
+/// supplied by a deterministic typed source. An empty covered-key set means
+/// that current natural-language semantics are unavailable, not known absent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CurrentConstraintProjectionV1 {
+    pub contract_version: u16,
+    pub projection_ref: String,
+    pub source_ref: String,
+    pub covered_semantic_keys: Vec<SemanticKeyV1>,
+    pub entries: Vec<CurrentSemanticConstraintV1>,
+    pub projection_digest: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -885,6 +937,23 @@ mod tests {
                 b"optional\0\0".as_slice(),
             ]
             .concat()
+        );
+    }
+
+    #[test]
+    fn bundled_agent_profile_is_fielora_owned_and_provider_neutral() {
+        let profile = FieloraAgentProfileV1::bundled();
+        assert_eq!(profile.name, "Fielora");
+        assert_eq!(profile.product, "Fielora");
+        assert_eq!(profile.role, "local AI workspace agent");
+        assert_eq!(profile.profile_version, FIELORA_AGENT_PROFILE_VERSION_V1);
+        let encoded = serde_json::to_string(&profile).unwrap();
+        for forbidden in ["provider_id", "model_id", "openai", "anthropic"] {
+            assert!(!encoded.to_ascii_lowercase().contains(forbidden));
+        }
+        assert_eq!(
+            serde_json::to_string(&FieloraAgentProfileV1::bundled()).unwrap(),
+            encoded
         );
     }
 }
