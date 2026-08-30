@@ -33,6 +33,7 @@
     "test:e2e:project-navigation": "pnpm build:core:debug && node tests/e2e/project-navigation-e2e.mjs",
     "test:e2e:rich-result": "pnpm build:core:debug && node tests/e2e/rich-result-typed-reference-e2e.mjs",
     "test:e2e:screenshot-evidence": "pnpm build:core:debug && node tests/e2e/durable-screenshot-evidence-e2e.mjs",
+    "test:e2e:durable-file-artifact": "pnpm build:core:debug && node tests/e2e/durable-actionable-file-artifact-e2e.mjs",
     "test:e2e:agent-codex-style": "node tests/e2e/agent-codex-style-execution-real-e2e.mjs",
     "test:e2e:appearance": "pnpm build:core:debug && node tests/e2e/appearance-settings-e2e.mjs",
     "test:e2e:mcp-connection-ui": "cargo build -p fielora-core --features mcp-fixture --bins && node tests/e2e/mcp-connection-ui-e2e.mjs",

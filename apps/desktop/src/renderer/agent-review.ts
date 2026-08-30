@@ -1,4 +1,4 @@
-import type { AgentToolCallView } from '@fielora/contracts';
+import type { AgentToolCallView, FileArtifactRevisionReviewView } from '@fielora/contracts';
 
 export interface AgentReviewFile {
   path: string;
@@ -9,6 +9,12 @@ export interface AgentReviewFile {
   diff: string;
   changes: AgentReviewChange[];
   state: 'PROPOSED' | 'APPLIED';
+  artifactId?: string;
+  revisionId?: string;
+  reviewState?: 'UNREVIEWED' | 'REVIEWED';
+  applicability?: 'CURRENT' | 'CHANGED_SINCE';
+  undoAvailability?: 'AVAILABLE' | 'BLOCKED_CHANGED_SINCE' | 'DEFERRED_OPERATION' | 'CONTENT_UNAVAILABLE';
+  verificationCount?: number;
 }
 
 export interface AgentReviewChange {
@@ -57,6 +63,65 @@ function reviewFragment(path: string, before: string, after: string): string {
   for (const line of before.split(/\r?\n/).filter((value) => value.length > 0)) lines.push(`-${line}`);
   for (const line of after.split(/\r?\n/).filter((value) => value.length > 0)) lines.push(`+${line}`);
   return lines.join('\n');
+}
+
+function durableReviewFragment(path: string, before: string, after: string): { diff: string; additions: number; deletions: number; changes: AgentReviewChange[] } {
+  const beforeLines = before === '' ? [] : before.split(/\r?\n/);
+  const afterLines = after === '' ? [] : after.split(/\r?\n/);
+  let prefix = 0;
+  while (prefix < beforeLines.length && prefix < afterLines.length && beforeLines[prefix] === afterLines[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < beforeLines.length - prefix && suffix < afterLines.length - prefix
+    && beforeLines[beforeLines.length - suffix - 1] === afterLines[afterLines.length - suffix - 1]) suffix += 1;
+  const removed = beforeLines.slice(prefix, beforeLines.length - suffix);
+  const added = afterLines.slice(prefix, afterLines.length - suffix);
+  const lines = [before ? `--- a/${path}` : '--- /dev/null', after ? `+++ b/${path}` : '+++ /dev/null'];
+  if (removed.length > 0 || added.length > 0) {
+    lines.push(`@@ -${prefix + 1},${removed.length} +${prefix + 1},${added.length} @@`);
+    lines.push(...removed.map((line) => `-${line}`), ...added.map((line) => `+${line}`));
+  }
+  return {
+    diff: lines.join('\n'), additions: added.length, deletions: removed.length,
+    changes: removed.length > 0 || added.length > 0 ? [{ before: removed.join('\n'), after: added.join('\n') }] : [],
+  };
+}
+
+export function buildDurableAgentReview(revisions: readonly FileArtifactRevisionReviewView[]): AgentReviewSummary {
+  const byArtifact = new Map<string, FileArtifactRevisionReviewView[]>();
+  for (const revision of revisions) {
+    const items = byArtifact.get(revision.artifact_id) ?? [];
+    items.push(revision);
+    byArtifact.set(revision.artifact_id, items);
+  }
+  const files: AgentReviewFile[] = [];
+  for (const items of byArtifact.values()) {
+    items.sort((left, right) => left.sequence - right.sequence || left.revision_id.localeCompare(right.revision_id));
+    const first = items[0]!;
+    const last = items.at(-1)!;
+    const path = last.after.relative_path;
+    const before = first.before.exists ? first.before_text : '';
+    const after = last.after.exists ? last.after_text : '';
+    const review = before !== null && after !== null
+      ? durableReviewFragment(path, before ?? '', after ?? '')
+      : { diff: `--- a/${path}\n+++ b/${path}\nBinary or unavailable durable content`, additions: 0, deletions: 0, changes: [] };
+    const changeType: AgentReviewFile['changeType'] = !first.before.exists && last.after.exists
+      ? 'CREATE' : first.before.exists && !last.after.exists ? 'DELETE' : 'MODIFY';
+    files.push({
+      path, previousPath: null, changeType, ...review, state: 'APPLIED',
+      artifactId: last.artifact_id,
+      revisionId: last.revision_id,
+      reviewState: last.review_state,
+      applicability: last.applicability,
+      undoAvailability: last.undo_availability,
+      verificationCount: last.verifications.length,
+    });
+  }
+  return {
+    files,
+    additions: files.reduce((sum, file) => sum + file.additions, 0),
+    deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+    state: files.length > 0 ? 'APPLIED' : 'EMPTY',
+  };
 }
 
 function replacementDiff(path: string, replacements: unknown[]): { diff: string; additions: number; deletions: number; changes: AgentReviewChange[] } {

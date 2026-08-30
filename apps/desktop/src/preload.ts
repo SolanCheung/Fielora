@@ -31,6 +31,9 @@ const bridge: FieloraBridge = {
     previewAsset: (request) => ipcRenderer.invoke(channels.artifactAssetPreview, request),
     previewDiagram: (request) => ipcRenderer.invoke(channels.artifactDiagramPreview, request),
     setArchiveState: (request) => ipcRenderer.invoke(channels.artifactSetArchiveState, request),
+    listFileReviews: (request) => ipcRenderer.invoke(channels.artifactFileReviews, request),
+    markFileReviewed: (request) => ipcRenderer.invoke(channels.artifactFileMarkReviewed, request),
+    undoFileRevision: (request) => ipcRenderer.invoke(channels.artifactFileUndo, request),
   },
   workspace: {
     listFiles: (request) => ipcRenderer.invoke(channels.workspaceFileList, request),

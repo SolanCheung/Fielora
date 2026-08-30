@@ -1999,6 +1999,14 @@ impl ToolRuntime {
         bytes: &[u8],
         expected_sha256: &str,
     ) -> Result<String, AgentError> {
+        self.put_content_blob(bytes, expected_sha256)
+    }
+
+    pub fn put_content_blob(
+        &self,
+        bytes: &[u8],
+        expected_sha256: &str,
+    ) -> Result<String, AgentError> {
         self.content_blob_store
             .as_ref()
             .ok_or(AgentError::IoFailed)?
@@ -2016,6 +2024,71 @@ impl ToolRuntime {
             .as_ref()
             .ok_or(AgentError::IoFailed)?
             .read_verified(blob_ref, expected_length, expected_sha256, max_bytes)
+    }
+
+    pub fn read_content_blob(
+        &self,
+        expected_sha256: &str,
+        expected_length: u64,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, AgentError> {
+        if !valid_sha256(expected_sha256) {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        self.read_asset_blob(
+            &format!(
+                "blobs/objects/{}/{}",
+                &expected_sha256[..2],
+                expected_sha256
+            ),
+            expected_length,
+            expected_sha256,
+            max_bytes,
+        )
+    }
+
+    pub fn read_project_optional_binary(
+        &self,
+        path: &str,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<u8>>, AgentError> {
+        let relative = normalize_relative(path)?;
+        deny_sensitive(&relative)?;
+        let bytes = self.read_optional_contained(&relative)?;
+        if bytes.as_ref().is_some_and(|value| value.len() > max_bytes) {
+            return Err(AgentError::FileTooLarge);
+        }
+        Ok(bytes)
+    }
+
+    pub fn read_checkpoint_binary(
+        &self,
+        expected_sha256: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, AgentError> {
+        if !valid_sha256(expected_sha256) {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        let bytes = fs::read(self.checkpoint_root.join(expected_sha256))
+            .map_err(|_| AgentError::FileNotFound)?;
+        if bytes.len() > max_bytes {
+            return Err(AgentError::FileTooLarge);
+        }
+        if sha256(&bytes) != expected_sha256 {
+            return Err(AgentError::IoFailed);
+        }
+        Ok(bytes)
+    }
+
+    pub fn ensure_checkpoint_binary(
+        &self,
+        bytes: &[u8],
+        expected_sha256: &str,
+    ) -> Result<(), AgentError> {
+        if sha256(bytes) != expected_sha256 {
+            return Err(AgentError::FileChanged);
+        }
+        self.checkpoint(bytes).map(|_| ())
     }
 
     /// Inspect durable arguments against current contained workspace state.
@@ -3336,9 +3409,10 @@ impl ToolRuntime {
         if sha256(&backup) != args.backup_sha256 {
             return Err(AgentError::IoFailed);
         }
+        let previous_backup_sha256 = self.checkpoint(&current)?;
         atomic_write(&target, &backup, false)?;
         Ok(ToolExecution {
-            receipt: json!({"kind":"FILE_RESTORED","path":relative_text(&relative),"before_sha256":args.expected_sha256,"after_sha256":args.backup_sha256}),
+            receipt: json!({"kind":"FILE_RESTORED","path":relative_text(&relative),"before_sha256":args.expected_sha256,"after_sha256":args.backup_sha256,"backup_sha256":previous_backup_sha256,"restored_from_sha256":args.backup_sha256,"bytes":backup.len()}),
             observation: format!("{} restored", relative_text(&relative)),
         })
     }

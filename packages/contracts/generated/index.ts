@@ -332,7 +332,13 @@ export type ScreenshotEvidencePreviewView = { screenshot_evidence_id: Screenshot
 
 export type PortableBlobManifestEntryView = { blob_ref: string, content_sha256: string, byte_size: number, };
 
-export type ArtifactType = "DOCUMENT" | "PRESENTATION" | "DIAGRAM" | "SPREADSHEET";
+export type ArtifactType = "DOCUMENT" | "PRESENTATION" | "DIAGRAM" | "SPREADSHEET" | "FILE_MUTATION";
+
+export type FileMutationOperation = "CREATE" | "MODIFY" | "DELETE" | "MOVE" | "RESTORE";
+
+export type FileArtifactStateV1 = { relative_path: string, exists: boolean, content_sha256: string | null, byte_length: number | null, };
+
+export type FileMutationArtifactV1 = { operation: FileMutationOperation, before: FileArtifactStateV1, after: FileArtifactStateV1, };
 
 export type ArtifactRefV1 = { artifact_id: ArtifactId, revision_id: ArtifactRevisionId, expected_type: ArtifactType, semantic_sha256: string, };
 
@@ -418,7 +424,7 @@ export type SpreadsheetCellEmphasis = "NORMAL" | "HEADER" | "TOTAL";
 
 export type SpreadsheetCellAlignment = "AUTO" | "LEFT" | "CENTER" | "RIGHT";
 
-export type ArtifactContentV1 = { "type": "DOCUMENT", "content": DocumentArtifact } | { "type": "PRESENTATION", "content": PresentationArtifact } | { "type": "DIAGRAM", "content": DiagramArtifactV1 } | { "type": "SPREADSHEET", "content": SpreadsheetArtifactV1 };
+export type ArtifactContentV1 = { "type": "DOCUMENT", "content": DocumentArtifact } | { "type": "PRESENTATION", "content": PresentationArtifact } | { "type": "DIAGRAM", "content": DiagramArtifactV1 } | { "type": "SPREADSHEET", "content": SpreadsheetArtifactV1 } | { "type": "FILE_MUTATION", "content": FileMutationArtifactV1 };
 
 export type ArtifactMutationKind = "CREATE" | "UPDATE";
 
@@ -436,6 +442,16 @@ export type ArtifactRevisionView = { revision_id: ArtifactRevisionId, artifact_i
 
 export type ArtifactReadView = { artifact: ArtifactView, revision: ArtifactRevisionView, };
 
+export type FileArtifactReviewState = "UNREVIEWED" | "REVIEWED";
+
+export type FileArtifactApplicability = "CURRENT" | "CHANGED_SINCE";
+
+export type FileArtifactUndoAvailability = "AVAILABLE" | "BLOCKED_CHANGED_SINCE" | "DEFERRED_OPERATION" | "CONTENT_UNAVAILABLE";
+
+export type FileArtifactRevisionReviewView = { artifact_id: ArtifactId, revision_id: ArtifactRevisionId, sequence: number, source_run_id: AgentRunId, source_tool_call_id: ToolCallId, operation: FileMutationOperation, before: FileArtifactStateV1, after: FileArtifactStateV1, before_text: string | null, after_text: string | null, review_state: FileArtifactReviewState, applicability: FileArtifactApplicability, undo_availability: FileArtifactUndoAvailability, verifications: Array<VerificationReceiptView>, };
+
+export type FileArtifactReviewListView = { revisions: Array<FileArtifactRevisionReviewView>, };
+
 export type AssetView = { asset_id: AssetId, profile_id: ProfileId, media_type: AssetMediaType, content_sha256: string, byte_length: number, width: number, height: number, blob_ref: string, created_from_conversation_id: ConversationId | null, created_by_agent_run_id: AgentRunId | null, created_by_tool_call_id: ToolCallId, created_at: number, };
 
 export type ListArtifactsRequest = { cursor: ArtifactListCursor | null, limit: number | null, include_archived: boolean, };
@@ -443,6 +459,12 @@ export type ListArtifactsRequest = { cursor: ArtifactListCursor | null, limit: n
 export type ReadArtifactRequest = { artifact_id: ArtifactId, revision_id: ArtifactRevisionId | null, };
 
 export type ArtifactHistoryRequest = { artifact_id: ArtifactId, before_sequence: number | null, limit: number | null, };
+
+export type ListFileArtifactReviewsRequest = { run_id: AgentRunId, };
+
+export type MarkFileArtifactReviewedRequest = { artifact_id: ArtifactId, revision_id: ArtifactRevisionId, };
+
+export type UndoFileArtifactRevisionRequest = { source_run_id: AgentRunId, artifact_id: ArtifactId, revision_id: ArtifactRevisionId, };
 
 export type AssetPreviewRequest = { asset_id: AssetId, expected_content_sha256: string, };
 

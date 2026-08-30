@@ -32,6 +32,7 @@ import {
   validateSkillCatalog, validateRegisterLocalPlugin, validateUnregisterLocalPlugin,
   validateListArtifacts, validateReadArtifact, validateArtifactHistory,
   validateAssetPreview, validateDiagramPreview, validateSetArtifactArchiveState,
+  validateListFileArtifactReviews, validateMarkFileArtifactReviewed, validateUndoFileArtifactRevision,
   validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment, validateStoreWorkspaceAttachment,
   validateSaveWebLibrary, validateLibraryObject, validateDeleteLibraryObject, validateListLibraryObjects,
   validateScreenshotEvidence, validateScreenshotEvidenceByRun, validateScreenshotEvidenceByVerification, validateScreenshotEvidencePreview,
@@ -325,6 +326,9 @@ function registerBridgeHandlers(): void {
   handle(channels.artifactAssetPreview, validateAssetPreview, 'query.artifact.asset_preview');
   handle(channels.artifactDiagramPreview, validateDiagramPreview, 'query.artifact.diagram_preview');
   handle(channels.artifactSetArchiveState, validateSetArtifactArchiveState, 'command.artifact.set_archive_state');
+  handle(channels.artifactFileReviews, validateListFileArtifactReviews, 'query.artifact.file_reviews');
+  handle(channels.artifactFileMarkReviewed, validateMarkFileArtifactReviewed, 'command.artifact.file_mark_reviewed');
+  handle(channels.artifactFileUndo, validateUndoFileArtifactRevision, 'command.artifact.file_undo');
   ipcMain.handle(channels.workspaceFileList, async (event, payload) => {
     assertBridgeEvent(event); const request=validateWorkspaceProject(payload);
     return workspaceRuntime.listFiles(await projectRoot(request.field_id));

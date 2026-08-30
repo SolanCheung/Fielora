@@ -140,5 +140,6 @@ export function artifactTypeLabel(type: ArtifactType): string {
     PRESENTATION: '演示文稿',
     DIAGRAM: '图示',
     SPREADSHEET: '电子表格',
+    FILE_MUTATION: '文件变更',
   }[type];
 }

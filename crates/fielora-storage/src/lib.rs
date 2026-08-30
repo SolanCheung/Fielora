@@ -37,6 +37,7 @@ const MIGRATION_0011: &str = include_str!("../migrations/0011_artifact_archive_s
 const MIGRATION_0012: &str = include_str!("../migrations/0012_idr_v2_human_model.sql");
 const MIGRATION_0013: &str = include_str!("../migrations/0013_rich_result_typed_references.sql");
 const MIGRATION_0014: &str = include_str!("../migrations/0014_durable_screenshot_evidence.sql");
+const MIGRATION_0015: &str = include_str!("../migrations/0015_durable_file_artifacts.sql");
 const MIGRATION_0001_NAME: &str = "core";
 const MIGRATION_0002_NAME: &str = "phase02_reality";
 const MIGRATION_0004_NAME: &str = "phase04_entry";
@@ -50,6 +51,7 @@ const MIGRATION_0011_NAME: &str = "artifact_archive_state";
 const MIGRATION_0012_NAME: &str = "idr_v2_human_model";
 const MIGRATION_0013_NAME: &str = "rich_result_typed_references";
 const MIGRATION_0014_NAME: &str = "durable_screenshot_evidence";
+const MIGRATION_0015_NAME: &str = "durable_file_artifacts";
 const MIGRATION_0002_FROZEN_SHA256: &str =
     "9152a933786c33a58769d1c0268084a4471113fd3eee1436d122dcb1986039f9";
 const MIGRATION_0004_FROZEN_SHA256: &str =
@@ -58,7 +60,7 @@ const MIGRATION_0005_FROZEN_SHA256: &str =
     "b7e1e586b47e50389502677e172741d69463e9518ed32211dfafe0dc910c1547";
 const MIGRATION_0006_FROZEN_SHA256: &str =
     "5257959801424a13426259ce10c9ed2d5037795ec7a3a207171c568bc80dbaae";
-const SCHEMA_VERSION: u32 = 14;
+const SCHEMA_VERSION: u32 = 15;
 const LOCAL_USER_NAME: &str = "Local user";
 const SYSTEM_NAME: &str = "Fielora system";
 
@@ -182,6 +184,33 @@ pub struct UpdateArtifactRecord {
     pub semantic_sha256: String,
     pub mutation_request_sha256: String,
     pub now: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileArtifactMutationRecord {
+    pub relative_path: String,
+    pub content: FileMutationArtifactV1,
+    pub canonical_content_json: String,
+    pub semantic_sha256: String,
+}
+
+/// Trusted Harness-to-storage input for one successful built-in file ToolCall.
+/// A multi-file call commits all per-file revisions in one SQLite transaction.
+#[derive(Debug, Clone)]
+pub struct CommitFileArtifactMutationsRecord {
+    pub project_field_id: FieldId,
+    pub conversation_id: ConversationId,
+    pub run_id: AgentRunId,
+    pub tool_call_id: ToolCallId,
+    pub mutation_request_sha256: String,
+    pub mutations: Vec<FileArtifactMutationRecord>,
+    pub now: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredFileArtifactRevision {
+    pub read: ArtifactReadView,
+    pub review_state: FileArtifactReviewState,
 }
 
 /// Trusted Harness-to-storage input for Artifact visibility state. Archive is
@@ -1081,6 +1110,28 @@ impl StorageHandle {
         })
     }
 
+    pub fn list_artifact_revision_verifications(
+        &self,
+        artifact_id: ArtifactId,
+        revision_id: ArtifactRevisionId,
+    ) -> Result<Vec<VerificationReceiptView>, DomainError> {
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            get_artifact_revision(connection, &profile_id, &artifact_id, &revision_id)?;
+            let mut statement = connection.prepare(
+                "SELECT v.id,v.run_id,v.tool_call_id,v.check_kind,v.outcome,v.summary,v.artifact_sha256,v.exit_code,v.created_at,v.subject_kind,v.subject_artifact_id,v.subject_revision_id,v.subject_sha256 FROM agent_verification_receipts v JOIN artifacts a ON a.id=v.subject_artifact_id WHERE a.profile_id=?1 AND v.subject_kind='ARTIFACT_REVISION' AND v.subject_artifact_id=?2 AND v.subject_revision_id=?3 ORDER BY v.created_at ASC,v.id ASC"
+            ).map_err(storage_domain)?;
+            statement
+                .query_map(
+                    params![profile_id.0, artifact_id.0, revision_id.0],
+                    verification_receipt_from_row,
+                )
+                .map_err(storage_domain)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(storage_domain)
+        })
+    }
+
     pub fn create_screenshot_evidence(
         &self,
         evidence: ScreenshotEvidenceView,
@@ -1166,7 +1217,12 @@ impl StorageHandle {
         let profile_id = self.profile_id.clone();
         request_task(&self.sender, move |connection| {
             let mut statement = connection.prepare(
-                "SELECT blob_ref,content_sha256,byte_size FROM (SELECT blob_ref,content_hash AS content_sha256,size AS byte_size FROM library_objects WHERE profile_id=?1 AND kind='FILE' UNION SELECT blob_ref,content_sha256,byte_length AS byte_size FROM assets WHERE profile_id=?1) ORDER BY blob_ref ASC"
+                "SELECT blob_ref,content_sha256,byte_size FROM (
+                    SELECT blob_ref,content_hash AS content_sha256,size AS byte_size FROM library_objects WHERE profile_id=?1 AND kind='FILE'
+                    UNION SELECT blob_ref,content_sha256,byte_length AS byte_size FROM assets WHERE profile_id=?1
+                    UNION SELECT 'blobs/objects/' || substr(json_extract(r.content_json,'$.content.before.content_sha256'),1,2) || '/' || json_extract(r.content_json,'$.content.before.content_sha256'),json_extract(r.content_json,'$.content.before.content_sha256'),json_extract(r.content_json,'$.content.before.byte_length') FROM artifact_revisions r JOIN artifacts a ON a.id=r.artifact_id WHERE a.profile_id=?1 AND a.artifact_type='FILE_MUTATION' AND json_extract(r.content_json,'$.content.before.exists')=1
+                    UNION SELECT 'blobs/objects/' || substr(json_extract(r.content_json,'$.content.after.content_sha256'),1,2) || '/' || json_extract(r.content_json,'$.content.after.content_sha256'),json_extract(r.content_json,'$.content.after.content_sha256'),json_extract(r.content_json,'$.content.after.byte_length') FROM artifact_revisions r JOIN artifacts a ON a.id=r.artifact_id WHERE a.profile_id=?1 AND a.artifact_type='FILE_MUTATION' AND json_extract(r.content_json,'$.content.after.exists')=1
+                ) ORDER BY blob_ref ASC"
             ).map_err(storage_domain)?;
             statement
                 .query_map([&profile_id.0], |row| {
@@ -1318,6 +1374,177 @@ impl StorageHandle {
         })
     }
 
+    pub fn commit_file_artifact_mutations(
+        &self,
+        request: CommitFileArtifactMutationsRecord,
+    ) -> Result<Vec<ArtifactReadView>, DomainError> {
+        let owner = self.local_user.clone();
+        let profile_id = self.profile_id.clone();
+        let device_id = self.device_id.clone();
+        request_task(&self.sender, move |connection| {
+            validate_file_artifact_mutation_request(connection, &owner, &profile_id, &request)?;
+            let existing = file_artifact_mutations_for_tool_call(
+                connection,
+                &profile_id,
+                &request.tool_call_id,
+            )?;
+            if !existing.is_empty() {
+                if file_artifact_replay_matches(connection, &request, &existing)? {
+                    return Ok(existing);
+                }
+                return Err(DomainError::Validation(
+                    "ARTIFACT_TOOLCALL_IDEMPOTENCY_CONFLICT".into(),
+                ));
+            }
+
+            let transaction = connection.transaction().map_err(storage_domain)?;
+            let mut committed = Vec::with_capacity(request.mutations.len());
+            for mutation in &request.mutations {
+                let existing_artifact_id = transaction
+                    .query_row(
+                        "SELECT artifact_id FROM file_artifact_bindings WHERE profile_id=?1 AND project_field_id=?2 AND relative_path=?3",
+                        params![profile_id.0, request.project_field_id.0, mutation.relative_path],
+                        |row| row.get::<_, String>(0).map(ArtifactId::new),
+                    )
+                    .optional()
+                    .map_err(storage_domain)?;
+                let revision_id = ArtifactRevisionId::new(Uuid::now_v7().to_string());
+                let artifact_id = if let Some(artifact_id) = existing_artifact_id {
+                    let artifact = get_artifact(&transaction, &profile_id, &artifact_id)?;
+                    if artifact.artifact_type != ArtifactType::FileMutation
+                        || artifact.project_field_id.as_ref() != Some(&request.project_field_id)
+                    {
+                        return Err(DomainError::Validation(
+                            "FILE_ARTIFACT_BINDING_INVALID".into(),
+                        ));
+                    }
+                    let parent = get_artifact_revision(
+                        &transaction,
+                        &profile_id,
+                        &artifact_id,
+                        &artifact.current_revision_id,
+                    )?;
+                    let sequence = parent.sequence.checked_add(1).ok_or_else(|| {
+                        DomainError::Validation("ARTIFACT_REVISION_OVERFLOW".into())
+                    })?;
+                    transaction.execute(
+                        "INSERT INTO artifact_revisions(id,artifact_id,sequence,parent_revision_id,mutation_kind,content_schema_version,content_json,semantic_sha256,mutation_request_sha256,created_from_conversation_id,created_by_agent_run_id,created_by_tool_call_id,created_at) VALUES(?1,?2,?3,?4,'UPDATE',1,?5,?6,?7,?8,?9,?10,?11)",
+                        params![revision_id.0,artifact_id.0,revision_to_domain(sequence)?,artifact.current_revision_id.0,mutation.canonical_content_json,mutation.semantic_sha256,request.mutation_request_sha256,request.conversation_id.0,request.run_id.0,request.tool_call_id.0,request.now],
+                    ).map_err(storage_domain)?;
+                    let changed = transaction.execute(
+                        "UPDATE artifacts SET current_revision_id=?1,updated_by_device=?2,updated_at=?3 WHERE id=?4 AND profile_id=?5 AND current_revision_id=?6",
+                        params![revision_id.0,device_id.0,request.now,artifact_id.0,profile_id.0,artifact.current_revision_id.0],
+                    ).map_err(storage_domain)?;
+                    if changed != 1 {
+                        return Err(DomainError::RevisionConflict);
+                    }
+                    transaction.execute(
+                        "UPDATE file_artifact_bindings SET updated_at=MAX(updated_at,?1) WHERE artifact_id=?2 AND profile_id=?3",
+                        params![request.now,artifact_id.0,profile_id.0],
+                    ).map_err(storage_domain)?;
+                    artifact_id
+                } else {
+                    let artifact_id = ArtifactId::new(Uuid::now_v7().to_string());
+                    transaction.execute(
+                        "INSERT INTO artifacts(id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at) VALUES(?1,?2,'FILE_MUTATION',NULL,?3,?4,?5,?6,?7,?8,?8)",
+                        params![artifact_id.0,profile_id.0,request.project_field_id.0,revision_id.0,request.conversation_id.0,request.run_id.0,device_id.0,request.now],
+                    ).map_err(storage_domain)?;
+                    transaction.execute(
+                        "INSERT INTO artifact_revisions(id,artifact_id,sequence,parent_revision_id,mutation_kind,content_schema_version,content_json,semantic_sha256,mutation_request_sha256,created_from_conversation_id,created_by_agent_run_id,created_by_tool_call_id,created_at) VALUES(?1,?2,1,NULL,'CREATE',1,?3,?4,?5,?6,?7,?8,?9)",
+                        params![revision_id.0,artifact_id.0,mutation.canonical_content_json,mutation.semantic_sha256,request.mutation_request_sha256,request.conversation_id.0,request.run_id.0,request.tool_call_id.0,request.now],
+                    ).map_err(storage_domain)?;
+                    transaction.execute(
+                        "INSERT INTO file_artifact_bindings(artifact_id,profile_id,project_field_id,relative_path,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?5)",
+                        params![artifact_id.0,profile_id.0,request.project_field_id.0,mutation.relative_path,request.now],
+                    ).map_err(storage_domain)?;
+                    artifact_id
+                };
+                committed.push((artifact_id, revision_id));
+            }
+            transaction.commit().map_err(storage_domain)?;
+            committed
+                .into_iter()
+                .map(|(artifact_id, revision_id)| {
+                    get_artifact_read(connection, &profile_id, &artifact_id, Some(&revision_id))
+                })
+                .collect()
+        })
+    }
+
+    pub fn file_artifact_mutations_by_tool_call(
+        &self,
+        tool_call_id: ToolCallId,
+    ) -> Result<Vec<ArtifactReadView>, DomainError> {
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            file_artifact_mutations_for_tool_call(connection, &profile_id, &tool_call_id)
+        })
+    }
+
+    pub fn list_file_artifact_revisions_by_run(
+        &self,
+        run_id: AgentRunId,
+    ) -> Result<Vec<StoredFileArtifactRevision>, DomainError> {
+        let owner = self.local_user.clone();
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            get_agent_run(connection, &owner, &run_id)?;
+            let mut statement = connection.prepare(
+                "SELECT r.artifact_id,r.id,CASE WHEN rr.revision_id IS NULL THEN 0 ELSE 1 END FROM artifact_revisions r JOIN artifacts a ON a.id=r.artifact_id LEFT JOIN artifact_revision_reviews rr ON rr.revision_id=r.id AND rr.profile_id=a.profile_id WHERE a.profile_id=?1 AND a.artifact_type='FILE_MUTATION' AND r.created_by_agent_run_id=?2 ORDER BY r.created_at ASC,r.sequence ASC,r.id ASC"
+            ).map_err(storage_domain)?;
+            let rows = statement
+                .query_map(params![profile_id.0, run_id.0], |row| {
+                    Ok((
+                        ArtifactId::new(row.get::<_, String>(0)?),
+                        ArtifactRevisionId::new(row.get::<_, String>(1)?),
+                        row.get::<_, bool>(2)?,
+                    ))
+                })
+                .map_err(storage_domain)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(storage_domain)?;
+            rows.into_iter()
+                .map(|(artifact_id, revision_id, reviewed)| {
+                    Ok(StoredFileArtifactRevision {
+                        read: get_artifact_read(
+                            connection,
+                            &profile_id,
+                            &artifact_id,
+                            Some(&revision_id),
+                        )?,
+                        review_state: if reviewed {
+                            FileArtifactReviewState::Reviewed
+                        } else {
+                            FileArtifactReviewState::Unreviewed
+                        },
+                    })
+                })
+                .collect()
+        })
+    }
+
+    pub fn mark_file_artifact_revision_reviewed(
+        &self,
+        artifact_id: ArtifactId,
+        revision_id: ArtifactRevisionId,
+        now: i64,
+    ) -> Result<FileArtifactReviewState, DomainError> {
+        let owner = self.local_user.clone();
+        let profile_id = self.profile_id.clone();
+        request_task(&self.sender, move |connection| {
+            let read =
+                get_artifact_read(connection, &profile_id, &artifact_id, Some(&revision_id))?;
+            if read.artifact.artifact_type != ArtifactType::FileMutation {
+                return Err(DomainError::Validation("FILE_ARTIFACT_TYPE_INVALID".into()));
+            }
+            connection.execute(
+                "INSERT INTO artifact_revision_reviews(revision_id,profile_id,state,reviewed_by_principal_id,reviewed_at) VALUES(?1,?2,'REVIEWED',?3,?4) ON CONFLICT(revision_id) DO NOTHING",
+                params![revision_id.0,profile_id.0,owner.0,now],
+            ).map_err(storage_domain)?;
+            Ok(FileArtifactReviewState::Reviewed)
+        })
+    }
+
     pub fn read_artifact(
         &self,
         artifact_id: ArtifactId,
@@ -1345,7 +1572,7 @@ impl StorageHandle {
             let cursor_updated_at = cursor.as_ref().map(|value| value.updated_at);
             let cursor_artifact_id = cursor.as_ref().map(|value| value.artifact_id.0.as_str());
             let mut statement = connection.prepare(
-                "SELECT id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at,archived_at FROM artifacts WHERE profile_id=?1 AND (?2 OR archived_at IS NULL) AND (?3 IS NULL OR updated_at < ?3 OR (updated_at = ?3 AND id < ?4)) ORDER BY updated_at DESC,id DESC LIMIT ?5"
+                "SELECT id,profile_id,artifact_type,title,project_field_id,current_revision_id,created_from_conversation_id,created_by_agent_run_id,updated_by_device,created_at,updated_at,archived_at FROM artifacts WHERE profile_id=?1 AND artifact_type!='FILE_MUTATION' AND (?2 OR archived_at IS NULL) AND (?3 IS NULL OR updated_at < ?3 OR (updated_at = ?3 AND id < ?4)) ORDER BY updated_at DESC,id DESC LIMIT ?5"
             ).map_err(storage_domain)?;
             let rows = statement
                 .query_map(
@@ -2740,6 +2967,131 @@ fn validate_artifact_write_request(
     Ok(())
 }
 
+fn valid_file_artifact_path(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 4096
+        && !value.starts_with('/')
+        && !value.contains('\\')
+        && !value.contains('\0')
+        && value
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+fn valid_file_artifact_state(state: &FileArtifactStateV1) -> bool {
+    valid_file_artifact_path(&state.relative_path)
+        && if state.exists {
+            state
+                .content_sha256
+                .as_deref()
+                .is_some_and(valid_lower_sha256)
+                && state.byte_length.is_some_and(|value| value <= 1024 * 1024)
+        } else {
+            state.content_sha256.is_none() && state.byte_length.is_none()
+        }
+}
+
+fn validate_file_artifact_mutation_request(
+    connection: &Connection,
+    owner: &PrincipalId,
+    profile_id: &ProfileId,
+    request: &CommitFileArtifactMutationsRecord,
+) -> Result<(), DomainError> {
+    let run = get_agent_run(connection, owner, &request.run_id)?;
+    if run.conversation_id != request.conversation_id || run.field_id != request.project_field_id {
+        return Err(DomainError::Validation(
+            "ARTIFACT_TRUSTED_CONTEXT_INVALID".into(),
+        ));
+    }
+    let tool = get_agent_tool_call(connection, owner, &request.tool_call_id)?;
+    let expected_operation = match tool.name.as_str() {
+        "create_file" => FileMutationOperation::Create,
+        "write_file" | "replace_text" | "apply_patches" => FileMutationOperation::Modify,
+        "delete_file" => FileMutationOperation::Delete,
+        "restore_file" => FileMutationOperation::Restore,
+        _ => {
+            return Err(DomainError::Validation(
+                "ARTIFACT_TOOLCALL_SCOPE_INVALID".into(),
+            ));
+        }
+    };
+    if tool.run_id != request.run_id
+        || tool.status != AgentToolStatus::Running
+        || current_profile_id(connection)? != *profile_id
+        || !valid_lower_sha256(&request.mutation_request_sha256)
+        || request.mutations.is_empty()
+        || request.mutations.len() > 16
+    {
+        return Err(DomainError::Validation(
+            "ARTIFACT_TOOLCALL_SCOPE_INVALID".into(),
+        ));
+    }
+    let mut paths = HashSet::with_capacity(request.mutations.len());
+    for mutation in &request.mutations {
+        let content = &mutation.content;
+        if content.operation != expected_operation
+            || !valid_file_artifact_path(&mutation.relative_path)
+            || !paths.insert(mutation.relative_path.as_str())
+            || !valid_file_artifact_state(&content.before)
+            || !valid_file_artifact_state(&content.after)
+            || content.before.relative_path != mutation.relative_path
+            || content.after.relative_path != mutation.relative_path
+            || match content.operation {
+                FileMutationOperation::Create => content.before.exists || !content.after.exists,
+                FileMutationOperation::Modify | FileMutationOperation::Restore => {
+                    !content.before.exists || !content.after.exists
+                }
+                FileMutationOperation::Delete => !content.before.exists || content.after.exists,
+                FileMutationOperation::Move => true,
+            }
+            || mutation.canonical_content_json.len() > 256 * 1024
+            || !valid_lower_sha256(&mutation.semantic_sha256)
+            || format!(
+                "{:x}",
+                Sha256::digest(mutation.canonical_content_json.as_bytes())
+            ) != mutation.semantic_sha256
+        {
+            return Err(DomainError::Validation("ARTIFACT_CONTENT_INVALID".into()));
+        }
+        let decoded: ArtifactContentV1 = serde_json::from_str(&mutation.canonical_content_json)
+            .map_err(|_| DomainError::Validation("ARTIFACT_CONTENT_INVALID".into()))?;
+        if decoded != ArtifactContentV1::FileMutation(content.clone()) {
+            return Err(DomainError::Validation("ARTIFACT_CONTENT_INVALID".into()));
+        }
+    }
+    Ok(())
+}
+
+fn file_artifact_replay_matches(
+    connection: &Connection,
+    request: &CommitFileArtifactMutationsRecord,
+    existing: &[ArtifactReadView],
+) -> Result<bool, DomainError> {
+    if existing.len() != request.mutations.len() {
+        return Ok(false);
+    }
+    let digests: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM artifact_revisions WHERE created_by_tool_call_id=?1 AND mutation_request_sha256=?2",
+            params![request.tool_call_id.0, request.mutation_request_sha256],
+            |row| row.get(0),
+        )
+        .map_err(storage_domain)?;
+    if digests != existing.len() as i64 {
+        return Ok(false);
+    }
+    Ok(request.mutations.iter().all(|mutation| {
+        existing.iter().any(|read| {
+            read.revision.semantic_sha256 == mutation.semantic_sha256
+                && matches!(
+                    &read.revision.content,
+                    ArtifactContentV1::FileMutation(content)
+                        if content == &mutation.content
+                )
+        })
+    }))
+}
+
 struct PersistedArtifactRow {
     artifact_id: ArtifactId,
     profile_id: ProfileId,
@@ -2937,6 +3289,31 @@ fn artifact_mutation_for_tool_call(
         get_artifact_read(connection, profile_id, &artifact_id, Some(&revision_id))
     })
     .transpose()
+}
+
+fn file_artifact_mutations_for_tool_call(
+    connection: &Connection,
+    profile_id: &ProfileId,
+    tool_call_id: &ToolCallId,
+) -> Result<Vec<ArtifactReadView>, DomainError> {
+    let mut statement = connection.prepare(
+        "SELECT r.artifact_id,r.id FROM artifact_revisions r JOIN artifacts a ON a.id=r.artifact_id WHERE r.created_by_tool_call_id=?1 AND a.profile_id=?2 AND a.artifact_type='FILE_MUTATION' ORDER BY r.id ASC"
+    ).map_err(storage_domain)?;
+    let ids = statement
+        .query_map(params![tool_call_id.0, profile_id.0], |row| {
+            Ok((
+                ArtifactId::new(row.get::<_, String>(0)?),
+                ArtifactRevisionId::new(row.get::<_, String>(1)?),
+            ))
+        })
+        .map_err(storage_domain)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(storage_domain)?;
+    ids.into_iter()
+        .map(|(artifact_id, revision_id)| {
+            get_artifact_read(connection, profile_id, &artifact_id, Some(&revision_id))
+        })
+        .collect()
 }
 
 fn asset_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetView> {
@@ -4191,6 +4568,7 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     let checksum_0012 = migration_checksum(MIGRATION_0012);
     let checksum_0013 = migration_checksum(MIGRATION_0013);
     let checksum_0014 = migration_checksum(MIGRATION_0014);
+    let checksum_0015 = migration_checksum(MIGRATION_0015);
     if checksum_0002 != MIGRATION_0002_FROZEN_SHA256 {
         return Err(StorageError::MigrationChecksum { version: 2 });
     }
@@ -4331,8 +4709,57 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     if !migration_exists(connection, 14)? {
         apply_screenshot_evidence_migration(connection, now, MIGRATION_0014, &checksum_0014)?;
     }
+    verify_applied_migration(connection, 15, MIGRATION_0015_NAME, &checksum_0015)?;
+    if !migration_exists(connection, 15)? {
+        apply_durable_file_artifact_migration(connection, now, MIGRATION_0015, &checksum_0015)?;
+    }
     validate_schema(connection)?;
     Ok(())
+}
+
+fn apply_durable_file_artifact_migration(
+    connection: &mut Connection,
+    now: i64,
+    migration_sql: &str,
+    checksum: &str,
+) -> Result<(), StorageError> {
+    // The original migration-0008 global ToolCall uniqueness lives on the
+    // immutable revision table. SQLite requires the same bounded parent-table
+    // rebuild protocol used by migration 0009 to broaden it for multi-file
+    // ToolCalls while preserving every existing row and foreign key.
+    connection.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let foreign_keys: i64 = connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+    if foreign_keys != 0 {
+        return Err(StorageError::OpenGate(
+            "migration 0015 could not suspend foreign keys".into(),
+        ));
+    }
+    let migration_result = (|| {
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if transaction.execute_batch(migration_sql).is_err() {
+            return Err(StorageError::MigrationIncompatibleData);
+        }
+        transaction.execute(
+            "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (15, ?1, ?2, ?3)",
+            params![MIGRATION_0015_NAME, checksum, now],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    })();
+    let restore_result = connection.execute_batch("PRAGMA foreign_keys = ON;");
+    if let Err(error) = migration_result {
+        restore_result?;
+        return Err(error);
+    }
+    restore_result?;
+    let foreign_keys: i64 = connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+    if foreign_keys != 1 {
+        return Err(StorageError::OpenGate(
+            "migration 0015 did not restore foreign keys".into(),
+        ));
+    }
+    validate_schema(connection)
 }
 
 fn apply_screenshot_evidence_migration(
@@ -5009,6 +5436,87 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
     }
     if migration_exists(connection, 14)? {
         validate_screenshot_evidence_schema(connection)?;
+    }
+    if migration_exists(connection, 15)? {
+        validate_durable_file_artifact_schema(connection)?;
+    }
+    Ok(())
+}
+
+fn validate_durable_file_artifact_schema(connection: &Connection) -> Result<(), StorageError> {
+    for table in ["file_artifact_bindings", "artifact_revision_reviews"] {
+        let exists: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            [table],
+            |row| row.get(0),
+        )?;
+        if exists != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "migration validation missing table {table}"
+            )));
+        }
+    }
+    for (table, column) in [
+        ("file_artifact_bindings", "artifact_id"),
+        ("file_artifact_bindings", "profile_id"),
+        ("file_artifact_bindings", "project_field_id"),
+        ("file_artifact_bindings", "relative_path"),
+        ("artifact_revision_reviews", "revision_id"),
+        ("artifact_revision_reviews", "profile_id"),
+        ("artifact_revision_reviews", "state"),
+        ("artifact_revision_reviews", "reviewed_by_principal_id"),
+        ("artifact_revision_reviews", "reviewed_at"),
+    ] {
+        let required: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name=?2 AND \"notnull\"=1",
+            params![table, column],
+            |row| row.get(0),
+        )?;
+        if required != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required NOT NULL column missing: {table}.{column}"
+            )));
+        }
+    }
+    for index in [
+        "idx_artifact_revisions_tool_call",
+        "idx_file_artifact_bindings_project_path",
+        "idx_artifact_revision_reviews_profile_reviewed",
+    ] {
+        let exists: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+            [index],
+            |row| row.get(0),
+        )?;
+        if exists != 1 {
+            return Err(StorageError::OpenGate(format!(
+                "required index missing: {index}"
+            )));
+        }
+    }
+    let revision_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='artifact_revisions'",
+        [],
+        |row| row.get(0),
+    )?;
+    let normalized = revision_sql
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_uppercase();
+    if !normalized.contains("UNIQUE (CREATED_BY_TOOL_CALL_ID, ARTIFACT_ID)") {
+        return Err(StorageError::OpenGate(
+            "file artifact ToolCall/revision uniqueness missing".into(),
+        ));
+    }
+    let foreign_key_violations: i64 =
+        connection.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })?;
+    if foreign_key_violations != 0 {
+        return Err(StorageError::OpenGate(
+            "durable file Artifact foreign key validation failed".into(),
+        ));
     }
     Ok(())
 }
@@ -7346,6 +7854,17 @@ mod tests {
         .unwrap();
     }
 
+    fn apply_schema_through_14(connection: &mut Connection, now: i64) {
+        apply_schema_through_13(connection, now);
+        apply_screenshot_evidence_migration(
+            connection,
+            now + 6,
+            MIGRATION_0014,
+            &migration_checksum(MIGRATION_0014),
+        )
+        .unwrap();
+    }
+
     fn start_pre_migrated_worker(
         mut connection: Connection,
         database_path: PathBuf,
@@ -8042,7 +8561,7 @@ mod tests {
             frozen_migration_checksum(MIGRATION_0006),
             MIGRATION_0006_FROZEN_SHA256
         );
-        assert_eq!(schema_version(), 14);
+        assert_eq!(schema_version(), 15);
     }
 
     #[test]
@@ -8073,7 +8592,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!((profile_before, version), (profile_after, 12));
+        assert_eq!((profile_before, version), (profile_after, 15));
         drop(connection);
         fs::remove_dir_all(&root).unwrap();
 
@@ -8230,7 +8749,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             (version, migration_name.as_str()),
-            (12, MIGRATION_0009_NAME)
+            (15, MIGRATION_0009_NAME)
         );
         assert_eq!(
             artifacts_before,
@@ -8525,7 +9044,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((max_version, assets_table), (12, 1));
+        assert_eq!((max_version, assets_table), (15, 1));
         assert_eq!(
             artifacts_before,
             query_json_rows(
@@ -8749,7 +9268,7 @@ mod tests {
             [&message_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).unwrap();
-        assert_eq!(migrated, (14, "# Existing Markdown".into(), "[]".into()));
+        assert_eq!(migrated, (15, "# Existing Markdown".into(), "[]".into()));
         apply_migrations(&mut connection, 21).unwrap();
         validate_schema(&connection).unwrap();
         drop(connection);
@@ -8796,7 +9315,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(migrated, (14, 1));
+        assert_eq!(migrated, (15, 1));
         apply_migrations(&mut connection, 21).unwrap();
         validate_schema(&connection).unwrap();
         drop(connection);
@@ -8827,6 +9346,551 @@ mod tests {
         assert_eq!(rolled_back, (0, 0));
         drop(rollback);
         fs::remove_dir_all(rollback_root).unwrap();
+    }
+
+    #[test]
+    fn migration_0015_preserves_artifact_history_and_is_atomic() {
+        let root = temporary_root();
+        let paths = PlatformPaths::from_root(root.clone()).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let mut connection = open_connection(&paths.database).unwrap();
+        apply_schema_through_14(&mut connection, 1);
+        bootstrap_records(&mut connection, &device, 10).unwrap();
+        let worker =
+            start_pre_migrated_worker(connection, paths.database.clone(), device.clone(), 11);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 20);
+        let existing = create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Document,
+            artifact_content("pre-0015 revision"),
+            "Pre-0015 Artifact",
+            30,
+        );
+        drop(worker);
+
+        let mut connection = open_connection(&paths.database).unwrap();
+        let revisions_before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,artifact_id,sequence,parent_revision_id,mutation_kind,content_json,semantic_sha256,mutation_request_sha256,created_by_tool_call_id) FROM artifact_revisions ORDER BY id",
+        );
+        apply_migrations(&mut connection, 40).unwrap();
+        let migrated: (i64, i64, i64) = connection.query_row(
+            "SELECT (SELECT MAX(version) FROM schema_migrations), (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='file_artifact_bindings'), (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='artifact_revision_reviews')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(migrated, (15, 1, 1));
+        assert_eq!(
+            revisions_before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,artifact_id,sequence,parent_revision_id,mutation_kind,content_json,semantic_sha256,mutation_request_sha256,created_by_tool_call_id) FROM artifact_revisions ORDER BY id",
+            )
+        );
+        let foreign_key_violations: i64 = connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
+        drop(connection);
+
+        let reopened = StorageWorker::start(&paths.database, device, 50).unwrap();
+        assert_eq!(
+            reopened
+                .handle()
+                .read_artifact(existing.artifact.artifact_id, None)
+                .unwrap()
+                .revision
+                .content,
+            existing.revision.content
+        );
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+
+        let rollback_root = temporary_root();
+        let rollback_paths = PlatformPaths::from_root(rollback_root.clone()).unwrap();
+        let rollback_device =
+            DeviceIdentity::load_or_create(&rollback_paths.device_identity).unwrap();
+        let mut rollback = open_connection(&rollback_paths.database).unwrap();
+        apply_schema_through_14(&mut rollback, 1);
+        bootstrap_records(&mut rollback, &rollback_device, 10).unwrap();
+        let failing_migration =
+            format!("{MIGRATION_0015}\nSELECT * FROM migration_0015_forced_failure;");
+        assert!(matches!(
+            apply_durable_file_artifact_migration(
+                &mut rollback,
+                20,
+                &failing_migration,
+                &migration_checksum(&failing_migration),
+            ),
+            Err(StorageError::MigrationIncompatibleData)
+        ));
+        let rolled_back: (i64, i64, i64, i64) = rollback.query_row(
+            "SELECT (SELECT COUNT(*) FROM schema_migrations WHERE version=15), (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='file_artifact_bindings'), (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='artifact_revision_reviews'), (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='artifact_revisions')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(rolled_back, (0, 0, 0, 1));
+        let foreign_keys: i64 = rollback
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(foreign_keys, 1);
+        drop(rollback);
+        fs::remove_dir_all(rollback_root).unwrap();
+    }
+
+    #[test]
+    fn file_artifact_revisions_are_stable_idempotent_reviewable_and_exactly_verified() {
+        fn mutation(
+            operation: FileMutationOperation,
+            path: &str,
+            before: Option<&[u8]>,
+            after: Option<&[u8]>,
+        ) -> FileArtifactMutationRecord {
+            let state = |bytes: Option<&[u8]>| FileArtifactStateV1 {
+                relative_path: path.into(),
+                exists: bytes.is_some(),
+                content_sha256: bytes.map(|value| format!("{:x}", Sha256::digest(value))),
+                byte_length: bytes.map(|value| value.len() as u64),
+            };
+            let content = FileMutationArtifactV1 {
+                operation,
+                before: state(before),
+                after: state(after),
+            };
+            let canonical_content_json =
+                serde_json::to_string(&ArtifactContentV1::FileMutation(content.clone())).unwrap();
+            let semantic_sha256 =
+                format!("{:x}", Sha256::digest(canonical_content_json.as_bytes()));
+            FileArtifactMutationRecord {
+                relative_path: path.into(),
+                content,
+                canonical_content_json,
+                semantic_sha256,
+            }
+        }
+
+        let root = temporary_root();
+        let worker = start(&root, 1);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 10);
+        let create_tool = artifact_tool(
+            &handle,
+            run.id.clone(),
+            "create_file",
+            AgentToolEffect::WorkspaceWrite,
+            20,
+        );
+        let create_mutation = mutation(
+            FileMutationOperation::Create,
+            "src/lib.rs",
+            None,
+            Some(b"revision one\n"),
+        );
+        let create_request = CommitFileArtifactMutationsRecord {
+            project_field_id: project.field_id.clone(),
+            conversation_id: conversation.id.clone(),
+            run_id: run.id.clone(),
+            tool_call_id: create_tool.id.clone(),
+            mutation_request_sha256: format!("{:x}", Sha256::digest(b"create-file-r1")),
+            mutations: vec![create_mutation.clone()],
+            now: 22,
+        };
+        let sync_before: i64 = request_task(&handle.sender, |connection| {
+            connection
+                .query_row("SELECT COUNT(*) FROM sync_change_journal", [], |row| {
+                    row.get(0)
+                })
+                .map_err(storage_domain)
+        })
+        .unwrap();
+        let r1 = handle
+            .commit_file_artifact_mutations(create_request.clone())
+            .unwrap();
+        assert_eq!(r1.len(), 1);
+        assert_eq!(r1[0].revision.sequence, 1);
+        assert_eq!(
+            handle
+                .commit_file_artifact_mutations(create_request)
+                .unwrap(),
+            r1
+        );
+        assert!(
+            !serde_json::to_string(&r1[0].revision.content)
+                .unwrap()
+                .contains(&project.root_path)
+        );
+        let sync_after: i64 = request_task(&handle.sender, |connection| {
+            connection
+                .query_row("SELECT COUNT(*) FROM sync_change_journal", [], |row| {
+                    row.get(0)
+                })
+                .map_err(storage_domain)
+        })
+        .unwrap();
+        assert_eq!(sync_after, sync_before);
+
+        let verification = VerificationReceiptView {
+            id: VerificationReceiptId::new(Uuid::now_v7().to_string()),
+            run_id: run.id.clone(),
+            tool_call_id: Some(create_tool.id.clone()),
+            check_kind: "TARGETED_FILE_CHECK".into(),
+            outcome: VerificationOutcome::Pass,
+            summary: "Exact first revision passed".into(),
+            artifact_sha256: None,
+            subject: Some(VerificationSubject::ArtifactRevision {
+                artifact_id: r1[0].artifact.artifact_id.clone(),
+                revision_id: r1[0].revision.revision_id.clone(),
+                semantic_sha256: r1[0].revision.semantic_sha256.clone(),
+            }),
+            exit_code: Some(0),
+            created_at: 23,
+        };
+        handle
+            .record_agent_verification(verification.clone())
+            .unwrap();
+        assert_eq!(
+            handle
+                .mark_file_artifact_revision_reviewed(
+                    r1[0].artifact.artifact_id.clone(),
+                    r1[0].revision.revision_id.clone(),
+                    24,
+                )
+                .unwrap(),
+            FileArtifactReviewState::Reviewed
+        );
+
+        let update_tool = artifact_tool(
+            &handle,
+            run.id.clone(),
+            "write_file",
+            AgentToolEffect::WorkspaceWrite,
+            25,
+        );
+        let update_mutation = mutation(
+            FileMutationOperation::Modify,
+            "src/lib.rs",
+            Some(b"revision one\n"),
+            Some(b"revision two\n"),
+        );
+        let r2 = handle
+            .commit_file_artifact_mutations(CommitFileArtifactMutationsRecord {
+                project_field_id: project.field_id.clone(),
+                conversation_id: conversation.id.clone(),
+                run_id: run.id.clone(),
+                tool_call_id: update_tool.id,
+                mutation_request_sha256: format!("{:x}", Sha256::digest(b"write-file-r2")),
+                mutations: vec![update_mutation],
+                now: 27,
+            })
+            .unwrap();
+        assert_eq!(r2.len(), 1);
+        assert_eq!(r2[0].artifact.artifact_id, r1[0].artifact.artifact_id);
+        assert_eq!(r2[0].revision.sequence, 2);
+        assert_eq!(
+            r2[0].revision.parent_revision_id,
+            Some(r1[0].revision.revision_id.clone())
+        );
+        assert_eq!(
+            handle
+                .list_artifact_revision_verifications(
+                    r1[0].artifact.artifact_id.clone(),
+                    r1[0].revision.revision_id.clone(),
+                )
+                .unwrap(),
+            vec![verification]
+        );
+        assert!(
+            handle
+                .list_artifact_revision_verifications(
+                    r2[0].artifact.artifact_id.clone(),
+                    r2[0].revision.revision_id.clone(),
+                )
+                .unwrap()
+                .is_empty()
+        );
+        let listed = handle
+            .list_file_artifact_revisions_by_run(run.id.clone())
+            .unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].review_state, FileArtifactReviewState::Reviewed);
+        assert_eq!(listed[1].review_state, FileArtifactReviewState::Unreviewed);
+        assert!(
+            handle
+                .list_artifacts(None, 100, true)
+                .unwrap()
+                .artifacts
+                .is_empty()
+        );
+
+        let (shared_hash, shared_length) = match &r2[0].revision.content {
+            ArtifactContentV1::FileMutation(content) => (
+                content.after.content_sha256.clone().unwrap(),
+                content.after.byte_length.unwrap(),
+            ),
+            _ => panic!("expected file mutation Artifact content"),
+        };
+        let unrelated_hash = "c".repeat(64);
+        for (index, content_sha256) in [shared_hash.clone(), unrelated_hash.clone()]
+            .into_iter()
+            .enumerate()
+        {
+            handle
+                .create_screenshot_evidence(ScreenshotEvidenceView {
+                    id: ScreenshotEvidenceId::new(Uuid::now_v7().to_string()),
+                    content_sha256: content_sha256.clone(),
+                    blob_ref: format!("blobs/objects/{}/{}", &content_sha256[..2], content_sha256),
+                    mime_type: "image/png".into(),
+                    byte_size: if index == 0 { shared_length } else { 64 },
+                    width: 8,
+                    height: 8,
+                    source_kind: ScreenshotEvidenceSourceKind::BrowserViewport,
+                    page_id: format!("page_{}", Uuid::now_v7()),
+                    navigation_generation: 1,
+                    captured_url: "https://fixture.example/artifact-owner-boundary".into(),
+                    captured_at: 28 + index as i64,
+                    conversation_id: Some(conversation.id.clone()),
+                    run_id: Some(run.id.clone()),
+                    tool_call_id: Some(create_tool.id.clone()),
+                    verification_receipt_id: None,
+                    visibility: ScreenshotEvidenceVisibility::Internal,
+                    retention_class: ScreenshotEvidenceRetentionClass::LocalEvidence,
+                    status: ScreenshotEvidenceStatus::Active,
+                    export_policy: ScreenshotEvidenceExportPolicy::Excluded,
+                    sync_policy: ScreenshotEvidenceSyncPolicy::LocalOnly,
+                    created_at: 28 + index as i64,
+                })
+                .unwrap();
+        }
+
+        let manifest = handle.portable_blob_manifest().unwrap();
+        assert_eq!(manifest.len(), 2);
+        assert!(manifest.iter().all(|entry| {
+            !entry.blob_ref.contains(&project.root_path)
+                && entry.blob_ref.starts_with("blobs/objects/")
+        }));
+        assert_eq!(
+            manifest
+                .iter()
+                .filter(|entry| entry.content_sha256 == shared_hash)
+                .count(),
+            1
+        );
+        assert!(
+            manifest
+                .iter()
+                .all(|entry| entry.content_sha256 != unrelated_hash)
+        );
+
+        drop(worker);
+        let reopened = start(&root, 30);
+        let reopened_handle = reopened.handle();
+        let restored = reopened_handle
+            .list_file_artifact_revisions_by_run(run.id)
+            .unwrap();
+        assert_eq!(restored.len(), 2);
+        assert_eq!(restored[0].review_state, FileArtifactReviewState::Reviewed);
+        assert_eq!(
+            restored[1].review_state,
+            FileArtifactReviewState::Unreviewed
+        );
+        assert_eq!(
+            restored[1].read.artifact.artifact_id,
+            restored[0].read.artifact.artifact_id
+        );
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn multi_file_toolcall_is_atomic_project_scoped_and_terminal_failures_create_no_revision() {
+        fn mutation(path: &str, before: &[u8], after: &[u8]) -> FileArtifactMutationRecord {
+            let content = FileMutationArtifactV1 {
+                operation: FileMutationOperation::Modify,
+                before: FileArtifactStateV1 {
+                    relative_path: path.into(),
+                    exists: true,
+                    content_sha256: Some(format!("{:x}", Sha256::digest(before))),
+                    byte_length: Some(before.len() as u64),
+                },
+                after: FileArtifactStateV1 {
+                    relative_path: path.into(),
+                    exists: true,
+                    content_sha256: Some(format!("{:x}", Sha256::digest(after))),
+                    byte_length: Some(after.len() as u64),
+                },
+            };
+            let canonical_content_json =
+                serde_json::to_string(&ArtifactContentV1::FileMutation(content.clone())).unwrap();
+            FileArtifactMutationRecord {
+                relative_path: path.into(),
+                content,
+                semantic_sha256: format!("{:x}", Sha256::digest(canonical_content_json.as_bytes())),
+                canonical_content_json,
+            }
+        }
+
+        let root = temporary_root();
+        let worker = start(&root, 1);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 10);
+        let tool = artifact_tool(
+            &handle,
+            run.id.clone(),
+            "apply_patches",
+            AgentToolEffect::WorkspaceWrite,
+            20,
+        );
+        let request = CommitFileArtifactMutationsRecord {
+            project_field_id: project.field_id.clone(),
+            conversation_id: conversation.id.clone(),
+            run_id: run.id.clone(),
+            tool_call_id: tool.id.clone(),
+            mutation_request_sha256: format!("{:x}", Sha256::digest(b"multi-file")),
+            mutations: vec![
+                mutation("src/a.rs", b"a1\n", b"a2\n"),
+                mutation("src/b.rs", b"b1\n", b"b2\n"),
+            ],
+            now: 22,
+        };
+        let committed = handle
+            .commit_file_artifact_mutations(request.clone())
+            .unwrap();
+        assert_eq!(committed.len(), 2);
+        assert_ne!(
+            committed[0].artifact.artifact_id,
+            committed[1].artifact.artifact_id
+        );
+        assert_eq!(
+            handle.commit_file_artifact_mutations(request).unwrap(),
+            committed
+        );
+        assert_eq!(
+            handle
+                .file_artifact_mutations_by_tool_call(tool.id)
+                .unwrap()
+                .len(),
+            2
+        );
+
+        request_task(&handle.sender, |connection| {
+            connection
+                .execute_batch(
+                    "CREATE TRIGGER file_artifact_batch_failure BEFORE INSERT ON file_artifact_bindings WHEN NEW.relative_path='src/fail-b.rs' BEGIN SELECT RAISE(ABORT, 'TEST_BATCH_FAILURE'); END;",
+                )
+                .map_err(storage_domain)?;
+            Ok(())
+        })
+        .unwrap();
+        let failed_batch_tool = artifact_tool(
+            &handle,
+            run.id.clone(),
+            "apply_patches",
+            AgentToolEffect::WorkspaceWrite,
+            24,
+        );
+        assert!(
+            handle
+                .commit_file_artifact_mutations(CommitFileArtifactMutationsRecord {
+                    project_field_id: project.field_id.clone(),
+                    conversation_id: conversation.id.clone(),
+                    run_id: run.id.clone(),
+                    tool_call_id: failed_batch_tool.id.clone(),
+                    mutation_request_sha256: format!("{:x}", Sha256::digest(b"failed-batch")),
+                    mutations: vec![
+                        mutation("src/fail-a.rs", b"a\n", b"aa\n"),
+                        mutation("src/fail-b.rs", b"b\n", b"bb\n"),
+                    ],
+                    now: 26,
+                })
+                .is_err()
+        );
+        assert!(
+            handle
+                .file_artifact_mutations_by_tool_call(failed_batch_tool.id)
+                .unwrap()
+                .is_empty()
+        );
+
+        let other_root = root.join("other-project");
+        let (other_project, other_conversation, other_run) =
+            artifact_run_fixture(&handle, &other_root, 30);
+        let other_tool = artifact_tool(
+            &handle,
+            other_run.id.clone(),
+            "write_file",
+            AgentToolEffect::WorkspaceWrite,
+            40,
+        );
+        let other = handle
+            .commit_file_artifact_mutations(CommitFileArtifactMutationsRecord {
+                project_field_id: other_project.field_id,
+                conversation_id: other_conversation.id,
+                run_id: other_run.id,
+                tool_call_id: other_tool.id,
+                mutation_request_sha256: format!("{:x}", Sha256::digest(b"other-project")),
+                mutations: vec![mutation("src/a.rs", b"a1\n", b"a2\n")],
+                now: 42,
+            })
+            .unwrap();
+        assert_ne!(
+            other[0].artifact.artifact_id,
+            committed[0].artifact.artifact_id
+        );
+
+        for (index, status) in [
+            AgentToolStatus::Failed,
+            AgentToolStatus::Denied,
+            AgentToolStatus::Cancelled,
+            AgentToolStatus::Unknown,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let terminal_tool = artifact_tool(
+                &handle,
+                run.id.clone(),
+                "write_file",
+                AgentToolEffect::WorkspaceWrite,
+                50 + index as i64 * 3,
+            );
+            handle
+                .update_agent_tool_call(
+                    terminal_tool.id.clone(),
+                    status,
+                    None,
+                    Some("FIXTURE_TERMINAL".into()),
+                    52 + index as i64 * 3,
+                )
+                .unwrap();
+            assert!(
+                handle
+                    .commit_file_artifact_mutations(CommitFileArtifactMutationsRecord {
+                        project_field_id: project.field_id.clone(),
+                        conversation_id: conversation.id.clone(),
+                        run_id: run.id.clone(),
+                        tool_call_id: terminal_tool.id.clone(),
+                        mutation_request_sha256: format!(
+                            "{:x}",
+                            Sha256::digest(format!("terminal-{index}").as_bytes())
+                        ),
+                        mutations: vec![mutation("src/terminal.rs", b"x\n", b"y\n")],
+                        now: 53 + index as i64 * 3,
+                    })
+                    .is_err()
+            );
+            assert!(
+                handle
+                    .file_artifact_mutations_by_tool_call(terminal_tool.id)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        drop(worker);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

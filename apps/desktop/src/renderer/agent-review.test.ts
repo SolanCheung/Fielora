@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { AgentToolCallView } from '@fielora/contracts';
-import { appliedAgentReview, buildAgentReview, reviewDisplayFor } from './agent-review.ts';
+import type { AgentToolCallView, FileArtifactRevisionReviewView } from '@fielora/contracts';
+import { appliedAgentReview, buildAgentReview, buildDurableAgentReview, reviewDisplayFor } from './agent-review.ts';
 
 function tool(overrides: Partial<AgentToolCallView>): AgentToolCallView {
   return {
@@ -87,4 +87,40 @@ test('direct replace_text receipts retain exact before and after content for str
   assert.equal(review.files[0]?.deletions, 1);
   assert.deepEqual(review.files[0]?.changes, [{ before: 'export const ready = true;', after: 'export const ready = { complete: true };' }]);
   assert.equal(reviewDisplayFor(review.files[0]!), 'STRUCTURED');
+});
+
+test('durable file revisions preserve exact diff, review, stale, undo and verification facts', () => {
+  const revision = (overrides: Partial<FileArtifactRevisionReviewView>): FileArtifactRevisionReviewView => ({
+    artifact_id: 'artifact-file-a', revision_id: 'revision-1', sequence: 1,
+    source_run_id: 'run-1', source_tool_call_id: 'tool-1', operation: 'MODIFY',
+    before: { relative_path: 'src/config.js', exists: true, content_sha256: 'a'.repeat(64), byte_length: 31 },
+    after: { relative_path: 'src/config.js', exists: true, content_sha256: 'b'.repeat(64), byte_length: 32 },
+    before_text: 'export const stage = true;\n', after_text: 'export const stage = false;\n',
+    review_state: 'UNREVIEWED', applicability: 'CURRENT', undo_availability: 'AVAILABLE', verifications: [],
+    ...overrides,
+  });
+  const durable = buildDurableAgentReview([
+    revision({}),
+    revision({
+      revision_id: 'revision-2', sequence: 2, source_tool_call_id: 'tool-2',
+      before_text: 'export const stage = false;\n', after_text: 'export const stage = null;\n',
+      review_state: 'REVIEWED', applicability: 'CHANGED_SINCE', undo_availability: 'BLOCKED_CHANGED_SINCE',
+      verifications: [{
+        id: 'verification-2', run_id: 'run-1', tool_call_id: 'tool-2', check_kind: 'COMMAND', outcome: 'PASS',
+        summary: 'Exact R2', artifact_sha256: null,
+        subject: { kind: 'ARTIFACT_REVISION', artifact_id: 'artifact-file-a', revision_id: 'revision-2', semantic_sha256: 'c'.repeat(64) },
+        exit_code: 0, created_at: 4,
+      }],
+    }),
+  ]);
+  assert.equal(durable.files.length, 1);
+  assert.equal(durable.files[0]?.artifactId, 'artifact-file-a');
+  assert.equal(durable.files[0]?.revisionId, 'revision-2');
+  assert.equal(durable.files[0]?.reviewState, 'REVIEWED');
+  assert.equal(durable.files[0]?.applicability, 'CHANGED_SINCE');
+  assert.equal(durable.files[0]?.undoAvailability, 'BLOCKED_CHANGED_SINCE');
+  assert.equal(durable.files[0]?.verificationCount, 1);
+  assert.match(durable.files[0]!.diff, /-export const stage = true;/);
+  assert.match(durable.files[0]!.diff, /\+export const stage = null;/);
+  assert.doesNotMatch(durable.files[0]!.diff, /false/);
 });

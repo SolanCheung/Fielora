@@ -902,7 +902,9 @@ where
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        ArtifactContentV1::Diagram(_) | ArtifactContentV1::Spreadsheet(_) => Vec::new(),
+        ArtifactContentV1::Diagram(_)
+        | ArtifactContentV1::Spreadsheet(_)
+        | ArtifactContentV1::FileMutation(_) => Vec::new(),
     };
     if references.len() > MAX_ASSETS_PER_REVISION {
         return Err(AgentError::ArtifactCompositionLimitExceeded);
@@ -1264,6 +1266,9 @@ pub fn canonicalize_content(
                 semantic_unit_count: facts.sheet_count + facts.cell_count,
             });
         }
+        // FILE_MUTATION is committed only from trusted Tool receipts by the
+        // Harness wrapper; it is intentionally absent from model create/update.
+        DurableArtifactType::FileMutation => return Err(AgentError::ArtifactContentInvalid),
     };
     validate_definition(&definition).map_err(|_| AgentError::ArtifactContentInvalid)?;
     let semantic_unit_count = definition.semantic_count();
@@ -1313,6 +1318,7 @@ pub fn export_saved(
         ArtifactContentV1::Spreadsheet(_) => {
             unreachable!("Spreadsheet export is dispatched above")
         }
+        ArtifactContentV1::FileMutation(_) => return Err(AgentError::ArtifactContentInvalid),
     };
     let mut execution = export(
         runtime,

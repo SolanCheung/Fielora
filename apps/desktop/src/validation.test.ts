@@ -7,6 +7,7 @@ import {
   validateCreateConversation, validateCreateConversationMessage, validateUpdateProject, validateApplyWorkspaceFile,
   validateRunTerminal,
   validateStartAgent, validateListAgentEvents, validateResolveAgentApproval,
+  validateListFileArtifactReviews, validateMarkFileArtifactReviewed, validateUndoFileArtifactRevision,
   validateActivateMcpConnection,
   validateStoreWorkspaceAttachment, validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment,
 } from './validation.ts';
@@ -146,6 +147,10 @@ test('Complete Agent bridge accepts only bounded typed execution and approval pa
   assert.throws(()=>validateResolveAgentApproval({run_id:fieldId,approval_id:fieldId,nonce:'one-time-nonce',decision:'ALWAYS_ALLOW'}));
   assert.deepEqual(validateActivateMcpConnection({run_id:fieldId,connection_id:'local.docs-v1'}),{run_id:fieldId,connection_id:'local.docs-v1'});
   assert.throws(()=>validateActivateMcpConnection({run_id:fieldId,connection_id:'local docs',command:'cmd.exe'}));
+  assert.deepEqual(validateListFileArtifactReviews({run_id:fieldId}),{run_id:fieldId});
+  assert.deepEqual(validateMarkFileArtifactReviewed({artifact_id:fieldId,revision_id:fieldId}),{artifact_id:fieldId,revision_id:fieldId});
+  assert.deepEqual(validateUndoFileArtifactRevision({source_run_id:fieldId,artifact_id:fieldId,revision_id:fieldId}),{source_run_id:fieldId,artifact_id:fieldId,revision_id:fieldId});
+  assert.throws(()=>validateUndoFileArtifactRevision({source_run_id:fieldId,artifact_id:fieldId,revision_id:fieldId,path:'C:\\outside'}));
 });
 
 test('multimodal Agent and attachment bridges accept only bounded native image parts', () => {

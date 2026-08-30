@@ -1473,6 +1473,36 @@ pub enum ArtifactType {
     Presentation,
     Diagram,
     Spreadsheet,
+    FileMutation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum FileMutationOperation {
+    Create,
+    Modify,
+    Delete,
+    Move,
+    Restore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct FileArtifactStateV1 {
+    pub relative_path: String,
+    pub exists: bool,
+    pub content_sha256: Option<String>,
+    #[ts(type = "number | null")]
+    pub byte_length: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct FileMutationArtifactV1 {
+    pub operation: FileMutationOperation,
+    pub before: FileArtifactStateV1,
+    pub after: FileArtifactStateV1,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1858,6 +1888,7 @@ pub enum ArtifactContentV1 {
     Presentation(PresentationArtifact),
     Diagram(DiagramArtifactV1),
     Spreadsheet(SpreadsheetArtifactV1),
+    FileMutation(FileMutationArtifactV1),
 }
 
 impl ArtifactContentV1 {
@@ -1867,6 +1898,7 @@ impl ArtifactContentV1 {
             Self::Presentation(_) => ArtifactType::Presentation,
             Self::Diagram(_) => ArtifactType::Diagram,
             Self::Spreadsheet(_) => ArtifactType::Spreadsheet,
+            Self::FileMutation(_) => ArtifactType::FileMutation,
         }
     }
 }
@@ -1963,6 +1995,56 @@ pub struct ArtifactReadView {
     pub revision: ArtifactRevisionView,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum FileArtifactReviewState {
+    Unreviewed,
+    Reviewed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum FileArtifactApplicability {
+    Current,
+    ChangedSince,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum FileArtifactUndoAvailability {
+    Available,
+    BlockedChangedSince,
+    DeferredOperation,
+    ContentUnavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct FileArtifactRevisionReviewView {
+    pub artifact_id: ArtifactId,
+    pub revision_id: ArtifactRevisionId,
+    #[ts(type = "number")]
+    pub sequence: u64,
+    pub source_run_id: AgentRunId,
+    pub source_tool_call_id: ToolCallId,
+    pub operation: FileMutationOperation,
+    pub before: FileArtifactStateV1,
+    pub after: FileArtifactStateV1,
+    pub before_text: Option<String>,
+    pub after_text: Option<String>,
+    pub review_state: FileArtifactReviewState,
+    pub applicability: FileArtifactApplicability,
+    pub undo_availability: FileArtifactUndoAvailability,
+    pub verifications: Vec<VerificationReceiptView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct FileArtifactReviewListView {
+    pub revisions: Vec<FileArtifactRevisionReviewView>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct AssetView {
     pub asset_id: AssetId,
@@ -2006,6 +2088,27 @@ pub struct ArtifactHistoryRequest {
     #[ts(type = "number | null")]
     pub before_sequence: Option<u64>,
     pub limit: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ListFileArtifactReviewsRequest {
+    pub run_id: AgentRunId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct MarkFileArtifactReviewedRequest {
+    pub artifact_id: ArtifactId,
+    pub revision_id: ArtifactRevisionId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct UndoFileArtifactRevisionRequest {
+    pub source_run_id: AgentRunId,
+    pub artifact_id: ArtifactId,
+    pub revision_id: ArtifactRevisionId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -3040,5 +3143,34 @@ mod tests {
         assert!(reference_wire["target"].get("library_object_id").is_some());
         assert!(reference_wire["target"]["library_object_id"].is_null());
         assert!(serde_json::from_value::<ResultReference>(reference_wire).is_ok());
+    }
+
+    #[test]
+    fn file_mutation_artifact_wire_uses_project_relative_identity_and_no_implicit_verification() {
+        let content = ArtifactContentV1::FileMutation(FileMutationArtifactV1 {
+            operation: FileMutationOperation::Modify,
+            before: FileArtifactStateV1 {
+                relative_path: "src/lib.rs".into(),
+                exists: true,
+                content_sha256: Some("a".repeat(64)),
+                byte_length: Some(12),
+            },
+            after: FileArtifactStateV1 {
+                relative_path: "src/lib.rs".into(),
+                exists: true,
+                content_sha256: Some("b".repeat(64)),
+                byte_length: Some(13),
+            },
+        });
+        let wire = serde_json::to_value(&content).unwrap();
+        assert_eq!(wire["type"], "FILE_MUTATION");
+        assert_eq!(wire["content"]["operation"], "MODIFY");
+        assert_eq!(wire["content"]["after"]["relative_path"], "src/lib.rs");
+        assert!(wire["content"].get("absolute_path").is_none());
+        assert!(wire.get("verification").is_none());
+        assert_eq!(
+            serde_json::from_value::<ArtifactContentV1>(wire).unwrap(),
+            content
+        );
     }
 }

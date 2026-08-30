@@ -37,7 +37,9 @@ use fielora_storage::idr::{
 };
 use fielora_storage::{AgentEventCommit, AgentProjectionUpdate, StorageHandle};
 use fielora_storage::{
-    CreateArtifactRecord, CreateAssetRecord, SetArtifactArchiveStateRecord, UpdateArtifactRecord,
+    CommitFileArtifactMutationsRecord, CreateArtifactRecord, CreateAssetRecord,
+    FileArtifactMutationRecord, SetArtifactArchiveStateRecord, StoredFileArtifactRevision,
+    UpdateArtifactRecord,
 };
 use futures_util::future::join_all;
 use serde::{Deserialize, Serialize};
@@ -70,6 +72,7 @@ const USER_PLUGIN_REGISTRY_FILENAME: &str = "local-plugins.json";
 const USER_PLUGIN_REGISTRY_VERSION: u16 = 1;
 const MAX_USER_PLUGIN_REGISTRY_BYTES: u64 = 64 * 1024;
 const IDR_PRIMARY_SEMANTIC_PROJECTION_TOOL: &str = "idr.submit_primary_semantic_projection";
+const MAX_FILE_ARTIFACT_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -478,6 +481,48 @@ fn durable_artifact_lifecycle_receipt(read: &ArtifactReadView) -> Value {
     })
 }
 
+fn file_mutation_request_sha256(name: &str, arguments: &Value) -> Result<String, AgentError> {
+    artifact_mutation_request_sha256(&json!({
+        "operation":"FILE_MUTATION",
+        "tool":name,
+        "arguments":arguments,
+    }))
+}
+
+fn durable_file_artifact_facts(revisions: &[ArtifactReadView]) -> Vec<Value> {
+    revisions
+        .iter()
+        .map(|read| {
+            json!({
+                "artifact_id":read.artifact.artifact_id,
+                "artifact_revision_id":read.revision.revision_id,
+                "artifact_revision":read.revision.sequence,
+                "artifact_semantic_sha256":read.revision.semantic_sha256,
+            })
+        })
+        .collect()
+}
+
+fn file_artifact_state_bytes(
+    runtime: &ToolRuntime,
+    state: &FileArtifactStateV1,
+) -> Result<Option<Vec<u8>>, DomainError> {
+    if !state.exists {
+        return Ok(None);
+    }
+    let sha256 = state
+        .content_sha256
+        .as_deref()
+        .ok_or_else(|| DomainError::Validation("FILE_ARTIFACT_CONTENT_INTEGRITY_FAILED".into()))?;
+    let byte_length = state
+        .byte_length
+        .ok_or_else(|| DomainError::Validation("FILE_ARTIFACT_CONTENT_INTEGRITY_FAILED".into()))?;
+    runtime
+        .read_content_blob(sha256, byte_length, MAX_FILE_ARTIFACT_BYTES)
+        .map(Some)
+        .map_err(|_| DomainError::Validation("FILE_ARTIFACT_CONTENT_INTEGRITY_FAILED".into()))
+}
+
 impl DurableArtifactToolExecutor {
     fn import_asset(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
         let args: ImportAssetArgs = serde_json::from_value(arguments.clone())
@@ -545,6 +590,183 @@ impl DurableArtifactToolExecutor {
             })
             .to_string(),
         })
+    }
+
+    fn replay_file_mutation(
+        &self,
+        name: &str,
+        arguments: &Value,
+    ) -> Result<Option<ToolExecution>, AgentError> {
+        let revisions = self
+            .storage
+            .file_artifact_mutations_by_tool_call(self.tool_call_id.clone())
+            .map_err(map_artifact_storage_error)?;
+        if revisions.is_empty() {
+            return Ok(None);
+        }
+        let expected = file_mutation_request_sha256(name, arguments)?;
+        let stored = self
+            .storage
+            .artifact_mutation_request_sha256(self.tool_call_id.clone())
+            .map_err(map_artifact_storage_error)?;
+        if stored.as_deref() != Some(expected.as_str()) {
+            return Err(AgentError::ArtifactIdempotencyConflict);
+        }
+        let facts = durable_file_artifact_facts(&revisions);
+        Ok(Some(ToolExecution {
+            receipt: json!({
+                "kind":"FILE_MUTATION_ARTIFACTS_COMMITTED",
+                "artifact_persistence":"DURABLE",
+                "file_artifacts":facts,
+                "files":revisions.len(),
+                "replayed":true,
+            }),
+            observation: format!(
+                "Recovered {} durable file Artifact revision(s).",
+                revisions.len()
+            ),
+        }))
+    }
+
+    fn persist_file_mutation(
+        &self,
+        name: &str,
+        arguments: &Value,
+        mut execution: ToolExecution,
+    ) -> Result<ToolExecution, AgentError> {
+        let operation = match name {
+            "create_file" => FileMutationOperation::Create,
+            "write_file" | "replace_text" | "apply_patches" => FileMutationOperation::Modify,
+            "delete_file" => FileMutationOperation::Delete,
+            "restore_file" => FileMutationOperation::Restore,
+            _ => return Ok(execution),
+        };
+        let receipt_items = if name == "apply_patches" {
+            execution
+                .receipt
+                .get("patches")
+                .and_then(Value::as_array)
+                .cloned()
+                .ok_or(AgentError::ToolProviderOutcomeUnknown)?
+        } else {
+            vec![execution.receipt.clone()]
+        };
+        let mut mutations = Vec::with_capacity(receipt_items.len());
+        for item in receipt_items {
+            let path = item
+                .get("path")
+                .and_then(Value::as_str)
+                .ok_or(AgentError::ToolProviderOutcomeUnknown)?
+                .to_owned();
+            let before_sha256 = item
+                .get("before_sha256")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let after_sha256 = item
+                .get("after_sha256")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let before_bytes = if operation == FileMutationOperation::Create {
+                None
+            } else {
+                let Some(backup_sha256) = item.get("backup_sha256").and_then(Value::as_str) else {
+                    return Err(AgentError::ToolProviderOutcomeUnknown);
+                };
+                match self
+                    .runtime
+                    .read_checkpoint_binary(backup_sha256, MAX_FILE_ARTIFACT_BYTES)
+                {
+                    Ok(bytes) => Some(bytes),
+                    // DELETE/RESTORE and legacy large-file writes remain real
+                    // Tool successes, but are outside this bounded first slice.
+                    Err(AgentError::FileTooLarge) => return Ok(execution),
+                    Err(_) => return Err(AgentError::ToolProviderOutcomeUnknown),
+                }
+            };
+            if before_bytes
+                .as_deref()
+                .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+                != before_sha256
+            {
+                return Err(AgentError::ToolProviderOutcomeUnknown);
+            }
+            let after_bytes = if operation == FileMutationOperation::Delete {
+                None
+            } else {
+                match self
+                    .runtime
+                    .read_project_optional_binary(&path, MAX_FILE_ARTIFACT_BYTES)
+                {
+                    Ok(Some(bytes)) => Some(bytes),
+                    Ok(None) => return Err(AgentError::ToolProviderOutcomeUnknown),
+                    Err(AgentError::FileTooLarge) => return Ok(execution),
+                    Err(_) => return Err(AgentError::ToolProviderOutcomeUnknown),
+                }
+            };
+            if after_bytes
+                .as_deref()
+                .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+                != after_sha256
+            {
+                return Err(AgentError::ToolProviderOutcomeUnknown);
+            }
+            for (bytes, digest) in [
+                (before_bytes.as_deref(), before_sha256.as_deref()),
+                (after_bytes.as_deref(), after_sha256.as_deref()),
+            ] {
+                if let (Some(bytes), Some(digest)) = (bytes, digest) {
+                    self.runtime
+                        .put_content_blob(bytes, digest)
+                        .map_err(|_| AgentError::ToolProviderOutcomeUnknown)?;
+                }
+            }
+            let content = FileMutationArtifactV1 {
+                operation,
+                before: FileArtifactStateV1 {
+                    relative_path: path.clone(),
+                    exists: before_bytes.is_some(),
+                    content_sha256: before_sha256,
+                    byte_length: before_bytes.as_ref().map(|bytes| bytes.len() as u64),
+                },
+                after: FileArtifactStateV1 {
+                    relative_path: path.clone(),
+                    exists: after_bytes.is_some(),
+                    content_sha256: after_sha256,
+                    byte_length: after_bytes.as_ref().map(|bytes| bytes.len() as u64),
+                },
+            };
+            let artifact_content = ArtifactContentV1::FileMutation(content.clone());
+            let canonical_content_json = serde_json::to_string(&artifact_content)
+                .map_err(|_| AgentError::ToolProviderOutcomeUnknown)?;
+            let semantic_sha256 =
+                format!("{:x}", Sha256::digest(canonical_content_json.as_bytes()));
+            mutations.push(FileArtifactMutationRecord {
+                relative_path: path,
+                content,
+                canonical_content_json,
+                semantic_sha256,
+            });
+        }
+        let revisions = self
+            .storage
+            .commit_file_artifact_mutations(CommitFileArtifactMutationsRecord {
+                project_field_id: self.project_field_id.clone(),
+                conversation_id: self.conversation_id.clone(),
+                run_id: self.run_id.clone(),
+                tool_call_id: self.tool_call_id.clone(),
+                mutation_request_sha256: file_mutation_request_sha256(name, arguments)?,
+                mutations,
+                now: now_ms(),
+            })
+            .map_err(|_| AgentError::ToolProviderOutcomeUnknown)?;
+        let facts = durable_file_artifact_facts(&revisions);
+        let receipt = execution
+            .receipt
+            .as_object_mut()
+            .ok_or(AgentError::ToolProviderOutcomeUnknown)?;
+        receipt.insert("artifact_persistence".into(), json!("DURABLE"));
+        receipt.insert("file_artifacts".into(), Value::Array(facts));
+        Ok(execution)
     }
 
     fn replay_committed_mutation(
@@ -948,6 +1170,16 @@ impl ToolExecutor for DurableArtifactToolExecutor {
             "artifact.set_archive_state" => self.set_archive_state(arguments),
             "artifact.export" if arguments.get("artifact_id").is_some() => {
                 self.export_saved(arguments, cancellation)
+            }
+            "create_file" | "write_file" | "replace_text" | "apply_patches" | "delete_file"
+            | "restore_file" => {
+                if let Some(replayed) = self.replay_file_mutation(name, arguments)? {
+                    return Ok(replayed);
+                }
+                let execution =
+                    self.runtime
+                        .execute(name, arguments, authorization_confirmed, cancellation)?;
+                self.persist_file_mutation(name, arguments, execution)
             }
             _ => self
                 .runtime
@@ -2661,6 +2893,365 @@ impl AgentCoordinator {
         }
     }
 
+    pub fn list_file_artifact_reviews(
+        &self,
+        request: ListFileArtifactReviewsRequest,
+    ) -> Result<FileArtifactReviewListView, DomainError> {
+        let run = self.storage.get_agent_run(request.run_id.clone())?;
+        let project = self.storage.get_project(run.field_id.clone())?;
+        let runtime = self.configure_tool_runtime(
+            ToolRuntime::new(Path::new(&project.root_path), &self.artifact_root)
+                .map_err(|_| DomainError::Validation("FILE_ARTIFACT_PROJECT_UNAVAILABLE".into()))?,
+        );
+        let stored = self
+            .storage
+            .list_file_artifact_revisions_by_run(request.run_id)?;
+        let mut revisions = Vec::with_capacity(stored.len());
+        for StoredFileArtifactRevision { read, review_state } in stored {
+            let ArtifactContentV1::FileMutation(content) = &read.revision.content else {
+                return Err(DomainError::Validation("FILE_ARTIFACT_TYPE_INVALID".into()));
+            };
+            let before_bytes = file_artifact_state_bytes(&runtime, &content.before)?;
+            let after_bytes = file_artifact_state_bytes(&runtime, &content.after)?;
+            let current_matches = match runtime
+                .read_project_optional_binary(&content.after.relative_path, MAX_FILE_ARTIFACT_BYTES)
+            {
+                Ok(current) => {
+                    current
+                        .as_deref()
+                        .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+                        == content.after.content_sha256
+                }
+                Err(AgentError::FileTooLarge) => false,
+                Err(_) => {
+                    return Err(DomainError::Validation(
+                        "FILE_ARTIFACT_PROJECT_UNAVAILABLE".into(),
+                    ));
+                }
+            };
+            let applicability = if current_matches {
+                FileArtifactApplicability::Current
+            } else {
+                FileArtifactApplicability::ChangedSince
+            };
+            let before_text = before_bytes
+                .as_ref()
+                .and_then(|bytes| String::from_utf8(bytes.clone()).ok());
+            let after_text = after_bytes
+                .as_ref()
+                .and_then(|bytes| String::from_utf8(bytes.clone()).ok());
+            let undo_availability = if applicability == FileArtifactApplicability::ChangedSince {
+                FileArtifactUndoAvailability::BlockedChangedSince
+            } else {
+                match content.operation {
+                    FileMutationOperation::Move => FileArtifactUndoAvailability::DeferredOperation,
+                    FileMutationOperation::Delete if before_text.is_none() => {
+                        FileArtifactUndoAvailability::ContentUnavailable
+                    }
+                    FileMutationOperation::Create
+                    | FileMutationOperation::Modify
+                    | FileMutationOperation::Delete
+                    | FileMutationOperation::Restore => FileArtifactUndoAvailability::Available,
+                }
+            };
+            let verifications = self.storage.list_artifact_revision_verifications(
+                read.artifact.artifact_id.clone(),
+                read.revision.revision_id.clone(),
+            )?;
+            revisions.push(FileArtifactRevisionReviewView {
+                artifact_id: read.artifact.artifact_id,
+                revision_id: read.revision.revision_id,
+                sequence: read.revision.sequence,
+                source_run_id: read.revision.created_by_agent_run_id.ok_or_else(|| {
+                    DomainError::Validation("FILE_ARTIFACT_PROVENANCE_INVALID".into())
+                })?,
+                source_tool_call_id: read.revision.created_by_tool_call_id,
+                operation: content.operation,
+                before: content.before.clone(),
+                after: content.after.clone(),
+                before_text,
+                after_text,
+                review_state,
+                applicability,
+                undo_availability,
+                verifications,
+            });
+        }
+        Ok(FileArtifactReviewListView { revisions })
+    }
+
+    pub fn mark_file_artifact_reviewed(
+        &self,
+        request: MarkFileArtifactReviewedRequest,
+    ) -> Result<FileArtifactReviewState, DomainError> {
+        self.storage.mark_file_artifact_revision_reviewed(
+            request.artifact_id,
+            request.revision_id,
+            now_ms(),
+        )
+    }
+
+    fn bind_verification_to_current_file_artifact_revisions(
+        &self,
+        verification: &VerificationReceiptView,
+    ) {
+        if verification.subject.is_some() {
+            return;
+        }
+        let Ok(review) = self.list_file_artifact_reviews(ListFileArtifactReviewsRequest {
+            run_id: verification.run_id.clone(),
+        }) else {
+            return;
+        };
+        for revision in review
+            .revisions
+            .into_iter()
+            .filter(|revision| revision.applicability == FileArtifactApplicability::Current)
+        {
+            let Ok(read) = self.storage.read_artifact(
+                revision.artifact_id.clone(),
+                Some(revision.revision_id.clone()),
+            ) else {
+                continue;
+            };
+            let exact = VerificationReceiptView {
+                id: VerificationReceiptId::new(Uuid::now_v7().to_string()),
+                run_id: verification.run_id.clone(),
+                tool_call_id: verification.tool_call_id.clone(),
+                check_kind: verification.check_kind.clone(),
+                outcome: verification.outcome,
+                summary: verification.summary.clone(),
+                artifact_sha256: verification.artifact_sha256.clone(),
+                subject: Some(VerificationSubject::ArtifactRevision {
+                    artifact_id: revision.artifact_id,
+                    revision_id: revision.revision_id,
+                    semantic_sha256: read.revision.semantic_sha256,
+                }),
+                exit_code: verification.exit_code,
+                created_at: verification.created_at,
+            };
+            if self
+                .storage
+                .record_agent_verification(exact.clone())
+                .is_ok()
+            {
+                let _ = append_event(
+                    &self.storage,
+                    &self.sender,
+                    exact.run_id.clone(),
+                    AgentEventKind::VerificationRecorded,
+                    json!({"receipt":exact,"binding":"EXACT_FILE_ARTIFACT_REVISION"}),
+                    AgentProjectionUpdate::default(),
+                );
+            }
+        }
+    }
+
+    /// Mediate an explicit human file-revision undo through the same
+    /// PolicyEngine, AgentRun, ToolCall, guarded ToolRuntime, receipt, and file
+    /// Artifact commit path as model-originated mutations.
+    pub fn undo_file_artifact_revision(
+        &self,
+        request: UndoFileArtifactRevisionRequest,
+    ) -> Result<AgentToolCallView, DomainError> {
+        let source_run = self.storage.get_agent_run(request.source_run_id.clone())?;
+        if self
+            .storage
+            .list_agent_runs(source_run.conversation_id.clone())?
+            .iter()
+            .any(|run| {
+                matches!(
+                    run.status,
+                    AgentRunStatus::Queued
+                        | AgentRunStatus::Running
+                        | AgentRunStatus::WaitingApproval
+                        | AgentRunStatus::Paused
+                )
+            })
+        {
+            return Err(DomainError::Validation("AGENT_RUN_ALREADY_ACTIVE".into()));
+        }
+        let review = self
+            .list_file_artifact_reviews(ListFileArtifactReviewsRequest {
+                run_id: request.source_run_id.clone(),
+            })?
+            .revisions
+            .into_iter()
+            .find(|candidate| {
+                candidate.artifact_id == request.artifact_id
+                    && candidate.revision_id == request.revision_id
+            })
+            .ok_or(DomainError::NotFound)?;
+        if review.undo_availability != FileArtifactUndoAvailability::Available {
+            return Err(DomainError::Validation(
+                if review.applicability == FileArtifactApplicability::ChangedSince {
+                    "FILE_ARTIFACT_UNDO_CHANGED_SINCE"
+                } else {
+                    "FILE_ARTIFACT_UNDO_DEFERRED"
+                }
+                .into(),
+            ));
+        }
+        let (tool_name, arguments) = match review.operation {
+            FileMutationOperation::Create => (
+                "delete_file",
+                json!({
+                    "path":review.after.relative_path,
+                    "expected_sha256":review.after.content_sha256,
+                }),
+            ),
+            FileMutationOperation::Modify | FileMutationOperation::Restore => {
+                let before_sha256 = review.before.content_sha256.as_deref().ok_or_else(|| {
+                    DomainError::Validation("FILE_ARTIFACT_UNDO_CONTENT_UNAVAILABLE".into())
+                })?;
+                let before_length = review.before.byte_length.ok_or_else(|| {
+                    DomainError::Validation("FILE_ARTIFACT_UNDO_CONTENT_UNAVAILABLE".into())
+                })?;
+                let project = self.storage.get_project(source_run.field_id.clone())?;
+                let runtime = self.configure_tool_runtime(
+                    ToolRuntime::new(Path::new(&project.root_path), &self.artifact_root).map_err(
+                        |_| DomainError::Validation("FILE_ARTIFACT_PROJECT_UNAVAILABLE".into()),
+                    )?,
+                );
+                let before = runtime
+                    .read_content_blob(before_sha256, before_length, MAX_FILE_ARTIFACT_BYTES)
+                    .map_err(|_| {
+                        DomainError::Validation("FILE_ARTIFACT_UNDO_CONTENT_UNAVAILABLE".into())
+                    })?;
+                runtime
+                    .ensure_checkpoint_binary(&before, before_sha256)
+                    .map_err(|_| {
+                        DomainError::Validation("FILE_ARTIFACT_UNDO_CONTENT_UNAVAILABLE".into())
+                    })?;
+                (
+                    "restore_file",
+                    json!({
+                        "path":review.after.relative_path,
+                        "backup_sha256":before_sha256,
+                        "expected_sha256":review.after.content_sha256,
+                    }),
+                )
+            }
+            FileMutationOperation::Delete => (
+                "create_file",
+                json!({
+                    "path":review.before.relative_path,
+                    "content":review.before_text.ok_or_else(|| DomainError::Validation("FILE_ARTIFACT_UNDO_CONTENT_UNAVAILABLE".into()))?,
+                }),
+            ),
+            FileMutationOperation::Move => {
+                return Err(DomainError::Validation(
+                    "FILE_ARTIFACT_UNDO_DEFERRED".into(),
+                ));
+            }
+        };
+        let provider = self
+            .storage
+            .get_provider_config(source_run.provider_config_id.clone())?;
+        let project = self.storage.get_project(source_run.field_id.clone())?;
+        let created = self.storage.create_agent_run(
+            StartAgentRunRequest {
+                field_id: source_run.field_id.clone(),
+                conversation_id: source_run.conversation_id.clone(),
+                user_message_id: None,
+                provider_config_id: source_run.provider_config_id,
+                model_id: Some(source_run.model_id),
+                task: "[HUMAN_COMMAND FILE_ARTIFACT_UNDO]".into(),
+                permission: AgentPermission::FullControl,
+                max_steps: Some(1),
+                attachments: None,
+                active_work_surface: None,
+            },
+            now_ms(),
+        )?;
+        emit_commit(&self.sender, &created);
+        let started = append_event(
+            &self.storage,
+            &self.sender,
+            created.run.id.clone(),
+            AgentEventKind::RunStarted,
+            json!({"harness_profile":"HUMAN_COMMAND_MEDIATION_V1","model_requests":0,"command":"FILE_ARTIFACT_UNDO","source_revision_id":request.revision_id}),
+            AgentProjectionUpdate {
+                status: Some(AgentRunStatus::Running),
+                ..Default::default()
+            },
+        )?;
+        let spec = self
+            .available_tool_catalog()
+            .map_err(|error| DomainError::Validation(error.code().into()))?
+            .into_iter()
+            .find(|spec| spec.definition.name == tool_name)
+            .ok_or_else(|| DomainError::Validation("AGENT_TOOL_NOT_FOUND".into()))?;
+        let tool = self.propose_tool_call(
+            &started.run,
+            &spec,
+            AgentModelToolCall {
+                id: Uuid::now_v7().to_string(),
+                name: tool_name.into(),
+                arguments,
+            },
+            false,
+        )?;
+        let prepared = PreparedRun {
+            run: started.run,
+            endpoint: ProviderEndpoint {
+                kind: provider.view.provider_kind,
+                base_url: provider.view.base_url,
+            },
+            project_root: PathBuf::from(project.root_path),
+            secret: SecretBytes::new(Vec::new()),
+        };
+        let cancellation = ExecutionCancellation {
+            model: CancellationToken::new(),
+            command: CommandCancellation::default(),
+            pause_requested: Arc::new(AtomicBool::new(false)),
+        };
+        let runtime = self.runtime.clone();
+        let disposition =
+            runtime.block_on(self.execute_tool(&prepared, tool.clone(), true, &cancellation));
+        let succeeded = matches!(
+            &disposition,
+            ToolDisposition::Executed(ExecutedTool {
+                message: AgentModelMessage::ToolResult {
+                    is_error: false,
+                    ..
+                },
+                ..
+            })
+        );
+        if !succeeded {
+            let _ = append_event(
+                &self.storage,
+                &self.sender,
+                prepared.run.id.clone(),
+                AgentEventKind::RunFailed,
+                json!({"error_code":"FILE_ARTIFACT_UNDO_FAILED","model_requests":0}),
+                AgentProjectionUpdate {
+                    status: Some(AgentRunStatus::Failed),
+                    error_code: Some("FILE_ARTIFACT_UNDO_FAILED".into()),
+                    ..Default::default()
+                },
+            );
+            return Err(DomainError::Validation("FILE_ARTIFACT_UNDO_FAILED".into()));
+        }
+        append_event(
+            &self.storage,
+            &self.sender,
+            prepared.run.id.clone(),
+            AgentEventKind::RunCompleted,
+            json!({"completion_basis":"HUMAN_COMMAND_TOOL_RECEIPT","model_requests":0,"tool_call_id":tool.id,"source_revision_id":request.revision_id}),
+            AgentProjectionUpdate {
+                status: Some(AgentRunStatus::Completed),
+                ..Default::default()
+            },
+        )?;
+        self.storage
+            .list_agent_tool_calls(prepared.run.id)?
+            .into_iter()
+            .find(|candidate| candidate.id == tool.id)
+            .ok_or_else(|| DomainError::Validation("AGENT_TOOL_NOT_FOUND".into()))
+    }
+
     /// Mediate an explicit human Archive/Restore command through the existing
     /// PolicyEngine, durable AgentRun/ToolCall lifecycle, ToolExecutor, and
     /// receipt path. No Model invocation occurs.
@@ -3196,6 +3787,54 @@ impl AgentCoordinator {
                         status: ToolReconciliationStatus::NotApplied,
                         evidence: json!({"reason":"NO_DURABLE_ARTIFACT_REVISION_FOR_TOOLCALL"}),
                     },
+                }
+            } else if matches!(
+                tool.name.as_str(),
+                "create_file"
+                    | "write_file"
+                    | "replace_text"
+                    | "apply_patches"
+                    | "delete_file"
+                    | "restore_file"
+            ) {
+                let revisions = self
+                    .storage
+                    .file_artifact_mutations_by_tool_call(tool.id.clone())
+                    .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+                if revisions.is_empty() {
+                    // Workspace state alone is not terminal mutation truth.
+                    // A crash before the Artifact transaction stays blocked
+                    // for manual review rather than manufacturing a Revision.
+                    fielora_agent::ToolReconciliation {
+                        status: ToolReconciliationStatus::ManualReview,
+                        evidence: json!({"reason":"NO_DURABLE_FILE_ARTIFACT_REVISION_FOR_TOOLCALL"}),
+                    }
+                } else {
+                    let expected = file_mutation_request_sha256(&tool.name, &tool.arguments)
+                        .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+                    let stored = self
+                        .storage
+                        .artifact_mutation_request_sha256(tool.id.clone())
+                        .map_err(|_| "AGENT_RECOVERY_INSPECTION_FAILED")?;
+                    if stored.as_deref() == Some(expected.as_str()) {
+                        fielora_agent::ToolReconciliation {
+                            status: ToolReconciliationStatus::Applied,
+                            evidence: json!({
+                                "reason":"DURABLE_FILE_ARTIFACT_REVISIONS_COMMITTED",
+                                "durable_receipt":{
+                                    "kind":"FILE_MUTATION_ARTIFACTS_COMMITTED",
+                                    "artifact_persistence":"DURABLE",
+                                    "file_artifacts":durable_file_artifact_facts(&revisions),
+                                    "files":revisions.len(),
+                                },
+                            }),
+                        }
+                    } else {
+                        fielora_agent::ToolReconciliation {
+                            status: ToolReconciliationStatus::Diverged,
+                            evidence: json!({"reason":"ARTIFACT_TOOLCALL_IDEMPOTENCY_CONFLICT"}),
+                        }
+                    }
                 }
             } else if tool.name == "artifact.set_archive_state" {
                 match self
@@ -7547,6 +8186,7 @@ impl AgentCoordinator {
                         json!({"receipt":verification,"workspace_revision":receipt.get("workspace_revision"),"verification_eligible":true}),
                         AgentProjectionUpdate::default(),
                     );
+                    self.bind_verification_to_current_file_artifact_revisions(&verification);
                     passed
                 } else {
                     false
@@ -11950,6 +12590,525 @@ mod tests {
         drop(coordinator);
         drop(storage);
         drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn durable_file_artifact_survives_restart_detects_stale_and_undoes_through_tools() {
+        let root = std::env::temp_dir().join(format!(
+            "fielora-core-durable-file-artifact-{}",
+            Uuid::now_v7()
+        ));
+        let workspace = root.join("workspace");
+        let artifacts = root.join("artifacts");
+        std::fs::create_dir_all(workspace.join("src")).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let before = b"pub fn value() -> i32 { 1 }\n";
+        let after = b"pub fn value() -> i32 { 2 }\n";
+        std::fs::write(workspace.join("src/lib.rs"), before).unwrap();
+        let before_sha256 = format!("{:x}", Sha256::digest(before));
+        let after_sha256 = format!("{:x}", Sha256::digest(after));
+
+        let paths = PlatformPaths::from_root(root.join("profile")).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let worker = StorageWorker::start(&paths.database, device.clone(), 1).unwrap();
+        let storage = worker.handle();
+        let project = storage
+            .create_project(
+                CreateProjectRequest {
+                    title: "Durable file Artifact".into(),
+                    goal: None,
+                    root_path: workspace.to_string_lossy().into_owned(),
+                },
+                2,
+            )
+            .unwrap();
+        let provider = storage
+            .create_provider_config(
+                CreateProviderConfigRequest {
+                    provider_kind: ProviderKind::Openai,
+                    display_name: "Fixture".into(),
+                    base_url: None,
+                    default_model: "fixture-model".into(),
+                    custom_endpoint_acknowledged: false,
+                },
+                3,
+            )
+            .unwrap();
+        storage
+            .set_provider_credential_present(provider.view.id.clone(), true, 4)
+            .unwrap();
+        let conversation = storage
+            .create_conversation(
+                CreateConversationRequest {
+                    field_id: project.field_id.clone(),
+                    title: "Durable file review".into(),
+                    provider_config_id: Some(provider.view.id.clone()),
+                    model_id: Some("fixture-model".into()),
+                },
+                5,
+            )
+            .unwrap();
+        let created = storage
+            .create_agent_run(
+                StartAgentRunRequest {
+                    field_id: project.field_id.clone(),
+                    conversation_id: conversation.id.clone(),
+                    user_message_id: None,
+                    provider_config_id: provider.view.id,
+                    model_id: Some("fixture-model".into()),
+                    task: "Modify one file".into(),
+                    permission: AgentPermission::FullControl,
+                    max_steps: Some(2),
+                    attachments: None,
+                    active_work_surface: None,
+                },
+                6,
+            )
+            .unwrap();
+        let started = storage
+            .append_agent_event(
+                created.run.id.clone(),
+                AgentEventKind::RunStarted,
+                json!({}),
+                AgentProjectionUpdate {
+                    status: Some(AgentRunStatus::Running),
+                    ..Default::default()
+                },
+                7,
+            )
+            .unwrap();
+        let (sender, _receiver) = mpsc::sync_channel(128);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let coordinator = AgentCoordinator::new(
+            storage.clone(),
+            Arc::new(WindowsCredentialStore),
+            sender,
+            artifacts.clone(),
+            runtime.handle().clone(),
+        )
+        .with_content_blob_root(paths.library_dir.clone());
+        let prepared = PreparedRun {
+            run: started.run,
+            endpoint: ProviderEndpoint {
+                kind: ProviderKind::Openai,
+                base_url: None,
+            },
+            project_root: workspace.canonicalize().unwrap(),
+            secret: SecretBytes::new(Vec::new()),
+        };
+        let spec = coordinator
+            .available_tool_catalog()
+            .unwrap()
+            .into_iter()
+            .find(|spec| spec.definition.name == "replace_text")
+            .unwrap();
+        let tool = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                &spec,
+                AgentModelToolCall {
+                    id: "durable-file-modify".into(),
+                    name: "replace_text".into(),
+                    arguments: json!({
+                        "path":"src/lib.rs",
+                        "old_text":"1",
+                        "new_text":"2",
+                        "expected_sha256":before_sha256,
+                    }),
+                },
+                false,
+            )
+            .unwrap();
+        let ToolDisposition::Executed(executed) = runtime.block_on(coordinator.execute_tool(
+            &prepared,
+            tool.clone(),
+            true,
+            &test_cancellation(),
+        )) else {
+            panic!("approved file mutation must execute")
+        };
+        assert!(executed.wrote_workspace);
+        assert!(!executed.verification_passed);
+        assert_eq!(std::fs::read(workspace.join("src/lib.rs")).unwrap(), after);
+        let completed_tool = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.id == tool.id)
+            .unwrap();
+        assert_eq!(completed_tool.status, AgentToolStatus::Completed);
+        assert_eq!(
+            completed_tool.receipt.as_ref().unwrap()["artifact_persistence"],
+            "DURABLE"
+        );
+
+        let request = ListFileArtifactReviewsRequest {
+            run_id: prepared.run.id.clone(),
+        };
+        let first = coordinator
+            .list_file_artifact_reviews(request.clone())
+            .unwrap();
+        assert_eq!(first.revisions.len(), 1);
+        let revision = first.revisions[0].clone();
+        assert_eq!(revision.operation, FileMutationOperation::Modify);
+        assert_eq!(
+            revision.after.content_sha256.as_deref(),
+            Some(after_sha256.as_str())
+        );
+        assert_eq!(
+            revision.before_text.as_deref(),
+            Some(std::str::from_utf8(before).unwrap())
+        );
+        assert_eq!(
+            revision.after_text.as_deref(),
+            Some(std::str::from_utf8(after).unwrap())
+        );
+        assert_eq!(revision.applicability, FileArtifactApplicability::Current);
+        assert_eq!(revision.review_state, FileArtifactReviewState::Unreviewed);
+        assert_eq!(
+            revision.undo_availability,
+            FileArtifactUndoAvailability::Available
+        );
+        assert!(revision.verifications.is_empty());
+        coordinator
+            .mark_file_artifact_reviewed(MarkFileArtifactReviewedRequest {
+                artifact_id: revision.artifact_id.clone(),
+                revision_id: revision.revision_id.clone(),
+            })
+            .unwrap();
+        let revision_semantic_sha256 = storage
+            .read_artifact(
+                revision.artifact_id.clone(),
+                Some(revision.revision_id.clone()),
+            )
+            .unwrap()
+            .revision
+            .semantic_sha256;
+        storage
+            .record_agent_verification(VerificationReceiptView {
+                id: VerificationReceiptId::new(Uuid::now_v7().to_string()),
+                run_id: prepared.run.id.clone(),
+                tool_call_id: Some(tool.id),
+                check_kind: "TARGETED_FILE_CHECK".into(),
+                outcome: VerificationOutcome::Pass,
+                summary: "Verified exact file Artifact revision".into(),
+                artifact_sha256: None,
+                subject: Some(VerificationSubject::ArtifactRevision {
+                    artifact_id: revision.artifact_id.clone(),
+                    revision_id: revision.revision_id.clone(),
+                    semantic_sha256: revision_semantic_sha256,
+                }),
+                exit_code: Some(0),
+                created_at: 8,
+            })
+            .unwrap();
+
+        let create_spec = coordinator
+            .available_tool_catalog()
+            .unwrap()
+            .into_iter()
+            .find(|spec| spec.definition.name == "create_file")
+            .unwrap();
+        let create_tool = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                &create_spec,
+                AgentModelToolCall {
+                    id: "durable-file-create".into(),
+                    name: "create_file".into(),
+                    arguments: json!({
+                        "path":"src/created.txt",
+                        "content":"durable create\n",
+                    }),
+                },
+                false,
+            )
+            .unwrap();
+        let create_tool_id = create_tool.id.clone();
+        let ToolDisposition::Executed(created_file) = runtime.block_on(coordinator.execute_tool(
+            &prepared,
+            create_tool,
+            true,
+            &test_cancellation(),
+        )) else {
+            panic!("approved file create must execute")
+        };
+        assert!(created_file.wrote_workspace);
+        assert!(!created_file.verification_passed);
+        assert_eq!(
+            std::fs::read(workspace.join("src/created.txt")).unwrap(),
+            b"durable create\n"
+        );
+        let created_revision = coordinator
+            .list_file_artifact_reviews(request.clone())
+            .unwrap()
+            .revisions
+            .into_iter()
+            .find(|candidate| candidate.source_tool_call_id == create_tool_id)
+            .unwrap();
+        assert_eq!(created_revision.operation, FileMutationOperation::Create);
+        assert!(!created_revision.before.exists);
+        assert_eq!(
+            created_revision.after_text.as_deref(),
+            Some("durable create\n")
+        );
+        assert!(created_revision.verifications.is_empty());
+
+        let recovery_arguments = json!({
+            "path":"src/recovery.txt",
+            "content":"crash-window revision\n",
+        });
+        let recovery_tool = coordinator
+            .propose_tool_call(
+                &prepared.run,
+                &create_spec,
+                AgentModelToolCall {
+                    id: "durable-file-recovery".into(),
+                    name: "create_file".into(),
+                    arguments: recovery_arguments.clone(),
+                },
+                false,
+            )
+            .unwrap();
+        storage
+            .update_agent_tool_call(
+                recovery_tool.id.clone(),
+                AgentToolStatus::Running,
+                None,
+                None,
+                now_ms(),
+            )
+            .unwrap();
+        DurableArtifactToolExecutor {
+            storage: storage.clone(),
+            runtime: ToolRuntime::new(&prepared.project_root, &artifacts)
+                .unwrap()
+                .with_content_blob_root(paths.library_dir.clone()),
+            run_id: prepared.run.id.clone(),
+            conversation_id: conversation.id.clone(),
+            project_field_id: project.field_id.clone(),
+            tool_call_id: recovery_tool.id.clone(),
+        }
+        .execute(
+            "create_file",
+            &recovery_arguments,
+            true,
+            &CommandCancellation::default(),
+        )
+        .unwrap();
+        let committed_before_reconcile = storage
+            .file_artifact_mutations_by_tool_call(recovery_tool.id.clone())
+            .unwrap();
+        assert_eq!(committed_before_reconcile.len(), 1);
+        storage
+            .update_agent_tool_call(
+                recovery_tool.id.clone(),
+                AgentToolStatus::Unknown,
+                None,
+                None,
+                now_ms(),
+            )
+            .unwrap();
+        assert!(
+            coordinator
+                .reconcile_for_resume(&prepared)
+                .unwrap()
+                .confirmed_workspace_mutation
+        );
+        let committed_after_reconcile = storage
+            .file_artifact_mutations_by_tool_call(recovery_tool.id.clone())
+            .unwrap();
+        assert_eq!(committed_after_reconcile, committed_before_reconcile);
+        let recovered_tool = storage
+            .list_agent_tool_calls(prepared.run.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.id == recovery_tool.id)
+            .unwrap();
+        assert_eq!(recovered_tool.status, AgentToolStatus::Completed);
+        assert_eq!(
+            recovered_tool.receipt.unwrap()["reconciliation_status"],
+            "APPLIED"
+        );
+        storage
+            .append_agent_event(
+                prepared.run.id.clone(),
+                AgentEventKind::RunCompleted,
+                json!({}),
+                AgentProjectionUpdate {
+                    status: Some(AgentRunStatus::Completed),
+                    ..Default::default()
+                },
+                9,
+            )
+            .unwrap();
+
+        std::fs::write(workspace.join("src/lib.rs"), b"newer human work\n").unwrap();
+        let stale = coordinator
+            .list_file_artifact_reviews(request.clone())
+            .unwrap()
+            .revisions
+            .into_iter()
+            .find(|candidate| candidate.revision_id == revision.revision_id)
+            .unwrap();
+        assert_eq!(stale.applicability, FileArtifactApplicability::ChangedSince);
+        assert_eq!(
+            stale.undo_availability,
+            FileArtifactUndoAvailability::BlockedChangedSince
+        );
+        assert_eq!(
+            coordinator
+                .undo_file_artifact_revision(UndoFileArtifactRevisionRequest {
+                    source_run_id: prepared.run.id.clone(),
+                    artifact_id: revision.artifact_id.clone(),
+                    revision_id: revision.revision_id.clone(),
+                })
+                .unwrap_err(),
+            DomainError::Validation("FILE_ARTIFACT_UNDO_CHANGED_SINCE".into())
+        );
+        assert_eq!(
+            std::fs::read(workspace.join("src/lib.rs")).unwrap(),
+            b"newer human work\n"
+        );
+
+        std::fs::write(workspace.join("src/lib.rs"), after).unwrap();
+        let undo = coordinator
+            .undo_file_artifact_revision(UndoFileArtifactRevisionRequest {
+                source_run_id: prepared.run.id.clone(),
+                artifact_id: revision.artifact_id.clone(),
+                revision_id: revision.revision_id.clone(),
+            })
+            .unwrap();
+        assert_eq!(undo.name, "restore_file");
+        assert_eq!(undo.status, AgentToolStatus::Completed);
+        assert_eq!(std::fs::read(workspace.join("src/lib.rs")).unwrap(), before);
+        let undo_reviews = coordinator
+            .list_file_artifact_reviews(ListFileArtifactReviewsRequest {
+                run_id: undo.run_id.clone(),
+            })
+            .unwrap();
+        assert_eq!(undo_reviews.revisions.len(), 1);
+        assert_eq!(undo_reviews.revisions[0].artifact_id, revision.artifact_id);
+        assert_eq!(undo_reviews.revisions[0].sequence, 2);
+        assert_eq!(
+            undo_reviews.revisions[0].operation,
+            FileMutationOperation::Restore
+        );
+        assert!(undo_reviews.revisions[0].verifications.is_empty());
+        assert_eq!(
+            coordinator
+                .list_file_artifact_reviews(request.clone())
+                .unwrap()
+                .revisions[0]
+                .review_state,
+            FileArtifactReviewState::Reviewed
+        );
+        let undo_create = coordinator
+            .undo_file_artifact_revision(UndoFileArtifactRevisionRequest {
+                source_run_id: prepared.run.id.clone(),
+                artifact_id: created_revision.artifact_id.clone(),
+                revision_id: created_revision.revision_id.clone(),
+            })
+            .unwrap();
+        assert_eq!(undo_create.name, "delete_file");
+        assert_eq!(undo_create.status, AgentToolStatus::Completed);
+        assert!(!workspace.join("src/created.txt").exists());
+        let delete_reviews = coordinator
+            .list_file_artifact_reviews(ListFileArtifactReviewsRequest {
+                run_id: undo_create.run_id.clone(),
+            })
+            .unwrap();
+        assert_eq!(delete_reviews.revisions.len(), 1);
+        assert_eq!(
+            delete_reviews.revisions[0].operation,
+            FileMutationOperation::Delete
+        );
+        assert_eq!(delete_reviews.revisions[0].sequence, 2);
+        assert_eq!(
+            delete_reviews.revisions[0].applicability,
+            FileArtifactApplicability::Current
+        );
+        let manifest = storage.portable_blob_manifest().unwrap();
+        assert_eq!(manifest.len(), 4);
+        assert!(manifest.iter().all(|entry| {
+            paths.library_dir.join(&entry.blob_ref).is_file()
+                && !entry
+                    .blob_ref
+                    .contains(&workspace.to_string_lossy().into_owned())
+        }));
+
+        let relocated = root.join("relocated-workspace");
+        std::fs::create_dir_all(relocated.join("src")).unwrap();
+        std::fs::write(relocated.join("src/lib.rs"), before).unwrap();
+        std::fs::write(
+            relocated.join("src/recovery.txt"),
+            b"crash-window revision\n",
+        )
+        .unwrap();
+        storage
+            .rebind_project(
+                RebindProjectRequest {
+                    field_id: project.field_id,
+                    root_path: relocated.to_string_lossy().into_owned(),
+                },
+                10,
+            )
+            .unwrap();
+        drop(coordinator);
+        drop(storage);
+        drop(worker);
+
+        let reopened_worker = StorageWorker::start(&paths.database, device, 11).unwrap();
+        let reopened_storage = reopened_worker.handle();
+        let (sender, _receiver) = mpsc::sync_channel(16);
+        let reopened = AgentCoordinator::new(
+            reopened_storage,
+            Arc::new(WindowsCredentialStore),
+            sender,
+            artifacts,
+            runtime.handle().clone(),
+        )
+        .with_content_blob_root(paths.library_dir);
+        let restored = reopened.list_file_artifact_reviews(request).unwrap();
+        assert_eq!(restored.revisions.len(), 3);
+        let restored_revision = restored
+            .revisions
+            .into_iter()
+            .find(|candidate| candidate.revision_id == revision.revision_id)
+            .unwrap();
+        assert_eq!(restored_revision.artifact_id, revision.artifact_id);
+        assert_eq!(
+            restored_revision.review_state,
+            FileArtifactReviewState::Reviewed
+        );
+        assert_eq!(
+            restored_revision.applicability,
+            FileArtifactApplicability::ChangedSince
+        );
+        let undo_after_relink = reopened
+            .list_file_artifact_reviews(ListFileArtifactReviewsRequest {
+                run_id: undo.run_id,
+            })
+            .unwrap();
+        assert_eq!(
+            undo_after_relink.revisions[0].applicability,
+            FileArtifactApplicability::Current
+        );
+        let delete_after_relink = reopened
+            .list_file_artifact_reviews(ListFileArtifactReviewsRequest {
+                run_id: undo_create.run_id,
+            })
+            .unwrap();
+        assert_eq!(
+            delete_after_relink.revisions[0].applicability,
+            FileArtifactApplicability::Current
+        );
+        drop(reopened);
+        drop(reopened_worker);
         std::fs::remove_dir_all(root).unwrap();
     }
 

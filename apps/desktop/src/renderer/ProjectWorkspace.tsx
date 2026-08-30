@@ -4,6 +4,7 @@ import type {
   AgentChangedEvent, AgentEventView, AgentPermission, AgentRunView, AgentToolCallView, ApprovalView,
   McpConnectionRuntimeView,
   ConversationMessageStatus, ConversationMessageView, ConversationView, ProjectView, ProviderConfigView, ArtifactView, ResultReference,
+  FileArtifactRevisionReviewView,
 } from '@fielora/contracts';
 import type { AgentTextDeltaEvent } from '../types';
 import type { ResultImagePreviewView, WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceFileEntry, WorkspaceFileView, WorkspaceImagePreview, WorkspaceProjectOpenTarget, WorkspaceProjectOpenTargetView } from '../workspace-types';
@@ -13,7 +14,7 @@ import { AgentTurn } from './AgentTurn';
 import { AgentHumanReview } from './AgentHumanReview';
 import { AttachmentThumbnail, ConversationImageGallery, ImageContextMenu, ImagePreview } from './AttachmentMedia';
 import { AGENT_PROJECTION_UNAVAILABLE_MESSAGE, loadCompleteAgentEventSequence, mergeAgentEventPages } from './agent-projection';
-import { buildAgentReview } from './agent-review';
+import { buildAgentReview, buildDurableAgentReview, type AgentReviewFile } from './agent-review';
 import { MarkdownMessage } from './MarkdownMessage';
 import { ResizableDivider } from './ResizableDivider';
 import { RightWorkspaceDock, type RightWorkspaceTab } from './RightWorkspaceDock';
@@ -490,6 +491,7 @@ function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copi
   const [run, setRun] = useState<AgentRunView | null>(null);
   const [events, setEvents] = useState<AgentEventView[]>([]);
   const [tools, setTools] = useState<AgentToolCallView[]>([]);
+  const [fileRevisions, setFileRevisions] = useState<FileArtifactRevisionReviewView[]>([]);
   useEffect(() => {
     const runId = terminalMessage.invocation_id;
     if (!runId) return undefined;
@@ -498,13 +500,14 @@ function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copi
       window.fielora.agent.get({ run_id: runId }),
       loadCompleteAgentEventSequence((request) => window.fielora.agent.events(request), runId),
       window.fielora.agent.toolCalls({ run_id: runId }),
-    ]).then(([nextRun, nextEvents, nextTools]) => {
+      window.fielora.artifact.listFileReviews({ run_id: runId }).catch(() => ({ revisions: [] })),
+    ]).then(([nextRun, nextEvents, nextTools, nextFileReviews]) => {
       if (!current) return;
-      setRun(nextRun); setEvents(nextEvents); setTools(nextTools);
+      setRun(nextRun); setEvents(nextEvents); setTools(nextTools); setFileRevisions(nextFileReviews.revisions);
     }).catch(() => undefined);
     return () => { current = false; };
   }, [terminalMessage.invocation_id]);
-  const review = useMemo(() => buildAgentReview(tools), [tools]);
+  const review = useMemo(() => fileRevisions.length > 0 ? buildDurableAgentReview(fileRevisions) : buildAgentReview(tools), [fileRevisions, tools]);
   const reviewSelection = (path = ''): HistoricalReviewSelection => ({
     review,
     runId: run?.id ?? terminalMessage.invocation_id ?? '',
@@ -714,6 +717,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const [agentRun, setAgentRun] = useState<AgentRunView | null>(null);
   const [agentEvents, setAgentEvents] = useState<AgentEventView[]>([]);
   const [agentTools, setAgentTools] = useState<AgentToolCallView[]>([]);
+  const [agentFileRevisions, setAgentFileRevisions] = useState<FileArtifactRevisionReviewView[]>([]);
   const [mcpRuntime, setMcpRuntime] = useState<McpConnectionRuntimeView | null>(null);
   const [mcpBusyConnectionId, setMcpBusyConnectionId] = useState('');
   const [agentProjectionNotice, setAgentProjectionNotice] = useState('');
@@ -753,6 +757,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const agentRunIdRef = useRef('');
   const agentEventsRef = useRef<AgentEventView[]>([]);
   const agentToolsRef = useRef<AgentToolCallView[]>([]);
+  const agentFileRevisionsRef = useRef<FileArtifactRevisionReviewView[]>([]);
   const dockTabsRef = useRef<ProjectDockTab[]>([]);
   const artifactSessionsRef = useRef<Record<string, ArtifactSurfaceSession>>({});
   const handledArtifactToolCallsRef = useRef(new Set<string>());
@@ -886,7 +891,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const approval = useMemo(() => pendingApproval(agentEvents, agentRun), [agentEvents, agentRun]);
   const approvalToolSummary = useMemo(() => pendingToolSummary(agentEvents, agentRun), [agentEvents, agentRun]);
   const agentTurn = useMemo(() => agentRun ? agentTurnOwnership(messages, agentRun, agentEvents) : null, [agentEvents, agentRun, messages]);
-  const agentReview = useMemo(() => buildAgentReview(agentTools), [agentTools]);
+  const agentReview = useMemo(() => agentFileRevisions.length > 0 ? buildDurableAgentReview(agentFileRevisions) : buildAgentReview(agentTools), [agentFileRevisions, agentTools]);
   const displayedAgentReview = historicalReview?.review ?? agentReview;
   const agentRunIsTerminal = agentRun ? ['COMPLETED', 'FAILED', 'CANCELLED'].includes(agentRun.status) : false;
   const sortedProjects = useMemo(() => {
@@ -1000,9 +1005,10 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       reset ? 200 : 100,
     );
     const needsTools = reset || !sameRun || incremental.some((event) => event.kind.startsWith('TOOL_') || event.kind.startsWith('APPROVAL_'));
-    const [tools, nextMcpRuntime] = await Promise.all([
+    const [tools, nextMcpRuntime, fileReviewList] = await Promise.all([
       needsTools ? window.fielora.agent.toolCalls({ run_id: run.id }) : Promise.resolve(agentToolsRef.current),
       window.fielora.agent.mcpRuntime({ run_id: run.id }).catch(() => null),
+      needsTools ? window.fielora.artifact.listFileReviews({ run_id: run.id }).catch(() => ({ revisions: [] })) : Promise.resolve({ revisions: agentFileRevisionsRef.current }),
     ]);
     if (selectedConversationRef.current !== run.conversation_id) return;
     const activeRunId = activeAgentRef.current?.runId;
@@ -1010,9 +1016,10 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const events = mergeAgentEventPages(existing, incremental);
     agentEventsRef.current = events;
     agentToolsRef.current = tools;
+    agentFileRevisionsRef.current = fileReviewList.revisions;
     processArtifactToolReceipts(tools);
     agentRunIdRef.current = run.id;
-    setAgentRun(run); setAgentEvents(events); setAgentTools(tools); setMcpRuntime(nextMcpRuntime); setAgentProjectionNotice('');
+    setAgentRun(run); setAgentEvents(events); setAgentTools(tools); setAgentFileRevisions(fileReviewList.revisions); setMcpRuntime(nextMcpRuntime); setAgentProjectionNotice('');
     performance.clearMeasures('fielora.agent.projection');
     performance.measure('fielora.agent.projection', { start: projectionStarted });
     if (['QUEUED', 'RUNNING', 'WAITING_APPROVAL'].includes(run.status)) {
@@ -1022,7 +1029,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const refreshConversationAgent = useCallback(async (id: string) => {
     const runs = (await window.fielora.agent.list({ conversation_id: id })).filter((run) => !run.task.startsWith('[SUBAGENT ') && !run.task.startsWith('[HUMAN_COMMAND '));
     if (selectedConversationRef.current !== id) return;
-    if (!runs[0]) { agentRunIdRef.current = ''; agentEventsRef.current = []; agentToolsRef.current = []; setAgentRun(null); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); activeAgentRef.current = null; return; }
+    if (!runs[0]) { agentRunIdRef.current = ''; agentEventsRef.current = []; agentToolsRef.current = []; agentFileRevisionsRef.current = []; setAgentRun(null); setAgentEvents([]); setAgentTools([]); setAgentFileRevisions([]); setMcpRuntime(null); activeAgentRef.current = null; return; }
     await loadAgentRun(runs[0], true);
   }, [loadAgentRun]);
 
@@ -1062,8 +1069,10 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     setPermission(resolveComposerPermission(conversationOverride, projectDefault, globalDefault));
     agentEventsRef.current = [];
     agentToolsRef.current = [];
+    agentFileRevisionsRef.current = [];
     agentRunIdRef.current = '';
     setAgentProjectionNotice('');
+    setAgentFileRevisions([]);
     if (!conversationId) { setMessages([]); setAgentRun(null); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); activeAgentRef.current = null; return; }
     void refreshMessages(conversationId).catch((reason) => setError(reasonMessage(reason)));
     void refreshConversationAgent(conversationId).catch(() => setAgentProjectionNotice(AGENT_PROJECTION_UNAVAILABLE_MESSAGE));
@@ -1420,8 +1429,8 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       });
       foregroundAgentRunsRef.current.add(started.id);
       activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '', step: 0 };
-      agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
-      setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); setStreamingOutput(''); setStreamingStep(0);
+      agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = []; agentFileRevisionsRef.current = [];
+      setAgentRun(started); setAgentEvents([]); setAgentTools([]); setAgentFileRevisions([]); setMcpRuntime(null); setStreamingOutput(''); setStreamingStep(0);
       scrollToLatestAnswer();
     } catch (reason) { setError(reasonMessage(reason)); }
     finally { setBusy(false); }
@@ -1565,8 +1574,8 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     });
     foregroundAgentRunsRef.current.add(started.id);
     activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '', step: 0 };
-    agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
-    setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null); setStreamingOutput(''); setStreamingStep(0);
+    agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = []; agentFileRevisionsRef.current = [];
+    setAgentRun(started); setAgentEvents([]); setAgentTools([]); setAgentFileRevisions([]); setMcpRuntime(null); setStreamingOutput(''); setStreamingStep(0);
     scrollToLatestAnswer();
     setQueuedFollowUps((current) => {
       const next = current.filter((queued) => queued.messageId !== item.messageId);
@@ -1639,8 +1648,8 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       });
       foregroundAgentRunsRef.current.add(started.id);
       activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '', step: 0 };
-      agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = [];
-      setAgentRun(started); setAgentEvents([]); setAgentTools([]); setMcpRuntime(null);
+      agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = []; agentFileRevisionsRef.current = [];
+      setAgentRun(started); setAgentEvents([]); setAgentTools([]); setAgentFileRevisions([]); setMcpRuntime(null);
       setStreamingOutput(''); setStreamingStep(0); setPrompt(''); setAttachments([]);
       scrollToLatestAnswer();
     } catch (reason) { setError(reasonMessage(reason)); }
@@ -1940,6 +1949,50 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     await openFile(entry);
   }
 
+  async function refreshFileArtifactReview(runId: string): Promise<ReturnType<typeof buildAgentReview>> {
+    const list = await window.fielora.artifact.listFileReviews({ run_id: runId });
+    const review = buildDurableAgentReview(list.revisions);
+    if (agentRunIdRef.current === runId) {
+      agentFileRevisionsRef.current = list.revisions;
+      setAgentFileRevisions(list.revisions);
+    }
+    setHistoricalReview((current) => current?.runId === runId ? { ...current, review } : current);
+    setDockTabs((tabs) => tabs.map((tab) => tab.reviewSelection?.runId === runId
+      ? { ...tab, reviewSelection: { ...tab.reviewSelection, review } }
+      : tab));
+    return review;
+  }
+
+  async function markAgentFileArtifactReviewed(file: AgentReviewFile): Promise<void> {
+    if (!file.artifactId || !file.revisionId) return;
+    try {
+      await window.fielora.artifact.markFileReviewed({ artifact_id: file.artifactId, revision_id: file.revisionId });
+      setError('');
+    } catch (reason) {
+      setError(`无法保存审阅状态：${reasonMessage(reason)}`);
+      throw reason;
+    }
+  }
+
+  async function undoAgentFileArtifact(runId: string, file: AgentReviewFile): Promise<void> {
+    if (!file.artifactId || !file.revisionId) return;
+    try {
+      await window.fielora.artifact.undoFileRevision({
+        source_run_id: runId,
+        artifact_id: file.artifactId,
+        revision_id: file.revisionId,
+      });
+      await Promise.all([
+        refreshFileArtifactReview(runId),
+        project ? window.fielora.workspace.listFiles({ field_id: project.field_id }).then(setFiles) : Promise.resolve(),
+      ]);
+      setError('');
+    } catch (reason) {
+      setError(`无法安全撤销：${reasonMessage(reason)}`);
+      throw reason;
+    }
+  }
+
   async function openResultReference(reference: ResultReference) {
     const target = reference.target;
     if (target.kind === 'IMAGE') {
@@ -2167,7 +2220,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         </>
       </DockResourceLayout>}
       {tab.kind === 'IMAGE' && imageAttachment && <DockResourceLayout fileTree={dockFileTree} treeWidth={dockFileTreeWidth} treeCollapsed={dockFileTreeCollapsed} onTreeWidthChange={updateDockFileTreeWidth}><div className="dock-image-preview" data-testid="file-image-preview"><button type="button" aria-label={`放大 ${imageAttachment.name}`} onClick={() => setPreviewAttachment(imageAttachment)} onContextMenu={(event) => openImageContextMenu(event, imageAttachment)}><img src={imageAttachment.data_url ?? ''} alt={imageAttachment.name}/></button><small>{imageAttachment.mime_type} · {Math.max(1, Math.ceil(imageAttachment.size / 1024))} KB · 点击放大</small></div></DockResourceLayout>}
-      {tab.kind === 'REVIEW' && <div className="diff-workspace">{draft ? <><header><div><p className="eyebrow">REVIEW</p><h3>{draft.relativePath}</h3></div><span>写入前不会修改磁盘</span></header><pre className="diff-view" data-testid="diff-view">{draft.diff}</pre><footer><button className="secondary-button" onClick={() => { setDraft(null); setEditorContent(selectedFile?.content ?? ''); if (selectedFile) ensureDockTab({ id: `file:${selectedFile.relative_path}`, kind: 'FILE', label: fileTabLabel(selectedFile.relative_path), icon: 'files', relativePath: selectedFile.relative_path }); else openDockTool('FILES'); }}>放弃</button><button className="primary-button" onClick={() => void acceptDraft()} data-testid="accept-change">接受变更</button></footer></> : (tab.reviewSelection?.review ?? displayedAgentReview).files.length > 0 ? <AgentHumanReview review={tab.reviewSelection?.review ?? displayedAgentReview} task={tab.reviewSelection?.task ?? agentRun?.task ?? conversation?.title ?? ''} runId={tab.reviewSelection?.runId ?? agentRun?.id ?? ''} selectedPathHint={tab.relativePath ?? agentReviewPath} onOpenFile={(path) => void openAgentReviewFile(path)}/> : <div className="workspace-blank"><h3>{conversation ? '本次任务没有文件变更' : '当前 Project 没有可审阅的变更'}</h3><p>文件写入、补丁和替换会显示在这里。</p></div>}</div>}
+      {tab.kind === 'REVIEW' && <div className="diff-workspace">{draft ? <><header><div><p className="eyebrow">REVIEW</p><h3>{draft.relativePath}</h3></div><span>写入前不会修改磁盘</span></header><pre className="diff-view" data-testid="diff-view">{draft.diff}</pre><footer><button className="secondary-button" onClick={() => { setDraft(null); setEditorContent(selectedFile?.content ?? ''); if (selectedFile) ensureDockTab({ id: `file:${selectedFile.relative_path}`, kind: 'FILE', label: fileTabLabel(selectedFile.relative_path), icon: 'files', relativePath: selectedFile.relative_path }); else openDockTool('FILES'); }}>放弃</button><button className="primary-button" onClick={() => void acceptDraft()} data-testid="accept-change">接受变更</button></footer></> : (tab.reviewSelection?.review ?? displayedAgentReview).files.length > 0 ? <AgentHumanReview review={tab.reviewSelection?.review ?? displayedAgentReview} task={tab.reviewSelection?.task ?? agentRun?.task ?? conversation?.title ?? ''} runId={tab.reviewSelection?.runId ?? agentRun?.id ?? ''} selectedPathHint={tab.relativePath ?? agentReviewPath} onOpenFile={(path) => void openAgentReviewFile(path)} onMarkReviewed={markAgentFileArtifactReviewed} onUndo={(file) => undoAgentFileArtifact(tab.reviewSelection?.runId ?? agentRun?.id ?? '', file)}/> : <div className="workspace-blank"><h3>{conversation ? '本次任务没有文件变更' : '当前 Project 没有可审阅的变更'}</h3><p>文件写入、补丁和替换会显示在这里。</p></div>}</div>}
       {tab.kind === 'BROWSER' && <BrowsePanel browser={window.fielora.browser} onSaveToLibrary={(input) => window.fielora.library.saveWeb(input)} onOpenBrowserSettings={() => window.dispatchEvent(new CustomEvent('fielora:open-settings', { detail: 'BROWSER' }))}/>}
       {tab.kind === 'TERMINAL' && <div className="right-terminal-view" data-testid="terminal-dock"><TerminalSession workingDirectory={terminalWorkingDirectory || project.root_path} command={terminalCommand} lastCommand={terminalLastCommand} output={terminalOutput} running={Boolean(terminalRunId)} active={workspaceOpen && tab.id === activeDockTabId} onCommandChange={setTerminalCommand} onRun={() => void runTerminal(terminalCommand, 'RIGHT')} onCancel={() => terminalRunId ? void window.fielora.workspace.cancelTerminal({ run_id: terminalRunId }) : undefined} testId="terminal"/></div>}
       {tab.kind === 'ARTIFACTS' && <ArtifactCatalog refreshToken={artifactRefreshToken} onOpen={openArtifact}/>}
@@ -2329,7 +2382,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         <header className="workspace-panel-header"><div><ShellIcon name={workspaceTab === 'FILES' ? 'files' : 'diff'}/><strong>{workspaceTab === 'FILES' ? '文件' : '审阅变更'}</strong></div><button onClick={() => setWorkspaceOpen(false)} title="关闭工作区" data-testid="workspace-close"><ShellIcon name="close"/></button></header>
         <div className="workspace-tabs"><button className={workspaceTab === 'FILES' ? 'active' : ''} onClick={() => setWorkspaceTab('FILES')}>文件</button><button className={workspaceTab === 'DIFF' ? 'active' : ''} onClick={() => setWorkspaceTab('DIFF')}>审阅{draft || displayedAgentReview.files.length ? ` · ${draft ? 1 : displayedAgentReview.files.length}` : ''}</button></div>
         {workspaceTab === 'FILES' && <div className="file-workspace"><div className="file-tree"><header><strong>文件</strong><button onClick={async () => setFiles(await window.fielora.workspace.listFiles({field_id:project.field_id}))}>↻</button></header>{files.map((file) => <button key={file.relative_path} className={selectedFile?.relative_path === file.relative_path || (filePreview?.kind === 'IMAGE' ? filePreview.preview.relative_path : filePreview?.relativePath) === file.relative_path ? 'active' : ''} onClick={() => void openFile(file)} data-testid="workspace-file"><span>⌑</span>{file.relative_path}</button>)}</div>{selectedFile ? <div className="file-editor"><header><span>{selectedFile.relative_path}</span>{undoChange?.relativePath === selectedFile.relative_path && <button onClick={() => void undoAcceptedChange()} data-testid="undo-change">撤销已接受变更</button>}</header><textarea value={editorContent} onChange={(event) => setEditorContent(event.target.value)} spellCheck={false} data-testid="file-editor" /><footer><span>{editorContent === selectedFile.content ? '未修改' : '有未 review 的修改'}</span><button disabled={editorContent === selectedFile.content} onClick={reviewEditor} data-testid="review-change">Review Diff</button></footer></div> : filePreview?.kind === 'IMAGE' ? <div className="file-image-preview" data-testid="file-image-preview"><header><span>{filePreview.preview.relative_path}</span></header><div><img src={filePreview.preview.data_url} alt={filePreview.preview.relative_path}/><small>{filePreview.preview.mime_type} · {Math.max(1, Math.ceil(filePreview.preview.size / 1024))} KB</small></div></div> : filePreview?.kind === 'UNSUPPORTED' ? <div className="file-unsupported-preview" data-testid="file-unsupported-preview"><ShellIcon name="files"/><h3>无法在此预览</h3><strong>{filePreview.relativePath}</strong><p>{filePreview.message}</p></div> : <div className="workspace-blank"><p>选择文件以查看和编辑。</p></div>}</div>}
-        {workspaceTab === 'DIFF' && <div className="diff-workspace">{draft ? <><header><div><p className="eyebrow">REVIEW</p><h3>{draft.relativePath}</h3></div><span>写入前不会修改磁盘</span></header><pre className="diff-view" data-testid="diff-view">{draft.diff}</pre><footer><button className="secondary-button" onClick={() => {setDraft(null);setEditorContent(selectedFile?.content??'');setWorkspaceTab('FILES');}}>放弃</button><button className="primary-button" onClick={() => void acceptDraft()} data-testid="accept-change">接受变更</button></footer></> : displayedAgentReview.files.length > 0 ? <AgentHumanReview review={displayedAgentReview} task={historicalReview?.task ?? agentRun?.task ?? conversation?.title ?? ''} runId={historicalReview?.runId ?? agentRun?.id ?? ''} selectedPathHint={agentReviewPath} onOpenFile={(path) => void openAgentReviewFile(path)}/> : <div className="workspace-blank"><h3>本次任务没有文件变更</h3><p>Agent 的写入、补丁和替换会显示在这里。</p></div>}</div>}
+        {workspaceTab === 'DIFF' && <div className="diff-workspace">{draft ? <><header><div><p className="eyebrow">REVIEW</p><h3>{draft.relativePath}</h3></div><span>写入前不会修改磁盘</span></header><pre className="diff-view" data-testid="diff-view">{draft.diff}</pre><footer><button className="secondary-button" onClick={() => {setDraft(null);setEditorContent(selectedFile?.content??'');setWorkspaceTab('FILES');}}>放弃</button><button className="primary-button" onClick={() => void acceptDraft()} data-testid="accept-change">接受变更</button></footer></> : displayedAgentReview.files.length > 0 ? <AgentHumanReview review={displayedAgentReview} task={historicalReview?.task ?? agentRun?.task ?? conversation?.title ?? ''} runId={historicalReview?.runId ?? agentRun?.id ?? ''} selectedPathHint={agentReviewPath} onOpenFile={(path) => void openAgentReviewFile(path)} onMarkReviewed={markAgentFileArtifactReviewed} onUndo={(file) => undoAgentFileArtifact(historicalReview?.runId ?? agentRun?.id ?? '', file)}/> : <div className="workspace-blank"><h3>本次任务没有文件变更</h3><p>Agent 的写入、补丁和替换会显示在这里。</p></div>}</div>}
       </section>}
       {project && <RightWorkspaceDock
         tabs={dockTabs}

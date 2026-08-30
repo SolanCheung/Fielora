@@ -6,6 +6,8 @@ interface AgentHumanReviewProps {
   task: string;
   runId: string;
   onOpenFile: (path: string) => void;
+  onMarkReviewed?: (file: AgentReviewFile) => Promise<void>;
+  onUndo?: (file: AgentReviewFile) => Promise<void>;
   selectedPathHint?: string;
 }
 
@@ -76,8 +78,11 @@ function VisualReview({ file, display }: { file: AgentReviewFile; display: Retur
   </div>;
 }
 
-export function AgentHumanReview({ review, task, runId, onOpenFile, selectedPathHint = '' }: AgentHumanReviewProps) {
+export function AgentHumanReview({ review, task, runId, onOpenFile, onMarkReviewed, onUndo, selectedPathHint = '' }: AgentHumanReviewProps) {
   const [selectedPath, setSelectedPath] = useState(review.files[0]?.path ?? '');
+  const [reviewedRevisions, setReviewedRevisions] = useState<string[]>([]);
+  const [undoFinished, setUndoFinished] = useState<string[]>([]);
+  const [actionBusy, setActionBusy] = useState(false);
   const initialFile = review.files[0] ?? null;
   const [mode, setMode] = useState<'VISUAL' | 'RAW'>(() => initialFile && reviewDisplayFor(initialFile) !== 'RAW' ? 'VISUAL' : 'RAW');
   useEffect(() => {
@@ -108,6 +113,7 @@ export function AgentHumanReview({ review, task, runId, onOpenFile, selectedPath
 
     {selected && <div className={`human-review-detail${review.files.length === 1 ? ' is-single-file' : ''}`} data-change-type={selected.changeType} data-testid="agent-review-file" data-change-type-summary={selected.changeType}>
       {selected.changeType !== 'CREATE' && <h3>{changeHeading(selected)}</h3>}
+      {selected.applicability === 'CHANGED_SINCE' && <p className="human-review-stale" data-testid="agent-review-stale">当前文件已在这次修改之后继续变化；下方仍是当时的原始 Diff。</p>}
       {mode === 'VISUAL' && display !== 'RAW'
         ? <VisualReview file={selected} display={display}/>
         : <pre className="human-review-raw" data-testid="agent-review-diff">{selected.diff}</pre>}
@@ -116,7 +122,12 @@ export function AgentHumanReview({ review, task, runId, onOpenFile, selectedPath
           {display !== 'RAW' && <button type="button" role="tab" aria-selected={mode === 'VISUAL'} onClick={() => setMode('VISUAL')} data-testid="agent-review-human">可视化</button>}
           <button type="button" role="tab" aria-selected={mode === 'RAW'} onClick={() => setMode('RAW')} data-testid="agent-review-raw">原始 Diff</button>
         </div>
-        <button type="button" className="human-review-open-file" onClick={() => onOpenFile(selected.path)}>打开文件</button>
+        <div>
+          {selected.artifactId && selected.revisionId && onMarkReviewed && selected.reviewState !== 'REVIEWED' && !reviewedRevisions.includes(selected.revisionId) && <button type="button" disabled={actionBusy} onClick={() => { setActionBusy(true); void onMarkReviewed(selected).then(() => setReviewedRevisions((items) => [...items, selected.revisionId!])).catch(() => undefined).finally(() => setActionBusy(false)); }} data-testid="agent-review-mark-reviewed">标记已审阅</button>}
+          {selected.artifactId && selected.revisionId && onUndo && selected.undoAvailability === 'AVAILABLE' && !undoFinished.includes(selected.revisionId) && <button type="button" disabled={actionBusy} onClick={() => { setActionBusy(true); void onUndo(selected).then(() => setUndoFinished((items) => [...items, selected.revisionId!])).catch(() => undefined).finally(() => setActionBusy(false)); }} data-testid="agent-review-undo">撤销这次修改</button>}
+          {selected.undoAvailability === 'BLOCKED_CHANGED_SINCE' && <span data-testid="agent-review-undo-blocked">当前文件已变化，无法安全撤销</span>}
+          <button type="button" className="human-review-open-file" onClick={() => onOpenFile(selected.path)}>打开文件</button>
+        </div>
       </footer>
     </div>}
   </section>;

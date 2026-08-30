@@ -41,6 +41,8 @@ import type {
   ArtifactListView, ArtifactReadView, ArtifactHistoryView,
   AssetPreviewRequest, AssetPreviewView, DiagramPreviewRequest, DiagramPreviewView,
   SetArtifactArchiveStateCommandRequest,
+  FileArtifactReviewListView, FileArtifactReviewState, ListFileArtifactReviewsRequest,
+  MarkFileArtifactReviewedRequest, UndoFileArtifactRevisionRequest,
   ScreenshotEvidenceView, ScreenshotEvidenceRequest, ScreenshotEvidencePreviewRequest,
   ListScreenshotEvidenceByRunRequest, ListScreenshotEvidenceByVerificationRequest,
 } from '@fielora/contracts';
@@ -96,6 +98,9 @@ export interface FieloraBridge {
     previewAsset(request: AssetPreviewRequest): Promise<AssetPreviewView>;
     previewDiagram(request: DiagramPreviewRequest): Promise<DiagramPreviewView>;
     setArchiveState(request: SetArtifactArchiveStateCommandRequest): Promise<AgentToolCallView>;
+    listFileReviews(request: ListFileArtifactReviewsRequest): Promise<FileArtifactReviewListView>;
+    markFileReviewed(request: MarkFileArtifactReviewedRequest): Promise<FileArtifactReviewState>;
+    undoFileRevision(request: UndoFileArtifactRevisionRequest): Promise<AgentToolCallView>;
   };
   workspace: {
     listFiles(request: WorkspaceProjectRequest): Promise<WorkspaceFileEntry[]>;

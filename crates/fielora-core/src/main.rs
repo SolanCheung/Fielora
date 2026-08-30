@@ -811,6 +811,18 @@ fn dispatch_request(
             let params: SetArtifactArchiveStateCommandRequest = parse_params(&request.params)?;
             serialize(runtime.agent.set_artifact_archive_state(params)?)
         }
+        "query.artifact.file_reviews" => {
+            let params: ListFileArtifactReviewsRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.list_file_artifact_reviews(params)?)
+        }
+        "command.artifact.file_mark_reviewed" => {
+            let params: MarkFileArtifactReviewedRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.mark_file_artifact_reviewed(params)?)
+        }
+        "command.artifact.file_undo" => {
+            let params: UndoFileArtifactRevisionRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.undo_file_artifact_revision(params)?)
+        }
         "command.agent.start" => {
             let params: StartAgentRunRequest = parse_params(&request.params)?;
             serialize(runtime.agent.start(params)?)
