@@ -219,7 +219,7 @@ test('activity uses the conversation scroll only and running composer actions ke
   assert.match(styles, /li:hover > \.agent-completion-time/);
   assert.match(tokens, /--fl-font-size-agent-execution:\s*calc\(14px \* var\(--fl-ui-font-scale\)\)/);
   const appearance = readFileSync(path.join(rendererRoot, 'styles', 'appearance.css'), 'utf8');
-  assert.match(appearance, /\.conversation-composer \.composer-submit\.stop,\s*\.stop-button \{[^}]*background: var\(--fl-color-emphasis\)/s);
+  assert.match(appearance, /\.conversation-composer \.composer-submit\.stop,\s*\.stop-button \{[^}]*background: var\(--fl-action-primary\)/s);
   assert.doesNotMatch(appearance, /\.composer-submit\.stop,[^}]*background: var\(--fl-color-danger\)/s);
   assert.match(icons, /stop: Stop/);
 });

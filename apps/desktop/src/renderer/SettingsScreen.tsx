@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ModelInvocationEvent, ProviderConfigView } from '@fielora/contracts';
-import fieloraMark from '../../assets/fielora-mark.svg';
+import fieloraMark from '../../assets/fielora-brand-mark.svg';
 import type { AppPreferences, StartupDestination } from './app-preferences';
 import { AppearanceSettings } from './AppearanceSettings';
 import { AppIcon, type AppIconName } from './ui';
@@ -122,7 +122,7 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
     persistWorkspaceNavigationWidth(width, 'fielora:settings-navigation-width');
   }
 
-  return <WorkspaceSurface className="settings-root" testId="settings-screen" navigationWidth={navigationWidth} onNavigationWidthChange={updateNavigationWidth} navigationResizerTestId="settings-navigation-resizer" navigationResizerClassName="settings-navigation-resizer" navigation={<aside className="settings-navigation" data-surface="chrome">
+  return <WorkspaceSurface className="settings-root" testId="settings-screen" navigationWidth={navigationWidth} onNavigationWidthChange={updateNavigationWidth} navigationResizerTestId="settings-navigation-resizer" navigationResizerClassName="settings-navigation-resizer" navigation={<aside className="settings-navigation" data-surface="chrome" data-brand-chrome="navigation">
       <button className="settings-back" onClick={onBack} data-testid="settings-back">← <span>返回应用</span></button>
       <label className="settings-search"><span className="sr-only">搜索设置</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索设置…" data-testid="settings-search" /></label>
       <nav aria-label="设置分类">
@@ -147,7 +147,7 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
       </div>}
       {category === 'EXTENSIONS' && <CapabilityExtensionsSettings activeTab={extensionTab} fieldId={fieldId} onTabChange={setExtensionTab}/>}
       {category === 'STORAGE_DATA' && <StorageDataSettings preferences={preferences} onPreferencesChange={onChange} />}
-      {category === 'SHORTCUTS' && <div className="settings-section" data-testid="settings-shortcuts"><header><p>效率</p><h1>键盘快捷键</h1></header><section className="settings-card shortcut-list"><div><span>新对话</span><kbd>Ctrl+N</kbd></div><div><span>打开 Project 文件夹</span><kbd>Ctrl+O</kbd></div><div><span>显示或隐藏侧栏</span><kbd>Ctrl+B</kbd></div><div><span>审阅</span><kbd>Ctrl+Shift+G</kbd></div><div><span>终端</span><kbd>Ctrl+`</kbd></div><div><span>浏览器 / 新建浏览页面</span><kbd>Ctrl+T</kbd></div><div><span>文件</span><kbd>Ctrl+P</kbd></div><div><span>侧边聊天</span><kbd>Ctrl+Alt+S</kbd></div><div><span>地址栏</span><kbd>Ctrl+L</kbd></div><div><span>刷新网页</span><kbd>Ctrl+R</kbd></div><div><span>Summon</span><kbd>Ctrl+Shift+Space</kbd></div></section></div>}
+      {category === 'SHORTCUTS' && <div className="settings-section" data-testid="settings-shortcuts"><header><p>效率</p><h1>键盘快捷键</h1></header><section className="settings-card shortcut-list"><div><span>新对话</span><kbd>Ctrl+N</kbd></div><div><span>打开 Project 文件夹</span><kbd>Ctrl+O</kbd></div><div><span>显示或隐藏侧栏</span><kbd>Ctrl+B</kbd></div><div><span>审阅</span><kbd>Ctrl+Shift+G</kbd></div><div><span>终端</span><kbd>Ctrl+`</kbd></div><div><span>浏览器 / 新建浏览页面</span><kbd>Ctrl+T</kbd></div><div><span>文件</span><kbd>Ctrl+P</kbd></div><div><span>地址栏</span><kbd>Ctrl+L</kbd></div><div><span>刷新网页</span><kbd>Ctrl+R</kbd></div></section></div>}
       {category === 'ABOUT' && <div className="settings-section" data-testid="settings-about"><header><p>Fielora</p><h1>关于</h1></header><section className="settings-card about-card"><img src={fieloraMark} alt="" /><span><strong>Fielora Desktop 0.1.0</strong><small>Windows 11 x64 · Electron 43.4.0 · schema 11</small></span></section></div>}
     </section>
   </WorkspaceSurface>;

@@ -2255,7 +2255,6 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     { id: 'terminal', label: 'PowerShell', icon: 'terminal', shortcut: 'Ctrl+`', onOpen: () => openDockTool('TERMINAL') },
     { id: 'browser', label: '浏览器', icon: 'browse', shortcut: 'Ctrl+T', onOpen: () => openDockTool('BROWSER') },
     { id: 'files', label: '文件', icon: 'folder', shortcut: 'Ctrl+P', onOpen: () => openDockTool('FILES') },
-    { id: 'chat', label: '侧边聊天', icon: 'compose', shortcut: 'Ctrl+Alt+S', onOpen: () => window.dispatchEvent(new CustomEvent('fielora:open-summon')) },
   ];
   const dockViews = project ? dockTabs.map((tab) => {
     const session = fileDockSessions[tab.id] ?? null;

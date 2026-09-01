@@ -207,7 +207,6 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
       if (command && event.shiftKey && event.key.toLowerCase() === 'g') { event.preventDefault(); openWorkspace('DIFF'); return; }
       if (command && event.key === '`') { event.preventDefault(); emit('fielora:toggle-terminal'); return; }
       if (command && event.key.toLowerCase() === 'p') { event.preventDefault(); openWorkspace('FILES'); return; }
-      if (command && event.altKey && event.key.toLowerCase() === 's') { event.preventDefault(); setToolsOpen(false); emit('fielora:open-summon'); return; }
       if (command && event.key.toLowerCase() === 't' && !(toolsOpen && utilityView === 'BROWSER')) {
         event.preventDefault();
         if (route.route === 'PROJECTS') openWorkspace('BROWSER');
@@ -231,7 +230,7 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
   } as CSSProperties;
 
   return <div className="desktop-frame" data-surface="canvas" data-testid="desktop-frame">
-    <header className="desktop-chrome" ref={chromeRef} data-surface="chrome" data-chrome-plane="window" data-testid="desktop-chrome">
+    <header className="desktop-chrome" ref={chromeRef} data-surface="chrome" data-chrome-plane="window" data-brand-chrome="top" data-testid="desktop-chrome">
       <div className="chrome-leading">
         <button className={sidebarCollapsed ? 'active' : ''} title="显示或隐藏侧栏 (Ctrl+B)" onClick={toggleSidebar} data-testid="chrome-sidebar-toggle"><AppIcon name="sidebar"/></button>
         <button title="后退" disabled={!route.canBack} onClick={() => emit('fielora:navigation-back')} data-testid="chrome-back"><AppIcon name="back"/></button>
@@ -255,7 +254,6 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
             <button onClick={() => openWorkspace('DIFF')} data-testid="utility-review"><AppIcon name="diff"/><span>审阅</span><kbd>Ctrl+Shift+G</kbd></button>
             <button onClick={() => setUtilityView('BROWSER')} data-testid="utility-browser"><AppIcon name="browse"/><span>浏览器</span><kbd>Ctrl+T</kbd></button>
             <button onClick={() => openWorkspace('FILES')} data-testid="utility-files"><AppIcon name="folder"/><span>文件</span><kbd>Ctrl+P</kbd></button>
-            <button onClick={() => { setToolsOpen(false); emit('fielora:open-summon'); }} data-testid="utility-chat"><AppIcon name="compose"/><span>侧边聊天</span><kbd>Ctrl+Alt+S</kbd></button>
           </nav>
           <p>拖动左侧分隔线调整工具区宽度。</p>
         </>}

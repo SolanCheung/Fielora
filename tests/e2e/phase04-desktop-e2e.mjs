@@ -115,7 +115,7 @@ async function contains(rootPath, needle) {
 }
 
 const secret = `phase04-e2e-secret-${crypto.randomUUID()}`;
-const prompt = `phase04-unsaved-prompt-${crypto.randomUUID()}`;
+const modelInput = `phase04-model-input-${crypto.randomUUID()}`;
 const hiddenTail = `phase04-inbox-hidden-tail-${crypto.randomUUID()}`;
 let ids;
 
@@ -130,11 +130,11 @@ try {
   ids = await cdp.eval(`(async()=>{
     const provider=await window.fielora.provider.create({provider_kind:'OPENAI_COMPATIBLE',display_name:'Phase 04 Fixture',base_url:'https://example.com/v1',default_model:'__fielora_fixture__',custom_endpoint_acknowledged:true});
     const active=await window.fielora.provider.storeCredential({provider_config_id:provider.id,secret:${JSON.stringify(secret)}});
-    const field=await window.fielora.field.create({title:'Phase 04 Desktop',goal:'Summon and capture'});
+    const field=await window.fielora.field.create({title:'Phase 04 Desktop',goal:'Provider and capture'});
     async function run(modelId,cancel){
       const events=[];let resolveDone;const done=new Promise((resolve)=>{resolveDone=resolve;});
       const stop=window.fielora.core.subscribe((event)=>{if(event.event==='event.model.invocation'){events.push(event);if(['COMPLETED','CANCELLED','FAILED'].includes(event.kind)){stop();resolveDone();}}});
-      const invocation=await window.fielora.model.start({provider_config_id:provider.id,model_id:modelId,intent:'ASK',user_input:${JSON.stringify(prompt)},context_package:[{kind:'CURRENT_FIELD',source_identity:field.id,source_revision_or_navigation_generation:'1',display_label:'Current Field',content:'renderer-forged-value',sensitivity:'NORMAL',completeness:'COMPLETE'}],response_mode:'TEXT'});
+      const invocation=await window.fielora.model.start({provider_config_id:provider.id,model_id:modelId,intent:'ASK',user_input:${JSON.stringify(modelInput)},context_package:[{kind:'CURRENT_FIELD',source_identity:field.id,source_revision_or_navigation_generation:'1',display_label:'Current Field',content:'renderer-forged-value',sensitivity:'NORMAL',completeness:'COMPLETE'}],response_mode:'TEXT'});
       if(cancel)await window.fielora.model.cancel({invocation_id:invocation.invocation_id});
       await done;return{invocation,events};
     }
@@ -153,38 +153,7 @@ try {
   assert.equal(ids.failedEvents.at(-1).error_code, 'PROVIDER_RATE_LIMITED');
   assert.equal(ids.promoted.promoted_as, 'IDEA_CANDIDATE');
 
-  await cdp.eval(`document.querySelector('[data-testid="now-nav"]').focus();document.querySelector('[data-testid="summon-button"]').click()`);
-  await wait(cdp, `document.querySelector('[data-testid="summon-panel"]')`);
-  await wait(cdp, `document.querySelector('[data-testid="send-summary"]')?.innerText.includes('__fielora_fixture__')`);
-  assert.equal(await cdp.eval(`Boolean(document.querySelector('.summon-tabs'))`), false, 'Summon must not expose three equal tabs');
-  assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="provider-setup"]'))`), false, 'Provider setup must not occupy normal Ask');
-  assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="summon-context-inspector"]'))`), false, 'Context must start collapsed');
-  assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="context-sensitivity"]'))`), false, 'Sensitivity selector must not be persistent');
-  let panelText = await cdp.eval(`document.querySelector('[data-testid="summon-panel"]').innerText`);
-  assert.equal(panelText.includes(secret), false);
-  assert.equal(panelText.includes('__fielora_fixture__'), true);
-  assert.equal(panelText.includes('服务方是否保留内容由其账号与服务政策决定'), true);
-  assert.equal(panelText.includes('IDEA_CANDIDATE'), false);
-
   await mkdir(evidence, { recursive: true });
-  let shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-  await writeFile(path.join(evidence, `${mode}-phase04-summon-default.png`), Buffer.from(shot.data, 'base64'));
-
-  await cdp.eval(`document.querySelector('[data-testid="context-summary"]').click()`);
-  await wait(cdp, `document.querySelector('[data-testid="summon-context-inspector"]')`);
-  await cdp.eval(`(()=>{const input=document.querySelector('[data-testid="context-note"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Synthetic API key handling note');input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-testid="context-add"]').click();})()`);
-  await wait(cdp, `document.querySelector('[data-testid="sensitive-disclosure"]')`);
-  panelText = await cdp.eval(`document.querySelector('[data-testid="summon-panel"]').innerText`);
-  assert.equal(panelText.includes('这次上下文包含敏感内容'), true);
-  assert.equal(panelText.includes('普通'), false);
-
-  shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-  await writeFile(path.join(evidence, `${mode}-phase04-summon.png`), Buffer.from(shot.data, 'base64'));
-
-  await cdp.eval(`document.querySelector('[data-testid="summon-panel"] > header [aria-label="关闭"]').click()`);
-  await wait(cdp, `!document.querySelector('[data-testid="summon-panel"]')`);
-  await wait(cdp, `document.activeElement?.dataset?.testid==='now-nav'`);
-
   await cdp.eval(`document.querySelector('[data-testid="inbox-nav"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="inbox-surface"]')`);
   const inboxText = await cdp.eval(`document.querySelector('[data-testid="inbox-surface"]').innerText`);
@@ -192,10 +161,9 @@ try {
   assert.equal(inboxText.includes('IDEA_CANDIDATE'), false);
   assert.equal(inboxText.includes('Attach 到 Field'), false);
   assert.equal(inboxText.includes('Promote'), false);
-  assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="summon-panel"]'))`), false, 'Inbox must be independent from Summon');
   const previewLengths = await cdp.eval(`[...document.querySelectorAll('[data-testid="capture-preview"]')].map((item)=>[...item.innerText].length)`);
   assert.equal(previewLengths.every((length) => length <= 181), true);
-  shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+  let shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
   await writeFile(path.join(evidence, `${mode}-phase04-inbox.png`), Buffer.from(shot.data, 'base64'));
   await cdp.eval(`(()=>{const card=[...document.querySelectorAll('[data-testid="inbox-capture-card"]')].find((item)=>item.querySelector('h3')?.innerText==='Compressed Inbox Capture');card.querySelector('.capture-expand').click();})()`);
   await wait(cdp, `document.querySelector('[data-testid="capture-full-content"]')?.innerText.includes(${JSON.stringify(hiddenTail)})`);
@@ -203,18 +171,19 @@ try {
   await writeFile(path.join(evidence, `${mode}-phase04-inbox-expanded.png`), Buffer.from(shot.data, 'base64'));
   await cdp.eval(`document.querySelector('[data-testid="inbox-surface"] > header [aria-label="关闭"]').click()`);
 
-  await cdp.eval(`document.querySelector('[data-testid="summon-button"]').click()`);
-  await wait(cdp, `document.querySelector('[data-testid="summon-panel"]')`);
-  await cdp.eval(`document.querySelector('[aria-label="管理模型服务"]').click()`);
+  await cdp.eval(`window.dispatchEvent(new CustomEvent('fielora:open-provider-setup'))`);
   await wait(cdp, `document.querySelector('[data-testid="provider-setup"]')`);
-  assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="summon-prompt"]'))`), false);
+  const providerText = await cdp.eval(`document.querySelector('[data-testid="provider-setup"]').innerText`);
+  assert.equal(providerText.includes(secret), false);
+  assert.equal(providerText.includes('__fielora_fixture__'), true);
+  assert.equal(providerText.includes('服务方和账号政策决定'), true);
   shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
   await writeFile(path.join(evidence, `${mode}-phase04-provider-setup.png`), Buffer.from(shot.data, 'base64'));
   await cdp.eval(`document.querySelector('[data-testid="provider-setup"] > header [aria-label="关闭"]').click()`);
 
   await quit(cdp);
   assert.equal(await contains(dataRoot, secret), false, 'credential leaked outside Credential Manager');
-  assert.equal(await contains(dataRoot, prompt), false, 'unsaved prompt leaked to local files');
+  assert.equal(await contains(dataRoot, modelInput), false, 'model input leaked to local files');
 
   child = await launch();
   cdp = await connect();
@@ -225,12 +194,9 @@ try {
   assert.equal(resumed.placement_status, 'PROMOTED');
   assert.equal(resumed.promoted_as, 'IDEA_CANDIDATE');
   await cdp.eval(`window.fielora.provider.remove({provider_config_id:${JSON.stringify(ids.providerId)}})`);
-  await cdp.eval(`document.querySelector('[data-testid="summon-button"]').click()`);
-  await wait(cdp, `document.querySelector('[data-testid="provider-degraded"]')`);
-  assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="summon-prompt"]'))`), true, 'No-provider state must preserve Ask');
-  assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="provider-setup"]'))`), false, 'No-provider state must remain bounded until setup is requested');
-  await cdp.eval(`document.querySelector('[data-testid="provider-degraded"] button').click()`);
+  await cdp.eval(`window.dispatchEvent(new CustomEvent('fielora:open-provider-setup'))`);
   await wait(cdp, `document.querySelector('[data-testid="provider-setup"]')`);
+  assert.equal(await cdp.eval(`document.querySelector('[data-testid="provider-setup"]').innerText.includes('还没有模型服务')`), true);
   await quit(cdp);
 
   await writeFile(path.join(evidence, `${mode.toUpperCase()}_PHASE_04_ACCEPTANCE.json`), `${JSON.stringify({
@@ -239,11 +205,10 @@ try {
     checks: [
       'provider_config', 'wincred_write_read_delete', 'fixture_started_delta_usage_completed',
       'fixture_started_cancelled', 'fixture_started_failed_stable_error', 'context_core_reread',
-      'context_progressive_disclosure', 'sensitive_exception_disclosure', 'provider_setup_outside_ask',
-      'provider_model_retention_cost_disclosure', 'independent_inbox', 'inbox_bounded_preview',
+      'provider_setup_independent_surface', 'provider_model_retention_cost_disclosure',
+      'independent_inbox', 'inbox_bounded_preview',
       'user_language_hides_domain_terms', 'capture_attach_promote', 'restart_resume',
-      'secret_not_in_files', 'unsaved_prompt_not_in_files', 'summon_focus_restore',
-      'no_provider_degraded_setup', 'no_equal_summon_tabs',
+      'secret_not_in_files', 'model_input_not_in_files',
     ],
     provider_external_requests: 0,
     dxe_surface_runtime: 'NOT_IMPLEMENTED',

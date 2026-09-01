@@ -6,9 +6,9 @@ export interface WindowSurfaceColors {
   height: number;
 }
 
-/** Mirrors --fl-color-app and --fl-color-icon for the native WCO surface. */
+/** Mirrors the Brand Chrome caption edge for the native WCO surface. */
 export function windowSurfaceColors(theme: WindowSurfaceTheme): WindowSurfaceColors {
   return theme === 'DARK'
-    ? { background: '#17191e', symbols: '#c4c9d1', height: 44 }
-    : { background: '#f9fafc', symbols: '#505660', height: 44 };
+    ? { background: '#2b2229', symbols: '#f8f1fa', height: 44 }
+    : { background: '#f9e8ed', symbols: '#251a2d', height: 44 };
 }

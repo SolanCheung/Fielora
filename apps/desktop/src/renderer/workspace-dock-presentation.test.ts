@@ -41,7 +41,8 @@ test('all project tools share one persistent right workspace dock with closable 
   assert.match(dock, /data-testid="right-dock-home"/);
   assert.match(dock, /data-testid="right-dock-tool-menu"/);
   assert.doesNotMatch(dock, /WorkspaceObjectPicker|createPortal/);
-  for (const id of ['artifacts', 'review', 'terminal', 'browser', 'files', 'chat']) assert.match(workspace, new RegExp(`id: '${id}'`));
+  for (const id of ['artifacts', 'review', 'terminal', 'browser', 'files']) assert.match(workspace, new RegExp(`id: '${id}'`));
+  assert.doesNotMatch(workspace, /id: 'chat'/);
 });
 
 test('right workspace dock keeps a dynamic resize range and full-width tool views', () => {

@@ -20,8 +20,10 @@
   font-weight: var(--fl-font-weight-medium);
 }
 .ui-button:hover:not(:disabled) { color: var(--fl-color-text-strong); background: var(--fl-color-surface-active); }
-.ui-button--primary { color: var(--fl-color-text-on-accent); background: var(--fl-color-brand-ink); }
-.ui-button--primary:hover:not(:disabled) { color: var(--fl-color-text-on-accent); background: var(--fl-color-brand-ink-hover); }
+.ui-button--primary { color: var(--fl-action-primary-foreground); background: var(--fl-action-primary); }
+.ui-button--primary:hover:not(:disabled) { color: var(--fl-action-primary-foreground); background: var(--fl-action-primary-hover); }
+.ui-button--primary:active:not(:disabled) { background: var(--fl-action-primary-pressed); }
+.ui-button--primary:focus-visible { box-shadow: 0 0 0 3px var(--fl-action-primary-focus); }
 .ui-button--danger { color: var(--fl-color-text-on-accent); background: var(--fl-color-danger); }
 .ui-button--ghost { color: var(--fl-color-text-muted); background: transparent; }
 .ui-button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -276,8 +278,8 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  color: var(--fl-color-accent-foreground);
-  background: var(--fl-color-emphasis);
+  color: var(--fl-action-primary-foreground);
+  background: var(--fl-action-primary);
   box-shadow: none;
   transition:
     color var(--fl-duration-control) var(--fl-ease-standard),
@@ -295,18 +297,19 @@
   .select-menu.permission-picker > button { width: 30px; padding: 0; justify-content: center; }
 }
 .conversation-composer .composer-submit:hover:not(:disabled) {
-  background: var(--fl-color-emphasis-hover);
+  background: var(--fl-action-primary-hover);
   box-shadow: var(--fl-shadow-control-hover);
   transform: translateY(-1px);
 }
 .conversation-composer .composer-submit:active:not(:disabled) {
+  background: var(--fl-action-primary-pressed);
   box-shadow: none;
   transform: scale(0.94);
 }
 .conversation-composer .composer-submit:disabled {
   border-radius: 50%;
   color: var(--fl-color-text-disabled);
-  background: var(--fl-color-control-disabled);
+  background: var(--fl-action-primary-disabled);
   box-shadow: none;
   transform: none;
 }

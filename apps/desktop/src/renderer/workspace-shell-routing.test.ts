@@ -62,8 +62,8 @@ test('review, local environment, and installed applications use recognizable sem
   assert.doesNotMatch(workspace, /FILE_EXPLORER: 'F'|VISUAL_STUDIO_CODE: '<\/>'|INTELLIJ_IDEA: 'IJ'/);
 });
 
-test('right dock plus follows the last soft-edged tab', () => {
-  assert.match(dock, /<TabStrip className="right-dock-tabs"[\s\S]*?tabs\.map[\s\S]*?<\/TabStrip>\s*<div className="right-dock-add-wrap"/);
+test('right dock plus follows the last soft-edged tab only when tabs exist', () => {
+  assert.match(dock, /<TabStrip className="right-dock-tabs"[\s\S]*?tabs\.map[\s\S]*?<\/TabStrip>\s*\{tabs\.length > 0 && <div className="right-dock-add-wrap"/);
   assert.match(dock, /<Tab[\s\S]*?className="right-dock-tab"/);
   assert.match(styles, /\.right-dock-tab-strip \{[\s\S]*?display: flex;[\s\S]*?padding: 4px 6px 4px 5px/);
   assert.match(styles, /\.right-dock-tabs \{[\s\S]*?width: max-content; max-width: calc\(100% - 32px\);[\s\S]*?flex: 0 1 auto/);

@@ -2721,3 +2721,186 @@ SCHEDULE_STORAGE: DESKTOP_LOCAL_DURABLE_JSON
 UI_UX_LAYOUT_OWNERSHIP: LOCKED
 STRUCTURAL_CHANGE: USER_APPROVAL_REQUIRED_BEFORE_IMPLEMENTATION
 ```
+
+## 108. Replaceable Pastel Bloom Brand Chrome
+
+用户提供新的透明粉紫三瓣 Logo，并要求品牌主题只从左上角向左导航和 Desktop 顶部
+tab/title Chrome 延伸，不能污染 Conversation 或右侧工作区。Renderer 现以
+`apps/desktop/assets/fielora-brand-mark.png` 作为应用品牌位与 Windows icon generator 的唯一图片
+源；替换该 PNG 后运行既有 `icon:generate` 即可同步 EXE icon，不再维护独立 SVG 副本。
+
+用户复看首版后裁决高饱和紫色过重，且顶部与左导航视觉上被切成两块。当前
+`tokens.css` 中连续的 `--fl-brand-chrome-*` bundle 改为低饱和、近白的薰衣草/雾粉画布，并集中
+拥有 Light/Dark canvas、native caption edge、foreground、hover、active、input、edge 与 Logo shadow。
+Desktop 顶栏与左导航以相同 `100vw × 100vh` 背景尺寸绘制；左导航使用 `0 -44px` 位置继续顶栏
+坐标，因此不再依赖两套独立渐变模拟连续性。Workspace/Settings 的外层 shell 使用同一坐标下的
+canvas 作为 underlay，但只从 Content 圆角切口露出；正文和右侧工作面仍由中性 Content 完整覆盖。
+只有 `data-brand-chrome="top|navigation"` 可以消费该 bundle：DesktopChrome、Project Navigation
+和 Settings Navigation 已显式声明；Overlay menu、Conversation、Settings Content、Right Workspace
+Dock、Right Dock Tab Strip、Utility Workspace 与外部 Browse content 保持原中性 Surface。
+
+用户随后明确纠正 Conversation 右上角无需调整，因此新增的外侧右上 radius 已撤回；Conversation
+恢复既有左上 `--fl-radius-work-surface`、右上直角几何。左上品牌 Logo 通过 Brand bundle 中受控
+opacity 降低视觉强度，原始 PNG 与 Windows icon source 不变。
+
+本轮未改变 App Shell、Route、Pane topology、resizer 或 surface ownership；Agent/Core/Browser
+runtime、FIPC、Schema/Migration、Provider、Tool、Permission 与 Verification 变化均为 0。最终色彩与
+五层关系仍由真实 Electron Human Visual Gate 裁决。
+
+```text
+BRAND_ASSET_SOURCE: fielora-brand-mark.png / SINGLE
+BRAND_CHROME_SCOPE: DESKTOP_TOP + LEFT_NAVIGATION
+CONVERSATION_BRAND_BACKGROUND: NO
+RIGHT_DOCK_UTILITY_BRAND_BACKGROUND: NO
+OVERLAY_BRAND_BACKGROUND: NO
+LAYOUT_OWNERSHIP_CHANGED: NO
+THEME_REPLACEMENT: DECLARATIVE_TOKEN_BUNDLE + SINGLE_PNG
+BRAND_CHROME_CANVAS: SHARED_VIEWPORT / LOW_SATURATION
+CONVERSATION_TOP_RIGHT_GEOMETRY: UNCHANGED
+```
+
+## 109. Scheduled Shared Frame And Empty Dock Motion
+
+用户明确授权修正此前锁定结构中的一处不一致：`已安排` 不再使用 legacy fixed-width
+`.shell`，而是与 Project Conversation、Settings 一样复用唯一 `WorkspaceSurface`。Scheduled
+直接复用现有 Primary Navigation、共享 `fielora:workspace-navigation-width` 偏好、同一 4px
+resizer 与 `--fl-radius-work-surface` Content 左上圆角；因此在 Scheduled、Conversation 与
+Settings 之间切换不再改变左侧边界。应用 BrowserWindow 的初始宽度保持 `1180px`，初始高度
+改为当前允许的最小高度 `620px`；`minWidth` / `minHeight` 仍为 `900px / 620px`，不改变用户后续 resize 能力。
+
+Right Workspace Dock 的 Tab Strip 只在至少一个标签存在时显示“＋”；零标签状态继续由既有
+Dock launcher 提供当前真实入口。关闭最后标签或手动收起 Dock 时，Conversation minimum、
+divider 与 Dock width 使用注册的 length tracks 在既有 panel duration 内连续收起，Dock Content
+同时执行既有 opacity/translate motion；Reduced Motion 仍由全局可访问性设置裁决。
+
+该变更不增加 Pane、Route、Overlay、Agent Runtime、Tool、FIPC、Schema/Migration、Provider、
+Permission 或 Verification；它只把用户明确批准的 Scheduled ownership 修正到已有共享容器，并
+修复既有 Dock 关闭 presentation。
+
+```text
+SCHEDULED_FRAME: SHARED_WORKSPACE_SURFACE
+SCHEDULED_NAVIGATION_WIDTH: SHARED_PREFERENCE
+SCHEDULED_CONTENT_TOP_LEFT_RADIUS: SAME_AS_CONVERSATION
+INITIAL_WINDOW_SIZE: 1180X620 / MINIMUM_HEIGHT
+EMPTY_DOCK_ADD_BUTTON: HIDDEN
+LAST_TAB_CLOSE_MOTION: INTERPOLATED_LENGTH_TRACKS
+SECOND_LAYOUT_OR_RUNTIME: NO
+```
+
+## 110. Summon Removal And Minimum-height Startup Correction
+
+用户明确要求删除全局 Summon 功能，而不是只隐藏按钮。当前 Renderer 已移除全局 Summon
+浮动按钮、Overlay/Context 编辑与发送流程、`Ctrl+Shift+Space`、Desktop Utility 和 Right Dock
+中的“侧边聊天”、`Ctrl+Alt+S` 及其 presentation/test contract。Right Dock 零标签启动页现在只保留
+工作对象、审阅、PowerShell、浏览器和文件五个真实入口。Project Conversation / Agent 继续承担
+模型交互；Inbox、Quick Capture 与 Provider Setup 保留，但不再能进入第二套 Summon 请求界面。
+
+用户同时纠正上一轮尺寸要求：默认进入时需要使用最小高度而不是最小宽度。因此 BrowserWindow
+初始尺寸为 `1180 × 620px`，约束仍为 `minWidth: 900px`、`minHeight: 620px`。
+Provider-neutral Model Runtime、Conversation Agent flow、Capture persistence、Credential、FIPC、Schema/
+Migration、Tool、Permission 与 Verification 均未删除或改变；删除范围只属于已明确废弃的 Summon
+产品入口和 Renderer presentation。
+
+```text
+GLOBAL_SUMMON_UI: REMOVED
+SIDE_CHAT_ENTRY: REMOVED
+SUMMON_SHORTCUTS: REMOVED
+RIGHT_DOCK_LAUNCHER: 5 CURRENT ENTRIES
+PROJECT_CONVERSATION_AGENT: PRESERVED
+INBOX_QUICK_CAPTURE_PROVIDER_SETUP: PRESERVED
+INITIAL_WINDOW_SIZE: 1180X620
+MINIMUM_WINDOW_SIZE: 900X620
+SECOND_MODEL_RUNTIME: NO
+```
+
+## 111. Appearance Theme Overrides
+
+用户要求在 Settings → 外观中加入六项实时界面自定义，并明确它们必须是当前 Fielora Glass Theme
+之上的 Override，而不是第二套 Theme System。现有 v2 local UI preferences 现持久化 Sidebar Base
+Color、Workspace Base Color、UI font family/size、Code font family/size、neutral Surface contrast 和
+Primary Action Base Color；修改后由既有 `applyAppPreferences` 写入批准的 semantic CSS variables，
+无需重启。该轮最初以 `#EFEBFF` 代表 Light Sidebar；其 flat-default 行为已由 §112 supersede。
+
+Sidebar Override 只作用于左侧 Navigation；Workspace Override 覆盖 Conversation、Settings/Library
+Content、Right Dock/Utility 的基础 Content；Glass alpha/highlight/blur 与 Floating/Overlay 仍归现有
+Material resolver。UI size 以 15px 基线派生既有 typography roles，Code 以独立 13px 基线覆盖
+Markdown Code、Diff、Editor 与 Terminal。对比度 0–100 只派生中性 Surface/Border/Input token，并同步派生
+Brand Chrome 菜单 Hover/Selected/Edge/Input 与 selection shadow；滑杆收敛为 thin track + strong thumb + 数值，未使用
+全局 CSS filter；Action Base 自动派生交互状态和可读前景，不覆盖 Success/Warning/Danger。
+
+“恢复当前主题默认值”只清空六项 Override，保留 System/Light/Dark 和可访问性设置。Theme identity
+仍只有 `fielora`，Custom Theme importer、Schema/Migration、Agent/Core/Provider/Tool/Permission/
+Verification 变化均为 0。
+
+```text
+THEME_IDENTITY: FIELORA / ONE
+APPEARANCE_OVERRIDES: 6 / DECLARATIVE
+DEFAULT_LIGHT_SIDEBAR_BASE: SUPERSEDED_BY_112
+DEFAULT_LIGHT_WORKSPACE_BASE: #FFFFFF
+DEFAULT_LIGHT_ACTION_BASE: #6847D8
+SURFACE_CONTRAST_FILTER: FORBIDDEN
+SEMANTIC_STATUS_COLOR_OVERRIDE: NO
+RUNTIME_RESTART_REQUIRED: NO
+```
+
+## 112. Continuous Chrome, Compact Appearance And Library Shared Frame
+
+用户复看打包版后确认三项 presentation/ownership 修正：默认 Sidebar 不得以历史
+`#EFEBFF/#F0ECFF` flat override 与 Titlebar 分层，而要继续消费同一张 viewport-aligned Brand Chrome
+canvas；这两个旧版默认色若已作为 persisted override 保存，读取时迁回 `null`。Appearance 中代表色改为
+`#F7EFFB`，自定义 Sidebar Base Color 作为同一 Chrome canvas 上的 tint，而不是第二张不连续背景。
+
+Settings → Appearance 的六项自定义收敛为 compact 两列 matrix，右侧 control 起止边界统一、行高收紧、
+section 描述位于标题下方。Library 从 legacy `.shell` 迁入现有 `WorkspaceSurface`，与 Conversation、
+Scheduled、Settings 共享 Primary Navigation 宽度偏好、4px resizer、Content Base Surface 和左上圆角；
+Library 数据行为、Filter、Add/Open/Delete、Browser Save contract 均不改变。
+
+```text
+DEFAULT_SIDEBAR_SURFACE: SHARED_TITLEBAR_CHROME_CANVAS
+LEGACY_FLAT_SIDEBAR_DEFAULTS: #EFEBFF/#F0ECFF -> NULL
+APPEARANCE_LAYOUT: COMPACT_ALIGNED_TWO_COLUMN_MATRIX
+LIBRARY_FRAME: SHARED_WORKSPACE_SURFACE
+LIBRARY_BEHAVIOR_CHANGED: NO
+SECOND_THEME_OR_RUNTIME: NO
+```
+
+## 113. Purple Open-center Brand Mark
+
+用户提供黑色与紫色两个同形 SVG。两者几何均为三条旋转花瓣 path，仅填色和中心圆不同；在当前
+near-white lavender/pink Chrome 上，黑色版本视觉重量过高，因此选用 `#5840C8` 紫色版本，并按用户
+要求彻底删除中心浅色圆。Renderer 直接消费 canonical `fielora-brand-mark.svg`；透明 PNG 与 Windows
+ICO 由同一 SVG 机械生成，不产生第二套 Logo geometry。
+
+```text
+BRAND_MARK_VARIANT: PURPLE #5840C8
+BRAND_MARK_CENTER_CIRCLE: REMOVED
+CANONICAL_RENDERER_ASSET: fielora-brand-mark.svg
+GENERATED_NATIVE_ASSETS: PNG + ICO / SAME GEOMETRY
+```
+
+## 114. Unified Page Rails, Gradient Overrides And Bounded Color Picker
+
+用户连续复看 Scheduled、Library、Conversation 与 Settings 后确认：前三个主工作面不能继续使用互不相干的
+标题宽度、按钮尺度和空状态；Settings 各分类也不能混用 860/920/960px 内容宽度。当前 presentation 统一为
+1040px Page Rail 与 920px Settings Rail：Scheduled/Library 共用 30px 标题、38px Primary Action 和 quiet
+empty state，Conversation 保留专用 reading/composer width 但 Header 左边线对齐；Settings Header、row copy 与
+shortcut label 统一左边线。Route、Pane、Navigation、Composer、Dock、Resizer ownership 均未改变。
+
+Sidebar 与 Titlebar 现在直接消费同一个 `--fl-brand-chrome-canvas`，不再通过独立 Sidebar tint 形成两层；
+`#EFEBFF/#F0ECFF/#F7EFFB` 三个历史 flat representative override 读取时都恢复到真实 Theme 默认。Sidebar 和
+Workspace Background 均支持 Default/Solid/Gradient，Workspace 渐变 Paint 与 neutral solid derivation 分离，
+避免把 CSS image 当成 neutral mix color。
+
+Windows native color input 已从 Appearance 移除，替换为 Fielora Overlay Color Picker：saturation/value、Hue、
+HEX 实时同步，按 trigger 自动向上或向下展开，并在 12px viewport inset 内 clamp。它不新增 Theme、Schema、
+Migration、Runtime、Provider、Agent、Tool 或 Permission。
+
+```text
+PRIMARY_PAGE_RAIL: 1040PX
+SETTINGS_CONTENT_RAIL: 920PX
+BACKGROUND_OVERRIDE_MODES: DEFAULT / SOLID / GRADIENT
+SIDEBAR_TITLEBAR_CANVAS: ONE CONTINUOUS TOKEN
+NATIVE_COLOR_PICKER: REMOVED
+IN_APP_COLOR_PICKER: BOUNDED OVERLAY
+STRUCTURAL_OWNERSHIP_CHANGED: NO
+```

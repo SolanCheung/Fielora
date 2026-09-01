@@ -53,14 +53,14 @@ test('visual golden metrics keep the measured desktop calibration', () => {
   assert.match(materials, /\.conversation-composer\[data-surface="floating"\] \{[^}]*var\(--fl-shadow-surface\)/);
 });
 
-test('bright purple is limited to menu selection, top tabs and the Composer primary control', () => {
+test('work-content emphasis stays limited while branded purple remains Chrome-scoped', () => {
   const tokens = read('styles/tokens.css');
   const controls = read('styles/controls.css');
   const appearance = read('styles/appearance.css');
   assert.match(tokens, /--fl-color-accent: #505761;/);
   assert.match(tokens, /--fl-color-emphasis: #7657ef;/);
   assert.match(controls, /\.ui-select-check \{[^}]*color: var\(--fl-color-emphasis\)/s);
-  assert.match(appearance, /\.conversation-composer \.composer-submit,[\s\S]*?background: var\(--fl-color-emphasis\)/);
+  assert.match(appearance, /\.conversation-composer \.composer-submit,[\s\S]*?background: var\(--fl-action-primary\)/);
   assert.match(appearance, /\.right-dock-tab\.active::after \{[\s\S]*?background: var\(--fl-color-emphasis\)/);
   assert.match(appearance, /\.project-global-nav button\.active::before,[\s\S]*?content: none;/);
 });
@@ -103,7 +103,7 @@ test('app shell owns Canvas while the workspace uses one continuous Content plan
   assert.match(legacy, /\.project-root \{[^}]*background: transparent;/);
   assert.match(legacy, /\.workspace-surface \{[^}]*background: var\(--fl-surface-content\);/);
   assert.match(legacy, /\.conversation-column \{[^}]*background: var\(--fl-surface-content\);/);
-  assert.match(layout, /\.conversation-column,[\s\S]*?\.settings-content \{[\s\S]*?border-radius: var\(--fl-radius-work-surface\) 0 0 0;/);
+  assert.match(layout, /\.conversation-column,[\s\S]*?\.settings-content,[\s\S]*?\.library-content \{[\s\S]*?border-radius: var\(--fl-radius-work-surface\) 0 0 0;/);
   assert.match(layout, /\.project-navigation-resizer:hover span,[\s\S]*?opacity: \.38;[\s\S]*?background: var\(--fl-color-divider\);/);
   assert.match(appearance, /\.right-workspace-dock \{[^}]*background: var\(--fl-surface-content\)/);
   assert.doesNotMatch(legacy, /\.project-layout\.workspace-open \.right-workspace-dock \{ position: absolute/);
@@ -203,8 +203,11 @@ test('shared navigation resize, collapse and Settings content behavior stay cano
   const surface = read('WorkspaceSurface.tsx');
   const project = read('ProjectWorkspace.tsx');
   const settings = read('SettingsScreen.tsx');
+  const scheduled = read('ScheduledTasksScreen.tsx');
+  const rightDock = read('RightWorkspaceDock.tsx');
   const appearance = read('AppearanceSettings.tsx');
   const layout = read('styles/layout.css');
+  const main = read('../main.ts');
   const doc = read('../../../../docs/architecture/FIELORA_UI_UX_SYSTEM_V0.1.md');
 
   assert.match(surface, /WORKSPACE_NAVIGATION_DEFAULT_WIDTH = 304/);
@@ -213,27 +216,91 @@ test('shared navigation resize, collapse and Settings content behavior stay cano
   assert.match(surface, /style\.setProperty\('--workspace-navigation-width'/);
   assert.match(project, /navigationMax=\{navigationMaximumWidth\(\)\}/);
   assert.match(settings, /<WorkspaceSurface className="settings-root"/);
+  assert.match(scheduled, /<WorkspaceSurface[\s\S]*?className="scheduled-root"/);
+  assert.match(scheduled, /readWorkspaceNavigationWidth\(WORKSPACE_NAVIGATION_DEFAULT_WIDTH, 'fielora:scheduled-navigation-width'\)/);
+  assert.match(scheduled, /navigationResizerTestId="scheduled-navigation-resizer"/);
   assert.match(settings, /WORKSPACE_NAVIGATION_MIN_WIDTH/);
   assert.match(settings, /WORKSPACE_NAVIGATION_MAX_WIDTH/);
   assert.match(layout, /body\[data-sidebar-collapsed="true"\] \.workspace-surface \{[\s\S]*?grid-template-columns: 0 0 minmax\(0, 1fr\);/);
   assert.match(layout, /body\[data-sidebar-collapsed="true"\] \.project-navigation[\s\S]*?max-width: 0;/);
   assert.match(layout, /\.settings-content \{[\s\S]*?overflow-x: hidden;[\s\S]*?overflow-y: auto;/);
+  assert.match(read('styles/tokens.css'), /--fl-layout-page-width: 1040px;[\s\S]*?--fl-layout-settings-content: 920px;/);
+  assert.match(read('styles/appearance.css'), /\.settings-section,[\s\S]*?\.appearance-settings \{ width: min\(var\(--fl-layout-settings-content\), 100%\); margin-inline: auto; \}/);
+  assert.match(layout, /\.library-content > \*,[\s\S]*?\.scheduled-page > \* \{[\s\S]*?width: 100%;/);
+  assert.match(layout, /\.conversation-context-header \{[\s\S]*?calc\(\(100% - var\(--fl-layout-page-width\)\) \/ 2\)/);
+  assert.match(layout, /\.conversation-column,[\s\S]*?\.scheduled-page,[\s\S]*?\.settings-content,[\s\S]*?\.library-content \{[\s\S]*?border-radius: var\(--fl-radius-work-surface\) 0 0 0;/);
+  assert.match(layout, /@property --fl-project-workspace-track[\s\S]*?syntax: "<length>"/);
+  assert.match(layout, /--fl-project-workspace-track var\(--fl-duration-panel\) var\(--fl-ease-panel\)/);
+  assert.match(rightDock, /\{tabs\.length > 0 && <div className="right-dock-add-wrap"/);
+  assert.match(main, /width: 1180,[\s\S]*?height: 620,[\s\S]*?minWidth: 900,[\s\S]*?minHeight: 620,/);
 
   assert.match(appearance, /data-testid=\{`appearance-theme-\$\{option\.value\.toLowerCase\(\)\}`\}/);
   for (const mode of ['SYSTEM', 'LIGHT', 'DARK']) assert.match(appearance, new RegExp(`value: '${mode}'`));
-  for (const control of ['appearance-font-scale', 'appearance-reduced-motion', 'appearance-high-contrast', 'appearance-smooth-scrolling', 'appearance-reset']) {
+  for (const control of ['appearance-sidebar-background', 'appearance-workspace-background', 'appearance-ui-font', 'appearance-ui-font-size', 'appearance-code-font', 'appearance-code-font-size', 'appearance-surface-contrast', 'appearance-action-color', 'appearance-reduced-motion', 'appearance-high-contrast', 'appearance-smooth-scrolling', 'appearance-reset']) {
     assert.match(appearance, new RegExp(control), `missing useful Appearance control ${control}`);
   }
+  assert.match(appearance, /恢复当前主题默认值/);
+  assert.match(appearance, /value: 'GRADIENT', label: '渐变'/);
+  assert.match(appearance, /createPortal\(<div ref=\{popoverRef\} className="appearance-color-popover"/);
+  assert.doesNotMatch(appearance, /type="color"/);
+  assert.doesNotMatch(appearance, /filter:\s*contrast/);
   assert.doesNotMatch(appearance, /Fielora Glass|官方设计语言|Glass 不是一个主题选项|高级颜色|导入主题/);
   assert.match(doc, /220–560px/);
-  assert.match(doc, /Settings Content 自身纵向滚动/);
+  assert.match(doc, /Settings 与 Scheduled Content 自身纵向滚动/);
+  assert.match(doc, /初始窗口高度等于允许的最小高度 `620px`/);
 });
 
-test('window chrome and primary navigation resolve as one plane', () => {
+test('replaceable Brand Chrome is scoped to the top bar and left navigation', () => {
+  const chrome = read('DesktopChrome.tsx');
+  const primary = read('PrimaryNav.tsx');
+  const settings = read('SettingsScreen.tsx');
+  const app = read('App.tsx');
+  const webpack = read('../../webpack.renderer.ts');
+  const tokens = read('styles/tokens.css');
   const appearance = read('styles/appearance.css');
   const materials = read('styles/materials.css');
-  assert.match(appearance, /\.project-navigation,[\s\S]*?\.settings-navigation \{[\s\S]*?background: var\(--fl-color-app\)/);
-  assert.match(materials, /\.project-navigation\[data-surface="chrome"\],[\s\S]*?\.settings-navigation\[data-surface="chrome"\][\s\S]*?background: var\(--fl-color-app\)/);
+
+  assert.match(chrome, /data-chrome-plane="window" data-brand-chrome="top"/);
+  assert.match(primary, /data-surface="chrome"[\s\S]*?data-brand-chrome="navigation"/);
+  assert.match(settings, /className="settings-navigation" data-surface="chrome" data-brand-chrome="navigation"/);
+  for (const source of [app, primary, settings]) assert.match(source, /fielora-brand-mark\.svg/);
+  const brandSvg = readFileSync(path.join(rendererRoot, '..', '..', 'assets', 'fielora-brand-mark.svg'), 'utf8');
+  assert.match(brandSvg, /fill="#5840C8"/);
+  assert.equal(brandSvg.match(/<path\b/g)?.length, 3);
+  assert.doesNotMatch(brandSvg, /<circle\b/);
+  const brandPng = readFileSync(path.join(rendererRoot, '..', '..', 'assets', 'fielora-brand-mark.png'));
+  assert.equal(brandPng.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.match(webpack, /test: \/\\\.\(\?:png\|svg\)\$\/i/);
+
+  for (const token of ['top', 'navigation', 'caption', 'foreground', 'hover', 'active']) {
+    assert.match(tokens, new RegExp(`--fl-brand-chrome-${token}:`));
+  }
+  assert.match(tokens, /--fl-brand-logo-opacity: 0\.72;/);
+  assert.match(materials, /data-brand-chrome="top"[\s\S]*?background: var\(--fl-brand-chrome-top\)/);
+  assert.match(materials, /data-brand-chrome="navigation"[\s\S]*?border: 0;[\s\S]*?background: var\(--fl-brand-chrome-navigation\)/);
+  assert.match(materials, /data-brand-chrome="top"[\s\S]*?background-position: 0 0;[\s\S]*?background-size: 100vw 100vh;/);
+  assert.match(materials, /data-brand-chrome="navigation"[\s\S]*?background-position: 0 -44px;[\s\S]*?background-size: 100vw 100vh;/);
+  assert.match(materials, /\.workspace-surface,[\s\S]*?\.settings-root \{[\s\S]*?background: var\(--fl-brand-chrome-canvas\);[\s\S]*?background-position: 0 -44px;/);
+  assert.match(appearance, /\.desktop-chrome\[data-brand-chrome="top"\]/);
+  assert.match(appearance, /\.project-navigation\[data-brand-chrome="navigation"\]/);
+  assert.match(appearance, /\.settings-navigation\[data-brand-chrome="navigation"\]/);
+  assert.match(appearance, /\.project-navigation\[data-brand-chrome="navigation"\] \.project-brand-button img,[\s\S]*?opacity: var\(--fl-brand-logo-opacity\);/);
+
+  for (const stylesheet of [appearance, materials]) {
+    for (const block of stylesheet.matchAll(/([^{}]+)\{[^{}]*var\(--fl-brand-chrome-[^)]+\)[^{}]*\}/g)) {
+      assert.doesNotMatch(block[1] ?? '', /conversation-(?:column|header|composer)|message-|right-workspace-dock|right-dock-|utility-launcher/, 'Brand Chrome leaked into a Content or right-side owner');
+    }
+  }
+  assert.match(appearance, /\.right-workspace-dock \{[^}]*background: var\(--fl-surface-content\)/);
+});
+
+test('project navigation keeps the section label clear of scrolling and selects only the conversation', () => {
+  const layout = read('styles/layout.css');
+  const appearance = read('styles/appearance.css');
+  assert.match(layout, /\.project-tree:has\(> \.project-list\) \{[\s\S]*?grid-template-rows: auto minmax\(0, 1fr\);[\s\S]*?overflow: hidden;/);
+  assert.match(layout, /\.project-tree > \.project-list \{[\s\S]*?margin: var\(--fl-space-2\) var\(--fl-space-1\) var\(--fl-space-2\) 0;[\s\S]*?overflow-y: auto;[\s\S]*?scrollbar-gutter: stable;/);
+  assert.match(appearance, /\.project-navigation\[data-brand-chrome="navigation"\] \.project-item-row\.active \{[\s\S]*?background: transparent;[\s\S]*?box-shadow: none;/);
+  assert.match(appearance, /\.project-navigation\[data-brand-chrome="navigation"\] \.conversation-item\.active,[\s\S]*?background: var\(--fl-brand-chrome-active\);/);
 });
 
 test('legacy compatibility stylesheet cannot grow its raw color budget', () => {

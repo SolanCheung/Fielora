@@ -11,7 +11,7 @@ export const rendererConfig: Configuration = {
       },
       { test: /\.css$/, use: ['style-loader', 'css-loader'] },
       {
-        test: /\.svg$/i,
+        test: /\.(?:png|svg)$/i,
         type: 'asset/resource',
         generator: { filename: 'main_window/assets/[name][ext]' },
       },

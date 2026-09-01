@@ -3,7 +3,7 @@ import type {
   ActivityView, FieldResumeV1View, FieldStateKind, FieldSummary, HealthDTO,
   ReferenceView, StateView, SurfaceLayoutV1,
 } from '@fielora/contracts';
-import fieloraLogo from '../../assets/fielora-logo.svg';
+import fieloraLogo from '../../assets/fielora-brand-mark.svg';
 import { PrimaryNav } from './PrimaryNav';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { SettingsScreen, type SettingsCategory } from './SettingsScreen';

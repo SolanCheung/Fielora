@@ -65,24 +65,43 @@
   backdrop-filter: none;
 }
 
-/* Windows titleBarOverlay is opaque. The renderer half of the caption plane
- * intentionally resolves to the same app color so the 40px native/app row is
- * one continuous Chrome owner instead of two visually competing strips. */
-[data-surface="chrome"][data-chrome-plane="window"],
-:root[data-material="solid"] [data-surface="chrome"][data-chrome-plane="window"] {
-  background: var(--fl-color-app);
+/* Brand Chrome is an explicit subtheme, not a new application-wide material.
+ * Its opaque right edge matches the native titleBarOverlay caption color. */
+[data-surface="chrome"][data-chrome-plane="window"][data-brand-chrome="top"],
+:root[data-material="solid"] [data-surface="chrome"][data-chrome-plane="window"][data-brand-chrome="top"] {
+  border-color: var(--fl-brand-chrome-edge);
+  background: var(--fl-brand-chrome-top);
+  background-position: 0 0;
+  background-size: 100vw 100vh;
+  background-repeat: no-repeat;
   box-shadow: none;
   backdrop-filter: none;
 }
 
-/* Native titlebar, app menu and primary navigation read as one Chrome plane. */
-.project-navigation[data-surface="chrome"],
-.settings-navigation[data-surface="chrome"],
-:root[data-material="solid"] .project-navigation[data-surface="chrome"],
-:root[data-material="solid"] .settings-navigation[data-surface="chrome"] {
-  background: var(--fl-color-app);
+/* Only persistent left navigation owns the vertical half of the brand theme. */
+.project-navigation[data-surface="chrome"][data-brand-chrome="navigation"],
+.settings-navigation[data-surface="chrome"][data-brand-chrome="navigation"],
+:root[data-material="solid"] .project-navigation[data-surface="chrome"][data-brand-chrome="navigation"],
+:root[data-material="solid"] .settings-navigation[data-surface="chrome"][data-brand-chrome="navigation"] {
+  border-color: var(--fl-brand-chrome-edge);
+  border: 0;
+  background: var(--fl-brand-chrome-navigation);
+  background-position: 0 -44px;
+  background-size: 100vw 100vh;
+  background-repeat: no-repeat;
   box-shadow: none;
   backdrop-filter: none;
+}
+
+/* The shared shell canvas is only exposed by the rounded Content corners.
+ * It keeps those corners visibly attached to Brand Chrome without tinting
+ * Conversation, Settings Content, or the right-side work surfaces. */
+.workspace-surface,
+.settings-root {
+  background: var(--fl-brand-chrome-canvas);
+  background-position: 0 -44px;
+  background-size: 100vw 100vh;
+  background-repeat: no-repeat;
 }
 
 @supports not (backdrop-filter: blur(1px)) {

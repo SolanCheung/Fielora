@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import fieloraMark from '../../assets/fielora-mark.svg';
+import fieloraMark from '../../assets/fielora-brand-mark.svg';
 import { AppIcon } from './ui';
 
 export type PrimarySection = 'PROJECTS' | 'NOW' | 'LIBRARY' | 'BROWSE' | 'FIELDS';
@@ -22,6 +22,7 @@ export function PrimaryNav({ active, onProjects, onNow, onBrowse, onFields, onNe
   return <aside
     className="project-navigation app-navigation"
     data-surface="chrome"
+    data-brand-chrome="navigation"
     data-testid="project-navigation"
     data-app-navigation="true"
   >

@@ -895,7 +895,7 @@ async function createWindow(): Promise<void> {
   const initialSurface = windowSurfaceColors(nativeTheme.shouldUseDarkColors ? 'DARK' : 'LIGHT');
   const window = new BrowserWindow({
     width: 1180,
-    height: 760,
+    height: 620,
     minWidth: 900,
     minHeight: 620,
     backgroundColor: initialSurface.background,

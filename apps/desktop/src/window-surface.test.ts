@@ -4,11 +4,11 @@ import path from 'node:path';
 import test from 'node:test';
 import { windowSurfaceColors } from './window-surface.ts';
 
-test('native titlebar surface stays identical to renderer app tokens in both themes', () => {
+test('native titlebar surface stays identical to the renderer Brand Chrome edge in both themes', () => {
   const tokens = readFileSync(path.join(import.meta.dirname, 'renderer', 'styles', 'tokens.css'), 'utf8').toLowerCase();
   for (const theme of ['LIGHT', 'DARK'] as const) {
     const surface = windowSurfaceColors(theme);
-    assert.match(tokens, new RegExp(`--fl-color-app:\\s*${surface.background}`));
+    assert.match(tokens, new RegExp(`--fl-brand-chrome-caption:\\s*${surface.background}`));
     assert.equal(surface.height, 44);
   }
   assert.notEqual(windowSurfaceColors('LIGHT').symbols, windowSurfaceColors('DARK').symbols);
@@ -24,5 +24,6 @@ test('native 44px caption plane stays continuous while workspace controls remain
   assert.match(styles, /\.desktop-frame \{[^}]*grid-template-rows: 44px minmax\(0,1fr\)/);
   assert.match(styles, /\.desktop-chrome \{[^}]*padding: 0 146px 0 10px/);
   assert.match(styles, /\.utility-control-dock \{ right: 10px;[^}]*-webkit-app-region: no-drag/);
-  assert.match(materials, /data-chrome-plane="window"[\s\S]*?background: var\(--fl-color-app\);[\s\S]*?backdrop-filter: none/);
+  assert.match(chrome, /data-chrome-plane="window" data-brand-chrome="top"/);
+  assert.match(materials, /data-chrome-plane="window"\]\[data-brand-chrome="top"\][\s\S]*?background: var\(--fl-brand-chrome-top\);[\s\S]*?backdrop-filter: none/);
 });

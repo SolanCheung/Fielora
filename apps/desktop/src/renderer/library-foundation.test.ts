@@ -20,6 +20,9 @@ test('fixed sidebar converges on New chat, Now, and Library while preserving the
 });
 
 test('Library exposes focused file/web flows and Browser runtime keeps a save action', () => {
+  assert.match(library, /<WorkspaceSurface className="library-root"/);
+  assert.match(library, /readWorkspaceNavigationWidth\(WORKSPACE_NAVIGATION_DEFAULT_WIDTH/);
+  assert.match(library, /navigationResizerTestId="library-navigation-resizer"/);
   assert.match(library, /data-testid="library-add-file"/);
   for (const label of ['全部', '网页', '文件', '图片', '音频', '视频']) assert.match(library, new RegExp(`label: '${label}'`));
   assert.match(library, /window\.fielora\.library\.delete/);

@@ -41,8 +41,9 @@
   line-height: var(--fl-type-meta-line-height);
 }
 
-:where(code, pre, kbd, samp, .dock-code-editor-surface, .terminal-dock, .terminal-session) {
+:where(code, pre, kbd, samp, .dock-code-editor-surface, .dock-code-input, .file-editor textarea, .diff-view, .terminal-dock, .terminal-session, .terminal-transcript) {
   font-family: var(--fl-font-mono);
+  font-size: var(--fl-code-font-size);
 }
 
 :where(.ui-button, .ui-menu-item, .ui-select, .ui-tab, .ui-toolbar-action, .right-dock-toolbar) strong {

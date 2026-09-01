@@ -13,6 +13,12 @@
   --fl-color-accent-foreground: #ffffff;
   --fl-color-emphasis: #7657ef;
   --fl-color-emphasis-hover: #6848db;
+  --fl-action-primary: #6847d8;
+  --fl-action-primary-hover: color-mix(in srgb, var(--fl-action-primary) 86%, var(--fl-color-text-strong));
+  --fl-action-primary-pressed: color-mix(in srgb, var(--fl-action-primary) 74%, var(--fl-color-text-strong));
+  --fl-action-primary-focus: color-mix(in srgb, var(--fl-action-primary) 30%, transparent);
+  --fl-action-primary-disabled: color-mix(in srgb, var(--fl-action-primary) 16%, var(--fl-color-surface-subtle));
+  --fl-action-primary-foreground: #ffffff;
 
   /* Brand aliases remain stable while the active accent completes the visual language. */
   --fl-color-brand-ink: #6546c7;
@@ -20,11 +26,40 @@
   --fl-color-brand-accent: #6546c7;
   --fl-color-brand-paper: var(--fl-color-surface-subtle);
 
+  /*
+   * Replaceable Brand Chrome Theme — Pastel Bloom.
+   * This bundle belongs only to [data-brand-chrome]. Swap these tokens and
+   * fielora-brand-mark.svg to rebrand the persistent navigation/title Chrome;
+   * Content, Conversation and right-side work surfaces never consume it.
+   */
+  --fl-brand-chrome-foreground: #251a2d;
+  --fl-brand-chrome-text: rgba(37, 26, 45, 0.88);
+  --fl-brand-chrome-muted: rgba(49, 35, 58, 0.66);
+  --fl-brand-chrome-faint: rgba(57, 42, 66, 0.48);
+  --fl-brand-chrome-hover: rgba(93, 61, 125, 0.07);
+  --fl-brand-chrome-active: rgba(100, 68, 132, 0.12);
+  --fl-brand-chrome-input: rgba(255, 255, 255, 0.42);
+  --fl-brand-chrome-edge: rgba(76, 51, 93, 0.1);
+  --fl-brand-chrome-focus: rgba(91, 54, 137, 0.4);
+  --fl-brand-chrome-shadow-color: #2c2035;
+  --fl-brand-chrome-selection-shadow: 0 2px 2.68px rgba(44, 32, 53, 0.05);
+  --fl-brand-logo-shadow: drop-shadow(0 4px 10px rgba(68, 35, 98, 0.16));
+  --fl-brand-logo-opacity: 0.72;
+
+  /* Managed in-app color picker paint. Product CSS consumes these tokens so
+   * the picker remains theme-independent and never introduces ad-hoc color. */
+  --fl-color-picker-white: #ffffff;
+  --fl-color-picker-black: #000000;
+  --fl-color-picker-ring: rgba(17, 20, 26, 0.68);
+  --fl-color-picker-shadow: rgba(0, 0, 0, 0.24);
+  --fl-color-picker-hue-gradient: linear-gradient(90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
+
   /* Typography */
   --fl-font-sans: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
   --fl-font-mono: "Cascadia Code", Consolas, monospace;
   --fl-font-agent-sans: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
   --fl-font-agent-mono: "Cascadia Code", Consolas, monospace;
+  --fl-code-font-size: 13px;
   --fl-font-size-caption: calc(12px * var(--fl-ui-font-scale));
   --fl-font-size-meta: calc(13px * var(--fl-ui-font-scale));
   --fl-font-size-label: calc(14px * var(--fl-ui-font-scale));
@@ -96,6 +131,9 @@
   --fl-layout-composer-width: 920px;
   --fl-layout-workspace-dock-default: 635px;
   --fl-layout-workspace-dock-min: 360px;
+  --fl-layout-page-width: 1040px;
+  --fl-layout-settings-content: 920px;
+  --fl-layout-page-gutter: max(28px, calc((100% - var(--fl-layout-page-width)) / 2));
 
   /* Shape */
   --fl-radius-control: 8px;
@@ -142,7 +180,7 @@
   --fl-shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.16);
 
   /* Compatibility aliases while legacy surfaces migrate. */
-  --fielora-ink: var(--fl-color-brand-ink);
+  --fielora-ink: var(--fl-action-primary);
   --fielora-accent: var(--fl-color-accent);
   --fielora-paper: var(--fl-color-brand-paper);
   --panel-border: var(--fl-color-border-soft);
@@ -153,6 +191,11 @@
 
 :root,
 :root[data-effective-appearance="light"] {
+  --fl-brand-chrome-canvas: radial-gradient(ellipse 42% 66% at 10% 18%, rgba(191, 168, 248, 0.34), transparent 72%), radial-gradient(ellipse 34% 70% at 17% 90%, rgba(255, 190, 214, 0.27), transparent 74%), radial-gradient(ellipse 42% 52% at 68% 0%, rgba(247, 190, 226, 0.2), transparent 74%), linear-gradient(112deg, #efebff 0%, #f7effb 42%, #ffeff2 100%);
+  --fl-brand-chrome-top: var(--fl-brand-chrome-canvas);
+  --fl-brand-chrome-navigation: var(--fl-brand-chrome-canvas);
+  --fl-brand-chrome-caption: #f9e8ed;
+
   /* Backgrounds */
   --fl-color-app: #f9fafc;
   --fl-color-canvas: #f4f6fb;
@@ -264,8 +307,28 @@
 }
 
 :root[data-effective-appearance="dark"] {
+  --fl-brand-chrome-canvas: radial-gradient(ellipse 42% 66% at 10% 18%, rgba(137, 96, 159, 0.18), transparent 72%), radial-gradient(ellipse 34% 70% at 17% 90%, rgba(159, 91, 122, 0.11), transparent 74%), linear-gradient(112deg, #1b1820 0%, #211c24 48%, #2b2229 100%);
+  --fl-brand-chrome-top: var(--fl-brand-chrome-canvas);
+  --fl-brand-chrome-navigation: var(--fl-brand-chrome-canvas);
+  --fl-brand-chrome-caption: #2b2229;
+  --fl-brand-chrome-foreground: #f8f1fa;
+  --fl-brand-chrome-text: rgba(248, 241, 250, 0.9);
+  --fl-brand-chrome-muted: rgba(244, 235, 247, 0.68);
+  --fl-brand-chrome-faint: rgba(239, 228, 243, 0.48);
+  --fl-brand-chrome-hover: rgba(255, 255, 255, 0.07);
+  --fl-brand-chrome-active: rgba(255, 255, 255, 0.12);
+  --fl-brand-chrome-input: rgba(4, 3, 6, 0.2);
+  --fl-brand-chrome-edge: rgba(255, 239, 255, 0.09);
+  --fl-brand-chrome-focus: rgba(217, 183, 233, 0.5);
+  --fl-brand-chrome-shadow-color: #000000;
+  --fl-brand-chrome-selection-shadow: 0 2px 2.68px rgba(0, 0, 0, 0.12);
+  --fl-brand-logo-shadow: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.24));
+  --fl-brand-logo-opacity: 0.78;
+
   --fl-color-emphasis: #9680ff;
   --fl-color-emphasis-hover: #a795ff;
+  --fl-action-primary: #9680ff;
+  --fl-action-primary-foreground: #181a1f;
   --fl-color-app: #17191e;
   --fl-color-canvas: #11131a;
   --fl-color-navigation: #171a22;

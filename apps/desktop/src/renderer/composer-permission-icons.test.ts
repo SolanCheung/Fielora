@@ -68,7 +68,7 @@ test('empty conversation keeps the Composer bottom anchored with quiet permissio
   assert.doesNotMatch(layout, /\.conversation-column\.is-empty-conversation \.conversation-composer/);
   assert.match(controls, /\.select-menu\.permission-picker > button \{[\s\S]*?border: 0;[\s\S]*?background: transparent;/);
   assert.match(controls, /\.permission-picker \.ui-select-popover \{[\s\S]*?animation: permission-popover-enter/);
-  assert.match(controls, /\.conversation-composer \.composer-submit \{[\s\S]*?border-radius: 50%;[\s\S]*?background: var\(--fl-color-emphasis\);/);
+  assert.match(controls, /\.conversation-composer \.composer-submit \{[\s\S]*?border-radius: 50%;[\s\S]*?background: var\(--fl-action-primary\);/);
   assert.match(controls, /\.conversation-composer \.composer-submit \{[\s\S]*?width: 36px;[\s\S]*?height: 36px;/);
   assert.doesNotMatch(readFileSync(path.join(rendererRoot, 'styles', 'appearance.css'), 'utf8'), /\.conversation-composer \.composer-submit \{[^}]*\b(?:width|height|border-radius|transform):/);
   assert.match(controls, /\.conversation-composer \.composer-submit:active:not\(:disabled\) \{[\s\S]*?transform: scale\(0\.94\);/);

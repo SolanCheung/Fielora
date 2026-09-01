@@ -19,7 +19,7 @@ Glass 的目的不是装饰性透明。它必须帮助用户辨认 Chrome、浮�
 3. **Semantic surfaces**：组件声明表面角色，不自行选择 blur、alpha 或阴影配方。
 4. **Progressive disclosure**：默认只显示当前任务需要的控件；Workspace、Terminal、菜单和弹层按需出现。
 5. **Soft boundaries**：优先使用材质差、留白和单像素边缘表达层级，避免堆叠描边与厚重阴影。
-6. **Restrained accent**：Fielora 紫只用于焦点、选中、关键动作和品牌；不铺大面积装饰底色。
+6. **Restrained accent**：工作内容中的 Fielora 紫只用于焦点、选中与关键动作。唯一大面积品牌例外是持久的左导航和 Desktop 顶部 tab/title Chrome；Conversation、Settings Content、Right Dock、右侧工具栏、Overlay 与外部网页不得继承该底色。
 7. **Provider-neutral presentation**：模型、Provider、Agent 与 Tool 使用产品语义，不让厂商视觉控制工作面。
 8. **System-respectful motion**：动效解释状态变化并服从 `prefers-reduced-motion`。
 
@@ -49,6 +49,7 @@ Fallback 必须复用同一 DOM、同一 `data-surface` 与同一交互状态，
 
 - Light 与 Dark 共享语义角色和组件结构，只替换 token 值。
 - Content 保持近实色；Chrome、Floating、Overlay 才允许受控 translucent material。
+- Brand Chrome 只允许在左导航与 Desktop 顶栏共享一张低饱和、近白的薰衣草粉连续背景；shell underlay 只可从 Content 的圆角切口露出，用于让弧度可见，不得向正文着色。不得将两处画成分割的高饱和紫色块。右侧 Dock/Tabs/Utility、Conversation 和其他 Content 继续使用中性表面。
 - Success、Warning、Danger 只表达状态，不表达配置、当前项或品牌。
 - 产品样式不得直接新增 hex/rgb；必须先在 `styles/tokens.css` 建立语义 token。
 - 阴影表达 elevation，不用于装饰卡片；边缘高光不得替代 focus ring。
@@ -59,7 +60,7 @@ Fallback 必须复用同一 DOM、同一 `data-surface` 与同一交互状态，
 
 ### 5.3 Geometry
 
-- 控件圆角 8px；输入框 10px；卡片约 12px；Surface/Dialog 16px。
+- 控件圆角 8px；输入框 10px；卡片约 12px；Surface/Dialog 16px。Brand Chrome 不改变 Conversation 既有右上角几何。
 - 控件高度使用 30/34/38px 三档。
 - 图标使用 14/17/20px 三档和统一 stroke token。
 - 间距消费 `--fl-space-*`；不在新组件内建立第二套尺度。
@@ -78,6 +79,8 @@ Fallback 必须复用同一 DOM、同一 `data-surface` 与同一交互状态，
 
 AppIcon 使用 `currentColor`、14/17/20px 尺寸角色和统一 weight；状态由父控件的 semantic token 表达。文件类型使用同一 Phosphor family 与集中语义色；外部应用的本机图标、站点 favicon 和内容媒体不属于产品 icon grammar，可保留真实来源。
 
+Fielora Logo 不属于通用 AppIcon grammar。唯一 canonical 品牌源是 `apps/desktop/assets/fielora-brand-mark.svg`；Renderer 直接消费 SVG，Windows icon pipeline 消费由它机械生成的同形 PNG/ICO。当前批准版本使用紫色 `#5840C8` 三瓣轮廓，中心保持透明负空间，不保留浅色圆；更换 Logo 不建立第二份组件资源。
+
 ## 7. 共享组件契约
 
 新页面优先使用：
@@ -95,11 +98,17 @@ AppIcon 使用 `currentColor`、14/17/20px 尺寸角色和统一 weight；状态
 
 原生 `prompt/confirm/alert/select` 禁止进入产品 Renderer。共享控件必须覆盖 keyboard、focus-visible、disabled、active 与 reduced-motion。
 
-## 8. Appearance 与 Custom Theme Seam
+## 8. Appearance 与 User Override Seam
 
-Appearance Settings 只提供 `System / Light / Dark`。页面应明确 Fielora Glass 是当前官方语言，并可解释五层 Surface；不得显示 Fielora Light、Fielora Dark 或 Solid 等伪主题卡片。
+Appearance identity 只提供 `System / Light / Dark`，Fielora Glass 仍是唯一 Theme。Settings 可以在当前 Theme 之上持久化六项批准的用户 Override：Sidebar Background、Workspace Background、UI font family/size、Code font family/size、neutral Surface contrast 和 Primary Action Base Color。背景允许默认、单色或两端色渐变，但仍只覆盖对应 semantic token；未设置的值继续继承当前 Light/Dark registry，恢复时删除 Override 而不是切换或复制 Theme。
 
-Custom Theme 当前只有声明式扩展缝隙：允许未来覆盖批准的 token group，但禁止脚本、React、DOM、CSS selector、网络、文件、credential、Tool 或 Runtime capability。导入入口在 importer 与安全验证真正实现前保持禁用，不用伪配置导入冒充主题系统。
+Sidebar 当前 Light 默认继承与 Titlebar 同一张 viewport-aligned Brand Chrome 渐变；设置必须以真实渐变 swatch 和“主题渐变”表达默认状态，不得再用 `#EFEBFF/#F0ECFF/#F7EFFB` flat fill 或代表色制造横向断层。Workspace 默认仍为 `#FFFFFF`，Primary Action 为 `#6847D8`。颜色输入只接受 `#RRGGBB` 并实时预览；应用内 Color Picker 必须是受控 Overlay，含 saturation/value 与 Hue，并始终夹紧在当前窗口内，禁止调用会越出产品窗口的 native picker。Contrast 只派生 `surface.subtle/hover/selected`、border、input 以及 Brand Chrome 菜单 hover/selected/edge/input/selection-shadow 等中性层级，禁止对整页使用 CSS filter，禁止改变正文、图标、Success、Warning、Danger；控件自身使用 thin track、strong circular thumb 和右侧数值，不使用厚重输入框高光。Action Color 自动派生 Default/Hover/Pressed/Focus/Disabled 和可读前景色；红绿黄语义状态保持独立。UI 与 Code typography 各自拥有 family/size，代码内容不跟随普通 UI 字号。
+
+Scheduled、Library 与 Conversation Header 使用同一 1040px Page Rail；前两者的标题、Primary Action 和 empty state 共享一套尺度，按钮不得作为孤立高饱和块悬在页面远端。全部 Settings category 使用同一 920px Content Rail 与左边线，并预留 stable scrollbar gutter，Appearance 不得拥有独立宽度或在滚动条出现时水平跳动。该校准不改变各 Route、Navigation、Composer、Dock 或 Resizer ownership。
+
+这些 Override 仍属于声明式扩展缝隙：禁止脚本、React、DOM、CSS selector、网络、文件、credential、Tool 或 Runtime capability。未来主题导入入口在 importer 与安全验证真正实现前保持禁用，不用伪配置导入冒充主题系统。
+
+当前内置的 Brand Chrome bundle 是该声明式缝隙的第一个受控 group：`--fl-brand-chrome-*` 只改变左导航与 Desktop 顶栏的 paint/foreground/state，配合单一 `fielora-brand-mark.svg` 即可快速换品牌。它不是第二套 Theme，也不能覆盖 Content、Conversation、Right Dock/Utility 或 Overlay selector。
 
 ## 9. 样式分层
 

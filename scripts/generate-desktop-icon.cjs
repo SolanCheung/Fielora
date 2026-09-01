@@ -1,21 +1,11 @@
-const { spawnSync } = require('node:child_process');
-const { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
-const { tmpdir } = require('node:os');
+const { readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
 const { deflateSync, inflateSync } = require('node:zlib');
 
-const sourcePath = path.resolve(__dirname, '..', 'apps', 'desktop', 'assets', 'fielora-mark.svg');
+const sourcePath = path.resolve(__dirname, '..', 'apps', 'desktop', 'assets', 'fielora-brand-mark.png');
 const outputPath = path.resolve(__dirname, '..', 'apps', 'desktop', 'assets', 'fielora.ico');
 const previewPath = process.env.FIELORA_ICON_PREVIEW ? path.resolve(process.env.FIELORA_ICON_PREVIEW) : null;
 const sizes = [16, 24, 32, 48, 64, 128, 256];
-const browserCandidates = [
-  process.env.FIELORA_ICON_BROWSER,
-  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-  'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-].filter(Boolean);
 
 const crcTable = Array.from({ length: 256 }, (_, value) => {
   let current = value;
@@ -215,57 +205,23 @@ function encodeIco(images) {
   return Buffer.concat([header, ...images.map(({ png }) => png)]);
 }
 
-function renderSource(browserPath, htmlUrl, directory) {
-  const pngPath = path.join(directory, 'fielora-source.png');
-  const profilePath = path.join(directory, `profile-${path.basename(browserPath, '.exe')}`);
-  const result = spawnSync(browserPath, [
-    '--headless=new', '--disable-gpu', '--disable-extensions', '--disable-sync', '--hide-scrollbars',
-    '--run-all-compositor-stages-before-draw', '--virtual-time-budget=1000', '--force-device-scale-factor=1',
-    '--default-background-color=00000000', '--no-default-browser-check', '--no-first-run',
-    `--user-data-dir=${profilePath}`, '--window-size=256,256', `--screenshot=${pngPath}`, htmlUrl,
-  ], { encoding: 'utf8', windowsHide: true, timeout: 30_000 });
-  if (result.status !== 0 || !existsSync(pngPath)) throw new Error(result.stderr || result.stdout || `exit ${result.status}`);
-  const decoded = decodePng(readFileSync(pngPath));
-  const alpha = alphaRange(decoded.pixels);
-  if (decoded.width !== 256 || decoded.height !== 256 || alpha.minimum !== 0 || alpha.maximum !== 255) {
-    throw new Error(`Invalid source render: ${JSON.stringify({ width: decoded.width, height: decoded.height, ...alpha })}`);
-  }
-  return decoded;
-}
-
 function main() {
-  const availableBrowsers = browserCandidates.filter((candidate) => existsSync(candidate));
-  if (availableBrowsers.length === 0) throw new Error('Microsoft Edge or Google Chrome is required to generate the Windows icon');
-  const directory = mkdtempSync(path.join(tmpdir(), 'fielora-icon-'));
-  try {
-    const svg = readFileSync(sourcePath, 'utf8');
-    const htmlPath = path.join(directory, 'icon.html');
-    writeFileSync(htmlPath, `<style>html,body{margin:0;overflow:hidden;background:transparent}svg{position:absolute;inset:0 auto auto 0;display:block;width:256px;height:256px}</style>${svg}`);
-    const errors = [];
-    let source;
-    for (const browserPath of availableBrowsers) {
-      try {
-        source = renderSource(browserPath, pathToFileURL(htmlPath).href, directory);
-        break;
-      } catch (error) {
-        errors.push(`${browserPath}: ${error.message || error}`);
-      }
-    }
-    if (!source) throw new Error(`No browser could render the icon:\n${errors.join('\n')}`);
-
-    const fittedSource = fitVisiblePixels(source.pixels, source.width, source.height);
-    const images = sizes.map((size) => {
-      const pixels = resizeRgba(fittedSource.pixels, source.width, source.height, size, size);
-      const alpha = alphaRange(pixels);
-      if (alpha.minimum !== 0 || alpha.maximum !== 255) throw new Error(`Invalid alpha range for ${size}px: ${JSON.stringify(alpha)}`);
-      return { size, png: encodePng(size, size, pixels) };
-    });
-    writeFileSync(outputPath, encodeIco(images));
-    if (previewPath) writeFileSync(previewPath, images.at(-1).png);
-    process.stdout.write(`Generated transparent Windows icon: ${outputPath}\nVisible mark fitted to ${fittedSource.bounds.fittedWidth}x${fittedSource.bounds.fittedHeight}px at ${fittedSource.bounds.offsetX},${fittedSource.bounds.offsetY}\n`);
-  } finally {
-    rmSync(directory, { recursive: true, force: true, maxRetries: 12, retryDelay: 150 });
+  const source = decodePng(readFileSync(sourcePath));
+  const sourceAlpha = alphaRange(source.pixels);
+  if (sourceAlpha.minimum !== 0 || sourceAlpha.maximum !== 255) {
+    throw new Error(`Brand PNG must include full transparency and opacity: ${JSON.stringify(sourceAlpha)}`);
   }
+
+  const fittedSource = fitVisiblePixels(source.pixels, source.width, source.height);
+  const images = sizes.map((size) => {
+    const pixels = resizeRgba(fittedSource.pixels, source.width, source.height, size, size);
+    const alpha = alphaRange(pixels);
+    if (alpha.minimum !== 0 || alpha.maximum < 250) throw new Error(`Invalid alpha range for ${size}px: ${JSON.stringify(alpha)}`);
+    return { size, png: encodePng(size, size, pixels) };
+  });
+  writeFileSync(outputPath, encodeIco(images));
+  if (previewPath) writeFileSync(previewPath, images.at(-1).png);
+  process.stdout.write(`Generated transparent Windows icon from ${sourcePath}: ${outputPath}\nVisible mark fitted to ${fittedSource.bounds.fittedWidth}x${fittedSource.bounds.fittedHeight}px at ${fittedSource.bounds.offsetX},${fittedSource.bounds.offsetY}\n`);
 }
 
 try {

@@ -9,9 +9,12 @@ export type InterfaceRadius = 'SMALL' | 'STANDARD' | 'LARGE';
 export type UiFont = 'SYSTEM' | 'INTER' | 'SEGOE_UI' | 'PINGFANG_SC' | 'MICROSOFT_YAHEI';
 export type CodeFont = 'SYSTEM_MONO' | 'CONSOLAS' | 'CASCADIA_CODE' | 'JETBRAINS_MONO';
 export type UiFontScale = 90 | 95 | 100 | 105 | 110 | 115 | 120;
+export type UiFontSize = 12 | 13 | 14 | 15 | 16 | 17 | 18;
+export type CodeFontSize = 11 | 12 | 13 | 14 | 15 | 16 | 17;
 export type ReducedMotionPreference = 'SYSTEM' | 'REDUCE' | 'FULL';
 export type AdvancedColorKey = 'accent' | 'canvas' | 'sidebar' | 'surface' | 'foreground' | 'border';
 export type AdvancedColorOverrides = Partial<Record<AdvancedColorKey, string>>;
+export interface BackgroundGradientOverride { from: string; to: string }
 
 export interface AppearancePreferences {
   /** Persisted field name retained for UI preference compatibility. This is an appearance mode, not a Theme ID. */
@@ -23,6 +26,15 @@ export interface AppearancePreferences {
   radius: InterfaceRadius;
   uiFont: UiFont;
   codeFont: CodeFont;
+  uiFontSize: UiFontSize;
+  codeFontSize: CodeFontSize;
+  sidebarBackgroundOverride: string | null;
+  sidebarBackgroundGradientOverride: BackgroundGradientOverride | null;
+  workspaceBackgroundOverride: string | null;
+  workspaceBackgroundGradientOverride: BackgroundGradientOverride | null;
+  surfaceContrast: number;
+  actionColorOverride: string | null;
+  /** Retained only for persisted v2 compatibility. New UI uses uiFontSize. */
   uiFontScale: UiFontScale;
   translucentSidebar: boolean;
   softElevation: boolean;
@@ -57,7 +69,11 @@ const ADVANCED_COLOR_KEYS: AdvancedColorKey[] = ['accent', 'canvas', 'sidebar', 
 
 export const defaultAppearancePreferences: AppearancePreferences = {
   themePreference: 'SYSTEM', accentPreset: 'FIELORA', customAccent: '#6546C7', density: 'STANDARD', contrast: 'STANDARD', radius: 'STANDARD',
-  uiFont: 'SYSTEM', codeFont: 'SYSTEM_MONO', uiFontScale: 100, translucentSidebar: false, softElevation: true,
+  uiFont: 'SYSTEM', codeFont: 'SYSTEM_MONO', uiFontSize: 15, codeFontSize: 13,
+  sidebarBackgroundOverride: null, sidebarBackgroundGradientOverride: null,
+  workspaceBackgroundOverride: null, workspaceBackgroundGradientOverride: null,
+  surfaceContrast: 42, actionColorOverride: null,
+  uiFontScale: 100, translucentSidebar: false, softElevation: true,
   reducedMotionPreference: 'SYSTEM', smoothScrolling: true, pointerCursor: true, highContrast: false, advancedColorOverrides: {},
 };
 
@@ -77,6 +93,16 @@ function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function numberIn<T extends number>(value: unknown, values: readonly T[], fallback: T): T {
+  const next = Number(value);
+  return values.includes(next as T) ? next as T : fallback;
+}
+
+function boundedInteger(value: unknown, minimum: number, maximum: number, fallback: number): number {
+  const next = Number(value);
+  return Number.isFinite(next) ? Math.min(maximum, Math.max(minimum, Math.round(next))) : fallback;
+}
+
 export function isHexColor(value: unknown): value is string {
   return typeof value === 'string' && HEX_COLOR.test(value);
 }
@@ -87,10 +113,18 @@ function normalizeAdvancedColors(value: unknown): AdvancedColorOverrides {
   return Object.fromEntries(ADVANCED_COLOR_KEYS.flatMap((key) => isHexColor(input[key]) ? [[key, String(input[key]).toUpperCase()]] : []));
 }
 
+function normalizeGradient(value: unknown): BackgroundGradientOverride | null {
+  const input = record(value);
+  if (!input || !isHexColor(input.from) || !isHexColor(input.to)) return null;
+  return { from: input.from.toUpperCase(), to: input.to.toUpperCase() };
+}
+
 function normalizeAppearance(value: unknown, legacy?: Record<string, unknown>): AppearancePreferences {
   const input = record(value) ?? {};
   const legacyDensity = legacy?.density === 'COMPACT' ? 'COMPACT' : legacy?.density === 'COMFORTABLE' ? 'COMFORTABLE' : defaultAppearancePreferences.density;
   const legacyMotion = legacy?.reduceMotion === true ? 'REDUCE' : defaultAppearancePreferences.reducedMotionPreference;
+  const persistedSidebar = isHexColor(input.sidebarBackgroundOverride) ? input.sidebarBackgroundOverride.toUpperCase() : null;
+  const sidebarBackgroundOverride = persistedSidebar === '#EFEBFF' || persistedSidebar === '#F0ECFF' || persistedSidebar === '#F7EFFB' ? null : persistedSidebar;
   return {
     themePreference: oneOf(input.themePreference, ['SYSTEM', 'LIGHT', 'DARK'], defaultAppearancePreferences.themePreference),
     accentPreset: oneOf(input.accentPreset, ['FIELORA', 'BLUE', 'TEAL', 'ORANGE', 'CUSTOM'], defaultAppearancePreferences.accentPreset),
@@ -100,6 +134,14 @@ function normalizeAppearance(value: unknown, legacy?: Record<string, unknown>): 
     radius: oneOf(input.radius, ['SMALL', 'STANDARD', 'LARGE'], defaultAppearancePreferences.radius),
     uiFont: oneOf(input.uiFont, ['SYSTEM', 'INTER', 'SEGOE_UI', 'PINGFANG_SC', 'MICROSOFT_YAHEI'], defaultAppearancePreferences.uiFont),
     codeFont: oneOf(input.codeFont, ['SYSTEM_MONO', 'CONSOLAS', 'CASCADIA_CODE', 'JETBRAINS_MONO'], defaultAppearancePreferences.codeFont),
+    uiFontSize: numberIn(input.uiFontSize, [12, 13, 14, 15, 16, 17, 18], defaultAppearancePreferences.uiFontSize),
+    codeFontSize: numberIn(input.codeFontSize, [11, 12, 13, 14, 15, 16, 17], defaultAppearancePreferences.codeFontSize),
+    sidebarBackgroundOverride,
+    sidebarBackgroundGradientOverride: normalizeGradient(input.sidebarBackgroundGradientOverride),
+    workspaceBackgroundOverride: isHexColor(input.workspaceBackgroundOverride) ? input.workspaceBackgroundOverride.toUpperCase() : null,
+    workspaceBackgroundGradientOverride: normalizeGradient(input.workspaceBackgroundGradientOverride),
+    surfaceContrast: boundedInteger(input.surfaceContrast, 0, 100, defaultAppearancePreferences.surfaceContrast),
+    actionColorOverride: isHexColor(input.actionColorOverride) ? input.actionColorOverride.toUpperCase() : null,
     uiFontScale: [90, 95, 100, 105, 110, 115, 120].includes(Number(input.uiFontScale)) ? Number(input.uiFontScale) as UiFontScale : defaultAppearancePreferences.uiFontScale,
     translucentSidebar: booleanValue(input.translucentSidebar, defaultAppearancePreferences.translucentSidebar),
     softElevation: booleanValue(input.softElevation, defaultAppearancePreferences.softElevation),
@@ -149,6 +191,36 @@ export function resolveReducedMotion(preference: ReducedMotionPreference, prefer
   return preference === 'SYSTEM' ? prefersReducedMotion : preference === 'REDUCE';
 }
 
+export function appearanceThemeDefaults(appearance: EffectiveAppearance): { sidebar: string; workspace: string; action: string } {
+  return appearance === 'DARK'
+    ? { sidebar: '#1B1820', workspace: '#181B23', action: '#9680FF' }
+    : { sidebar: '#F7EFFB', workspace: '#FFFFFF', action: '#6847D8' };
+}
+
+const UI_FONT_FAMILIES: Record<UiFont, string | null> = {
+  SYSTEM: null,
+  INTER: 'Inter, "Segoe UI Variable", "Segoe UI", sans-serif',
+  SEGOE_UI: '"Segoe UI Variable", "Segoe UI", sans-serif',
+  PINGFANG_SC: '"PingFang SC", "Microsoft YaHei UI", sans-serif',
+  MICROSOFT_YAHEI: '"Microsoft YaHei UI", "Microsoft YaHei", sans-serif',
+};
+
+const CODE_FONT_FAMILIES: Record<CodeFont, string | null> = {
+  SYSTEM_MONO: null,
+  CONSOLAS: 'Consolas, monospace',
+  CASCADIA_CODE: '"Cascadia Code", Consolas, monospace',
+  JETBRAINS_MONO: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
+};
+
+function setOrRemove(target: HTMLElement, property: string, value: string | null): void {
+  if (value === null) target.style.removeProperty(property);
+  else target.style.setProperty(property, value);
+}
+
+function neutralMix(strength: number): string {
+  return `color-mix(in srgb, var(--fl-color-text-strong) ${strength.toFixed(2)}%, var(--fl-color-surface))`;
+}
+
 export function applyAppPreferences(target: HTMLElement, preferences: AppPreferences, environment: AppearanceEnvironment = { prefersDark: false, prefersReducedMotion: false }): void {
   const appearance = preferences.appearance;
   const effectiveAppearance = resolveAppearance(appearance.themePreference, environment.prefersDark);
@@ -170,10 +242,63 @@ export function applyAppPreferences(target: HTMLElement, preferences: AppPrefere
   target.dataset.highContrast = String(appearance.highContrast);
   target.style.colorScheme = effectiveAppearance.toLowerCase();
   target.style.removeProperty('--fl-color-accent');
-  target.style.removeProperty('--fl-font-sans');
-  target.style.removeProperty('--fl-font-mono');
-  target.style.setProperty('--fl-ui-font-scale', String(appearance.uiFontScale / 100));
-  for (const property of ['--fl-color-canvas', '--fl-color-navigation', '--fl-color-surface-subtle', '--fl-color-text-strong', '--fl-color-border']) target.style.removeProperty(property);
+  const uiFamily = UI_FONT_FAMILIES[appearance.uiFont];
+  const codeFamily = CODE_FONT_FAMILIES[appearance.codeFont];
+  setOrRemove(target, '--fl-font-sans', uiFamily);
+  setOrRemove(target, '--fl-font-agent-sans', uiFamily);
+  setOrRemove(target, '--fl-font-mono', codeFamily);
+  setOrRemove(target, '--fl-font-agent-mono', codeFamily);
+  target.style.setProperty('--fl-ui-font-scale', String(appearance.uiFontSize / 15));
+  target.style.setProperty('--fl-code-font-size', `${appearance.codeFontSize}px`);
+
+  const sidebar = appearance.sidebarBackgroundOverride;
+  const sidebarGradient = appearance.sidebarBackgroundGradientOverride;
+  const sidebarPaint = sidebarGradient
+    ? `linear-gradient(112deg, ${sidebarGradient.from} 0%, ${sidebarGradient.to} 100%)`
+    : sidebar;
+  setOrRemove(target, '--fl-sidebar-background', null);
+  setOrRemove(target, '--fl-brand-chrome-canvas', sidebarPaint);
+
+  const workspace = appearance.workspaceBackgroundOverride;
+  const workspaceGradient = appearance.workspaceBackgroundGradientOverride;
+  const workspacePaint = workspaceGradient
+    ? `linear-gradient(135deg, ${workspaceGradient.from} 0%, ${workspaceGradient.to} 100%)`
+    : workspace;
+  const workspaceBase = workspaceGradient
+    ? `color-mix(in srgb, ${workspaceGradient.from} 50%, ${workspaceGradient.to})`
+    : workspace;
+  setOrRemove(target, '--fl-surface-content', workspacePaint);
+  setOrRemove(target, '--fl-color-surface', workspaceBase);
+  setOrRemove(target, '--fl-color-workbench', workspaceBase);
+  const customContrast = appearance.surfaceContrast !== defaultAppearancePreferences.surfaceContrast;
+  const customNeutrals = workspaceBase !== null || customContrast;
+  const contrast = appearance.surfaceContrast;
+  const neutralProperties: Array<[string, number]> = [
+    ['--fl-color-surface-raised', 1 + contrast * 0.015],
+    ['--fl-color-surface-subtle', contrast * 0.11],
+    ['--fl-color-surface-hover', 1 + contrast * 0.15],
+    ['--fl-color-surface-hover-strong', 2 + contrast * 0.2],
+    ['--fl-color-surface-active', 3 + contrast * 0.23],
+    ['--fl-color-surface-selected', 1 + contrast * 0.14],
+    ['--fl-color-border-subtle', 1 + contrast * 0.12],
+    ['--fl-color-border', 2 + contrast * 0.16],
+    ['--fl-color-border-soft', 1 + contrast * 0.12],
+    ['--fl-color-border-strong', 3 + contrast * 0.2],
+  ];
+  for (const [property, strength] of neutralProperties) setOrRemove(target, property, customNeutrals ? neutralMix(strength) : null);
+  setOrRemove(target, '--fl-effect-boundary', customNeutrals ? `color-mix(in srgb, var(--fl-color-text-strong) ${(1 + contrast * 0.15).toFixed(2)}%, transparent)` : null);
+  setOrRemove(target, '--fl-surface-interactive', customNeutrals ? `color-mix(in srgb, var(--fl-color-text-strong) ${(contrast * 0.08).toFixed(2)}%, var(--fl-color-surface))` : null);
+  setOrRemove(target, '--fl-brand-chrome-hover', customContrast ? `color-mix(in srgb, var(--fl-brand-chrome-foreground) ${(contrast * 0.17).toFixed(2)}%, transparent)` : null);
+  setOrRemove(target, '--fl-brand-chrome-active', customContrast ? `color-mix(in srgb, var(--fl-brand-chrome-foreground) ${(contrast * 0.29).toFixed(2)}%, transparent)` : null);
+  setOrRemove(target, '--fl-brand-chrome-edge', customContrast ? `color-mix(in srgb, var(--fl-brand-chrome-foreground) ${(contrast * 0.24).toFixed(2)}%, transparent)` : null);
+  setOrRemove(target, '--fl-brand-chrome-input', customContrast ? `color-mix(in srgb, var(--fl-color-surface) ${(15 + contrast * 0.64).toFixed(2)}%, transparent)` : null);
+  setOrRemove(target, '--fl-brand-chrome-selection-shadow', customContrast
+    ? (contrast === 0 ? 'none' : `0 2px ${(1 + contrast * 0.04).toFixed(2)}px color-mix(in srgb, var(--fl-brand-chrome-shadow-color) ${(contrast * 0.12).toFixed(2)}%, transparent)`)
+    : null);
+
+  const action = appearance.actionColorOverride;
+  setOrRemove(target, '--fl-action-primary', action);
+  setOrRemove(target, '--fl-action-primary-foreground', action ? (colorContrast(action, '#FFFFFF') >= colorContrast(action, '#181A1F') ? '#FFFFFF' : '#181A1F') : null);
 }
 
 function linearChannel(value: number): number {

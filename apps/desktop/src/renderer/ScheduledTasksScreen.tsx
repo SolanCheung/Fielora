@@ -4,6 +4,14 @@ import type { CreateScheduledTaskRequest, ScheduledTaskCadence, ScheduledTaskSta
 import { PrimaryNav } from './PrimaryNav';
 import { AppIcon } from './ui';
 import { Button, IconButton, SelectMenu, TextActionDialog } from './UiPrimitives';
+import {
+  persistWorkspaceNavigationWidth,
+  readWorkspaceNavigationWidth,
+  WORKSPACE_NAVIGATION_DEFAULT_WIDTH,
+  WORKSPACE_NAVIGATION_MAX_WIDTH,
+  WORKSPACE_NAVIGATION_MIN_WIDTH,
+  WorkspaceSurface,
+} from './WorkspaceSurface';
 
 type Filter = 'ALL' | ScheduledTaskStatus;
 
@@ -76,6 +84,7 @@ export function ScheduledTasksScreen(props: ScheduledTasksScreenProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<ScheduledTaskView | null>(null);
   const [error, setError] = useState('');
+  const [navigationWidth, setNavigationWidth] = useState(() => readWorkspaceNavigationWidth(WORKSPACE_NAVIGATION_DEFAULT_WIDTH, 'fielora:scheduled-navigation-width'));
 
   const readyProviders = useMemo(
     () => providers.filter((provider) => provider.lifecycle_status !== 'REMOVED' && provider.credential_present),
@@ -146,12 +155,25 @@ export function ScheduledTasksScreen(props: ScheduledTasksScreenProps) {
     finally { setBusyId(null); }
   }
 
-  return <div className="shell scheduled-shell" data-testid="scheduled-tasks-screen">
-    <PrimaryNav active="NOW" onProjects={props.onProjects} onNow={() => undefined} onBrowse={props.onBrowse} onFields={props.onFields} onNewConversation={props.onNewConversation} onSettings={props.onSettings} />
-    <main className="scheduled-page content">
-      <header className="scheduled-header">
+  function updateNavigationWidth(next: number) {
+    const width = Math.min(Math.max(next, WORKSPACE_NAVIGATION_MIN_WIDTH), WORKSPACE_NAVIGATION_MAX_WIDTH);
+    setNavigationWidth(width);
+    persistWorkspaceNavigationWidth(width, 'fielora:scheduled-navigation-width');
+  }
+
+  return <WorkspaceSurface
+    className="scheduled-root"
+    testId="scheduled-tasks-screen"
+    navigationWidth={navigationWidth}
+    onNavigationWidthChange={updateNavigationWidth}
+    navigationResizerTestId="scheduled-navigation-resizer"
+    navigationResizerClassName="project-navigation-resizer"
+    navigation={<PrimaryNav active="NOW" onProjects={props.onProjects} onNow={() => undefined} onBrowse={props.onBrowse} onFields={props.onFields} onNewConversation={props.onNewConversation} onSettings={props.onSettings} />}
+  >
+    <section className="scheduled-page" data-surface="content">
+      <header className="scheduled-header page-header">
         <div><h1>已安排的任务</h1><p>让 Fielora 定时运行任务、设置提醒或持续监测更新。</p></div>
-        <Button variant="primary" className="scheduled-create" onClick={openCreate}><AppIcon name="plus" size="sm"/>创建</Button>
+        <Button variant="primary" className="scheduled-create page-primary-action" onClick={openCreate}><AppIcon name="plus" size="sm"/>创建</Button>
       </header>
       <label className="scheduled-search"><AppIcon name="search" size="sm"/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索已安排任务" aria-label="搜索已安排任务" /></label>
       <div className="scheduled-filters" role="tablist" aria-label="任务状态">
@@ -159,7 +181,7 @@ export function ScheduledTasksScreen(props: ScheduledTasksScreenProps) {
       </div>
       {error && <p className="scheduled-error" role="alert">{error}</p>}
       <section className="scheduled-list" aria-label="已安排任务列表">
-        {visibleTasks.length === 0 ? <div className="scheduled-empty"><AppIcon name="scheduled" size="lg"/><h2>{tasks.length === 0 ? '还没有已安排的任务' : '没有匹配的任务'}</h2><p>{tasks.length === 0 ? '创建一个定时任务，它会在独立对话中通过现有 Agent 运行。' : '请更换筛选条件或搜索词。'}</p></div>
+        {visibleTasks.length === 0 ? <div className="scheduled-empty page-empty-state"><AppIcon name="scheduled" size="lg"/><h2>{tasks.length === 0 ? '还没有已安排的任务' : '没有匹配的任务'}</h2><p>{tasks.length === 0 ? '创建一个定时任务，它会在独立对话中通过现有 Agent 运行。' : '请更换筛选条件或搜索词。'}</p></div>
           : visibleTasks.map((task) => <article className="scheduled-row" key={task.id} data-status={task.status}>
             <span className="scheduled-status" aria-label={nextRunLabel(task)} />
             <div className="scheduled-copy"><strong>{task.name}</strong><p>{task.task}</p><small>{cadenceLabel(task)} · {nextRunLabel(task)}</small>{task.last_error && <small className="task-error">上次运行失败：{task.last_error}</small>}</div>
@@ -171,7 +193,7 @@ export function ScheduledTasksScreen(props: ScheduledTasksScreenProps) {
             </div>
           </article>)}
       </section>
-    </main>
+    </section>
     {dialogOpen && <div className="ui-dialog-backdrop scheduled-dialog-backdrop" role="presentation" data-effect="backdrop-dim" onMouseDown={(event) => { if (event.currentTarget === event.target) setDialogOpen(false); }}>
       <form className="ui-dialog scheduled-dialog" role="dialog" aria-modal="true" aria-labelledby="scheduled-dialog-title" data-surface="overlay" onSubmit={save}>
         <header><div><h2 id="scheduled-dialog-title">{editing ? '编辑已安排任务' : '创建已安排任务'}</h2><p>任务会写入一个持久对话，并使用现有 AgentRun 执行。</p></div><IconButton size="sm" label="关闭" icon={<AppIcon name="close" size="sm"/>} onClick={() => setDialogOpen(false)}/></header>
@@ -190,5 +212,5 @@ export function ScheduledTasksScreen(props: ScheduledTasksScreenProps) {
       </form>
     </div>}
     {deleteCandidate && <TextActionDialog title="删除已安排任务" description={`将删除“${deleteCandidate.name}”的计划；对应对话和历史运行会保留。`} confirmLabel="删除任务" danger onCancel={() => setDeleteCandidate(null)} onConfirm={() => { const candidate = deleteCandidate; setDeleteCandidate(null); void mutate(candidate.id, () => window.fielora.scheduledTask.delete({ id: candidate.id })); }} testId="delete-scheduled-task"/>}
-  </div>;
+  </WorkspaceSurface>;
 }

@@ -2,6 +2,24 @@
  * Stable application geometry contract.
  * Material work may change paint, never these ownership boundaries.
  */
+@property --fl-project-conversation-min-track {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fl-project-workspace-divider-track {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fl-project-workspace-track {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 .desktop-frame,
 .desktop-work-area,
 .desktop-content,
@@ -9,8 +27,12 @@
 .workspace-surface,
 .conversation-column,
 .right-workspace-dock,
+.scheduled-root,
+.scheduled-page,
 .settings-root,
-.settings-content {
+.settings-content,
+.library-root,
+.library-content {
   min-width: 0;
   min-height: 0;
 }
@@ -18,7 +40,9 @@
 .desktop-frame,
 .project-root,
 .workspace-surface,
-.settings-root {
+.scheduled-root,
+.settings-root,
+.library-root {
   width: 100%;
   height: 100%;
 }
@@ -39,7 +63,20 @@
 }
 
 .project-layout {
-  grid-template-columns: var(--workspace-navigation-width, var(--fl-layout-navigation-default)) 4px minmax(0, 1fr) 0 0;
+  --fl-project-conversation-min-track: 0px;
+  --fl-project-workspace-divider-track: 0px;
+  --fl-project-workspace-track: 0px;
+  grid-template-columns:
+    var(--workspace-navigation-width, var(--fl-layout-navigation-default))
+    4px
+    minmax(var(--fl-project-conversation-min-track), 1fr)
+    var(--fl-project-workspace-divider-track)
+    minmax(0, var(--fl-project-workspace-track));
+  transition:
+    grid-template-columns var(--fl-duration-panel) var(--fl-ease-panel),
+    --fl-project-conversation-min-track var(--fl-duration-panel) var(--fl-ease-panel),
+    --fl-project-workspace-divider-track var(--fl-duration-panel) var(--fl-ease-panel),
+    --fl-project-workspace-track var(--fl-duration-panel) var(--fl-ease-panel);
 }
 
 :root[data-resizing="vertical"] .workspace-surface {
@@ -66,12 +103,9 @@
 }
 
 .project-layout.workspace-open {
-  grid-template-columns:
-    var(--workspace-navigation-width, var(--fl-layout-navigation-default))
-    4px
-    minmax(var(--fl-layout-conversation-min), 1fr)
-    4px
-    minmax(var(--fl-layout-workspace-dock-min), var(--project-workspace-width, var(--fl-layout-workspace-dock-default)));
+  --fl-project-conversation-min-track: var(--fl-layout-conversation-min);
+  --fl-project-workspace-divider-track: 4px;
+  --fl-project-workspace-track: var(--project-workspace-width, var(--fl-layout-workspace-dock-default));
 }
 
 .project-layout.workspace-open.dock-focused {
@@ -92,11 +126,11 @@ body[data-sidebar-collapsed="true"] .settings-navigation {
 }
 
 body[data-sidebar-collapsed="true"] .project-layout {
-  grid-template-columns: 0 0 minmax(0, 1fr) 0 0;
+  grid-template-columns: 0 0 minmax(var(--fl-project-conversation-min-track), 1fr) var(--fl-project-workspace-divider-track) minmax(0, var(--fl-project-workspace-track));
 }
 
 body[data-sidebar-collapsed="true"] .project-layout.workspace-open {
-  grid-template-columns: 0 0 minmax(var(--fl-layout-conversation-min), 1fr) 4px minmax(var(--fl-layout-workspace-dock-min), var(--project-workspace-width, var(--fl-layout-workspace-dock-default)));
+  grid-template-columns: 0 0 minmax(var(--fl-project-conversation-min-track), 1fr) var(--fl-project-workspace-divider-track) minmax(0, var(--fl-project-workspace-track));
 }
 
 body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused {
@@ -114,7 +148,9 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
 /* The work canvas rounds into the shared app chrome without splitting the
  * conversation or Settings into a separate card. */
 .conversation-column,
-.settings-content {
+.scheduled-page,
+.settings-content,
+.library-content {
   border-radius: var(--fl-radius-work-surface) 0 0 0;
   background: var(--fl-surface-content);
   box-shadow: none;
@@ -126,6 +162,51 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.scheduled-page {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Scheduled, Library and Conversation share one page rail. Specialized
+ * content may keep its own reading width, but page headers no longer jump
+ * horizontally when the user moves between primary destinations. */
+.library-content {
+  padding: 48px var(--fl-layout-page-gutter) 72px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.library-content > *,
+.scheduled-page > * {
+  width: 100%;
+  margin-inline: auto;
+}
+
+.conversation-context-header {
+  padding-inline: max(20px, calc((100% - var(--fl-layout-page-width)) / 2));
+}
+
+/* Keep the section label outside the project scroller. The inset around the
+ * list prevents its scrollbar from touching either the label or the work
+ * surface edge while preserving the existing navigation ownership. */
+.project-tree:has(> .project-list) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.project-tree > .project-list {
+  min-height: 0;
+  margin: var(--fl-space-2) var(--fl-space-1) var(--fl-space-2) 0;
+  padding: 0 var(--fl-space-1) var(--fl-space-2) 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 /* Navigation resizing keeps a generous invisible hit target. Its visual edge

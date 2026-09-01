@@ -13,7 +13,7 @@ V0.1 唯一正式验收平台：**Windows 11 x64** 本地桌面应用。
 ## 2. 语言
 
 ### TypeScript + React
-负责 Fielora Shell、Now、Inbox、Browse UI、Field UI、Composer / Summon、Context Chips、DXE Surface、Code Workspace UI。
+负责 Fielora Shell、Scheduled、Inbox、Browse UI、Project Conversation / Composer、Provider Setup、DXE Surface、Code Workspace UI。当前产品不再提供独立 Summon UI 或侧边聊天入口。
 
 UI 业务状态与组件 Contract 不得直接编码 Windows-only 假设；平台差异通过受控 Platform Adapter / capability exposure 进入。
 

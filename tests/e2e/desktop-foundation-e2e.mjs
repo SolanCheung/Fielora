@@ -134,11 +134,8 @@ try{
   await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
   await wait(cdp,`!document.querySelector('[data-testid="utility-launcher"]')`);
   await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
-  await wait(cdp,`document.querySelector('[data-testid="desktop-work-area"]').classList.contains('utility-open')&&document.querySelector('[data-testid="utility-chat"]')`);
-  await cdp.eval(`document.querySelector('[data-testid="utility-chat"]').click()`);
-  await wait(cdp,`document.querySelector('[data-testid="summon-panel"]')`);
-  await cdp.eval(`document.querySelector('[data-testid="summon-panel"] > header [aria-label="关闭"]').click()`);
-  await wait(cdp,`!document.querySelector('[data-testid="summon-panel"]')`);
+  await wait(cdp,`document.querySelector('[data-testid="desktop-work-area"]').classList.contains('utility-open')`);
+  assert.equal(await cdp.eval(`document.querySelector('[data-testid="utility-chat"]') === null`), true);
   const created=await cdp.eval(`(async()=>{const provider=await window.fielora.provider.create({provider_kind:'OPENAI_COMPATIBLE',display_name:'Desktop Fixture',base_url:'https://example.com/v1',default_model:'__fielora_agent_fixture__',custom_endpoint_acknowledged:true});await window.fielora.provider.storeCredential({provider_config_id:provider.id,secret:${JSON.stringify(secret)}});const project=await window.fieloraTest.createProject({title:'Sample Project',goal:'Desktop hero flow',root_path:${JSON.stringify(projectRoot)}});return{providerId:provider.id,fieldId:project.field_id};})()`);
   providerId=created.providerId;
   await cdp.eval(`window.dispatchEvent(new Event('fielora:providers-changed'));window.dispatchEvent(new CustomEvent('fielora:navigate',{detail:'PROJECTS'}))`);

@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   applyAppPreferences,
+  appearanceThemeDefaults,
   colorContrast,
   defaultAppearancePreferences,
   defaultAppPreferences,
+  normalizeAppPreferences,
   readAppPreferences,
   resolveAppearance,
   resolveMaterial,
@@ -52,6 +54,7 @@ test('v2 appearance preferences round-trip through the canonical storage key', (
     appearance: {
       ...defaultAppearancePreferences,
       themePreference: 'DARK', accentPreset: 'CUSTOM', customAccent: '#137F88', density: 'COMPACT', radius: 'LARGE', uiFontScale: 110,
+      uiFontSize: 17, codeFontSize: 15, sidebarBackgroundOverride: '#E8DEFA', workspaceBackgroundOverride: '#FCFDFE', surfaceContrast: 60, actionColorOverride: '#6847D8',
       advancedColorOverrides: { sidebar: '#20242A' },
     },
   };
@@ -69,6 +72,8 @@ test('System appearance and motion resolve from the environment without becoming
   assert.equal(resolveReducedMotion('SYSTEM', true), true);
   assert.equal(resolveReducedMotion('FULL', true), false);
   assert.equal(resolveReducedMotion('REDUCE', false), true);
+  assert.deepEqual(appearanceThemeDefaults('LIGHT'), { sidebar: '#F7EFFB', workspace: '#FFFFFF', action: '#6847D8' });
+  assert.deepEqual(appearanceThemeDefaults('DARK'), { sidebar: '#1B1820', workspace: '#181B23', action: '#9680FF' });
 });
 
 test('applying appearance fixes the official identity and resolves Glass material capability', () => {
@@ -86,7 +91,9 @@ test('applying appearance fixes the official identity and resolves Glass materia
     appearance: {
       ...defaultAppearancePreferences,
       themePreference: 'SYSTEM', accentPreset: 'BLUE', density: 'COMPACT', contrast: 'HIGH', radius: 'LARGE',
-      uiFont: 'MICROSOFT_YAHEI', codeFont: 'CASCADIA_CODE', uiFontScale: 115, translucentSidebar: true,
+      uiFont: 'MICROSOFT_YAHEI', codeFont: 'CASCADIA_CODE', uiFontSize: 18, codeFontSize: 16,
+      sidebarBackgroundOverride: '#E8DEFA', workspaceBackgroundOverride: '#FCFDFE', surfaceContrast: 67, actionColorOverride: '#6847D8',
+      uiFontScale: 115, translucentSidebar: true,
       reducedMotionPreference: 'SYSTEM', pointerCursor: false, advancedColorOverrides: { canvas: '#101214', accent: '#A15AC7' },
     },
   };
@@ -100,8 +107,18 @@ test('applying appearance fixes the official identity and resolves Glass materia
   assert.equal(target.style.colorScheme, 'dark');
   assert.equal(properties.has('--fl-color-accent'), false);
   assert.equal(properties.has('--fl-color-canvas'), false);
-  assert.equal(properties.has('--fl-font-sans'), false);
-  assert.equal(properties.get('--fl-ui-font-scale'), '1.15');
+  assert.match(properties.get('--fl-font-sans') ?? '', /Microsoft YaHei/);
+  assert.match(properties.get('--fl-font-mono') ?? '', /Cascadia Code/);
+  assert.equal(properties.get('--fl-ui-font-scale'), '1.2');
+  assert.equal(properties.get('--fl-code-font-size'), '16px');
+  assert.equal(properties.get('--fl-brand-chrome-canvas'), '#E8DEFA');
+  assert.equal(properties.has('--fl-sidebar-background'), false);
+  assert.equal(properties.get('--fl-surface-content'), '#FCFDFE');
+  assert.match(properties.get('--fl-color-surface-subtle') ?? '', /color-mix/);
+  assert.match(properties.get('--fl-brand-chrome-active') ?? '', /19\.43%/);
+  assert.match(properties.get('--fl-brand-chrome-selection-shadow') ?? '', /8\.04%/);
+  assert.equal(properties.get('--fl-action-primary'), '#6847D8');
+  assert.equal(properties.get('--fl-action-primary-foreground'), '#FFFFFF');
 
   applyAppPreferences(target, preferences, { prefersDark: false, prefersReducedMotion: false, supportsBackdrop: false });
   assert.equal(target.dataset.material, 'solid');
@@ -126,6 +143,37 @@ test('legacy visual customization data remains readable but cannot replace the o
   applyAppPreferences(target, preferences, { prefersDark: false, prefersReducedMotion: false, supportsBackdrop: true });
   assert.equal(properties.has('--fl-color-canvas'), false);
   assert.equal(target.dataset.officialTheme, 'fielora');
+});
+
+test('legacy flat sidebar defaults migrate back to the continuous Chrome surface', () => {
+  for (const legacyColor of ['#EFEBFF', '#F0ECFF', '#F7EFFB']) {
+    const preferences = readAppPreferences(memoryStorage({ 'fielora.ui.preferences.v2': JSON.stringify({
+      version: 2,
+      startupDestination: 'PROJECTS',
+      appearance: { ...defaultAppearancePreferences, sidebarBackgroundOverride: legacyColor },
+    }) }));
+    assert.equal(preferences.appearance.sidebarBackgroundOverride, null);
+  }
+});
+
+test('background gradients normalize and resolve without entering neutral color derivation as images', () => {
+  const preferences = normalizeAppPreferences({
+    version: 2,
+    startupDestination: 'PROJECTS',
+    appearance: {
+      ...defaultAppearancePreferences,
+      sidebarBackgroundGradientOverride: { from: '#e8defa', to: '#ffeef4' },
+      workspaceBackgroundGradientOverride: { from: '#fcfdfe', to: '#eef7ff' },
+    },
+  });
+  assert.deepEqual(preferences.appearance.sidebarBackgroundGradientOverride, { from: '#E8DEFA', to: '#FFEEF4' });
+  assert.deepEqual(preferences.appearance.workspaceBackgroundGradientOverride, { from: '#FCFDFE', to: '#EEF7FF' });
+  const properties = new Map<string, string>();
+  const target = { dataset: {} as DOMStringMap, style: { colorScheme: '', setProperty: (name: string, value: string) => { properties.set(name, value); }, removeProperty: (name: string) => { properties.delete(name); return ''; } } } as unknown as HTMLElement;
+  applyAppPreferences(target, preferences, { prefersDark: false, prefersReducedMotion: false, supportsBackdrop: true });
+  assert.match(properties.get('--fl-brand-chrome-canvas') ?? '', /linear-gradient\(112deg, #E8DEFA/);
+  assert.match(properties.get('--fl-surface-content') ?? '', /linear-gradient\(135deg, #FCFDFE/);
+  assert.match(properties.get('--fl-color-surface') ?? '', /color-mix\(in srgb, #FCFDFE 50%, #EEF7FF\)/);
 });
 
 test('resetting appearance can preserve non-appearance preferences', () => {
