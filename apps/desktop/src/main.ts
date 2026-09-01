@@ -321,8 +321,11 @@ async function workspaceOpenTargets(): Promise<WorkspaceOpenTargetView[]> {
 function registerBridgeHandlers(): void {
   ipcMain.handle(channels.windowTitlebarTheme, (event, payload) => {
     assertBridgeEvent(event);
-    if (payload !== 'LIGHT' && payload !== 'DARK') throw new Error('Invalid titlebar theme');
-    const surface = windowSurfaceColors(payload as WindowSurfaceTheme);
+    if (!payload || typeof payload !== 'object') throw new Error('Invalid titlebar theme');
+    const { theme, background } = payload as { theme?: unknown; background?: unknown };
+    if (theme !== 'LIGHT' && theme !== 'DARK') throw new Error('Invalid titlebar theme');
+    if (typeof background !== 'string' || !/^#[0-9a-f]{6}$/iu.test(background)) throw new Error('Invalid titlebar background');
+    const surface = windowSurfaceColors(theme as WindowSurfaceTheme, background);
     withUsableWindow(appWindow, (window) => {
       window.setBackgroundColor(surface.background);
       window.setTitleBarOverlay({ color: surface.background, symbolColor: surface.symbols, height: surface.height });

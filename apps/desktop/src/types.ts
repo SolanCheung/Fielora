@@ -73,7 +73,7 @@ export type DesktopCoreEvent = DomainEventDTO | ModelInvocationEvent | CaptureCh
 
 export interface FieloraBridge {
   window: {
-    setTitlebarTheme(theme: 'LIGHT' | 'DARK'): Promise<null>;
+    setTitlebarTheme(theme: 'LIGHT' | 'DARK', background: string): Promise<null>;
   };
   project: {
     pick(request: PickProjectRequest): Promise<ProjectView | null>;

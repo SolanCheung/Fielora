@@ -183,6 +183,12 @@ export function resolveAppearance(preference: AppearanceMode, prefersDark: boole
   return preference === 'SYSTEM' ? (prefersDark ? 'DARK' : 'LIGHT') : preference;
 }
 
+export function resolveTitlebarCaption(appearance: AppearancePreferences, effectiveAppearance: EffectiveAppearance): string {
+  return appearance.sidebarBackgroundGradientOverride?.to
+    ?? appearance.sidebarBackgroundOverride
+    ?? (effectiveAppearance === 'DARK' ? '#2B2229' : '#FFEFF2');
+}
+
 export function resolveMaterial(supportsBackdrop: boolean): MaterialMode {
   return supportsBackdrop ? 'GLASS' : 'SOLID';
 }
@@ -258,6 +264,7 @@ export function applyAppPreferences(target: HTMLElement, preferences: AppPrefere
     : sidebar;
   setOrRemove(target, '--fl-sidebar-background', null);
   setOrRemove(target, '--fl-brand-chrome-canvas', sidebarPaint);
+  target.style.setProperty('--fl-brand-chrome-caption', resolveTitlebarCaption(appearance, effectiveAppearance));
 
   const workspace = appearance.workspaceBackgroundOverride;
   const workspaceGradient = appearance.workspaceBackgroundGradientOverride;

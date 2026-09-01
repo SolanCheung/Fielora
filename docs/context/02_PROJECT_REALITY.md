@@ -2904,3 +2904,23 @@ NATIVE_COLOR_PICKER: REMOVED
 IN_APP_COLOR_PICKER: BOUNDED OVERLAY
 STRUCTURAL_OWNERSHIP_CHANGED: NO
 ```
+
+## 115. Native Caption Seam And Neutral Workspace Tabs
+
+用户复看发现 Renderer Titlebar 渐变进入 Windows 原生最小化/最大化/关闭区域时仍有竖向色阶，尤其在
+Appearance 切换或自定义 Sidebar 背景时可见。当前 Titlebar 在原生控制区前 96px 平滑过渡到
+`--fl-brand-chrome-caption`；该 token 由默认 Theme、Sidebar 单色或 Sidebar 渐变右端色确定，并通过
+trusted window IPC 以严格 `#RRGGBB` 校验后同步给 `setTitleBarOverlay`。Renderer 与 native caption
+因此消费同一个最终颜色。
+
+Right Workspace Dock 的 active Tab 删除底部蓝紫 accent indicator，只保留 neutral material shift、文字
+和 close affordance；Browser loading 仍使用 favicon-slot spinner 与 Address Toolbar progress，不把 loading
+和 selected 混为同一状态。
+
+```text
+TITLEBAR_NATIVE_CAPTION_COLOR: CURRENT BRAND CHROME RIGHT EDGE
+TITLEBAR_NATIVE_PAYLOAD: TRUSTED + STRICT HEX
+RIGHT_DOCK_ACTIVE_TAB_UNDERLINE: NONE
+BROWSER_LOADING_FEEDBACK: PRESERVED
+PANE_OR_RUNTIME_CHANGE: NO
+```

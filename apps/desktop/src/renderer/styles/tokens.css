@@ -194,7 +194,7 @@
   --fl-brand-chrome-canvas: radial-gradient(ellipse 42% 66% at 10% 18%, rgba(191, 168, 248, 0.34), transparent 72%), radial-gradient(ellipse 34% 70% at 17% 90%, rgba(255, 190, 214, 0.27), transparent 74%), radial-gradient(ellipse 42% 52% at 68% 0%, rgba(247, 190, 226, 0.2), transparent 74%), linear-gradient(112deg, #efebff 0%, #f7effb 42%, #ffeff2 100%);
   --fl-brand-chrome-top: var(--fl-brand-chrome-canvas);
   --fl-brand-chrome-navigation: var(--fl-brand-chrome-canvas);
-  --fl-brand-chrome-caption: #f9e8ed;
+  --fl-brand-chrome-caption: #ffeff2;
 
   /* Backgrounds */
   --fl-color-app: #f9fafc;

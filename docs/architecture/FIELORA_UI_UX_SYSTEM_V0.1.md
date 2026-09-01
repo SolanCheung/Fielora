@@ -30,7 +30,7 @@ DesktopChrome
 
 - Conversation 与 Right Workspace Dock 是同一个连续 `Content` 背景上的两个工作视图，不建立两套页面底板。
 - Conversation、Settings 与 Scheduled 的 Content pane 使用同一个 `--fl-radius-work-surface` 左上接入 Chrome；其外层 shell 只在既有圆角切口处露出同一 Brand Chrome canvas，保证弧度真实可见而不向正文着色。Conversation 右上角保持原有直角，不随 Brand Chrome 调整。
-- Window Chrome、Project Navigation 与 Settings Navigation 保持同一个连续 Chrome owner，并通过显式 `data-brand-chrome="top|navigation"` 消费可替换的 Brand Chrome token bundle。Light 使用一张跨整个 viewport 的低饱和近白薰衣草/雾粉画布，Navigation 以 `-44px` 纵向偏移续接顶栏，禁止分别绘制两块高饱和紫色背景或产生接缝。该作用域不得进入 Conversation、Settings Content、Right Workspace Dock、Right Dock Tab Strip、Utility Workspace 或 Overlay。
+- Window Chrome、Project Navigation 与 Settings Navigation 保持同一个连续 Chrome owner，并通过显式 `data-brand-chrome="top|navigation"` 消费可替换的 Brand Chrome token bundle。Light 使用一张跨整个 viewport 的低饱和近白薰衣草/雾粉画布，Navigation 以 `-44px` 纵向偏移续接顶栏；顶栏进入原生 Window Controls Overlay 前必须平滑收敛到当前 Sidebar solid/gradient 的右端色，并将同一 HEX 传给 native caption，主题切换和自定义色都不得产生竖向接缝。该作用域不得进入 Conversation、Settings Content、Right Workspace Dock、Right Dock Tab Strip、Utility Workspace 或 Overlay。
 - Settings 与 Scheduled 内容区复用同一 `Content` 背景；Scheduled 直接复用 Project 的 Primary Navigation，二者均通过共享 `WorkspaceSurface` 持有相同宽度偏好与 resizer。
 - Bottom Terminal 是工作区底层，不进入左侧导航，也不成为第四列。
 - Composer 浮在完整 Conversation viewport 上；滚动区延伸至 Pane 底部并通过 bottom padding 避让。
@@ -162,7 +162,7 @@ Brand Chrome 是 `Chrome` 内的显式产品子主题，不是第六种 Surface�
 
 所有工作区正文区域使用同一个 `Content` 基础背景。材质变化不得增加 Pane 间实色割裂、重复标题栏、大面积状态色、装饰性 gradient card 或重阴影。
 
-Conversation Header 不常驻 Project 打开方式控件；Project 外部打开器只属于 File/Resource toolbar。Right Workspace Dock 中的工作对象与 Browser viewer 均使用标准白色 `Content` plane。嵌入 Right Workspace Dock 的 Browser Page 必须直接使用 Dock 顶部的共享 Tab Strip，不得在内容区重复绘制第二层 Page Strip；其内部固定为 `Address Toolbar → Viewport` 两行，自上而下占满动态 Dock。独立 Browse Route 可以保留自己的 Page Strip。共享 Page Tab / Address Toolbar 分别为约 `32px / 44px`，地址框为 `34px`，导航与更多操作为 `30px`；空状态使用中性的 Browser glyph、`开始浏览` 与一行说明，不形成 Landing Page 式大标题。
+Conversation Header 不常驻 Project 打开方式控件；Project 外部打开器只属于 File/Resource toolbar。Right Workspace Dock 中的工作对象与 Browser viewer 均使用标准白色 `Content` plane。嵌入 Right Workspace Dock 的 Browser Page 必须直接使用 Dock 顶部的共享 Tab Strip，不得在内容区重复绘制第二层 Page Strip；active Tab 只以中性 material shift 与文字状态表达，禁止在标签底部绘制蓝色或紫色 indicator。其内部固定为 `Address Toolbar → Viewport` 两行，自上而下占满动态 Dock。独立 Browse Route 可以保留自己的 Page Strip。共享 Page Tab / Address Toolbar 分别为约 `32px / 44px`，地址框为 `34px`，导航与更多操作为 `30px`；空状态使用中性的 Browser glyph、`开始浏览` 与一行说明，不形成 Landing Page 式大标题。
 
 ## 7. Change Protocol（强制）
 
@@ -214,7 +214,7 @@ apps/desktop/webpack.renderer.ts
 | Right Workspace Dock default | ≈635px | 635px（不是 max） |
 | Divider | ≈1px / 6–8% neutral | 1px / 6% neutral |
 
-Light appearance 的 Content 文字/图标对比基线为：Primary `#181a1f`、Secondary `#343a43`、Muted `#717a87`、普通图标 `#505761`。工作内容中的亮紫色只用于菜单选中标记、Workspace 顶部 active Tab 与 Composer 发送/停止主操作；显式 Brand Chrome 是独立例外，只覆盖 Desktop 顶栏与左导航，并使用其自有高对比 foreground/selection tokens。普通 Content 导航、展开状态、进度、文件、工具栏与焦点反馈均使用 Neutral，成功/警告/危险继续使用各自语义色。Project expanded 不是 selected；同一导航链只保留 Current Conversation 的 selection。Composer 仍由 `Floating` material resolver 绘制，但使用低一级 surface shadow，减少独立 Card 感。
+Light appearance 的 Content 文字/图标对比基线为：Primary `#181a1f`、Secondary `#343a43`、Muted `#717a87`、普通图标 `#505761`。工作内容中的亮紫色只用于菜单选中标记与 Composer 发送/停止主操作；Workspace 顶部 active Tab 使用 neutral material shift，不使用底部 accent line。显式 Brand Chrome 是独立例外，只覆盖 Desktop 顶栏与左导航，并使用其自有高对比 foreground/selection tokens。普通 Content 导航、展开状态、进度、文件、工具栏与焦点反馈均使用 Neutral，成功/警告/危险继续使用各自语义色。Project expanded 不是 selected；同一导航链只保留 Current Conversation 的 selection。Composer 仍由 `Floating` material resolver 绘制，但使用低一级 surface shadow，减少独立 Card 感。
 
 Conversation 顶部遵循单行 Header：项目文件夹图标 → 当前 Conversation 标题 → 更多操作。Project 名称、绝对路径或重复上下文不得作为第二行常驻标题。右上角 Workspace Dock 开关统一使用 Phosphor 右侧面板图标；不得以 Columns、手绘 SVG 或文本符号代替。
 

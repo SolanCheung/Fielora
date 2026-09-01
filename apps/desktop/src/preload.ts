@@ -5,7 +5,7 @@ import type { DesktopCoreEvent } from './types';
 
 const bridge: FieloraBridge = {
   window: {
-    setTitlebarTheme: (theme) => ipcRenderer.invoke(channels.windowTitlebarTheme, theme),
+    setTitlebarTheme: (theme, background) => ipcRenderer.invoke(channels.windowTitlebarTheme, { theme, background }),
   },
   project: {
     pick: (request) => ipcRenderer.invoke(channels.projectPick, request),

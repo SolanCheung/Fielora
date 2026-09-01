@@ -11,6 +11,7 @@ import {
   resolveAppearance,
   resolveMaterial,
   resolveReducedMotion,
+  resolveTitlebarCaption,
   writeAppPreferences,
   type AppPreferences,
 } from './app-preferences.ts';
@@ -172,8 +173,12 @@ test('background gradients normalize and resolve without entering neutral color 
   const target = { dataset: {} as DOMStringMap, style: { colorScheme: '', setProperty: (name: string, value: string) => { properties.set(name, value); }, removeProperty: (name: string) => { properties.delete(name); return ''; } } } as unknown as HTMLElement;
   applyAppPreferences(target, preferences, { prefersDark: false, prefersReducedMotion: false, supportsBackdrop: true });
   assert.match(properties.get('--fl-brand-chrome-canvas') ?? '', /linear-gradient\(112deg, #E8DEFA/);
+  assert.equal(properties.get('--fl-brand-chrome-caption'), '#FFEEF4');
   assert.match(properties.get('--fl-surface-content') ?? '', /linear-gradient\(135deg, #FCFDFE/);
   assert.match(properties.get('--fl-color-surface') ?? '', /color-mix\(in srgb, #FCFDFE 50%, #EEF7FF\)/);
+  assert.equal(resolveTitlebarCaption(preferences.appearance, 'LIGHT'), '#FFEEF4');
+  assert.equal(resolveTitlebarCaption(defaultAppearancePreferences, 'LIGHT'), '#FFEFF2');
+  assert.equal(resolveTitlebarCaption(defaultAppearancePreferences, 'DARK'), '#2B2229');
 });
 
 test('resetting appearance can preserve non-appearance preferences', () => {

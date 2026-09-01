@@ -66,16 +66,29 @@
 }
 
 /* Brand Chrome is an explicit subtheme, not a new application-wide material.
- * Its opaque right edge matches the native titleBarOverlay caption color. */
+ * The final 96px before native controls blends to the exact caption color so
+ * Window Controls Overlay never creates a vertical seam during theme changes. */
 [data-surface="chrome"][data-chrome-plane="window"][data-brand-chrome="top"],
 :root[data-material="solid"] [data-surface="chrome"][data-chrome-plane="window"][data-brand-chrome="top"] {
   border-color: var(--fl-brand-chrome-edge);
-  background: var(--fl-brand-chrome-top);
+  background-color: var(--fl-brand-chrome-caption);
+  background-image: var(--fl-brand-chrome-top);
   background-position: 0 0;
   background-size: 100vw 100vh;
   background-repeat: no-repeat;
   box-shadow: none;
   backdrop-filter: none;
+}
+
+[data-surface="chrome"][data-chrome-plane="window"][data-brand-chrome="top"]::after {
+  position: absolute;
+  top: 0;
+  right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 146px)));
+  bottom: 0;
+  width: 96px;
+  pointer-events: none;
+  content: "";
+  background: linear-gradient(90deg, transparent, var(--fl-brand-chrome-caption));
 }
 
 /* Only persistent left navigation owns the vertical half of the brand theme. */

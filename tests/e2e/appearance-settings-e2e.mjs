@@ -77,8 +77,11 @@ try {
   await wait(cdp, `document.documentElement.dataset.effectiveAppearance==='light'`);
   const sidebarDefault = await cdp.eval(`(()=>{const stored=JSON.parse(localStorage.getItem('fielora.ui.preferences.v2'));return{summary:document.querySelector('[data-testid="appearance-sidebar-background-summary"]').textContent,override:stored.appearance.sidebarBackgroundOverride,gradientOverride:stored.appearance.sidebarBackgroundGradientOverride};})()`);
   assert.deepEqual(sidebarDefault, { summary: '主题渐变', override: null, gradientOverride: null });
-  const chromeContinuity = await cdp.eval(`(()=>{const top=getComputedStyle(document.querySelector('[data-brand-chrome="top"]'));const navigation=getComputedStyle(document.querySelector('.settings-navigation[data-brand-chrome="navigation"]'));return{topImage:top.backgroundImage,navigationImage:navigation.backgroundImage,override:document.documentElement.style.getPropertyValue('--fl-sidebar-background')};})()`);
-  assert.equal(chromeContinuity.navigationImage, chromeContinuity.topImage);
+  const chromeContinuity = await cdp.eval(`(()=>{const element=document.querySelector('[data-brand-chrome="top"]');const top=getComputedStyle(element);const transition=getComputedStyle(element,'::after');const navigation=getComputedStyle(document.querySelector('.settings-navigation[data-brand-chrome="navigation"]'));const area=navigator.windowControlsOverlay?.getTitlebarAreaRect();return{topImage:top.backgroundImage,navigationImage:navigation.backgroundImage,transitionImage:transition.backgroundImage,transitionRight:Number.parseFloat(transition.right),nativeControlsWidth:area?innerWidth-area.x-area.width:null,caption:document.documentElement.style.getPropertyValue('--fl-brand-chrome-caption'),override:document.documentElement.style.getPropertyValue('--fl-sidebar-background')};})()`);
+  assert.equal(chromeContinuity.topImage, chromeContinuity.navigationImage);
+  assert.equal(chromeContinuity.transitionImage.includes('rgb(255, 239, 242)'), true, JSON.stringify(chromeContinuity));
+  if (chromeContinuity.nativeControlsWidth !== null) assert.equal(Math.abs(chromeContinuity.transitionRight - chromeContinuity.nativeControlsWidth) <= 1, true, JSON.stringify(chromeContinuity));
+  assert.equal(chromeContinuity.caption, '#FFEFF2');
   assert.equal(chromeContinuity.override, '');
   await captureScreenshot(cdp, path.join(visualReview, 'appearance-refined-light-1440.png'));
   const customizationGeometry = await cdp.eval(`(()=>{const rows=[...document.querySelectorAll('.appearance-customization-card .appearance-setting-row')];const controls=rows.map((row)=>row.lastElementChild.getBoundingClientRect());const heading=document.querySelector('#appearance-customization-title');const description=heading.nextElementSibling;return{rowHeights:rows.map((row)=>row.getBoundingClientRect().height),controlHeights:controls.map((rect)=>rect.height),copyHeights:rows.map((row)=>row.firstElementChild.getBoundingClientRect().height),rowBoxSizing:rows.map((row)=>getComputedStyle(row).boxSizing),rowPadding:rows.map((row)=>getComputedStyle(row).padding),controlLefts:controls.map((rect)=>rect.left),controlRights:controls.map((rect)=>rect.right),descriptionBelowTitle:description.getBoundingClientRect().top>=heading.getBoundingClientRect().bottom};})()`);
@@ -118,10 +121,13 @@ try {
   await wait(cdp, `document.querySelector('[data-testid="appearance-sidebar-background-hex"]:not([readonly])')`);
   await cdp.eval(`(()=>{const input=document.querySelector('[data-testid="appearance-sidebar-background-hex"]');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,'#DDEEFF');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   await wait(cdp, `document.documentElement.style.getPropertyValue('--fl-brand-chrome-canvas')==='#DDEEFF'`);
+  await wait(cdp, `getComputedStyle(document.querySelector('[data-brand-chrome="top"]')).backgroundColor===getComputedStyle(document.querySelector('.settings-navigation[data-brand-chrome="navigation"]')).backgroundColor`);
   const customSidebar = await cdp.eval(`JSON.parse(localStorage.getItem('fielora.ui.preferences.v2')).appearance.sidebarBackgroundOverride`);
   assert.equal(customSidebar, '#DDEEFF');
-  const customChromeContinuity = await cdp.eval(`(()=>{const top=getComputedStyle(document.querySelector('[data-brand-chrome="top"]'));const navigation=getComputedStyle(document.querySelector('.settings-navigation[data-brand-chrome="navigation"]'));return{top:top.backgroundImage,nav:navigation.backgroundImage,legacy:document.documentElement.style.getPropertyValue('--fl-sidebar-background')};})()`);
-  assert.equal(customChromeContinuity.top, customChromeContinuity.nav);
+  const customChromeContinuity = await cdp.eval(`(()=>{const element=document.querySelector('[data-brand-chrome="top"]');const top=getComputedStyle(element);const transition=getComputedStyle(element,'::after');const navigation=getComputedStyle(document.querySelector('.settings-navigation[data-brand-chrome="navigation"]'));return{topImage:top.backgroundImage,navImage:navigation.backgroundImage,topColor:top.backgroundColor,navColor:navigation.backgroundColor,transitionImage:transition.backgroundImage,caption:document.documentElement.style.getPropertyValue('--fl-brand-chrome-caption'),legacy:document.documentElement.style.getPropertyValue('--fl-sidebar-background')};})()`);
+  assert.equal(customChromeContinuity.topColor, customChromeContinuity.navColor, JSON.stringify(customChromeContinuity));
+  assert.equal(customChromeContinuity.caption, '#DDEEFF');
+  assert.equal(customChromeContinuity.transitionImage.includes('rgb(221, 238, 255)'), true, JSON.stringify(customChromeContinuity));
   assert.equal(customChromeContinuity.legacy, '');
 
   await cdp.eval(`document.querySelector('[data-testid="appearance-sidebar-background-picker"]').click()`);

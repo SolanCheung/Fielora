@@ -7,8 +7,9 @@ export interface WindowSurfaceColors {
 }
 
 /** Mirrors the Brand Chrome caption edge for the native WCO surface. */
-export function windowSurfaceColors(theme: WindowSurfaceTheme): WindowSurfaceColors {
+export function windowSurfaceColors(theme: WindowSurfaceTheme, backgroundOverride?: string): WindowSurfaceColors {
+  const background = backgroundOverride ?? (theme === 'DARK' ? '#2b2229' : '#ffeff2');
   return theme === 'DARK'
-    ? { background: '#2b2229', symbols: '#f8f1fa', height: 44 }
-    : { background: '#f9e8ed', symbols: '#251a2d', height: 44 };
+    ? { background, symbols: '#f8f1fa', height: 44 }
+    : { background, symbols: '#251a2d', height: 44 };
 }

@@ -61,7 +61,7 @@ test('work-content emphasis stays limited while branded purple remains Chrome-sc
   assert.match(tokens, /--fl-color-emphasis: #7657ef;/);
   assert.match(controls, /\.ui-select-check \{[^}]*color: var\(--fl-color-emphasis\)/s);
   assert.match(appearance, /\.conversation-composer \.composer-submit,[\s\S]*?background: var\(--fl-action-primary\)/);
-  assert.match(appearance, /\.right-dock-tab\.active::after \{[\s\S]*?background: var\(--fl-color-emphasis\)/);
+  assert.doesNotMatch(appearance, /\.right-dock-tab\.active::after/);
   assert.match(appearance, /\.project-global-nav button\.active::before,[\s\S]*?content: none;/);
 });
 
@@ -276,7 +276,8 @@ test('replaceable Brand Chrome is scoped to the top bar and left navigation', ()
     assert.match(tokens, new RegExp(`--fl-brand-chrome-${token}:`));
   }
   assert.match(tokens, /--fl-brand-logo-opacity: 0\.72;/);
-  assert.match(materials, /data-brand-chrome="top"[\s\S]*?background: var\(--fl-brand-chrome-top\)/);
+  assert.match(materials, /data-brand-chrome="top"[\s\S]*?background-color: var\(--fl-brand-chrome-caption\);[\s\S]*?background-image: var\(--fl-brand-chrome-top\)/);
+  assert.match(materials, /data-brand-chrome="top"\]::after \{[\s\S]*?right: calc\(100vw - env\(titlebar-area-x,[\s\S]*?env\(titlebar-area-width,[\s\S]*?width: 96px;[\s\S]*?var\(--fl-brand-chrome-caption\)/);
   assert.match(materials, /data-brand-chrome="navigation"[\s\S]*?border: 0;[\s\S]*?background: var\(--fl-brand-chrome-navigation\)/);
   assert.match(materials, /data-brand-chrome="top"[\s\S]*?background-position: 0 0;[\s\S]*?background-size: 100vw 100vh;/);
   assert.match(materials, /data-brand-chrome="navigation"[\s\S]*?background-position: 0 -44px;[\s\S]*?background-size: 100vw 100vh;/);

@@ -75,6 +75,8 @@ try {
   assert.notEqual(secondPageId, firstPageId);
   const workspaceTabs = await cdp.eval(`[...document.querySelectorAll('[data-testid="right-dock-tabs"] .browser-workspace-page')].map((tab)=>({id:tab.dataset.tabId,label:tab.innerText,active:tab.classList.contains('active')}))`);
   assert.equal(workspaceTabs.length, baselinePageCount + 1, JSON.stringify(workspaceTabs));
+  const activeTabIndicator = await cdp.eval(`getComputedStyle(document.querySelector('[data-testid="right-dock-tabs"] .browser-workspace-page.active'),'::after').content`);
+  assert.equal(activeTabIndicator, 'none', 'active workspace tabs must not render a blue/purple underline');
 
   await cdp.eval(`document.querySelector('[data-tab-id="browser:${firstPageId}"] .right-dock-tab-main').click()`);
   await wait(cdp, `window.fielora.browser.getState().then((state)=>state.active_page_id===${JSON.stringify(firstPageId)})`);

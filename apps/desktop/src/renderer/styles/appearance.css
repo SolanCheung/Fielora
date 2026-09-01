@@ -733,7 +733,7 @@ button[type="submit"]:disabled { background: var(--fl-action-primary-disabled); 
 .conversation-composer:focus-within { border-color: color-mix(in srgb,var(--fl-color-accent) 30%,var(--fl-effect-boundary)); }
 .conversation-composer textarea { color: var(--fl-color-text-strong); background: transparent; }
 
-/* Chrome and tabs stay quiet; selection is a material shift plus a thin accent. */
+/* Chrome and tabs stay quiet; selection is expressed only as a material shift. */
 .desktop-chrome { border-bottom: 0; }
 .project-global-nav button.active,
 .sidebar-project-home.active,
@@ -751,16 +751,6 @@ button[type="submit"]:disabled { background: var(--fl-action-primary-disabled); 
 .right-dock-toolbar { border-bottom: 0; background: transparent; }
 .right-dock-tab { position: relative; border-color: transparent; background: transparent; box-shadow: none; }
 .right-dock-tab.active { border-color: transparent; background: var(--fl-surface-interactive); box-shadow: none; }
-.right-dock-tab.active::after {
-  content: "";
-  position: absolute;
-  right: var(--fl-space-3);
-  bottom: 0;
-  left: var(--fl-space-3);
-  height: 2px;
-  border-radius: var(--fl-radius-pill);
-  background: var(--fl-color-emphasis);
-}
 .browser-page-strip {
   min-height: 34px;
   gap: var(--fl-space-1);

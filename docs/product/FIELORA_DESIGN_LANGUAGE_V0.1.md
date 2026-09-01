@@ -49,7 +49,7 @@ Fallback 必须复用同一 DOM、同一 `data-surface` 与同一交互状态，
 
 - Light 与 Dark 共享语义角色和组件结构，只替换 token 值。
 - Content 保持近实色；Chrome、Floating、Overlay 才允许受控 translucent material。
-- Brand Chrome 只允许在左导航与 Desktop 顶栏共享一张低饱和、近白的薰衣草粉连续背景；shell underlay 只可从 Content 的圆角切口露出，用于让弧度可见，不得向正文着色。不得将两处画成分割的高饱和紫色块。右侧 Dock/Tabs/Utility、Conversation 和其他 Content 继续使用中性表面。
+- Brand Chrome 只允许在左导航与 Desktop 顶栏共享一张低饱和、近白的薰衣草粉连续背景；进入 Windows 原生窗口按钮前平滑过渡到当前背景的右端色，native caption 必须同步使用同一颜色。shell underlay 只可从 Content 的圆角切口露出，用于让弧度可见，不得向正文着色。不得将两处画成分割的高饱和紫色块。右侧 Dock/Tabs/Utility、Conversation 和其他 Content 继续使用中性表面，active Tab 不使用蓝紫底线。
 - Success、Warning、Danger 只表达状态，不表达配置、当前项或品牌。
 - 产品样式不得直接新增 hex/rgb；必须先在 `styles/tokens.css` 建立语义 token。
 - 阴影表达 elevation，不用于装饰卡片；边缘高光不得替代 focus ring。

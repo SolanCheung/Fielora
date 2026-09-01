@@ -10,7 +10,7 @@ import { SettingsScreen, type SettingsCategory } from './SettingsScreen';
 import { LibraryScreen } from './LibraryScreen';
 import { ScheduledTasksScreen } from './ScheduledTasksScreen';
 import { SelectMenu, TextActionDialog } from './UiPrimitives';
-import { applyAppPreferences, readAppPreferences, resolveAppearance, writeAppPreferences, type AppPreferences } from './app-preferences';
+import { applyAppPreferences, readAppPreferences, resolveAppearance, resolveTitlebarCaption, writeAppPreferences, type AppPreferences } from './app-preferences';
 import type { AppView } from './view-state';
 import {
   activityLabel,
@@ -63,12 +63,13 @@ export function App() {
     const dark = window.matchMedia('(prefers-color-scheme: dark)');
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const apply = () => {
+      const effectiveAppearance = resolveAppearance(preferences.appearance.themePreference, dark.matches);
       applyAppPreferences(document.documentElement, preferences, {
         prefersDark: dark.matches,
         prefersReducedMotion: reducedMotion.matches,
         supportsBackdrop: CSS.supports('backdrop-filter', 'blur(1px)'),
       });
-      void window.fielora.window.setTitlebarTheme(resolveAppearance(preferences.appearance.themePreference, dark.matches));
+      void window.fielora.window.setTitlebarTheme(effectiveAppearance, resolveTitlebarCaption(preferences.appearance, effectiveAppearance));
     };
     apply();
     dark.addEventListener('change', apply);
