@@ -308,10 +308,13 @@ try {
   await wait(cdp, `document.querySelector('[data-testid="send-steering"]')`);
   await cdp.eval(`document.querySelector('[data-testid="send-steering"]')?.click()`);
   await wait(cdp, `document.querySelector('[data-testid="queued-follow-up-status"]')`);
-  const queued = await cdp.eval(`(()=>{const status=document.querySelector('[data-testid="queued-follow-up-status"]');const turn=status?.closest('[data-testid="message-user"]');const style=getComputedStyle(status);return{text:status?.innerText??'',afterRunId:status?.dataset.afterRunId,userText:turn?.querySelector('.message-content')?.innerText??'',size:style.fontSize,weight:style.fontWeight,stop:Boolean(document.querySelector('[data-testid="stop-agent"]'))};})()`);
+  const queued = await cdp.eval(`(()=>{const status=document.querySelector('[data-testid="queued-follow-up-status"]');const card=status?.closest('[data-testid="queued-follow-up-card"]');const style=getComputedStyle(status);return{text:status?.innerText??'',afterRunId:status?.dataset.afterRunId,userText:card?.querySelector('.queued-follow-up-main strong')?.innerText??'',size:style.fontSize,weight:style.fontWeight,stop:Boolean(document.querySelector('[data-testid="stop-agent"]')),adjust:Boolean(card?.querySelector('.queued-follow-up-adjust')),remove:Boolean(card?.querySelector('[aria-label="删除排队消息"]')),durableTurn:[...document.querySelectorAll('[data-testid="message-user"] .message-content')].some((node)=>node.innerText.includes(${JSON.stringify(steering)}))};})()`);
   assert.equal(queued.afterRunId, firstRun.id);
   assert.match(queued.text, /完成后继续处理/);
   assert.match(queued.userText, new RegExp(acceptanceFile.replaceAll('.', '\\.')));
+  assert.equal(queued.adjust, true);
+  assert.equal(queued.remove, true);
+  assert.equal(queued.durableTurn, false, 'queued follow-up must remain editable until it actually starts');
   assert.deepEqual({ size: queued.size, weight: queued.weight }, { size: '12.5px', weight: '400' });
   screenshots.push(await capture(cdp, screenshotNames[5]));
 

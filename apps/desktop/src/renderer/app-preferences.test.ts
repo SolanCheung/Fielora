@@ -12,6 +12,7 @@ import {
   resolveMaterial,
   resolveReducedMotion,
   resolveTitlebarCaption,
+  resolveUiLocale,
   writeAppPreferences,
   type AppPreferences,
 } from './app-preferences.ts';
@@ -26,7 +27,7 @@ function memoryStorage(initial: Record<string, string> = {}) {
 }
 
 function freshPreferences(): AppPreferences {
-  return { version: 2, startupDestination: 'PROJECTS', appearance: { ...defaultAppearancePreferences, advancedColorOverrides: {} } };
+  return { version: 2, startupDestination: 'PROJECTS', languagePreference: 'SYSTEM', appearance: { ...defaultAppearancePreferences, advancedColorOverrides: {} } };
 }
 
 test('appearance preferences use fresh safe defaults and tolerate corrupt storage', () => {
@@ -52,6 +53,7 @@ test('v2 appearance preferences round-trip through the canonical storage key', (
   const preferences: AppPreferences = {
     version: 2,
     startupDestination: 'NOW',
+    languagePreference: 'EN',
     appearance: {
       ...defaultAppearancePreferences,
       themePreference: 'DARK', accentPreset: 'CUSTOM', customAccent: '#137F88', density: 'COMPACT', radius: 'LARGE', uiFontScale: 110,
@@ -75,6 +77,15 @@ test('System appearance and motion resolve from the environment without becoming
   assert.equal(resolveReducedMotion('REDUCE', false), true);
   assert.deepEqual(appearanceThemeDefaults('LIGHT'), { sidebar: '#F7EFFB', workspace: '#FFFFFF', action: '#6847D8' });
   assert.deepEqual(appearanceThemeDefaults('DARK'), { sidebar: '#1B1820', workspace: '#181B23', action: '#9680FF' });
+});
+
+test('UI language follows Chinese system locales and supports explicit overrides', () => {
+  assert.equal(resolveUiLocale('SYSTEM', 'zh-CN'), 'zh-CN');
+  assert.equal(resolveUiLocale('SYSTEM', 'zh-Hans-CN'), 'zh-CN');
+  assert.equal(resolveUiLocale('SYSTEM', 'en-US'), 'en');
+  assert.equal(resolveUiLocale('ZH_CN', 'en-US'), 'zh-CN');
+  assert.equal(resolveUiLocale('EN', 'zh-CN'), 'en');
+  assert.equal(normalizeAppPreferences({ version: 2, languagePreference: 'UNKNOWN' }).languagePreference, 'SYSTEM');
 });
 
 test('applying appearance fixes the official identity and resolves Glass material capability', () => {
@@ -185,6 +196,7 @@ test('resetting appearance can preserve non-appearance preferences', () => {
   const configured: AppPreferences = {
     version: 2,
     startupDestination: 'BROWSE',
+    languagePreference: 'ZH_CN',
     appearance: { ...defaultAppearancePreferences, themePreference: 'DARK', density: 'COMPACT' },
   };
   const reset = { ...configured, appearance: { ...defaultAppearancePreferences, advancedColorOverrides: {} } };

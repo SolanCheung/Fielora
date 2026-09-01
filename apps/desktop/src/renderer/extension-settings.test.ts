@@ -12,22 +12,24 @@ const plugins = read('PluginSettings.tsx');
 const artifact = read('ArtifactWorkingSurface.tsx');
 
 test('Settings exposes one capability and extension destination without group subtitles', () => {
-  assert.match(settings, /id: 'EXTENSIONS', label: '能力与扩展'/);
+  assert.match(settings, /id: 'EXTENSIONS', label: t\('能力与扩展', 'Capabilities & extensions'\)/);
   assert.doesNotMatch(settings, /settings-nav-group|visibleGroups|<h2>\{group\}<\/h2>/);
   assert.match(settings, /id: 'GENERAL'.*icon: 'settings'/);
   assert.match(settings, /id: 'MODELS'.*icon: 'models'/);
   assert.match(settings, /id: 'EXTENSIONS'.*icon: 'extensions'/);
   assert.match(settings, /id: 'STORAGE_DATA'.*icon: 'storage'/);
-  assert.match(settings, /label: '项目'/);
-  assert.match(settings, /label: '现在'/);
+  assert.match(settings, /label: t\('项目', 'Projects'\)/);
+  assert.match(settings, /label: t\('现在', 'Now'\)/);
+  assert.match(settings, /testId="ui-language"/);
+  for (const language of ['SYSTEM', 'ZH_CN', 'EN']) assert.match(settings, new RegExp(`value: '${language}'`));
 });
 
 test('Capability and extension destination uses one accessible three-tab page', () => {
-  assert.match(capabilities, /<h1>能力与扩展<\/h1>/);
+  assert.match(capabilities, /<h1>\{t\('能力与扩展', 'Capabilities & extensions'\)\}<\/h1>/);
   assert.match(capabilities, /role="tablist"/);
   assert.match(capabilities, /id: 'SKILLS', label: 'Skills'/);
   assert.match(capabilities, /id: 'MCP', label: 'MCP'/);
-  assert.match(capabilities, /id: 'PLUGINS', label: '插件'/);
+  assert.match(capabilities, /id: 'PLUGINS', label: t\('插件', 'Plugins'\)/);
   assert.match(capabilities, /role="tabpanel"/);
   assert.match(capabilities, /<SkillsSettings fieldId=\{fieldId\} embedded\/>/);
   assert.match(capabilities, /<McpSettings embedded\/>/);

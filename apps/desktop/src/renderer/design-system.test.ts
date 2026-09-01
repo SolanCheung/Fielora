@@ -232,7 +232,7 @@ test('shared navigation resize, collapse and Settings content behavior stay cano
   assert.match(layout, /@property --fl-project-workspace-track[\s\S]*?syntax: "<length>"/);
   assert.match(layout, /--fl-project-workspace-track var\(--fl-duration-panel\) var\(--fl-ease-panel\)/);
   assert.match(rightDock, /\{tabs\.length > 0 && <div className="right-dock-add-wrap"/);
-  assert.match(main, /width: 1180,[\s\S]*?height: 620,[\s\S]*?minWidth: 900,[\s\S]*?minHeight: 620,/);
+  assert.match(main, /width: 1180,[\s\S]*?height: 560,[\s\S]*?minWidth: 900,[\s\S]*?minHeight: 560,/);
 
   assert.match(appearance, /data-testid=\{`appearance-theme-\$\{option\.value\.toLowerCase\(\)\}`\}/);
   for (const mode of ['SYSTEM', 'LIGHT', 'DARK']) assert.match(appearance, new RegExp(`value: '${mode}'`));
@@ -240,14 +240,14 @@ test('shared navigation resize, collapse and Settings content behavior stay cano
     assert.match(appearance, new RegExp(control), `missing useful Appearance control ${control}`);
   }
   assert.match(appearance, /恢复当前主题默认值/);
-  assert.match(appearance, /value: 'GRADIENT', label: '渐变'/);
+  assert.match(appearance, /value: 'GRADIENT', label: t\('渐变', 'Gradient'\)/);
   assert.match(appearance, /createPortal\(<div ref=\{popoverRef\} className="appearance-color-popover"/);
   assert.doesNotMatch(appearance, /type="color"/);
   assert.doesNotMatch(appearance, /filter:\s*contrast/);
   assert.doesNotMatch(appearance, /Fielora Glass|官方设计语言|Glass 不是一个主题选项|高级颜色|导入主题/);
   assert.match(doc, /220–560px/);
   assert.match(doc, /Settings 与 Scheduled Content 自身纵向滚动/);
-  assert.match(doc, /初始窗口高度等于允许的最小高度 `620px`/);
+  assert.match(doc, /初始窗口高度等于允许的最小高度 `560px`/);
 });
 
 test('replaceable Brand Chrome is scoped to the top bar and left navigation', () => {

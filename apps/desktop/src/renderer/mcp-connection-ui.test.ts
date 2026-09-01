@@ -12,7 +12,7 @@ test('MCP Settings stays passive while activation belongs to current AgentRun de
     readFile(new URL('AgentTurn.tsx', rendererRoot), 'utf8'),
     readFile(new URL('ProjectWorkspace.tsx', rendererRoot), 'utf8'),
   ]);
-  assert.match(settings, /id: 'EXTENSIONS', label: '能力与扩展'/);
+  assert.match(settings, /id: 'EXTENSIONS', label: t\('能力与扩展', 'Capabilities & extensions'\)/);
   assert.match(mcpSettings, /agent\.mcpConnections\(\)/);
   assert.match(mcpSettings, /credential_binding_count/);
   assert.match(mcpSettings, /credential_missing_count/);

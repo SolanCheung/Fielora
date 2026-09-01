@@ -142,7 +142,10 @@ test('running presentation is narrative and activity chronology followed by hone
 test('composer queues steering without parallel runs and keeps an explicit user turn status', () => {
   assert.match(workspace, /if \(activeAgentRef\.current\) \{ await queueFollowUp\(content\); return; \}/);
   assert.match(workspace, /data-testid="queued-follow-up-status"/);
-  assert.match(workspace, /data-after-run-id=\{queuedFollowUp\.afterRunId\}/);
+  assert.match(workspace, /data-after-run-id=\{item\.afterRunId\}/);
+  assert.match(workspace, /data-testid="queued-follow-up-card"/);
+  assert.match(workspace, /editQueuedFollowUp\(item\)/);
+  assert.match(workspace, /removeQueuedFollowUp\(item\.id\)/);
   assert.match(workspace, /if \(!project \|\| !conversation \|\| activeAgentRef\.current \|\| !agentRunIsTerminal\) return/);
   assert.match(workspace, /data-testid="send-steering"/);
   assert.match(workspace, /data-testid="stop-agent-secondary"/);

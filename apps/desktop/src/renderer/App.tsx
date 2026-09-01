@@ -12,6 +12,7 @@ import { ScheduledTasksScreen } from './ScheduledTasksScreen';
 import { SelectMenu, TextActionDialog } from './UiPrimitives';
 import { applyAppPreferences, readAppPreferences, resolveAppearance, resolveTitlebarCaption, writeAppPreferences, type AppPreferences } from './app-preferences';
 import type { AppView } from './view-state';
+import { notifyUiLanguagePreferenceChanged } from './ui-locale';
 import {
   activityLabel,
   continuationPresentation,
@@ -190,7 +191,11 @@ export function App() {
     if (tool !== 'TERMINAL' && tool !== 'BROWSER') navigateTo('PROJECTS');
   }, [navigateTo]);
   const requestAddProject = useCallback(() => { setAddProjectRequest((value) => value + 1); navigateTo('PROJECTS'); }, [navigateTo]);
-  const updatePreferences = (next: AppPreferences) => { setPreferences(next); writeAppPreferences(window.localStorage, next); };
+  const updatePreferences = (next: AppPreferences) => {
+    setPreferences(next);
+    writeAppPreferences(window.localStorage, next);
+    notifyUiLanguagePreferenceChanged(next.languagePreference);
+  };
 
   useEffect(() => {
     if (preferences.startupDestination !== 'BROWSE') return;

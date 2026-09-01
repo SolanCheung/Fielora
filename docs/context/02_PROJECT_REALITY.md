@@ -2924,3 +2924,28 @@ RIGHT_DOCK_ACTIVE_TAB_UNDERLINE: NONE
 BROWSER_LOADING_FEEDBACK: PRESERVED
 PANE_OR_RUNTIME_CHANGE: NO
 ```
+
+## 116. Locale Override, Compact Window, Queued Follow-up And Edge-collapse Gesture
+
+Settings → General 现在提供 `SYSTEM / ZH_CN / EN` 界面语言偏好并实时生效；SYSTEM 只读取 Electron
+renderer 的系统 locale，中文系统显示简体中文。官方内置 Skill 的用户可见名称与说明通过受信任映射本地化，
+内部 Skill ID、Project Skill 与 Plugin metadata 保持原值。该实现复用现有 AppPreferences v2，不建立第二套
+Theme 或设置系统。
+
+Desktop 初始高度与最低高度同步下调为 `560px`，宽度仍为 `1180px`、最低宽度仍为 `900px`。运行中的
+Conversation follow-up 在真正启动前以 Composer 上方的本地队列卡片存在，可调整回输入框、删除或关闭排队；
+只有上一 Run terminal 后才创建 durable User Message 并调用既有 Agent start，Side Chat 不回归。
+
+共享 Navigation divider 与 Right Workspace divider 均支持边缘越界收起；window-level pointer lifecycle 保证
+鼠标左键未松开时可反向拖回恢复。真实 Electron E2E 已覆盖左右两侧 collapse → restore、宽度持久化、
+Browser native bounds 与 Terminal/File Dock 回归。
+
+```text
+UI_LANGUAGE: SYSTEM / ZH_CN / EN
+SYSTEM_ZH_LOCALE: ZH_CN
+WINDOW_INITIAL_MIN_SIZE: 1180x560 / 900x560
+QUEUED_FOLLOW_UP: EDITABLE_UNTIL_START
+SIDE_CHAT_REINTRODUCED: NO
+DIVIDER_EDGE_COLLAPSE_RESTORE: SAME_POINTER_GESTURE
+RUNTIME_OR_SCHEMA_CHANGED: NO
+```

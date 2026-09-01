@@ -7,6 +7,7 @@ import { Phase04Layer } from './Phase04Layer';
 import { QuickCapture } from './QuickCapture';
 import { prototypeViewFromHash } from './agentic-ux-prototype-data';
 import { applyAppPreferences, readAppPreferences } from './app-preferences';
+import { UiLocaleProvider } from './ui-locale';
 import './styles/index.css';
 import '../types';
 
@@ -22,4 +23,4 @@ applyAppPreferences(document.documentElement, readAppPreferences(window.localSto
 const prototypeView = prototypeViewFromHash(window.location.hash);
 createRoot(root).render(prototypeView
   ? <StrictMode><AgenticUXPrototype initialView={prototypeView} /></StrictMode>
-  : <StrictMode><DesktopChrome><App /></DesktopChrome><QuickCapture /><Phase04Layer /></StrictMode>);
+  : <StrictMode><UiLocaleProvider><DesktopChrome><App /></DesktopChrome><QuickCapture /><Phase04Layer /></UiLocaleProvider></StrictMode>);

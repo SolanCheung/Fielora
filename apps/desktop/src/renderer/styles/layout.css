@@ -98,6 +98,14 @@
   background: color-mix(in srgb, var(--fl-color-text-muted) 24%, transparent);
 }
 
+/* Pointer capture must survive a drag-triggered collapse so reversing the
+ * same uninterrupted gesture can restore the panel. */
+.project-workspace-resizer.dragging,
+body[data-sidebar-collapsed="true"] .workspace-navigation-resizer.dragging {
+  visibility: visible;
+  pointer-events: auto;
+}
+
 .app-icon[data-icon="panelRight"] {
   transform: scaleX(-1);
 }
@@ -260,6 +268,19 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   padding: var(--fl-space-2) var(--fl-space-4);
 }
 
+.queued-follow-up-stack {
+  position: absolute;
+  z-index: var(--fl-layer-floating);
+  right: 0;
+  bottom: 116px;
+  left: 0;
+  width: min(calc(100% - 40px), var(--fl-layout-composer-width));
+  max-height: min(184px, 28vh);
+  margin: 0 auto;
+  overflow: visible;
+  pointer-events: none;
+}
+
 /* Empty conversations keep the real Composer in the same reading column. */
 .conversation-column.is-empty-conversation .message-list {
   display: grid;
@@ -313,5 +334,10 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   .conversation-composer {
     width: calc(100% - 20px);
     margin-bottom: var(--fl-space-3);
+  }
+
+  .queued-follow-up-stack {
+    width: calc(100% - 20px);
+    bottom: 112px;
   }
 }

@@ -44,6 +44,22 @@ async function dragDivider(cdp, delta, steps = 1) {
   return widths;
 }
 
+async function dragDividerThroughCollapseAndBack(cdp, selector, collapseX, restoreX, collapsedExpression, restoredExpression) {
+  const rect = await cdp.eval(`(()=>{const value=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:value.x,y:value.y,width:value.width,height:value.height};})()`);
+  const x = rect.x + rect.width / 2;
+  const y = rect.y + Math.min(120, rect.height / 2);
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+  try {
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: collapseX, y, button: 'left', buttons: 1 });
+    await wait(cdp, collapsedExpression);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: restoreX, y, button: 'left', buttons: 1 });
+    await wait(cdp, restoredExpression);
+  } finally {
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: restoreX, y, button: 'left', clickCount: 1 });
+  }
+  await new Promise((resolve) => setTimeout(resolve, 180));
+}
+
 async function waitForPreferredDockWidth(cdp) {
   await wait(cdp, `(()=>{const dock=document.querySelector('[data-testid="right-workspace-dock"]');const preferred=Number(localStorage.getItem('fielora:project-workspace-width'));return dock&&Number.isFinite(preferred)&&Math.abs(dock.getBoundingClientRect().width-preferred)<=2;})()`);
 }
@@ -121,6 +137,7 @@ try {
   await wait(cdp, `document.querySelector('[data-testid="conversation-${setup.conversationId}"]')&&document.querySelector('.conversation-heading')`);
   await cdp.eval(`window.dispatchEvent(new CustomEvent('fielora:open-workspace',{detail:'FILES'}))`);
   await wait(cdp, `document.querySelector('[data-testid="right-dock-view-files"]:not([hidden]) .workspace-file-tool')`);
+  await wait(cdp, `Math.abs(document.querySelector('[data-testid="right-workspace-dock"]').getBoundingClientRect().width-635)<=2`);
 
   const header = await cdp.eval(`(()=>{const heading=document.querySelector('.conversation-heading');return{title:heading.querySelector('h2')?.textContent,folder:heading.querySelector(':scope > [data-icon="folder"]')!==null,subtitle:heading.querySelector('small')!==null,dockIcon:document.querySelector('[data-testid="chrome-tools"] [data-icon="panelRight"]')!==null};})()`);
   assert.deepEqual(header, { title: '动态工作区宽度', folder: true, subtitle: false, dockIcon: true });
@@ -131,6 +148,28 @@ try {
   assert.ok(Number(initial.dividerOpacity) >= 0.9, `Dock divider is not visibly rendered: ${JSON.stringify(initial)}`);
   assert.notEqual(initial.dividerBackground, 'rgba(0, 0, 0, 0)');
   assertToolFillsDock(initial, initial.fileStyle, 'File');
+
+  await dragDividerThroughCollapseAndBack(
+    cdp,
+    '[data-testid="project-navigation-resizer"]',
+    initial.surface.left + 80,
+    initial.navigation.right,
+    `document.body.dataset.sidebarCollapsed==='true'&&document.querySelector('[data-testid="project-navigation"]').getBoundingClientRect().width<1`,
+    `document.body.dataset.sidebarCollapsed==='false'&&document.querySelector('[data-testid="project-navigation"]').getBoundingClientRect().width>=220`,
+  );
+  const navigationRestored = await metrics(cdp);
+  assert.ok(Math.abs(navigationRestored.navigation.width - initial.navigation.width) <= 2, JSON.stringify(navigationRestored));
+
+  await dragDividerThroughCollapseAndBack(
+    cdp,
+    '[data-testid="project-workspace-resizer"]',
+    initial.surface.right - 80,
+    initial.surface.right - initial.dock.width,
+    `!document.querySelector('[data-testid="project-workspace-surface"]').classList.contains('workspace-open')&&document.querySelector('[data-testid="right-workspace-dock"]').getBoundingClientRect().width<1`,
+    `document.querySelector('[data-testid="project-workspace-surface"]').classList.contains('workspace-open')&&document.querySelector('[data-testid="right-workspace-dock"]').getBoundingClientRect().width>=360`,
+  );
+  const dockRestored = await metrics(cdp);
+  assert.ok(Math.abs(dockRestored.dock.width - initial.dock.width) <= 2, JSON.stringify(dockRestored));
 
   await resizeWindow(cdp, 1920);
   const growFrames = await dragDivider(cdp, -500, 8);
@@ -174,7 +213,7 @@ try {
       viewportBackground:background('.right-dock-view-browser:not([hidden]) .browse-viewport'),
     };
   })()`);
-  assert.ok(Math.abs(browserChrome.workspacePageTab.height - 32) <= 1, JSON.stringify(browserChrome));
+  assert.ok(Math.abs(browserChrome.workspacePageTab.height - 34) <= 1, JSON.stringify(browserChrome));
   assert.equal(browserChrome.duplicatePageStrip, null, JSON.stringify(browserChrome));
   assert.ok(Math.abs(browserChrome.toolbar.height - 44) <= 1, JSON.stringify(browserChrome));
   assert.ok(Math.abs(browserChrome.address.height - 34) <= 1, JSON.stringify(browserChrome));

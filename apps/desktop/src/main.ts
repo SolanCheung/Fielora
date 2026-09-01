@@ -898,9 +898,9 @@ async function createWindow(): Promise<void> {
   const initialSurface = windowSurfaceColors(nativeTheme.shouldUseDarkColors ? 'DARK' : 'LIGHT');
   const window = new BrowserWindow({
     width: 1180,
-    height: 620,
+    height: 560,
     minWidth: 900,
-    minHeight: 620,
+    minHeight: 560,
     backgroundColor: initialSurface.background,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',

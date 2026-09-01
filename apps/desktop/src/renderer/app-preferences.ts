@@ -1,4 +1,6 @@
 export type StartupDestination = 'PROJECTS' | 'NOW' | 'BROWSE';
+export type UiLanguagePreference = 'SYSTEM' | 'ZH_CN' | 'EN';
+export type UiLocale = 'zh-CN' | 'en';
 export type AppearanceMode = 'SYSTEM' | 'LIGHT' | 'DARK';
 export type EffectiveAppearance = 'LIGHT' | 'DARK';
 export type MaterialMode = 'GLASS' | 'SOLID';
@@ -48,6 +50,7 @@ export interface AppearancePreferences {
 export interface AppPreferences {
   version: 2;
   startupDestination: StartupDestination;
+  languagePreference: UiLanguagePreference;
   appearance: AppearancePreferences;
 }
 
@@ -78,7 +81,7 @@ export const defaultAppearancePreferences: AppearancePreferences = {
 };
 
 export const defaultAppPreferences: AppPreferences = {
-  version: 2, startupDestination: 'PROJECTS', appearance: defaultAppearancePreferences,
+  version: 2, startupDestination: 'PROJECTS', languagePreference: 'SYSTEM', appearance: defaultAppearancePreferences,
 };
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -154,7 +157,7 @@ function normalizeAppearance(value: unknown, legacy?: Record<string, unknown>): 
 }
 
 function freshDefaults(): AppPreferences {
-  return { version: 2, startupDestination: 'PROJECTS', appearance: { ...defaultAppearancePreferences, advancedColorOverrides: {} } };
+  return { version: 2, startupDestination: 'PROJECTS', languagePreference: 'SYSTEM', appearance: { ...defaultAppearancePreferences, advancedColorOverrides: {} } };
 }
 
 export function readAppPreferences(storage: Pick<PreferenceStorage, 'getItem'>): AppPreferences {
@@ -171,6 +174,7 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
   return {
     version: 2,
     startupDestination: oneOf(parsed.startupDestination, ['PROJECTS', 'NOW', 'BROWSE'], defaultAppPreferences.startupDestination),
+    languagePreference: oneOf(parsed.languagePreference, ['SYSTEM', 'ZH_CN', 'EN'], defaultAppPreferences.languagePreference),
     appearance: normalizeAppearance(parsed.appearance, parsed),
   };
 }
@@ -181,6 +185,12 @@ export function writeAppPreferences(storage: Pick<PreferenceStorage, 'setItem'>,
 
 export function resolveAppearance(preference: AppearanceMode, prefersDark: boolean): EffectiveAppearance {
   return preference === 'SYSTEM' ? (prefersDark ? 'DARK' : 'LIGHT') : preference;
+}
+
+export function resolveUiLocale(preference: UiLanguagePreference, systemLocale: string): UiLocale {
+  if (preference === 'ZH_CN') return 'zh-CN';
+  if (preference === 'EN') return 'en';
+  return /^zh(?:-|_|$)/i.test(systemLocale.trim()) ? 'zh-CN' : 'en';
 }
 
 export function resolveTitlebarCaption(appearance: AppearancePreferences, effectiveAppearance: EffectiveAppearance): string {

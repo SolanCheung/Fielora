@@ -46,6 +46,17 @@ try {
 
   await cdp.eval(`document.querySelector('[data-testid="settings-nav"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="settings-screen"]')`);
+  assert.equal(await cdp.eval(`document.querySelector('[data-testid="ui-language"]').closest('.ui-select').dataset.value`), 'SYSTEM');
+  await cdp.eval(`document.querySelector('[data-testid="ui-language"]').click()`);
+  await wait(cdp, `document.querySelector('[data-testid="ui-language-option-EN"]')`);
+  await cdp.eval(`document.querySelector('[data-testid="ui-language-option-EN"]').click()`);
+  await wait(cdp, `document.documentElement.lang==='en'&&document.querySelector('[data-testid="settings-general"] h1').innerText==='General'`);
+  assert.equal(await cdp.eval(`JSON.parse(localStorage.getItem('fielora.ui.preferences.v2')).languagePreference`), 'EN');
+  await cdp.eval(`document.querySelector('[data-testid="ui-language"]').click()`);
+  await wait(cdp, `document.querySelector('[data-testid="ui-language-option-ZH_CN"]')`);
+  await cdp.eval(`document.querySelector('[data-testid="ui-language-option-ZH_CN"]').click()`);
+  await wait(cdp, `document.documentElement.lang==='zh-CN'&&document.querySelector('[data-testid="settings-general"] h1').innerText==='常规'`);
+  assert.equal(await cdp.eval(`JSON.parse(localStorage.getItem('fielora.ui.preferences.v2')).languagePreference`), 'ZH_CN');
   const settingsRails = [];
   for (const [category, section] of [['general', 'settings-general'], ['shortcuts', 'settings-shortcuts'], ['appearance', 'settings-appearance']]) {
     await cdp.eval(`document.querySelector('[data-testid="settings-category-${category}"]').click()`);

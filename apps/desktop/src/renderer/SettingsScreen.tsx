@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ModelInvocationEvent, ProviderConfigView } from '@fielora/contracts';
 import fieloraMark from '../../assets/fielora-brand-mark.svg';
-import type { AppPreferences, StartupDestination } from './app-preferences';
+import { resolveUiLocale, type AppPreferences, type StartupDestination, type UiLanguagePreference } from './app-preferences';
 import { AppearanceSettings } from './AppearanceSettings';
 import { AppIcon, type AppIconName } from './ui';
 import { SelectMenu, SettingsToggle } from './UiPrimitives';
@@ -15,6 +15,7 @@ import {
 } from './WorkspaceSurface';
 import { StorageDataSettings } from './StorageDataSettings';
 import { CapabilityExtensionsSettings, type CapabilityExtensionTab } from './CapabilityExtensionsSettings';
+import { useUiLocale, type UiTranslator } from './ui-locale';
 
 export type SettingsCategory = 'GENERAL' | 'APPEARANCE' | 'MODELS' | 'EXTENSIONS' | 'SKILLS' | 'MCP' | 'PLUGINS' | 'STORAGE_DATA' | 'SHORTCUTS' | 'ABOUT' | 'BROWSER';
 
@@ -26,15 +27,17 @@ interface SettingsScreenProps {
   fieldId?: string | null;
 }
 
-const categories: Array<{ id: SettingsCategory; label: string; keywords: string; icon: AppIconName }> = [
-  { id: 'GENERAL', label: '常规', keywords: '启动 页面 默认', icon: 'settings' },
-  { id: 'APPEARANCE', label: '外观', keywords: '主题 浅色 深色 系统 字体 密度 圆角 动效 theme appearance', icon: 'appearance' },
-  { id: 'MODELS', label: '模型与服务', keywords: 'provider api key model 模型 服务', icon: 'models' },
-  { id: 'EXTENSIONS', label: '能力与扩展', keywords: 'skills agent skill mcp tool server stdio plugin extension local unpacked 插件 扩展 本地 工具 连接', icon: 'extensions' },
-  { id: 'STORAGE_DATA', label: '存储与数据', keywords: 'storage data library cache profile backup import export 存储 数据 资料库 缓存 备份 迁移', icon: 'storage' },
-  { id: 'SHORTCUTS', label: '键盘快捷键', keywords: '快捷键 keyboard shortcut', icon: 'keyboard' },
-  { id: 'ABOUT', label: '关于', keywords: '版本 about', icon: 'info' },
-];
+function settingsCategories(t: UiTranslator): Array<{ id: SettingsCategory; label: string; keywords: string; icon: AppIconName }> {
+  return [
+    { id: 'GENERAL', label: t('常规', 'General'), keywords: '启动 页面 默认 language 语言 startup default', icon: 'settings' },
+    { id: 'APPEARANCE', label: t('外观', 'Appearance'), keywords: '主题 浅色 深色 系统 字体 密度 圆角 动效 theme appearance', icon: 'appearance' },
+    { id: 'MODELS', label: t('模型与服务', 'Models & services'), keywords: 'provider api key model 模型 服务', icon: 'models' },
+    { id: 'EXTENSIONS', label: t('能力与扩展', 'Capabilities & extensions'), keywords: 'skills agent skill mcp tool server stdio plugin extension local unpacked 插件 扩展 本地 工具 连接', icon: 'extensions' },
+    { id: 'STORAGE_DATA', label: t('存储与数据', 'Storage & data'), keywords: 'storage data library cache profile backup import export 存储 数据 资料库 缓存 备份 迁移', icon: 'storage' },
+    { id: 'SHORTCUTS', label: t('键盘快捷键', 'Keyboard shortcuts'), keywords: '快捷键 keyboard shortcut', icon: 'keyboard' },
+    { id: 'ABOUT', label: t('关于', 'About'), keywords: '版本 about', icon: 'info' },
+  ];
+}
 
 function extensionTabFor(category: SettingsCategory): CapabilityExtensionTab {
   return category === 'MCP' || category === 'PLUGINS' ? category : 'SKILLS';
@@ -44,20 +47,21 @@ function normalizedCategory(category: SettingsCategory): SettingsCategory {
   return ['SKILLS', 'MCP', 'PLUGINS'].includes(category) ? 'EXTENSIONS' : category;
 }
 
-function probeFailureLabel(provider: ProviderConfigView, code?: string | null): string {
-  if (provider.provider_kind === 'OPENAI' && /^qwen/i.test(provider.default_model)) return '连接失败 · 当前是 OpenAI 官方协议，但模型像兼容服务；请检查协议与 Base URL';
+function probeFailureLabel(provider: ProviderConfigView, t: UiTranslator, code?: string | null): string {
+  if (provider.provider_kind === 'OPENAI' && /^qwen/i.test(provider.default_model)) return t('连接失败 · 当前是 OpenAI 官方协议，但模型像兼容服务；请检查协议与 Base URL', 'Connection failed · The selected protocol is official OpenAI, but the model appears to use a compatible service. Check the protocol and Base URL.');
   const labels: Record<string, string> = {
-    CREDENTIAL_REJECTED: 'API Key 无效或已失效',
-    MODEL_NOT_AVAILABLE: '模型不可用，请检查 Model ID',
-    PROVIDER_RATE_LIMITED: '服务限流，请稍后重试',
-    PROVIDER_UNAVAILABLE: '服务不可达，请检查网络与 Base URL',
-    PROVIDER_PROTOCOL_ERROR: '服务响应与所选协议不兼容',
-    CUSTOM_ENDPOINT_REJECTED: '自定义地址未通过安全检查',
+    CREDENTIAL_REJECTED: t('API Key 无效或已失效', 'The API key is invalid or expired'),
+    MODEL_NOT_AVAILABLE: t('模型不可用，请检查 Model ID', 'The model is unavailable. Check the Model ID'),
+    PROVIDER_RATE_LIMITED: t('服务限流，请稍后重试', 'The service is rate limited. Try again later'),
+    PROVIDER_UNAVAILABLE: t('服务不可达，请检查网络与 Base URL', 'The service is unavailable. Check the network and Base URL'),
+    PROVIDER_PROTOCOL_ERROR: t('服务响应与所选协议不兼容', 'The service response is incompatible with the selected protocol'),
+    CUSTOM_ENDPOINT_REJECTED: t('自定义地址未通过安全检查', 'The custom endpoint did not pass security checks'),
   };
-  return `连接失败 · ${labels[code ?? ''] ?? code ?? '服务异常'}`;
+  return `${t('连接失败', 'Connection failed')} · ${labels[code ?? ''] ?? code ?? t('服务异常', 'Service error')}`;
 }
 
 export function SettingsScreen({ preferences, onChange, onBack, initialCategory = 'GENERAL', fieldId = null }: SettingsScreenProps) {
+  const { t } = useUiLocale();
   const [category, setCategory] = useState<SettingsCategory>(() => normalizedCategory(initialCategory));
   const [extensionTab, setExtensionTab] = useState<CapabilityExtensionTab>(() => extensionTabFor(initialCategory));
   const [query, setQuery] = useState('');
@@ -93,16 +97,17 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
     if (model.kind === 'COMPLETED') setProviderProbe((current) => ({ ...current, [providerId]: '连接正常' }));
     if (model.kind === 'FAILED') {
       const provider = providers.find((item) => item.id === providerId);
-      setProviderProbe((current) => ({ ...current, [providerId]: provider ? probeFailureLabel(provider, model.error_code) : `连接失败 · ${model.error_code ?? '服务异常'}` }));
+      setProviderProbe((current) => ({ ...current, [providerId]: provider ? probeFailureLabel(provider, t, model.error_code) : `${t('连接失败', 'Connection failed')} · ${model.error_code ?? t('服务异常', 'Service error')}` }));
     }
     if (model.kind === 'CANCELLED') setProviderProbe((current) => ({ ...current, [providerId]: '测试已取消' }));
     if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(model.kind)) probeInvocations.current.delete(model.invocation_id);
-  }), [providers]);
+  }), [providers, t]);
 
+  const categories = useMemo(() => settingsCategories(t), [t]);
   const visibleCategories = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     return needle ? categories.filter((item) => `${item.label} ${item.keywords}`.toLocaleLowerCase().includes(needle)) : categories;
-  }, [query]);
+  }, [categories, query]);
   const update = (patch: Partial<AppPreferences>) => onChange({ ...preferences, ...patch });
   const activeProviders = providers.filter((provider) => provider.lifecycle_status !== 'REMOVED');
 
@@ -122,16 +127,26 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
     persistWorkspaceNavigationWidth(width, 'fielora:settings-navigation-width');
   }
 
+  const systemUiLocale = resolveUiLocale('SYSTEM', navigator.language || navigator.languages?.[0] || 'en');
+  const languageOptions = [
+    { value: 'SYSTEM', label: t('跟随系统', 'Follow system') },
+    { value: 'ZH_CN', label: '简体中文' },
+    { value: 'EN', label: 'English' },
+  ];
+
   return <WorkspaceSurface className="settings-root" testId="settings-screen" navigationWidth={navigationWidth} onNavigationWidthChange={updateNavigationWidth} navigationResizerTestId="settings-navigation-resizer" navigationResizerClassName="settings-navigation-resizer" navigation={<aside className="settings-navigation" data-surface="chrome" data-brand-chrome="navigation">
-      <button className="settings-back" onClick={onBack} data-testid="settings-back">← <span>返回应用</span></button>
-      <label className="settings-search"><span className="sr-only">搜索设置</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索设置…" data-testid="settings-search" /></label>
-      <nav aria-label="设置分类">
+      <button className="settings-back" onClick={onBack} data-testid="settings-back">← <span>{t('返回应用', 'Back to app')}</span></button>
+      <label className="settings-search"><span className="sr-only">{t('搜索设置', 'Search settings')}</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('搜索设置…', 'Search settings…')} data-testid="settings-search" /></label>
+      <nav aria-label={t('设置分类', 'Settings categories')}>
         {visibleCategories.map((item) => <button key={item.id} className={category === item.id ? 'active' : ''} onClick={() => setCategory(item.id)} data-testid={`settings-category-${item.id.toLowerCase()}`}><AppIcon name={item.icon}/><span>{item.label}</span></button>)}
       </nav>
       <div className="settings-brand"><img src={fieloraMark} alt="" /><span>Fielora Desktop</span></div>
     </aside>}>
     <section className="settings-content" data-surface="content">
-      {category === 'GENERAL' && <div className="settings-section" data-testid="settings-general"><header><p>个人</p><h1>常规</h1></header><section className="settings-card"><div className="settings-row"><span><strong>默认工作面</strong><small>选择启动 Fielora 时显示的主要工作面。</small></span><SelectMenu value={preferences.startupDestination === 'NOW' ? 'NOW' : 'PROJECTS'} onChange={(value) => update({ startupDestination: value as StartupDestination })} ariaLabel="默认工作面" testId="startup-destination" options={[{ value: 'PROJECTS', label: '项目' }, { value: 'NOW', label: '现在' }]} /></div></section></div>}
+      {category === 'GENERAL' && <div className="settings-section" data-testid="settings-general"><header><p>{t('个人', 'Personal')}</p><h1>{t('常规', 'General')}</h1></header><section className="settings-card">
+        <div className="settings-row"><span><strong>{t('界面语言', 'Interface language')}</strong><small>{preferences.languagePreference === 'SYSTEM' ? t(`跟随 Windows 显示语言；当前为${systemUiLocale === 'zh-CN' ? '简体中文' : ' English'}。`, `Uses the Windows display language; currently ${systemUiLocale === 'zh-CN' ? 'Simplified Chinese' : 'English'}.`) : t('更改后立即生效，不需要重启。', 'Changes apply immediately without restarting.')}</small></span><SelectMenu value={preferences.languagePreference} onChange={(value) => update({ languagePreference: value as UiLanguagePreference })} ariaLabel={t('界面语言', 'Interface language')} testId="ui-language" options={languageOptions} /></div>
+        <div className="settings-row"><span><strong>{t('默认工作面', 'Default workspace')}</strong><small>{t('选择启动 Fielora 时显示的主要工作面。', 'Choose the primary workspace shown when Fielora starts.')}</small></span><SelectMenu value={preferences.startupDestination === 'NOW' ? 'NOW' : 'PROJECTS'} onChange={(value) => update({ startupDestination: value as StartupDestination })} ariaLabel={t('默认工作面', 'Default workspace')} testId="startup-destination" options={[{ value: 'PROJECTS', label: t('项目', 'Projects') }, { value: 'NOW', label: t('现在', 'Now') }]} /></div>
+      </section></div>}
       {category === 'BROWSER' && <div className="settings-section" data-testid="settings-browser"><header><p>浏览器</p><h1>浏览器设置</h1></header><section className="settings-card"><div className="settings-row"><span><strong>启动时恢复浏览器</strong><small>启动 Fielora 时恢复上次打开的浏览页面。</small></span><SettingsToggle value={preferences.startupDestination === 'BROWSE'} onChange={(value) => update({ startupDestination: value ? 'BROWSE' : 'PROJECTS' })} label="启动时恢复浏览器" testId="browser-startup-toggle" /></div><div className="settings-row"><span><strong>搜索引擎</strong></span><em className="settings-readonly-value">Google</em></div><div className="settings-row"><span><strong>浏览数据</strong><small>Cookie 和网站登录状态仅保留在此设备，不会包含在 Fielora 迁移备份中。</small></span><em className="settings-readonly-value">仅此设备</em></div></section></div>}
       {category === 'APPEARANCE' && <AppearanceSettings appearance={preferences.appearance} onChange={(appearance) => onChange({ ...preferences, appearance })} />}
       {category === 'MODELS' && <div className="settings-section" data-testid="settings-models">

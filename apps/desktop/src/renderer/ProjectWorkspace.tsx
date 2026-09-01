@@ -64,6 +64,8 @@ const PROJECT_WORKSPACE_MIN_WIDTH = 360;
 const CONVERSATION_MIN_WIDTH = 340;
 const WORKSPACE_RESIZER_WIDTH = 4;
 const NAVIGATION_RESIZER_WIDTH = 4;
+const PROJECT_WORKSPACE_COLLAPSE_THRESHOLD = 176;
+const PROJECT_WORKSPACE_RESTORE_THRESHOLD = 236;
 
 interface ReviewDraft {
   relativePath: string;
@@ -87,7 +89,8 @@ interface ActiveAgent {
 }
 
 interface QueuedFollowUp {
-  messageId: string;
+  id: string;
+  messageId: string | null;
   content: string;
   afterRunId: string;
   selectedFilePath: string | null;
@@ -429,10 +432,23 @@ function readQueuedFollowUps(conversationId: string): QueuedFollowUp[] {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(queuedFollowUpKey(conversationId)) ?? '[]') as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is QueuedFollowUp => Boolean(item && typeof item === 'object'
-      && typeof (item as QueuedFollowUp).messageId === 'string'
-      && typeof (item as QueuedFollowUp).content === 'string'
-      && typeof (item as QueuedFollowUp).afterRunId === 'string'));
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const candidate = item as Partial<QueuedFollowUp>;
+      if (typeof candidate.content !== 'string' || typeof candidate.afterRunId !== 'string') return [];
+      const legacyMessageId = typeof candidate.messageId === 'string' ? candidate.messageId : null;
+      const id = typeof candidate.id === 'string' ? candidate.id : legacyMessageId;
+      if (!id) return [];
+      return [{
+        id,
+        messageId: legacyMessageId,
+        content: candidate.content,
+        afterRunId: candidate.afterRunId,
+        selectedFilePath: typeof candidate.selectedFilePath === 'string' ? candidate.selectedFilePath : null,
+        permission: candidate.permission === 'READ_ONLY' || candidate.permission === 'FULL_CONTROL' ? candidate.permission : 'REVIEW_CHANGES',
+        createdAt: typeof candidate.createdAt === 'number' ? candidate.createdAt : Date.now(),
+      } satisfies QueuedFollowUp];
+    });
   } catch { return []; }
 }
 
@@ -741,6 +757,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const [atLatestAnswer, setAtLatestAnswer] = useState(true);
   const [hasUnseenActivity, setHasUnseenActivity] = useState(false);
   const [queuedFollowUps, setQueuedFollowUps] = useState<QueuedFollowUp[]>([]);
+  const [queuedFollowUpMenuId, setQueuedFollowUpMenuId] = useState('');
   const [agentReviewPath, setAgentReviewPath] = useState('');
   const [historicalReview, setHistoricalReview] = useState<HistoricalReviewSelection | null>(null);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
@@ -754,6 +771,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   });
   const workspacePreferredWidthRef = useRef(workspaceWidth);
   const workspaceDragGeometryRef = useRef<{ right: number; maximum: number } | null>(null);
+  const workspaceCollapsedDuringDragRef = useRef(false);
   const activeAgentRef = useRef<ActiveAgent | null>(null);
   const agentRunIdRef = useRef('');
   const agentEventsRef = useRef<AgentEventView[]>([]);
@@ -805,6 +823,16 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
 
   useEffect(() => { dockTabsRef.current = dockTabs; }, [dockTabs]);
   useEffect(() => { artifactSessionsRef.current = artifactSessions; }, [artifactSessions]);
+
+  useEffect(() => {
+    if (!queuedFollowUpMenuId) return undefined;
+    const close = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('.queued-follow-up-card')) setQueuedFollowUpMenuId('');
+    };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [queuedFollowUpMenuId]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('fielora:terminal-state', { detail: { open: bottomTerminalOpen, height: bottomTerminalHeight } }));
@@ -969,6 +997,26 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     workspacePreferredWidthRef.current = preferred;
     setWorkspaceWidth(clampWorkspaceWidth(preferred));
     window.localStorage.setItem('fielora:project-workspace-width', String(Math.round(preferred)));
+  }
+
+  function resizeWorkspaceDuringDrag(clientX: number, commit: boolean) {
+    const geometry = workspaceDragGeometryRef.current;
+    if (!geometry) return;
+    const rawWidth = geometry.right - clientX;
+    if (!workspaceCollapsedDuringDragRef.current && rawWidth <= PROJECT_WORKSPACE_COLLAPSE_THRESHOLD) {
+      workspaceCollapsedDuringDragRef.current = true;
+      setWorkspaceOpen(false);
+      setDockFocused(false);
+      return;
+    }
+    if (workspaceCollapsedDuringDragRef.current) {
+      if (rawWidth < PROJECT_WORKSPACE_RESTORE_THRESHOLD) return;
+      workspaceCollapsedDuringDragRef.current = false;
+      setWorkspaceOpen(true);
+    }
+    const width = clampWorkspaceWidthTo(rawWidth, geometry.maximum);
+    layoutRef.current?.style.setProperty('--project-workspace-width', `${width}px`);
+    if (commit) updateWorkspaceWidth(width);
   }
 
   useEffect(() => {
@@ -1594,40 +1642,66 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       setError('运行中追加暂时只支持文字；附件仍保留在输入框中，可在当前任务结束后发送。');
       return;
     }
-    setBusy(true); setError('');
-    try {
-      const message = await window.fielora.conversation.createMessage({
-        conversation_id: conversation.id, role: 'USER', content: userText, status: 'COMPLETED',
-        provider_config_id: null, model_id: null, invocation_id: null, references: [],
-      });
-      const queued: QueuedFollowUp = {
-        messageId: message.id,
-        content: userText,
-        afterRunId: active.runId,
-        selectedFilePath: selectedFile?.relative_path ?? null,
-        permission,
-        createdAt: Date.now(),
-      };
-      setQueuedFollowUps((current) => {
-        const next = [...current, queued];
-        persistQueuedFollowUps(conversation.id, next);
-        return next;
-      });
-      setPrompt('');
-      await refreshMessages(conversation.id);
-      scrollToLatestAnswer();
-    } catch (reason) { setError(reasonMessage(reason)); }
-    finally { setBusy(false); }
+    const queued: QueuedFollowUp = {
+      id: crypto.randomUUID(),
+      messageId: null,
+      content: userText,
+      afterRunId: active.runId,
+      selectedFilePath: selectedFile?.relative_path ?? null,
+      permission,
+      createdAt: Date.now(),
+    };
+    setQueuedFollowUps((current) => {
+      const next = [...current, queued];
+      persistQueuedFollowUps(conversation.id, next);
+      return next;
+    });
+    setPrompt('');
+    scrollToLatestAnswer();
+  }
+
+  function removeQueuedFollowUp(id: string) {
+    if (!conversation) return;
+    setQueuedFollowUpMenuId('');
+    setQueuedFollowUps((current) => {
+      const next = current.filter((item) => item.id !== id);
+      persistQueuedFollowUps(conversation.id, next);
+      return next;
+    });
+  }
+
+  function editQueuedFollowUp(item: QueuedFollowUp) {
+    if (item.messageId) {
+      setError('这条追加消息已经进入启动流程，暂时不能再编辑。');
+      return;
+    }
+    setPrompt(item.content);
+    removeQueuedFollowUp(item.id);
+    window.requestAnimationFrame(() => composerRef.current?.focus());
   }
 
   async function startQueuedFollowUp(item: QueuedFollowUp) {
     if (!project || !conversation || activeAgentRef.current || !agentRunIsTerminal) return;
     const provider = effectiveConversationProvider;
     if (!provider || !provider.credential_present) throw new Error('追加任务对应的模型服务当前不可用，请在设置中检查。');
+    let messageId = item.messageId;
+    if (!messageId) {
+      const message = await window.fielora.conversation.createMessage({
+        conversation_id: conversation.id, role: 'USER', content: item.content, status: 'COMPLETED',
+        provider_config_id: null, model_id: null, invocation_id: null, references: [],
+      });
+      messageId = message.id;
+      setQueuedFollowUps((current) => {
+        const next = current.map((queued) => queued.id === item.id ? { ...queued, messageId } : queued);
+        persistQueuedFollowUps(conversation.id, next);
+        return next;
+      });
+      await refreshMessages(conversation.id);
+    }
     const selectedHint = item.selectedFilePath ? `\n\nThe currently selected project file is: ${item.selectedFilePath}` : '';
     const started = await window.fielora.agent.start({
       field_id: project.field_id, conversation_id: conversation.id,
-      user_message_id: item.messageId,
+      user_message_id: messageId,
       provider_config_id: provider.id, model_id: provider.default_model,
       task: `${item.content}${selectedHint}`.slice(0, 32_000), permission: item.permission, max_steps: 24,
       attachments: [],
@@ -1639,7 +1713,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     setAgentRun(started); setAgentEvents([]); setAgentTools([]); setAgentFileRevisions([]); setMcpRuntime(null); setStreamingOutput(''); setStreamingStep(0);
     scrollToLatestAnswer();
     setQueuedFollowUps((current) => {
-      const next = current.filter((queued) => queued.messageId !== item.messageId);
+      const next = current.filter((queued) => queued.id !== item.id);
       persistQueuedFollowUps(conversation.id, next);
       return next;
     });
@@ -2374,8 +2448,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
               }
               const persistedImages = message.role === 'USER' ? messageAttachments(message.id) : [];
               const queuedFollowUp = message.role === 'USER' ? queuedFollowUps.find((item) => item.messageId === message.id) ?? null : null;
+              if (queuedFollowUp) return null;
               return <Fragment key={message.id}>
-                <article data-message-id={message.id} className={`message ${message.role.toLowerCase()}${persistedImages.length ? ' has-image-attachments' : ''}`} data-testid={`message-${message.role.toLowerCase()}`}>{persistedImages.length > 0 && <ConversationImageGallery attachments={persistedImages} onOpen={openAttachmentInDock} onContextMenu={openImageContextMenu}/>}<div className="message-content"><MarkdownMessage content={message.content} references={message.references} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>{queuedFollowUp && <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={queuedFollowUp.afterRunId}><span aria-hidden="true"/>将在当前任务完成后继续处理</p>}<footer className={`message-actions ${copiedMessageId === message.id ? 'copy-confirmed' : ''}`}><time dateTime={new Date(message.created_at).toISOString()} title={new Date(message.created_at).toLocaleString('zh-CN')}>{messageTimeLabel(message.created_at)}</time>{message.status !== 'COMPLETED' && <span className="message-status">{messageStatusLabel(message.status)}</span>}<button type="button" className={copiedMessageId === message.id ? 'copied' : ''} aria-label={copiedMessageId === message.id ? '消息已复制' : '复制消息'} title={copiedMessageId === message.id ? '已复制' : '复制'} onClick={() => void copyMessage(message)} data-testid="message-copy"><AppIcon name={copiedMessageId === message.id ? 'check' : 'copy'}/>{copiedMessageId === message.id && <span role="status" aria-live="polite">已复制</span>}</button></footer></article>
+                <article data-message-id={message.id} className={`message ${message.role.toLowerCase()}${persistedImages.length ? ' has-image-attachments' : ''}`} data-testid={`message-${message.role.toLowerCase()}`}>{persistedImages.length > 0 && <ConversationImageGallery attachments={persistedImages} onOpen={openAttachmentInDock} onContextMenu={openImageContextMenu}/>}<div className="message-content"><MarkdownMessage content={message.content} references={message.references} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div><footer className={`message-actions ${copiedMessageId === message.id ? 'copy-confirmed' : ''}`}><time dateTime={new Date(message.created_at).toISOString()} title={new Date(message.created_at).toLocaleString('zh-CN')}>{messageTimeLabel(message.created_at)}</time>{message.status !== 'COMPLETED' && <span className="message-status">{messageStatusLabel(message.status)}</span>}<button type="button" className={copiedMessageId === message.id ? 'copied' : ''} aria-label={copiedMessageId === message.id ? '消息已复制' : '复制消息'} title={copiedMessageId === message.id ? '已复制' : '复制'} onClick={() => void copyMessage(message)} data-testid="message-copy"><AppIcon name={copiedMessageId === message.id ? 'check' : 'copy'}/>{copiedMessageId === message.id && <span role="status" aria-live="polite">已复制</span>}</button></footer></article>
                 {agentRun && agentTurn?.userMessageId === message.id && currentAgentTurn}
               </Fragment>;
             })}
@@ -2386,6 +2461,21 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
               ? <span className="latest-answer-ellipsis" aria-hidden="true"><i/><i/><i/></span>
               : <AppIcon name="chevronDown"/>}
           </button>}
+          {queuedFollowUps.length > 0 && <section className="queued-follow-up-stack" aria-label="排队中的追加消息" data-testid="queued-follow-up-stack">
+            {queuedFollowUps.map((item, index) => <article className="queued-follow-up-card" key={item.id} data-testid="queued-follow-up-card">
+              <div className="queued-follow-up-main"><span className="queued-follow-up-index" aria-hidden="true">{index + 1}</span><strong title={item.content}>{item.content}</strong></div>
+              <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={item.afterRunId}><span aria-hidden="true"/>将在当前任务完成后继续处理</p>
+              <div className="queued-follow-up-actions">
+                <button type="button" className="queued-follow-up-adjust" onClick={() => editQueuedFollowUp(item)}><AppIcon name="forward"/><span>调整方向</span></button>
+                <button type="button" aria-label="删除排队消息" title="删除排队消息" onClick={() => removeQueuedFollowUp(item.id)}><AppIcon name="delete"/></button>
+                <button type="button" className={queuedFollowUpMenuId === item.id ? 'active' : ''} aria-label="更多排队操作" aria-expanded={queuedFollowUpMenuId === item.id} onClick={() => setQueuedFollowUpMenuId((current) => current === item.id ? '' : item.id)}><AppIcon name="more"/></button>
+              </div>
+              {queuedFollowUpMenuId === item.id && <div className="queued-follow-up-menu" role="menu" data-surface="overlay">
+                <button type="button" role="menuitem" onClick={() => editQueuedFollowUp(item)}><AppIcon name="edit"/><span>编辑消息</span></button>
+                <button type="button" role="menuitem" onClick={() => removeQueuedFollowUp(item.id)}><AppIcon name="close"/><span>关闭排队</span></button>
+              </div>}
+            </article>)}
+          </section>}
     <form className="conversation-composer" data-surface="floating" data-testid="conversation-composer" onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={handleComposerDrop} onSubmit={(event) => { event.preventDefault(); void send(prompt); }}>
             {composerAttachments.length > 0 && <div className="composer-attachments" data-testid="composer-attachments">
               {composerAttachments.filter((attachment) => attachment.kind === 'IMAGE').map((attachment) => <AttachmentThumbnail key={attachment.id} attachment={attachment} variant="composer" onOpen={openAttachmentInDock} onRemove={(id) => setAttachments((items) => items.filter((item) => item.id !== id))} onContextMenu={openImageContextMenu}/>)}
@@ -2427,13 +2517,10 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
 
       {project && <ResizableDivider label="调整文件或审阅区域宽度" value={workspaceWidth} min={PROJECT_WORKSPACE_MIN_WIDTH} max={workspaceMaximumWidth()} onResizeStart={() => {
         workspaceDragGeometryRef.current = captureWorkspaceDragGeometry();
-      }} onResize={(clientX) => {
-        const geometry = workspaceDragGeometryRef.current;
-        if (geometry) layoutRef.current?.style.setProperty('--project-workspace-width', `${clampWorkspaceWidthTo(geometry.right - clientX, geometry.maximum)}px`);
-      }} onResizeEnd={(clientX) => {
-        const geometry = workspaceDragGeometryRef.current ?? captureWorkspaceDragGeometry();
+        workspaceCollapsedDuringDragRef.current = !workspaceOpen;
+      }} onResize={(clientX) => resizeWorkspaceDuringDrag(clientX, false)} onResizeEnd={(clientX) => {
+        resizeWorkspaceDuringDrag(clientX, true);
         workspaceDragGeometryRef.current = null;
-        if (geometry) updateWorkspaceWidth(clampWorkspaceWidthTo(geometry.right - clientX, geometry.maximum));
       }} onKeyboardResize={(delta) => updateWorkspaceWidth(workspacePreferredWidthRef.current - delta)} testId="project-workspace-resizer" className="project-workspace-resizer" />}
 
       {project && showLegacyWorkspace && <section className="legacy-workspace-panel" aria-hidden="true">

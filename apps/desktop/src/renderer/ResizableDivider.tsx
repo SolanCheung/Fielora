@@ -19,8 +19,10 @@ export function ResizableDivider({ label, value, min, max, onResizeStart, onResi
   const animationRef = useRef<number | null>(null);
   const pendingPositionRef = useRef<number | null>(null);
   const lastPositionRef = useRef<number | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => () => {
+    dragCleanupRef.current?.();
     if (animationRef.current !== null) window.cancelAnimationFrame(animationRef.current);
     delete document.documentElement.dataset.resizing;
   }, []);
@@ -39,33 +41,46 @@ export function ResizableDivider({ label, value, min, max, onResizeStart, onResi
 
   function pointerDown(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    dragCleanupRef.current?.();
+    const target = event.currentTarget;
+    const pointerId = event.pointerId;
+    target.setPointerCapture(pointerId);
     const position = orientation === 'vertical' ? event.clientX : event.clientY;
     lastPositionRef.current = position;
     onResizeStart?.(position);
     document.documentElement.dataset.resizing = orientation;
     setDragging(true);
-  }
-
-  function pointerMove(event: PointerEvent<HTMLDivElement>) {
-    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    scheduleResize(orientation === 'vertical' ? event.clientX : event.clientY);
-  }
-
-  function pointerUp(event: PointerEvent<HTMLDivElement>) {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    if (pendingPositionRef.current !== null) {
-      const pending = pendingPositionRef.current;
-      pendingPositionRef.current = null;
-      if (animationRef.current !== null) window.cancelAnimationFrame(animationRef.current);
-      animationRef.current = null;
-      onResize(pending);
-    }
-    if (lastPositionRef.current !== null) onResizeEnd?.(lastPositionRef.current);
-    lastPositionRef.current = null;
-    delete document.documentElement.dataset.resizing;
-    setDragging(false);
-    event.currentTarget.blur();
+    const move = (next: globalThis.PointerEvent) => {
+      if (next.pointerId !== pointerId) return;
+      scheduleResize(orientation === 'vertical' ? next.clientX : next.clientY);
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      dragCleanupRef.current = null;
+    };
+    const finish = (next: globalThis.PointerEvent) => {
+      if (next.pointerId !== pointerId) return;
+      cleanup();
+      if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
+      if (pendingPositionRef.current !== null) {
+        const pending = pendingPositionRef.current;
+        pendingPositionRef.current = null;
+        if (animationRef.current !== null) window.cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+        onResize(pending);
+      }
+      if (lastPositionRef.current !== null) onResizeEnd?.(lastPositionRef.current);
+      lastPositionRef.current = null;
+      delete document.documentElement.dataset.resizing;
+      setDragging(false);
+      target.blur();
+    };
+    dragCleanupRef.current = cleanup;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
   }
 
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -86,9 +101,6 @@ export function ResizableDivider({ label, value, min, max, onResizeStart, onResi
     aria-valuenow={Math.round(value)}
     tabIndex={0}
     onPointerDown={pointerDown}
-    onPointerMove={pointerMove}
-    onPointerUp={pointerUp}
-    onPointerCancel={pointerUp}
     onKeyDown={keyDown}
     data-testid={testId}
   ><span /></div>;

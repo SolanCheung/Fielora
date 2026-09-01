@@ -50,10 +50,10 @@ test('selected project title toggles its conversation branch and hides the absol
   assert.match(appearance, /\.conversation-section \{[^}]*border-left:\s*0/);
 });
 
-test('system navigation labels are consistently Chinese', () => {
-  assert.match(navigation, /data-testid="new-conversation"[^>]*>[\s\S]*?<span>新聊天<\/span>/);
-  assert.match(navigation, /data-testid="now-nav"[^>]*>[\s\S]*?<span>已安排<\/span>/);
-  assert.match(navigation, /data-testid="library-nav"[^>]*>[\s\S]*?<span>资料库<\/span>/);
+test('system navigation labels support Simplified Chinese and English from one locale boundary', () => {
+  assert.match(navigation, /data-testid="new-conversation"[^>]*>[\s\S]*?<span>\{t\('新聊天', 'New chat'\)\}<\/span>/);
+  assert.match(navigation, /data-testid="now-nav"[^>]*>[\s\S]*?<span>\{t\('已安排', 'Scheduled'\)\}<\/span>/);
+  assert.match(navigation, /data-testid="library-nav"[^>]*>[\s\S]*?<span>\{t\('资料库', 'Library'\)\}<\/span>/);
   assert.doesNotMatch(navigation, /data-testid="(?:fields|inbox|browse)-nav"/);
   assert.doesNotMatch(navigation, /<span>(?:Now|Fields|Inbox|Browser)<\/span>/);
 });

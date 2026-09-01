@@ -96,7 +96,7 @@ try {
   const cdp = await connect();
   await wait(cdp, `document.querySelector('[data-testid="project-workspace"]') && window.fieloraTest`);
   assert.ok(Math.abs(await cdp.eval('window.innerWidth') - 1180) <= 2, 'the initial BrowserWindow width must remain 1180px');
-  assert.ok(Math.abs(await cdp.eval('window.innerHeight') - 620) <= 2, 'the initial BrowserWindow height must equal its 620px minimum');
+  assert.ok(Math.abs(await cdp.eval('window.innerHeight') - 560) <= 2, 'the initial BrowserWindow height must equal its compact 560px minimum');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   const project = await cdp.eval(`window.fieloraTest.createProject({title:'Shell Routing 验收',goal:'Focused shell routing verification',root_path:${JSON.stringify(projectRoot)}})`);
   const conversation = await cdp.eval(`window.fielora.conversation.create({field_id:${JSON.stringify(project.field_id)},title:'自然对话工作面',provider_config_id:null,model_id:null})`);
