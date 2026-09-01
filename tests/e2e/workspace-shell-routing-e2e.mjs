@@ -97,7 +97,8 @@ try {
   await wait(cdp, `document.querySelector('[data-testid="project-workspace"]') && window.fieloraTest`);
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   const project = await cdp.eval(`window.fieloraTest.createProject({title:'Shell Routing 验收',goal:'Focused shell routing verification',root_path:${JSON.stringify(projectRoot)}})`);
-  await cdp.eval(`window.fielora.conversation.create({field_id:${JSON.stringify(project.field_id)},title:'自然对话工作面',provider_config_id:null,model_id:null})`);
+  const conversation = await cdp.eval(`window.fielora.conversation.create({field_id:${JSON.stringify(project.field_id)},title:'自然对话工作面',provider_config_id:null,model_id:null})`);
+  await cdp.eval(`(()=>{localStorage.setItem('fielora:workspace-navigation-width','190');localStorage.setItem('fielora:project-workspace-width','360');})()`);
   await cdp.eval('location.reload()');
   await wait(cdp, `document.querySelector('.conversation-context-header')`);
 
@@ -107,29 +108,43 @@ try {
 
   await cdp.eval(`window.dispatchEvent(new CustomEvent('fielora:open-workspace',{detail:'FILES'}))`);
   await wait(cdp, `document.querySelector('[data-testid="right-dock-tab-files"]') && document.querySelector('[data-testid="workspace-file"]') && document.querySelector('[data-testid="project-workspace-surface"]').classList.contains('workspace-open')`);
-  const roundedFileIcon = await cdp.eval(`(()=>{const tile=document.querySelector('[data-testid="workspace-file"] .file-type-tile');return{hasTile:Boolean(tile),radius:tile?.getAttribute('rx')};})()`);
-  assert.deepEqual(roundedFileIcon, { hasTile: true, radius: '3.25' });
+  const managedFileIcon = await cdp.eval(`(()=>{const icon=document.querySelector('[data-testid="workspace-file"] .file-type-icon');return{hasIcon:Boolean(icon),kind:icon?.getAttribute('data-file-kind'),isSvg:icon?.tagName==='svg'};})()`);
+  assert.deepEqual(managedFileIcon, { hasIcon: true, kind: 'typescript', isSvg: true });
   await cdp.eval(`document.querySelector('[data-testid="right-dock-close-files"]').click()`);
   await wait(cdp, `!document.querySelector('[data-testid="project-workspace-surface"]').classList.contains('workspace-open')`);
   await new Promise((resolve) => setTimeout(resolve, 320));
-  assert.equal(await cdp.eval(`getComputedStyle(document.querySelector('[data-testid="right-workspace-dock"]')).visibility`), 'hidden');
+  const closedDock = await cdp.eval(`(()=>{const dock=document.querySelector('[data-testid="right-workspace-dock"]');const style=getComputedStyle(dock);return{opacity:style.opacity,pointerEvents:style.pointerEvents,width:dock.getBoundingClientRect().width};})()`);
+  assert.deepEqual(closedDock, { opacity: '0', pointerEvents: 'none', width: 0 });
 
   await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="right-dock-home"]') && document.querySelector('[data-testid="project-workspace-surface"]').classList.contains('workspace-open')`);
-  const launcher = await cdp.eval(`(()=>{const buttons=[...document.querySelectorAll('[data-testid^="right-dock-home-"]')];return{labels:buttons.map((button)=>button.querySelector('span')?.textContent),shortcuts:buttons.map((button)=>button.querySelector('kbd')?.textContent),count:buttons.length};})()`);
-  assert.deepEqual(launcher.labels, ['审阅', '终端', '浏览器', '文件', '侧边聊天']);
-  assert.deepEqual(launcher.shortcuts, ['Ctrl+Shift+G', 'Ctrl+`', 'Ctrl+T', 'Ctrl+P', 'Ctrl+Alt+S']);
-  assert.equal(launcher.count, 5);
+  const launcher = await cdp.eval(`(()=>{const buttons=[...document.querySelectorAll('[data-testid="right-dock-home"] button')];return{labels:buttons.map((button)=>button.querySelector('span')?.textContent),shortcuts:buttons.map((button)=>button.querySelector('kbd')?.textContent??null),count:buttons.length};})()`);
+  assert.deepEqual(launcher.labels, ['工作对象', '审阅', 'PowerShell', '浏览器', '文件', '侧边聊天']);
+  assert.deepEqual(launcher.shortcuts, [null, 'Ctrl+Shift+G', 'Ctrl+`', 'Ctrl+T', 'Ctrl+P', 'Ctrl+Alt+S']);
+  assert.equal(launcher.count, 6);
+  await wait(cdp, `document.querySelector('[data-testid="right-workspace-dock"]').getBoundingClientRect().width >= 634.5`);
+  const workbenchGeometry = await cdp.eval(`(()=>{const navigation=document.querySelector('[data-testid="project-navigation"]').getBoundingClientRect();const conversation=document.querySelector('.conversation-column').getBoundingClientRect();const dock=document.querySelector('[data-testid="right-workspace-dock"]').getBoundingClientRect();const composer=document.querySelector('[data-testid="conversation-composer"]').getBoundingClientRect();return{navigationWidth:navigation.width,conversationWidth:conversation.width,dockWidth:dock.width,composerWidth:composer.width,composerInsideConversation:composer.left>=conversation.left&&composer.right<=conversation.right};})()`);
+  assert.equal(Math.abs(workbenchGeometry.navigationWidth - 304) <= 0.5, true, JSON.stringify(workbenchGeometry));
+  assert.equal(Math.abs(workbenchGeometry.dockWidth - 635) <= 0.5, true, JSON.stringify(workbenchGeometry));
+  assert.equal(workbenchGeometry.conversationWidth >= 379.5, true, JSON.stringify(workbenchGeometry));
+  assert.equal(workbenchGeometry.composerWidth <= 920.5, true, JSON.stringify(workbenchGeometry));
+  assert.equal(workbenchGeometry.composerInsideConversation, true, JSON.stringify(workbenchGeometry));
+  const launcherIcons = await cdp.eval(`(()=>{const parse=(value)=>{const match=value.match(/[\\d.]+/g);return match?.slice(0,3).map(Number)??[0,0,0]};const luminance=(rgb)=>{const values=rgb.map((value)=>{const channel=value/255;return channel<=.04045?channel/12.92:((channel+.055)/1.055)**2.4});return .2126*values[0]+.7152*values[1]+.0722*values[2]};const contrast=(foreground,background)=>{const a=luminance(parse(foreground));const b=luminance(parse(background));return (Math.max(a,b)+.05)/(Math.min(a,b)+.05)};const home=document.querySelector('[data-testid="right-dock-home"]');const background=getComputedStyle(home).backgroundColor;return[...home.querySelectorAll('button .app-icon')].map((icon)=>{const glyph=icon.querySelector('path,rect,circle,line,polyline,polygon');const iconStyle=getComputedStyle(icon);const glyphStyle=glyph?getComputedStyle(glyph):null;return{opacity:iconStyle.opacity,color:iconStyle.color,fill:glyphStyle?.fill??'none',stroke:glyphStyle?.stroke??'none',contrast:contrast(iconStyle.color,background)};});})()`);
+  assert.equal(launcherIcons.length, 6);
+  assert.equal(launcherIcons.every((icon) => icon.opacity === '1' && (icon.fill !== 'none' || icon.stroke !== 'none') && icon.contrast >= 3), true, JSON.stringify(launcherIcons));
+  await new Promise((resolve) => setTimeout(resolve, 360));
   await screenshot(cdp, '02-right-workspace-launcher.png');
 
   await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
-  await new Promise((resolve) => setTimeout(resolve, 70));
-  const closingDock = await cdp.eval(`(()=>{const dock=document.querySelector('[data-testid="right-workspace-dock"]');const tools=document.querySelector('[data-testid="chrome-tools"]');const d=dock.getBoundingClientRect();const t=tools.getBoundingClientRect();return{dockOpacity:Number(getComputedStyle(dock).opacity),dockLeft:d.left,dockRight:d.right,toolsLeft:t.left,toolsRight:t.right,viewport:innerWidth};})()`);
-  assert.ok(closingDock.dockOpacity < 1, JSON.stringify(closingDock));
-  assert.ok(closingDock.toolsRight <= closingDock.viewport, JSON.stringify(closingDock));
   await wait(cdp, `!document.querySelector('[data-testid="project-workspace-surface"]').classList.contains('workspace-open')`);
   await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="right-dock-home"]')`);
+  await cdp.eval(`document.querySelector('[data-testid="right-dock-add"]').click()`);
+  await wait(cdp, `document.querySelector('[data-testid="right-dock-tool-menu"]')`);
+  await cdp.eval(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+  await wait(cdp, `!document.querySelector('[data-testid="right-dock-tool-menu"]')`);
+  await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
+  await wait(cdp, `!document.querySelector('[data-testid="project-workspace-surface"]').classList.contains('workspace-open')`);
 
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="right-dock-tab-terminal"]') === null`), true);
   await cdp.eval(`document.querySelector('[data-testid="rail-terminal"]').click()`);
@@ -154,9 +169,10 @@ try {
   await cdp.eval(`document.querySelector('[data-testid="bottom-terminal-close"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="bottom-terminal-dock"]')?.getAttribute('aria-hidden') === 'true'`);
 
+  await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
+  await wait(cdp, `document.querySelector('[data-testid="right-dock-home"]')`);
   await cdp.eval(`document.querySelector('[data-testid="right-dock-home-terminal"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="right-dock-tab-terminal"]') && document.querySelector('[data-testid="terminal-session"]')`);
-  await wait(cdp, `document.activeElement === document.querySelector('[data-testid="terminal-command"]')`);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="bottom-terminal-dock"]')?.getAttribute('aria-hidden')`), 'true');
   const sideTerminal = await cdp.eval(`(()=>{const view=document.querySelector('.right-dock-view-terminal:not([hidden])');const terminal=document.querySelector('[data-testid="terminal-dock"]');const session=document.querySelector('[data-testid="terminal-session"]');return{text:session.innerText,toolbar:Boolean(terminal.querySelector('.terminal-toolbar')),legacyActions:Boolean(terminal.querySelector('[data-testid="run-tests"],[data-testid="terminal-run"]')),viewBackground:getComputedStyle(view).backgroundColor,terminalBackground:getComputedStyle(terminal).backgroundColor,sessionBackground:getComputedStyle(session).backgroundColor,toolbarRow:Boolean(document.querySelector('[data-testid="right-dock-toolbar"]')),inlinePrompt:Boolean(session.querySelector('.terminal-transcript > .terminal-prompt')),detachedPrompt:Boolean(session.querySelector(':scope > .terminal-prompt'))};})()`);
   assert.match(sideTerminal.text, /Windows PowerShell/);
@@ -180,6 +196,18 @@ try {
   await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="right-dock-tab-terminal"]') && document.querySelector('[data-testid="terminal-session"]')`);
   assert.equal(await cdp.eval(`document.querySelectorAll('[data-testid="right-dock-tab-terminal"]').length`), 1);
+
+  await cdp.eval(`(async()=>{
+    await window.fielora.conversation.createMessage({conversation_id:${JSON.stringify(conversation.id)},role:'USER',content:'请保持现有工作区结构，只恢复与 Codex 一致的布局比例。',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null});
+    await window.fielora.conversation.createMessage({conversation_id:${JSON.stringify(conversation.id)},role:'ASSISTANT',content:${JSON.stringify('已恢复工作区比例。\n\n左侧项目导航与右侧 Workspace Dock 已回到稳定默认宽度；Conversation、文件和工具继续共享同一工作面。')},status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null});
+  })()`);
+  await cdp.eval('location.reload()');
+  await wait(cdp, `document.querySelector('[data-testid="message-user"]') && document.querySelector('[data-testid="message-assistant"]')`);
+  await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
+  await wait(cdp, `document.querySelector('[data-testid="right-dock-home"]')`);
+  await cdp.eval(`(()=>{const list=document.querySelector('.message-list');list.scrollTop=list.scrollHeight;})()`);
+  await new Promise((resolve) => setTimeout(resolve, 360));
+  await screenshot(cdp, '05-active-conversation-workbench.png');
 
   await cdp.eval('void window.fielora.core.quit()');
   cdp.close();

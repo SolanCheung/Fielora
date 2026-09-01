@@ -24,6 +24,13 @@ const bridge: FieloraBridge = {
     createMessage: (request) => ipcRenderer.invoke(channels.conversationMessageCreate, request),
     listMessages: (request) => ipcRenderer.invoke(channels.conversationMessageList, request),
   },
+  scheduledTask: {
+    list: () => ipcRenderer.invoke(channels.scheduledTaskList),
+    create: (request) => ipcRenderer.invoke(channels.scheduledTaskCreate, request),
+    update: (request) => ipcRenderer.invoke(channels.scheduledTaskUpdate, request),
+    delete: (request) => ipcRenderer.invoke(channels.scheduledTaskDelete, request),
+    runNow: (request) => ipcRenderer.invoke(channels.scheduledTaskRunNow, request),
+  },
   artifact: {
     list: (request) => ipcRenderer.invoke(channels.artifactList, request),
     read: (request) => ipcRenderer.invoke(channels.artifactRead, request),

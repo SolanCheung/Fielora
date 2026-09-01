@@ -38,6 +38,7 @@ test('agent conversation typography stays on the shared readable scale', () => {
   const rendererRoot = import.meta.dirname;
   const tokens = readFileSync(path.join(rendererRoot, 'styles/tokens.css'), 'utf8');
   const productionStyles = readFileSync(path.join(rendererRoot, 'styles.css'), 'utf8');
+  const typographyStyles = readFileSync(path.join(rendererRoot, 'styles/typography.css'), 'utf8');
   const prototypeStyles = readFileSync(path.join(rendererRoot, 'styles/agentic-ux-prototype.css'), 'utf8');
   const productionComponent = [
     readFileSync(path.join(rendererRoot, 'ProjectWorkspace.tsx'), 'utf8'),
@@ -57,25 +58,22 @@ test('agent conversation typography stays on the shared readable scale', () => {
     '--fl-font-size-agent-title: calc(17px * var(--fl-ui-font-scale));',
     '--fl-font-size-agent-button: calc(13.5px * var(--fl-ui-font-scale));',
     '--fl-font-weight-regular: 400;',
-    '--fl-font-weight-medium: 550;',
-    '--fl-font-weight-semibold: 650;',
+    '--fl-font-weight-medium: 500;',
+    '--fl-font-weight-semibold: 600;',
     '--fl-line-height-agent-body: 1.7;',
   ]) assert.ok(tokens.includes(declaration), `missing typography token: ${declaration}`);
 
   assert.match(productionComponent, /agent-terminal-result/);
   assert.doesNotMatch(prototypeComponent, /prototype-speaker[^>]*>\s*Fielora\s*</);
   assert.match(productionStyles, /\.markdown-body\s*\{[^}]*font-size:\s*var\(--fl-font-size-agent-body\)[^}]*font-weight:\s*var\(--fl-font-weight-regular\)[^}]*line-height:\s*var\(--fl-line-height-agent-body\)/s);
-  assert.match(productionStyles, /\.agent-terminal-result h2\s*\{[^}]*font-size:\s*var\(--fl-font-size-agent-lead\)[^}]*font-weight:\s*var\(--fl-font-weight-result-title\)/s);
+  assert.match(productionStyles, /\.agent-terminal-result h2\s*\{[^}]*font-size:\s*var\(--fl-font-size-agent-title\)[^}]*font-weight:\s*var\(--fl-font-weight-result-title\)/s);
   assert.match(productionStyles, /\.message-list button, \.conversation-composer button\s*\{[^}]*font-size:\s*var\(--fl-font-size-agent-button\)[^}]*font-weight:\s*var\(--fl-font-weight-medium\)/s);
   assert.match(productionStyles, /\.human-review-raw\s*\{[^}]*font-family:\s*var\(--fl-font-agent-mono\)/s);
   assert.match(prototypeStyles, /\.prototype-assistant-turn\s*\{[^}]*font-size:\s*var\(--fl-font-size-agent-body\)[^}]*font-weight:\s*var\(--fl-font-weight-regular\)[^}]*line-height:\s*var\(--fl-line-height-agent-body\)/s);
   assert.match(prototypeStyles, /\.prototype-terminal-result h2\s*\{[^}]*font-size:\s*var\(--fl-font-size-agent-title\)[^}]*font-weight:\s*var\(--fl-font-weight-semibold\)/s);
 
-  const conversationStart = productionStyles.indexOf('.conversation-column { font-family:');
-  const conversationEnd = productionStyles.indexOf('@container (max-width: 560px)', conversationStart);
-  const conversationTypography = productionStyles.slice(conversationStart, conversationEnd);
-  assert.ok(conversationStart >= 0 && conversationEnd > conversationStart);
-  assert.doesNotMatch(conversationTypography, /font-weight:\s*(?:700|800)\b/);
-  assert.doesNotMatch(conversationTypography, /font-size:\s*\d+(?:\.\d+)?px/);
+  assert.match(typographyStyles, /:where\(\.conversation-column, \.settings-content, \.right-workspace-dock\) \{[^}]*font-family: var\(--fl-font-sans\)/s);
+  assert.doesNotMatch(typographyStyles, /font-weight:\s*(?:700|800)\b/);
+  assert.doesNotMatch(typographyStyles, /font-size:\s*\d+(?:\.\d+)?px/);
   assert.doesNotMatch([productionComponent, prototypeComponent].join('\n'), /fontFamily\s*:/);
 });

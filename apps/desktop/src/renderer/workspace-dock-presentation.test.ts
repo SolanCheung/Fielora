@@ -5,12 +5,17 @@ import test from 'node:test';
 
 const rendererRoot = import.meta.dirname;
 const workspace = readFileSync(path.join(rendererRoot, 'ProjectWorkspace.tsx'), 'utf8');
+const browser = readFileSync(path.join(rendererRoot, 'BrowseScreen.tsx'), 'utf8');
+const divider = readFileSync(path.join(rendererRoot, 'ResizableDivider.tsx'), 'utf8');
 const chrome = readFileSync(path.join(rendererRoot, 'DesktopChrome.tsx'), 'utf8');
 const dock = readFileSync(path.join(rendererRoot, 'RightWorkspaceDock.tsx'), 'utf8');
 const fileTree = readFileSync(path.join(rendererRoot, 'WorkspaceFileTree.tsx'), 'utf8');
+const fileTypeIcons = readFileSync(path.join(rendererRoot, 'ui', 'FileTypeIcon.tsx'), 'utf8');
 const media = readFileSync(path.join(rendererRoot, 'AttachmentMedia.tsx'), 'utf8');
 const styles = readFileSync(path.join(rendererRoot, 'styles.css'), 'utf8');
 const foundation = readFileSync(path.join(rendererRoot, 'styles', 'foundation.css'), 'utf8');
+const layout = readFileSync(path.join(rendererRoot, 'styles', 'layout.css'), 'utf8');
+const appearance = readFileSync(path.join(rendererRoot, 'styles', 'appearance.css'), 'utf8');
 const tokens = readFileSync(path.join(rendererRoot, 'styles', 'tokens.css'), 'utf8');
 
 test('conversation remains one natural work surface without a duplicate top tab strip', () => {
@@ -32,8 +37,31 @@ test('all project tools share one persistent right workspace dock with closable 
   assert.match(chrome, /emit\('fielora:toggle-terminal'\)/);
   assert.match(chrome, /emit\('fielora:open-workspace-launcher'\)/);
   assert.match(workspace, /showLauncher=\{workspaceOpen && dockTabs\.length === 0\}/);
+  assert.match(workspace, /tools=\{dockTools\}/);
   assert.match(dock, /data-testid="right-dock-home"/);
-  for (const id of ['review', 'terminal', 'browser', 'files', 'chat']) assert.match(workspace, new RegExp(`id: '${id}'`));
+  assert.match(dock, /data-testid="right-dock-tool-menu"/);
+  assert.doesNotMatch(dock, /WorkspaceObjectPicker|createPortal/);
+  for (const id of ['artifacts', 'review', 'terminal', 'browser', 'files', 'chat']) assert.match(workspace, new RegExp(`id: '${id}'`));
+});
+
+test('right workspace dock keeps a dynamic resize range and full-width tool views', () => {
+  assert.match(workspace, /const PROJECT_WORKSPACE_DEFAULT_WIDTH = 635;/);
+  assert.match(workspace, /const PROJECT_WORKSPACE_MIN_WIDTH = 360;/);
+  assert.match(workspace, /const CONVERSATION_MIN_WIDTH = 340;/);
+  assert.match(workspace, /availableWorkArea - CONVERSATION_MIN_WIDTH - WORKSPACE_RESIZER_WIDTH/);
+  assert.match(workspace, /workspacePreferredWidthRef/);
+  assert.match(workspace, /new ResizeObserver\(sync\)/);
+  assert.match(workspace, /workspaceDragGeometryRef/);
+  assert.match(workspace, /onResizeStart=\{\(\) =>/);
+  assert.match(workspace, /captureWorkspaceDragGeometry\(\)/);
+  assert.match(workspace, /onResizeEnd=\{\(clientX\) =>/);
+  assert.match(divider, /onResizeStart\?\.\(position\)/);
+  assert.match(browser, /showInFlight/);
+  assert.match(browser, /queuedBounds/);
+  assert.doesNotMatch(browser, /browser\.show\(bounds\)\.then\(\(state\)/);
+  assert.doesNotMatch(workspace, /PROJECT_WORKSPACE_MAX_WIDTH/);
+  assert.match(layout, /\.right-workspace-dock,[\s\S]*?\.right-dock-view-browser \.browse-panel,[\s\S]*?\.right-terminal-view \.terminal-session \{[\s\S]*?width: 100%;[\s\S]*?max-width: none;/);
+  assert.match(layout, /\.project-layout\.workspace-open \.project-workspace-resizer span \{[\s\S]*?opacity: 1;[\s\S]*?14%/);
 });
 
 test('a project can exist without a conversation and exposes a finite creation entry', () => {
@@ -46,11 +74,14 @@ test('a project can exist without a conversation and exposes a finite creation e
   assert.doesNotMatch(addProject, /createConversationFor/);
 });
 
-test('project controls relocate by ownership and expose real open and environment actions', () => {
+test('project controls keep environment in the conversation header and file opening in resource toolbars', () => {
   assert.match(chrome, /className="project-context-controls"/);
   assert.match(chrome, /projectDockOpen\) && <ToolbarAction/);
   assert.match(chrome, /fielora:toggle-workspace-focus/);
-  assert.match(workspace, /data-testid="project-open-menu-toggle"/);
+  assert.doesNotMatch(workspace, /data-testid="project-open-menu-toggle"/);
+  assert.doesNotMatch(workspace, /data-testid="project-open-default"/);
+  assert.match(workspace, /data-testid="dock-project-open-menu-toggle"/);
+  assert.match(workspace, /data-testid="dock-project-open-default"/);
   assert.match(workspace, /workspace\.getOpenTargets/);
   assert.match(workspace, /workspace\.openProject/);
   assert.match(workspace, /data-testid="environment-popover"/);
@@ -58,8 +89,35 @@ test('project controls relocate by ownership and expose real open and environmen
   assert.match(workspace, /environmentSources\.map/);
   assert.match(styles, /\.project-context-controls \{ right: 89px;/);
   assert.match(styles, /data-workspace-panel-open="true"[\s\S]*?\.project-context-controls \{ right: calc/);
-  assert.match(styles, /\.right-dock-tab-strip \{[\s\S]*?padding: 4px 112px 4px 5px;/);
+  assert.match(styles, /\.right-dock-tab-strip \{[\s\S]*?padding: 4px 6px 4px 5px;/);
   assert.doesNotMatch(styles, /data-workspace-panel-open="true"[^\n]*\.utility-control-dock \{ right: calc/);
+});
+
+test('work objects use a dedicated semantic icon and the shared white Content surface', () => {
+  const icons = readFileSync(path.join(rendererRoot, 'ui', 'Icon.tsx'), 'utf8');
+  const artifacts = readFileSync(path.join(rendererRoot, 'ArtifactWorkingSurface.tsx'), 'utf8');
+  assert.match(icons, /objects: Shapes/);
+  assert.match(workspace, /ARTIFACTS:[^\n]*icon: 'objects'/);
+  assert.match(workspace, /id: 'artifacts', label: '工作对象', icon: 'objects'/);
+  assert.match(artifacts, /<AppIcon name="objects"\/>/);
+  assert.match(styles, /\.right-dock-view-artifacts,[\s\S]*?background: var\(--fl-surface-content\)/);
+});
+
+test('browser pages reuse the workspace tab strip while standalone browse keeps its own strip', () => {
+  assert.match(styles, /\.browse-content \{[^}]*grid-template-rows: auto auto minmax\(0,1fr\);[^}]*background: var\(--fl-surface-content\)/);
+  assert.match(styles, /\.browse-content\.browser-tabs-in-workspace \{ grid-template-rows: auto minmax\(0,1fr\); \}/);
+  assert.match(layout, /\.right-dock-view-browser,[\s\S]*?\.right-dock-view-browser \.browse-empty \{[\s\S]*?background: var\(--fl-surface-content\);[\s\S]*?\}/);
+  assert.match(appearance, /\.browse-content \{ background: var\(--fl-surface-content\); \}/);
+  assert.match(appearance, /\.browser-page-strip \{[\s\S]*?min-height: 34px;[\s\S]*?background: transparent;/);
+  assert.match(dock, /tab\.tabHostId[\s\S]*?className="right-dock-tab-host"/);
+  assert.match(workspace, /BROWSER:[^\n]*tabHostId: 'right-workspace-browser-page-tabs'/);
+  assert.match(workspace, /workspaceTabHostId=\{tab\.tabHostId\}/);
+  assert.match(browser, /workspaceTabHost && createPortal\(pageTabs, workspaceTabHost, 'browser-workspace-pages'\)/);
+  assert.match(browser, /\{!workspaceTabHostId && <div className="browser-page-strip">/);
+  assert.match(appearance, /\.browser-toolbar \{[\s\S]*?min-height: 44px;[\s\S]*?background: transparent;/);
+  assert.match(appearance, /\.address-form input \{[\s\S]*?height: 34px;/);
+  assert.match(appearance, /\.browser-actions button,[\s\S]*?\.browser-overflow-button \{[\s\S]*?width: 30px;[\s\S]*?height: 30px;/);
+  assert.match(browser, /<div className="browse-empty"><AppIcon name="browse"\/><h2>开始浏览<\/h2><p>输入 URL 以打开页面<\/p><\/div>/);
 });
 
 test('files and images open as dock tabs and images expose location plus zoom', () => {
@@ -70,7 +128,7 @@ test('files and images open as dock tabs and images expose location plus zoom', 
   assert.match(media, /在右侧工作区显示/);
   assert.match(workspace, /onClick=\{\(\) => setPreviewAttachment\(imageAttachment\)\}/);
   assert.match(workspace, /当前桌面与 Agent Runtime 版本不一致。请重新打开最新 Fielora 后重试/);
-  assert.match(fileTree, /data-file-kind=\{kind\}/);
+  assert.match(fileTypeIcons, /data-file-kind=\{kind\}/);
   assert.match(fileTree, /data-testid="workspace-file-refresh"/);
   assert.match(workspace, /dockBreadcrumb\.map/);
   assert.doesNotMatch(workspace, /activeDockTab\.label<\/strong>/);
@@ -87,16 +145,18 @@ test('file and image tabs keep a Codex-like project tree beside the active resou
 
 test('file types use a modern semantic icon palette and product typography', () => {
   for (const kind of ['typescript', 'javascript', 'html', 'style', 'json', 'config', 'markdown', 'image']) {
-    assert.match(fileTree, new RegExp(`${kind}:`));
+    assert.match(fileTypeIcons, new RegExp(`kind: '${kind}'`));
     assert.match(styles, new RegExp(`\\.file-type-icon\\.is-${kind}`));
   }
-  assert.match(fileTree, /className="file-type-tile"/);
-  assert.match(styles, /\.file-tree-row \{[\s\S]*?font-family: var\(--fl-font-sans\); font-size: 13\.5px; font-weight: 430/);
+  assert.match(fileTypeIcons, /from '@phosphor-icons\/react'/);
+  assert.match(fileTypeIcons, /weight="duotone"/);
+  assert.doesNotMatch(fileTypeIcons, /<svg\b|<path\b|<rect\b/);
+  assert.match(styles, /\.file-tree-row \{[\s\S]*?font-family: var\(--fl-font-sans\); font-size: var\(--fl-font-size-label\); font-weight: 400/);
 });
 
 test('workspace breadcrumbs and source editor use one typography system with semantic syntax color', () => {
   assert.match(styles, /\.conversation-header h2 \{[\s\S]*?font-family: var\(--fl-font-sans\); font-size: 15px; font-weight: 600/);
-  assert.match(styles, /\.right-dock-breadcrumb \{[\s\S]*?font-family: var\(--fl-font-sans\); font-size: 12\.5px; font-weight: 430/);
+  assert.match(styles, /\.right-dock-breadcrumb \{[\s\S]*?font-family: var\(--fl-font-sans\); font-size: var\(--fl-font-size-meta\); font-weight: 400/);
   assert.match(styles, /\.dock-code-highlight, \.dock-code-editor-surface > \.dock-code-input \{[\s\S]*?font-family: var\(--fl-font-mono\); font-size: 13px; font-weight: 400/);
   assert.match(workspace, /function SyntaxCodeEditor/);
   assert.match(workspace, /className={`syntax-\$\{kind\}`}/);
@@ -138,7 +198,7 @@ test('floating composer leaves a full-height scroll viewport with compact scroll
   assert.match(styles, /\.conversation-composer \{ position: absolute;[\s\S]*?bottom: 0;/);
   assert.match(styles, /\.message-list \{ grid-row: 2; padding-bottom: 238px;/);
   assert.match(styles, /\.right-workspace-dock\.workspace-panel/);
-  assert.match(styles, /@media \(max-width: 1080px\)[\s\S]*?\.right-workspace-dock \{ position: absolute;/);
+  assert.doesNotMatch(styles, /\.project-layout\.workspace-open \.right-workspace-dock \{ position: absolute/);
   assert.match(foundation, /\*::-webkit-scrollbar \{ width: 4px; height: 4px; \}/);
   assert.match(foundation, /\*::-webkit-scrollbar-track \{ background: transparent; \}/);
   assert.match(foundation, /var\(--fl-color-text-muted\) 9%, transparent/);

@@ -20,6 +20,7 @@
     "cleanup:artifacts": "node scripts/check-node-version.cjs && node scripts/artifact-retention.mjs",
     "typecheck": "node scripts/check-node-version.cjs && pnpm --filter @fielora/desktop typecheck",
     "lint": "node scripts/check-node-version.cjs && pnpm --filter @fielora/desktop lint",
+    "verify:ui-ux": "node scripts/check-node-version.cjs && node scripts/check-ui-ux-doc-sync.mjs && pnpm --filter @fielora/desktop typecheck && node --test apps/desktop/src/renderer/design-system.test.ts apps/desktop/src/renderer/composer-permission-icons.test.ts",
     "test": "node scripts/check-node-version.cjs && pnpm test:ts && cargo test --workspace",
     "test:ts": "node scripts/check-node-version.cjs && pnpm --filter @fielora/desktop test",
     "test:integration": "node scripts/check-node-version.cjs && pnpm build:core:debug && node --test tests/integration/core.integration.test.mjs",

@@ -1,8 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { toBrowserUserMessage } from '../browser-policy';
 import type { BrowserPageState } from '../browser-types';
 import type { FieloraBridge } from '../types';
 import { PrimaryNav } from './PrimaryNav';
+import { Tab, TabStrip } from './UiPrimitives';
+import { AppIcon } from './ui';
 
 const EMPTY_BROWSER: BrowserPageState = {
   active_page_id: '',
@@ -33,17 +36,30 @@ interface BrowseScreenProps {
   onSettings: () => void;
 }
 
-export function BrowsePanel({ browser, onSaveToLibrary, onOpenBrowserSettings }: Pick<BrowseScreenProps, 'browser' | 'onSaveToLibrary' | 'onOpenBrowserSettings'>) {
+interface BrowsePanelProps extends Pick<BrowseScreenProps, 'browser' | 'onSaveToLibrary' | 'onOpenBrowserSettings'> {
+  workspaceTabHostId?: string;
+  workspaceActive?: boolean;
+  onRequestWorkspaceActivate?: () => void;
+  onRequestWorkspaceClose?: () => void;
+}
+
+export function BrowsePanel({ browser, onSaveToLibrary, onOpenBrowserSettings, workspaceTabHostId, workspaceActive = false, onRequestWorkspaceActivate, onRequestWorkspaceClose }: BrowsePanelProps) {
   const [page, setPage] = useState<BrowserPageState>(EMPTY_BROWSER);
   const [address, setAddress] = useState('');
   const [actionError, setActionError] = useState('');
   const [actionStatus, setActionStatus] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [workspaceTabHost, setWorkspaceTabHost] = useState<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
   const editingAddress = useRef(false);
   const activePageIdRef = useRef('');
+  const nativeViewVisibleRef = useRef(false);
+
+  useLayoutEffect(() => {
+    setWorkspaceTabHost(workspaceTabHostId ? document.getElementById(workspaceTabHostId) : null);
+  }, [workspaceTabHostId]);
 
   useEffect(() => {
     void browser.getState().then((state) => {
@@ -61,37 +77,94 @@ export function BrowsePanel({ browser, onSaveToLibrary, onOpenBrowserSettings }:
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    if (menuOpen) {
+    const hideNativeView = () => {
+      if (!nativeViewVisibleRef.current) return;
+      nativeViewVisibleRef.current = false;
       void browser.hide();
+    };
+    if (menuOpen || host.closest('[hidden]')) {
+      hideNativeView();
       return;
     }
     let settleTimer = 0;
+    let disposed = false;
+    let showInFlight = false;
+    let queuedBounds: BrowserPageState['surface']['bounds'] | null = null;
+    let lastRequestedBounds = '';
+    const flushBounds = () => {
+      if (disposed || showInFlight || !queuedBounds) return;
+      const bounds = queuedBounds;
+      queuedBounds = null;
+      showInFlight = true;
+      nativeViewVisibleRef.current = true;
+      void browser.show(bounds).catch((reason) => {
+        if (!disposed) setActionError(toBrowserUserMessage(reason));
+      }).finally(() => {
+        showInFlight = false;
+        flushBounds();
+      });
+    };
     const syncBounds = () => {
+      if (host.closest('[hidden]')) {
+        hideNativeView();
+        return;
+      }
       const rect = host.getBoundingClientRect();
-      void browser.show({
+      const bounds = {
         x: Math.max(0, Math.round(rect.left)),
         y: Math.max(0, Math.round(rect.top)),
         width: Math.max(0, Math.round(rect.width)),
         height: Math.max(0, Math.round(rect.height)),
-      }).then((state) => {
-        setPage(state);
-        if (!editingAddress.current) setAddress(state.url);
-      }).catch((reason) => setActionError(toBrowserUserMessage(reason)));
+      };
+      const boundsKey = `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`;
+      if (boundsKey === lastRequestedBounds) return;
+      lastRequestedBounds = boundsKey;
+      queuedBounds = bounds;
+      flushBounds();
     };
     const syncAfterWindowResize = () => {
       syncBounds();
       window.clearTimeout(settleTimer);
       settleTimer = window.setTimeout(syncBounds, 50);
     };
+    const transitionHost = host.closest<HTMLElement>('.utility-launcher');
+    let transitionFrame: number | null = null;
+    const syncTransitionFrame = () => {
+      syncBounds();
+      if (transitionHost?.getAnimations().some((animation) => animation.playState === 'running')) {
+        transitionFrame = window.requestAnimationFrame(syncTransitionFrame);
+        return;
+      }
+      transitionFrame = null;
+      syncBounds();
+    };
+    const beginTransitionSync = () => {
+      if (transitionFrame === null) transitionFrame = window.requestAnimationFrame(syncTransitionFrame);
+    };
+    const finishTransitionSync = () => {
+      if (transitionFrame !== null) window.cancelAnimationFrame(transitionFrame);
+      transitionFrame = null;
+      syncBounds();
+    };
     const observer = new window.ResizeObserver(syncBounds);
     observer.observe(host);
     window.addEventListener('resize', syncAfterWindowResize);
+    transitionHost?.addEventListener('transitionrun', beginTransitionSync);
+    transitionHost?.addEventListener('transitionend', finishTransitionSync);
+    transitionHost?.addEventListener('transitioncancel', finishTransitionSync);
+    beginTransitionSync();
     syncBounds();
     return () => {
+      disposed = true;
+      queuedBounds = null;
       observer.disconnect();
+      if (transitionFrame !== null) window.cancelAnimationFrame(transitionFrame);
       window.clearTimeout(settleTimer);
       window.removeEventListener('resize', syncAfterWindowResize);
-      void browser.hide();
+      transitionHost?.removeEventListener('transitionrun', beginTransitionSync);
+      transitionHost?.removeEventListener('transitionend', finishTransitionSync);
+      transitionHost?.removeEventListener('transitioncancel', finishTransitionSync);
+      hideNativeView();
     };
   }, [browser, menuOpen]);
 
@@ -199,42 +272,82 @@ export function BrowsePanel({ browser, onSaveToLibrary, onOpenBrowserSettings }:
     }
   }
 
+  const pageTabs = page.pages.length > 0
+    ? page.pages.map((item) => <Tab
+        className="right-dock-tab browser-workspace-page"
+        mainClassName="right-dock-tab-main"
+        closeClassName="right-dock-tab-close"
+        labelClassName="browser-page-label"
+        key={item.id}
+        data-loading={item.is_loading ? 'true' : 'false'}
+        onContextMenu={(event) => { event.preventDefault(); void act(() => browser.showPageContextMenu({ page_id: item.id })); }}
+        label={item.title || '新页面'}
+        active={workspaceActive && item.id === page.active_page_id}
+        onActivate={() => { onRequestWorkspaceActivate?.(); void switchPage(item.id); }}
+        onClose={() => void closePage(item.id)}
+        testId={item.id === page.active_page_id ? 'right-dock-tab-browser' : `browser-workspace-page-${item.id}`}
+        closeTestId={`browser-close-page-${item.id}`}
+        closeLabel={`关闭 ${item.title || '新页面'}`}
+        data-tab-id={`browser:${item.id}`}
+        leading={<span className="browser-page-visual" aria-hidden="true">
+          {item.is_loading
+            ? <span className="browser-page-loader" />
+            : item.favicon_data_url
+              ? <img src={item.favicon_data_url} alt="" />
+              : <span className="browser-page-fallback" />}
+        </span>}
+      />)
+    : [<Tab
+        key="browser-empty"
+        className="right-dock-tab browser-workspace-page"
+        mainClassName="right-dock-tab-main"
+        closeClassName="right-dock-tab-close"
+        label="新页面"
+        leading={<AppIcon name="browse"/>}
+        active={workspaceActive}
+        onActivate={() => { onRequestWorkspaceActivate?.(); window.requestAnimationFrame(() => addressRef.current?.focus()); }}
+        onClose={() => onRequestWorkspaceClose?.()}
+        testId="right-dock-tab-browser"
+        closeTestId="right-dock-close-browser"
+        closeLabel="关闭浏览器"
+        data-tab-id="browser"
+      />];
+
   return <div className="browse-panel" data-testid="browse-screen">
-    <main className="browse-content">
-      <div className="browser-page-strip">
-        <div className="browser-pages" role="tablist" aria-label="Browse 页面">
-          {page.pages.map((item) => <div
-            className={`browser-page ${item.id === page.active_page_id ? 'active' : ''}`}
+    {workspaceTabHost && createPortal(pageTabs, workspaceTabHost, 'browser-workspace-pages')}
+    <main className={`browse-content${workspaceTabHostId ? ' browser-tabs-in-workspace' : ''}`}>
+      {!workspaceTabHostId && <div className="browser-page-strip">
+        <TabStrip className="browser-pages" label="Browse 页面">
+          {page.pages.map((item) => <Tab
+            className="browser-page"
+            mainClassName="browser-page-main"
+            closeClassName="browser-page-close"
+            labelClassName="browser-page-label"
             key={item.id}
             data-loading={item.is_loading ? 'true' : 'false'}
             onContextMenu={(event) => { event.preventDefault(); void act(() => browser.showPageContextMenu({ page_id: item.id })); }}
-          >
-            <button
-              className="browser-page-main"
-              role="tab"
-              aria-selected={item.id === page.active_page_id}
-              title={item.title || item.url || '新页面'}
-              onClick={() => void switchPage(item.id)}
-              data-testid={`browser-page-${item.id}`}
-            >
-              <span className="browser-page-visual" aria-hidden="true">
+            label={item.title || '新页面'}
+            active={item.id === page.active_page_id}
+            onActivate={() => void switchPage(item.id)}
+            onClose={() => void closePage(item.id)}
+            testId={`browser-page-${item.id}`}
+            closeTestId={`browser-close-page-${item.id}`}
+            closeLabel={`关闭 ${item.title || '新页面'}`}
+            leading={<span className="browser-page-visual" aria-hidden="true">
                 {item.is_loading
                   ? <span className="browser-page-loader" />
                   : item.favicon_data_url
                     ? <img src={item.favicon_data_url} alt="" />
                     : <span className="browser-page-fallback" />}
-              </span>
-              <span className="browser-page-label">{item.title || '新页面'}</span>
-            </button>
-            <button className="browser-page-close" aria-label={`关闭 ${item.title || '新页面'}`} onClick={() => void closePage(item.id)} data-testid={`browser-close-page-${item.id}`}>×</button>
-          </div>)}
-        </div>
-        <button className="browser-new-page" aria-label="新建页面" title="新建页面 (Ctrl+T)" onClick={() => void createPage()} data-testid="browser-new-page">+</button>
-      </div>
+              </span>}
+          />)}
+        </TabStrip>
+        <button className="browser-new-page" aria-label="新建页面" title="新建页面 (Ctrl+T)" onClick={() => void createPage()} data-testid="browser-new-page"><AppIcon name="plus"/></button>
+      </div>}
       <div className="browser-toolbar">
         <div className="browser-actions" aria-label="页面导航">
-          <button aria-label="后退" data-testid="browser-back" disabled={!page.can_go_back} onClick={() => void act(() => browser.back())}>←</button>
-          <button aria-label="前进" data-testid="browser-forward" disabled={!page.can_go_forward} onClick={() => void act(() => browser.forward())}>→</button>
+          <button aria-label="后退" data-testid="browser-back" disabled={!page.can_go_back} onClick={() => void act(() => browser.back())}><AppIcon name="back"/></button>
+          <button aria-label="前进" data-testid="browser-forward" disabled={!page.can_go_forward} onClick={() => void act(() => browser.forward())}><AppIcon name="forward"/></button>
           <button
             aria-label="刷新"
             aria-busy={page.is_loading}
@@ -242,7 +355,7 @@ export function BrowsePanel({ browser, onSaveToLibrary, onOpenBrowserSettings }:
             data-testid="browser-reload"
             disabled={!page.url}
             onClick={() => void act(() => browser.reload())}
-          >↻</button>
+          ><AppIcon name="refresh"/></button>
         </div>
         <form className="address-form" onSubmit={navigate}>
           <input
@@ -261,8 +374,8 @@ export function BrowsePanel({ browser, onSaveToLibrary, onOpenBrowserSettings }:
         </form>
         <div className="browser-toolbar-end" ref={menuRef}>
           <span className="page-title" title={page.title}>{page.title}</span>
-          <button className="browser-overflow-button" type="button" aria-label="浏览器菜单" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((current) => !current)} data-testid="browser-overflow">⋮</button>
-          {menuOpen && <div className="browser-overflow-menu" role="menu" aria-label="浏览器菜单" data-testid="browser-overflow-menu">
+          <button className="browser-overflow-button" type="button" aria-label="浏览器菜单" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((current) => !current)} data-testid="browser-overflow"><AppIcon name="more"/></button>
+          {menuOpen && <div className="browser-overflow-menu" role="menu" aria-label="浏览器菜单" data-surface="overlay" data-testid="browser-overflow-menu">
             <div className="browser-menu-group">
               <button role="menuitem" type="button" onClick={() => { setMenuOpen(false); void createPage(); }}><span>新建标签页</span><kbd>Ctrl+T</kbd></button>
               <button role="menuitem" type="button" disabled={!/^https?:\/\//u.test(page.url)} onClick={() => void saveToLibrary()} data-testid="browser-save-library"><span>保存到资料库</span></button>
@@ -282,7 +395,7 @@ export function BrowsePanel({ browser, onSaveToLibrary, onOpenBrowserSettings }:
       {(actionError || page.error) && <div className="browser-error" role="status" data-testid="browser-error">{actionError || toBrowserUserMessage(page.error)}</div>}
       {actionStatus && <div className="browser-status" role="status">{actionStatus}</div>}
       <div className="browse-viewport" ref={hostRef} data-testid="browse-viewport" aria-busy={page.is_loading}>
-        {!page.url && <div className="browse-empty"><h2>新页面</h2><p>在地址栏输入网址或搜索内容。</p></div>}
+        {!page.url && <div className="browse-empty"><AppIcon name="browse"/><h2>开始浏览</h2><p>输入 URL 以打开页面</p></div>}
       </div>
     </main>
   </div>;

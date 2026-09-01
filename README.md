@@ -76,4 +76,4 @@ Complete Agent 现已实现 Project-scoped 持久 Run、Context、typed file too
 
 日常开发与人工体验长期运行 `pnpm dev`。根据变更范围使用 `pnpm verify:dev:docs`、`verify:dev:ui`、`verify:dev:core` 或 `verify:dev:cross`；任何准备进入 main 的变更运行 `pnpm verify:premerge`。Packaging-sensitive 变更额外执行 targeted packaged smoke；重大 Contract/Schema/Permission/Reality/Verification 变化先形成 `CHANGE IMPACT` 并运行受影响兼容性与 Hero Flow regression。正式阶段仍运行冻结的完整 Phase Gate。精确定义见 `docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md`。
 
-Desktop UI 的 canonical 设计语言是 **Fielora Quiet Workbench / 静默工作台**。新增或修改界面必须遵循 `docs/product/FIELORA_DESIGN_LANGUAGE_V0.1.md`，优先使用 semantic token 与共享 primitive，不再为单页复制颜色、控件或动效。
+Desktop UI 的唯一 canonical 设计语言是 **Fielora Glass**。System / Light / Dark 只决定明暗外观；产品原则见 `docs/product/FIELORA_DESIGN_LANGUAGE_V0.1.md`，实现 ownership、Cascade、Typography、Phosphor Icon 与共享控件规范见 `docs/architecture/FIELORA_UI_UX_SYSTEM_V0.1.md`。任何受管理 UI/UX 系统样式变更必须在同一 changeset 更新该架构文档，并通过 `pnpm verify:ui-ux`。

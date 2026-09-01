@@ -1,11 +1,11 @@
 import { McpSettings } from './McpSettings';
 import { PluginSettings } from './PluginSettings';
-import { ShellIcon, type ShellIconName } from './PrimaryNav';
+import { AppIcon, type AppIconName } from './ui';
 import { SkillsSettings } from './SkillsSettings';
 
 export type CapabilityExtensionTab = 'SKILLS' | 'MCP' | 'PLUGINS';
 
-const tabs: Array<{ id: CapabilityExtensionTab; label: string; icon: ShellIconName }> = [
+const tabs: Array<{ id: CapabilityExtensionTab; label: string; icon: AppIconName }> = [
   { id: 'SKILLS', label: 'Skills', icon: 'files' },
   { id: 'MCP', label: 'MCP', icon: 'environment' },
   { id: 'PLUGINS', label: '插件', icon: 'extensions' },
@@ -29,7 +29,7 @@ export function CapabilityExtensionsSettings({ activeTab, fieldId, onTabChange }
         className={activeTab === tab.id ? 'active' : ''}
         onClick={() => onTabChange(tab.id)}
         data-testid={`settings-extension-tab-${tab.id.toLowerCase()}`}
-      ><ShellIcon name={tab.icon}/><span>{tab.label}</span></button>)}
+      ><AppIcon name={tab.icon}/><span>{tab.label}</span></button>)}
     </div>
     <section id="settings-extension-panel" className="settings-extension-panel" role="tabpanel" aria-labelledby={`settings-extension-tab-${activeTab.toLowerCase()}`}>
       {activeTab === 'SKILLS' && <SkillsSettings fieldId={fieldId} embedded/>}

@@ -31,8 +31,8 @@
       "bytes": 2973
     },
     "README.md": {
-      "sha256": "fa1f167f34cae6bff9b22e04c635752890e81252e3089561f01b3870aae16350",
-      "bytes": 13249
+      "sha256": "492ea5791a0e6d79bec1e7ea68fdf8d411f119daf662ce1b0f4f18b06241a868",
+      "bytes": 13411
     },
     "AGENTS.md": {
       "sha256": "19d11269434e83620c00d01cbf4d1c1128bd363d2895ee3dcab32bd60e4b5592",
@@ -47,12 +47,12 @@
       "bytes": 12955
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "7cc53b8933ae2442dbb1fce03a38c46761cfb7592affccf32edb2e53142b36c0",
-      "bytes": 206234
+      "sha256": "d26b111fdcaa7e2678d92e4376f50c32fcd75c5f7a9493036aa9d0b8ceef0eed",
+      "bytes": 214087
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "eb26f9d426ca5c0d8dfb43e816b672ba13d8bf16d1ae178bbbdff156bed58d25",
-      "bytes": 102631
+      "sha256": "92f72c7adf1cd2962c3f7b590d5d9d130f26db33e88d42764251b83dd2b457e4",
+      "bytes": 106368
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
       "sha256": "0b4f9bd00ad5b9a198e4f3a6523503aaacbf8b5630aaa5d029577ee08abbc160",

@@ -1,0 +1,17 @@
+/*
+ * Canonical renderer cascade. Import this file once from index.tsx.
+ * Layer order is an API: legacy feature CSS cannot override layout, type,
+ * shared controls or material ownership by gaining selector specificity.
+ */
+@layer reset, tokens, legacy, foundation, features, layout, typography, components, materials, utilities, overrides;
+
+@import url("./tokens.css") layer(tokens);
+@import url("../styles.css") layer(legacy);
+@import url("./foundation.css") layer(foundation);
+@import url("./appearance.css") layer(features);
+@import url("./agentic-ux-prototype.css") layer(features);
+@import url("./scheduled-tasks.css") layer(features);
+@import url("./layout.css") layer(layout);
+@import url("./typography.css") layer(typography);
+@import url("./controls.css") layer(components);
+@import url("./materials.css") layer(materials);

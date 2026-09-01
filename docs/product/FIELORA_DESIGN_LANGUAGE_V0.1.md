@@ -1,119 +1,147 @@
 # Fielora Design Language V0.1
 
-状态：`CURRENT / MAINTENANCE CONTRACT`
+状态：`CURRENT OFFICIAL LANGUAGE / IMPLEMENTED CANDIDATE / HUMAN GATE PENDING`
 
-名称：**Fielora Quiet Workbench / 静默工作台**
+名称：**Fielora Glass**
 
-## 1. 目标
+## 1. 产品定义
 
-Fielora 的界面首先服务持续工作，而不是展示内部能力。设计语言必须让 Project、Conversation、Files、Review、Terminal、Browser、Settings 与未来 Agent 状态看起来属于同一个产品，并让新增功能默认继承统一视觉，而不是依赖逐页手工对齐。
+Fielora Glass 是 Fielora 唯一的官方视觉语言，不是可选主题，也不是 Settings 中与其他内置主题并列的皮肤。应用只有一个稳定主题身份 `fielora`；`System / Light / Dark` 只决定明暗外观，不能改变设计语言。
 
-核心句：**工作内容高对比，应用结构低对比；能力常驻系统，但只在需要时进入屏幕。**
+核心句：**工作内容清晰稳定，应用结构通过克制的层次、边界与材质被感知；能力常驻系统，但只在需要时进入屏幕。**
+
+Glass 的目的不是装饰性透明。它必须帮助用户辨认 Chrome、浮动控制与 Overlay 的空间关系，同时让 Conversation、File、Diff、Terminal、Artifact 与真实网页内容保持可读。外部 Browse `WebContents` 不注入 Fielora 样式。
 
 ## 2. 产品原则
 
-1. **Workbench first**：白色工作 Surface 是视觉焦点，导航和 Chrome 后退。
-2. **Progressive disclosure**：默认只显示当前任务需要的控件；右工具、Terminal、弹层按需出现。
-3. **Three-surface maximum**：同一时刻最多为导航、主工作区、可选右工具三块；Terminal 是主/右工作区的底部层，不成为第四列。
-4. **Soft boundaries**：优先使用背景、留白、圆角表达层级；分隔线仅为单像素低对比辅助。
-5. **Functional calm**：静止状态不制造底板、强阴影或高饱和色；hover 才给予轻微抬升反馈。
-6. **Provider-neutral presentation**：模型、Provider、Agent 和工具状态使用产品语义，不让厂商视觉控制工作面。
-7. **System-respectful motion**：控件、Surface、Panel 使用固定动效等级，并服从 `prefers-reduced-motion`。
+1. **Content first**：内容面近实色、高可读；透明度不穿透正文。
+2. **One language, three appearances**：Fielora Glass 是唯一语言；System、Light、Dark 是同一 token contract 的外观解析。
+3. **Semantic surfaces**：组件声明表面角色，不自行选择 blur、alpha 或阴影配方。
+4. **Progressive disclosure**：默认只显示当前任务需要的控件；Workspace、Terminal、菜单和弹层按需出现。
+5. **Soft boundaries**：优先使用材质差、留白和单像素边缘表达层级，避免堆叠描边与厚重阴影。
+6. **Restrained accent**：Fielora 紫只用于焦点、选中、关键动作和品牌；不铺大面积装饰底色。
+7. **Provider-neutral presentation**：模型、Provider、Agent 与 Tool 使用产品语义，不让厂商视觉控制工作面。
+8. **System-respectful motion**：动效解释状态变化并服从 `prefers-reduced-motion`。
 
-## 3. 视觉语法
+## 3. 五层 Surface Contract
 
-### 3.1 Surface
+产品组件只使用以下五种语义表面：
 
-- App/Chrome/Navigation：同一冷灰应用背景。
-- Workbench：承载布局的低对比底色。
-- Primary Surface：白色、左上 20px 圆角、无常驻重阴影。
-- Raised Surface：只用于 Popover/Dialog，使用明确 elevation。
-- Terminal：属于工作区底层，跟随系统明暗；不能进入左侧导航下方。
-
-### 3.2 颜色
-
-- 中性灰承担结构、文字和交互反馈。
-- Fielora 紫只用于品牌、焦点、选中和关键确认，不作为大面积装饰色。
-- Success/Warning/Danger 只表达状态，不表达品牌。
-- 产品样式不得直接新增 hex/rgb；必须先在 `styles/tokens.css` 中建立语义 token。
-
-### 3.3 字体
-
-字体栈：`Inter → Segoe UI Variable → Segoe UI`。
-
-| 层级 | Token | 用途 |
+| Surface | 语义 | 典型位置 |
 |---|---|---|
-| Caption | 9px | 时间、路径补充、极低优先级 metadata |
-| Meta | 10px | 紧凑工具状态、顶部标签 |
-| Label | 11px | 菜单项、紧凑按钮、Agent 工具标题 |
-| Navigation | 12px | 左侧导航、设置导航、标准控件 |
-| Body | 13px | 消息正文、说明文本 |
-| Title | 16px | Conversation/Panel 标题 |
+| `Canvas` | 最底层应用画布，不表达 elevation | Desktop frame、Workspace 背景 |
+| `Content` | 近实色的持续阅读/工作面 | Conversation、Settings 内容、File/Diff/Terminal 主体 |
+| `Chrome` | 低 elevation、可与内容分离的应用结构 | 左导航、工具栏、Page/Tabs、Dock header |
+| `Floating` | 与当前内容相关的临时或悬浮控制 | Composer、Quick Capture、浮动搜索 |
+| `Overlay` | 最高临时层，必须有明确边界与关闭路径 | Menu、Popover、Dialog、Lightbox |
 
-不得通过随意增加字号制造层级；先使用字重、颜色和间距。
+Renderer 通过 `data-surface="canvas|content|chrome|floating|overlay"` 声明角色。背景、边缘、阴影与 backdrop 只由 `styles/materials.css` 解析；Feature CSS 不复制 Glass recipe。
 
-### 3.4 Geometry
+## 4. Glass 与 Solid Fallback
 
-- 控件圆角：8px；输入框：10px；卡片：16px；工作 Surface：20px；Dialog：18px。
-- 控件高度：30/34/38px 三档。
-- 标准图标：14/17px 两档。
-- 间距只使用 token 中的 4/6/8/10/12/16/20/24px 主尺度。
+Glass 是官方体验。`solid` 仅为运行时内部 fallback，用于系统不支持 `backdrop-filter` 或未来明确的可访问性降级；它不是可选择主题、设置卡片或第二套组件样式。
 
-### 3.5 Motion
+Fallback 必须复用同一 DOM、同一 `data-surface` 与同一交互状态，只替换 semantic material token。任何组件不得通过 `@supports` 自行建立局部 fallback 分支。
 
-- Instant 100ms：局部状态变化。
-- Control 140ms：hover、active、chevron。
-- Surface 220ms：导航、Workspace resize/collapse。
-- Panel 250ms：右工具区出现和离开。
-- Canonical easing：`cubic-bezier(.2,.72,.2,1)`。
-- 动效必须解释状态变化；不得为静态装饰持续运行。
+## 5. 视觉语法
 
-## 4. 共享组件契约
+### 5.1 颜色与材质
+
+- Light 与 Dark 共享语义角色和组件结构，只替换 token 值。
+- Content 保持近实色；Chrome、Floating、Overlay 才允许受控 translucent material。
+- Success、Warning、Danger 只表达状态，不表达配置、当前项或品牌。
+- 产品样式不得直接新增 hex/rgb；必须先在 `styles/tokens.css` 建立语义 token。
+- 阴影表达 elevation，不用于装饰卡片；边缘高光不得替代 focus ring。
+
+### 5.2 字体
+
+字体栈为 `Segoe UI Variable → Segoe UI → Microsoft YaHei UI`，代码使用 `Cascadia Code → Consolas`。Conversation 正文约 15px，运行状态约 14px，metadata 约 12.5px；标题通过有限的 16–17px 层级、字重和间距建立秩序。不得用任意字号或高字重制造局部品牌方言。
+
+### 5.3 Geometry
+
+- 控件圆角 8px；输入框 10px；卡片约 12px；Surface/Dialog 16px。
+- 控件高度使用 30/34/38px 三档。
+- 图标使用 14/17/20px 三档和统一 stroke token。
+- 间距消费 `--fl-space-*`；不在新组件内建立第二套尺度。
+
+### 5.4 Motion
+
+- Fast 120ms：hover、active、chevron。
+- Normal 200ms：局部 Surface 和浮层出现。
+- Panel 280ms：可调整 Workspace/Dock 转换。
+- 进入与离开使用各自 easing；reduced-motion 下必须安全退化。
+- 禁止无状态意义的持续动画；loading 是例外，但必须与真实 loading state 绑定。
+
+## 6. Icon Grammar
+
+高频产品图标统一通过 `ui/Icon.tsx` 的 `<AppIcon>` 使用 `@phosphor-icons/react` 输出。导航、Chrome、Composer、权限、文件工作流、设置、菜单和通用控件不得各自复制 SVG path 或建立局部 glyph component。
+
+AppIcon 使用 `currentColor`、14/17/20px 尺寸角色和统一 weight；状态由父控件的 semantic token 表达。文件类型使用同一 Phosphor family 与集中语义色；外部应用的本机图标、站点 favicon 和内容媒体不属于产品 icon grammar，可保留真实来源。
+
+## 7. 共享组件契约
 
 新页面优先使用：
 
+- `AppIcon`
 - `Button`
 - `IconButton`
 - `ToolbarAction`
+- `Menu` / `MenuItem`
 - `SelectMenu`
+- `TabStrip` / `Tab`
 - `TextActionDialog`
 - `WorkspaceSurface`
 - `ResizableDivider`
 
-原生 `prompt/confirm/alert/select` 禁止进入产品 Renderer。共享控件必须包含 keyboard、focus-visible、disabled、active 和 reduced-motion 行为。
+原生 `prompt/confirm/alert/select` 禁止进入产品 Renderer。共享控件必须覆盖 keyboard、focus-visible、disabled、active 与 reduced-motion。
 
-## 5. 样式分层
+## 8. Appearance 与 Custom Theme Seam
 
-加载顺序固定为：
+Appearance Settings 只提供 `System / Light / Dark`。页面应明确 Fielora Glass 是当前官方语言，并可解释五层 Surface；不得显示 Fielora Light、Fielora Dark 或 Solid 等伪主题卡片。
 
-1. `styles/tokens.css`：唯一设计值事实源，同时定义 Light/Dark/System 的语义角色；
-2. `styles/foundation.css`：reset、字体、focus、scrollbar、系统 motion；
-3. `styles.css`：现有 Feature/Surface 兼容层，逐步迁移；
-4. `styles/appearance.css`：Appearance 设置页与触达 Surface 的 token-only 迁移层，不定义第二套主题值；
-5. `styles/controls.css`：共享原语的 canonical 样式，禁止 raw color。
+Custom Theme 当前只有声明式扩展缝隙：允许未来覆盖批准的 token group，但禁止脚本、React、DOM、CSS selector、网络、文件、credential、Tool 或 Runtime capability。导入入口在 importer 与安全验证真正实现前保持禁用，不用伪配置导入冒充主题系统。
 
-旧 `styles.css` 允许在迁移期保留历史字面值，但新的跨页面控件不得继续写入其中。`appearance.css` 与 shared controls 一样禁止 raw color，强制主题示例色也必须先成为 preview token。每次触及旧组件时，优先把相关视觉值迁入 token/primitive，而不是增加新的独立主题分支。
+## 9. 样式分层
 
-## 6. 维护规则
+Renderer 只加载 `styles/index.css`，并由 CSS Cascade Layers 固定以下 ownership：
+
+1. `tokens`：唯一设计值事实源；
+2. `legacy`：历史 `styles.css` 兼容层，只减不增；
+3. `foundation` / `features`：系统基础与现有 feature presentation；
+4. `layout`：锁定 Pane ownership 与连续工作面；
+5. `typography`：五个字体角色；
+6. `components`：Button/Menu/Select/Tabs/Dialog 等 canonical 状态；
+7. `materials`：五层 Surface 的唯一 material resolver 与 solid fallback。
+
+`tokens.css` 之外的设计系统新增代码禁止 raw color。Feature 文件可以声明 `data-surface`、布局与内容 geometry，但不得重新定义 backdrop recipe。
+
+## 10. 维护与验证
 
 新增 UI 前依次判断：
 
-1. 是否已有共享 primitive；
-2. 是否可以由现有 semantic token 表达；
-3. 是否引入第四个常驻 Surface；
-4. hover/focus/active/disabled 是否完整；
-5. 真实窗口缩窄、拖动、系统减少动画后是否仍成立。
+1. 属于哪一个 semantic surface；
+2. 是否已有 shared primitive/AppIcon；
+3. 是否能由现有 token 表达；
+4. hover/focus/active/disabled/reduced-motion 是否完整；
+5. 1280、1440、1920 宽度及 Light/Dark 是否仍成立；
+6. Glass 不可用时，同一组件结构能否在 solid fallback 下保持可读和可操作。
 
 评审硬规则：
 
-- `tokens.css` 之外的设计系统文件不得出现 raw hex/rgb/rgba。
-- 不为单页复制 Button/Popover/Dialog/Select 样式。
+- 产品内置 Theme identity 必须恰好一个：`fielora`。
+- Appearance 只能是 System/Light/Dark。
+- Feature CSS 不得直接写 `backdrop-filter: blur(...)`。
+- 不为单页复制 Button/Popover/Dialog/Select 或产品 SVG glyph。
 - 不用 z-index 竞争修复错误 DOM ownership。
-- 不用 `!important` 解决普通组件优先级；唯一例外是系统 reduced-motion 兜底。
-- 几何不变量进入 E2E；纯 token/primitive 契约进入静态测试。
+- 不用 `!important` 解决普通组件优先级；仅允许系统 reduced-motion 兜底。
+- 几何与 fallback 进入 Desktop E2E；token、registry、icon 和 material boundary 进入静态测试。
 
-## 7. 当前迁移状态
+实现 ownership、受管理文件、布局锁定、Typography/Icon/Primitive 规则与强制文档同步流程，以 `docs/architecture/FIELORA_UI_UX_SYSTEM_V0.1.md` 为 canonical。任何受管理样式变化必须在同一 changeset 更新该文档并通过 `pnpm verify:ui-ux`。当前材质状态仍是 `IMPLEMENTED CANDIDATE / NOT FROZEN`；自动 Gate 不替代用户 Visual Human Gate。
 
-V0.1 已建立 semantic tokens、Light/Dark/System resolver、Appearance preferences、foundation、Button/IconButton/ToolbarAction、Select、Dialog，以及共享 Workspace/Divider。Project navigation、Conversation、Message、Composer、Settings、File/Diff/Terminal、Popover/Dialog 与 Desktop Chrome 的触达路径已开始统一消费同一组 token；外部 Browse WebContents 不注入主题 CSS。现有历史 Surface 保留在兼容层以避免一次性视觉回归；后续按实际修改路径迁移，不进行无验证价值的全量重写。
+## 11. 既有页面结构锁定
 
-完成标准不是“styles.css 归零”，而是：新增页面不再创造新的颜色、阴影、圆角、控件和布局方言；修改一个 semantic token 可以稳定影响所有使用该语义的界面。
+`STRUCTURAL_CHANGE_REQUIRES_USER_APPROVAL`
+
+Fielora 已有页面的 App Shell、导航、对话区、Composer、工作区 Dock、底部终端和 Settings shared frame 是稳定产品结构。后续整体样式优化默认只允许校准 Typography、Icon、Color、Material、Shadow、Motion 与 Spacing，不得重排主要页面区域、改变 Pane ownership 或以新 Dashboard/Card topology 代替现有 Route。
+
+任何需要改变上述结构或布局 ownership 的工作必须在编码前暂停，向用户说明原因、范围和影响并取得明确许可。没有明确许可时，结构保持不变；这一规则同时适用于 Agent、自动优化、重构和视觉对标工作。

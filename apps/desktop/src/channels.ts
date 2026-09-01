@@ -3,6 +3,8 @@ export const channels = {
   conversationCreate: 'fielora:conversation:create', conversationList: 'fielora:conversation:list', conversationGet: 'fielora:conversation:get',
   conversationUpdate: 'fielora:conversation:update', conversationArchive: 'fielora:conversation:archive',
   conversationMessageCreate: 'fielora:conversation:message:create', conversationMessageList: 'fielora:conversation:message:list',
+  scheduledTaskList: 'fielora:scheduled-task:list', scheduledTaskCreate: 'fielora:scheduled-task:create',
+  scheduledTaskUpdate: 'fielora:scheduled-task:update', scheduledTaskDelete: 'fielora:scheduled-task:delete', scheduledTaskRunNow: 'fielora:scheduled-task:run-now',
   artifactList: 'fielora:artifact:list', artifactRead: 'fielora:artifact:read', artifactHistory: 'fielora:artifact:history',
   artifactAssetPreview: 'fielora:artifact:asset-preview', artifactDiagramPreview: 'fielora:artifact:diagram-preview', artifactSetArchiveState: 'fielora:artifact:set-archive-state',
   artifactFileReviews: 'fielora:artifact:file-reviews', artifactFileMarkReviewed: 'fielora:artifact:file-mark-reviewed', artifactFileUndo: 'fielora:artifact:file-undo',

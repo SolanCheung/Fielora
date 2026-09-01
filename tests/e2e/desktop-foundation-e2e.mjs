@@ -41,11 +41,11 @@ await mkdir(productionAgentEvidence,{recursive:true});
 async function runDesktopFoundation(){
 try{
   child=await launch();let cdp=await connect();await cdp.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});await wait(cdp,`document.querySelector('[data-testid="project-workspace"]')&&document.documentElement.dataset.reduceMotion==='false'`);
-  assert.equal((await cdp.eval('window.fielora.core.getHealth()')).schema_version,9);
+  assert.equal((await cdp.eval('window.fielora.core.getHealth()')).schema_version,15);
   assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="desktop-chrome"]'))`),true);
   await wait(cdp,`document.querySelector('.project-brand-button img')?.complete`);
   assert.equal(await cdp.eval(`(()=>{const image=document.querySelector('.project-brand-button img');const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;const context=canvas.getContext('2d');context.drawImage(image,0,0,64,64);const corner=context.getImageData(0,0,1,1).data[3];const center=context.getImageData(32,32,1,1).data[3];return corner===0&&center===255;})()`),true);
-  assert.equal(await cdp.eval(`document.querySelector('[data-testid="settings-nav"] path')?.getAttribute('d')?.startsWith('M12.22 2')`),true);
+  assert.equal(await cdp.eval(`document.querySelector('[data-testid="settings-nav"] [data-icon="settings"]')!==null`),true);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="chrome-back"]').disabled`),true);
   const mainNavigationTypography=await cdp.eval(`(()=>{const style=getComputedStyle(document.querySelector('[data-testid="now-nav"]'));return{fontFamily:style.fontFamily,fontSize:style.fontSize};})()`);
   await cdp.eval(`[...document.querySelectorAll('.chrome-menu-wrap > button')].find((item)=>item.textContent==='文件').click()`);
@@ -66,18 +66,18 @@ try{
   assert.equal((new Set(sidebarOpenSamples.map((value)=>Math.round(value))).size>=4),true);
   await wait(cdp,`document.querySelector('[data-testid="project-navigation"]').getBoundingClientRect().width>180&&Number.parseFloat(getComputedStyle(document.querySelector('[data-testid="project-navigation"]')).opacity)>0.95`);
   await cdp.eval(`document.querySelector('[data-testid="now-nav"]').click()`);
-  await wait(cdp,`document.querySelector('[data-testid="now-screen"]')&&!document.querySelector('[data-testid="rail-terminal"]')`);
-  await cdp.eval(`document.querySelector('[data-testid="browse-nav"]').click()`);
+  await wait(cdp,`document.querySelector('[data-testid="scheduled-tasks-screen"]')&&!document.querySelector('[data-testid="rail-terminal"]')`);
+  await cdp.eval(`window.dispatchEvent(new CustomEvent('fielora:open-utility',{detail:'BROWSER'}))`);
   await wait(cdp,`document.querySelector('[data-testid="desktop-work-area"]').classList.contains('utility-open')&&document.querySelector('[data-testid="browse-screen"]')`);
-  assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="now-screen"]')&&document.querySelector('[data-testid="utility-launcher"] .browse-panel'))`),true);
+  assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="scheduled-tasks-screen"]')&&document.querySelector('[data-testid="utility-launcher"] .browse-panel'))`),true);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="rail-browser"]')===null`),true);
   await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
   await wait(cdp,`!document.querySelector('[data-testid="utility-launcher"]')`);
-  await cdp.eval(`document.querySelector('[data-testid="projects-nav"]').click()`);
+  await cdp.eval(`window.dispatchEvent(new CustomEvent('fielora:navigate',{detail:'PROJECTS'}))`);
   await wait(cdp,`document.querySelector('[data-testid="project-workspace"]')`);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="chrome-back"]').disabled`),false);
   await cdp.eval(`document.querySelector('[data-testid="chrome-back"]').click()`);
-  await wait(cdp,`document.querySelector('[data-testid="now-screen"]')`);
+  await wait(cdp,`document.querySelector('[data-testid="scheduled-tasks-screen"]')`);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="chrome-forward"]').disabled`),false);
   await cdp.eval(`document.querySelector('[data-testid="chrome-forward"]').click()`);
   await wait(cdp,`document.querySelector('[data-testid="project-workspace"]')`);
@@ -88,7 +88,7 @@ try{
   await wait(cdp,`document.querySelector('[data-testid="new-conversation-start"]')`);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="new-conversation-start"]')?.innerText.includes('开始一条新对话')`),true);
   const newConversationScreenshot=await cdp.send('Page.captureScreenshot',{format:'png'});await writeFile(path.join(evidence,`${mode}-new-conversation.png`),Buffer.from(newConversationScreenshot.data,'base64'));
-  await cdp.eval(`document.querySelector('[data-testid="projects-nav"]').click()`);
+  await cdp.eval(`window.dispatchEvent(new CustomEvent('fielora:navigate',{detail:'PROJECTS'}))`);
   await wait(cdp,`document.querySelector('[data-testid="project-overview"]')`);
   await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="utility-launcher"]')===null`),true);
@@ -124,12 +124,12 @@ try{
   await wait(cdp,`document.querySelector('[data-testid="project-workspace"]')`);
   assert.equal(Math.abs(await cdp.eval(`document.querySelector('[data-testid="project-navigation"]').getBoundingClientRect().width`)-settingsNavigationWidthAfterDrag)<=1,true);
   await cdp.eval(`document.querySelector('[data-testid="now-nav"]').click()`);
-  await wait(cdp,`document.querySelector('[data-testid="now-screen"]')&&!document.querySelector('[data-testid="rail-terminal"]')`);
+  await wait(cdp,`document.querySelector('[data-testid="scheduled-tasks-screen"]')&&!document.querySelector('[data-testid="rail-terminal"]')`);
   await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
   await wait(cdp,`document.querySelector('[data-testid="desktop-work-area"]').classList.contains('utility-open')&&document.querySelector('[data-testid="utility-launcher"]')`);
   await cdp.eval(`document.querySelector('[data-testid="utility-browser"]').click()`);
   await wait(cdp,`document.querySelector('[data-testid="browse-screen"]')`);
-  assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="now-screen"]')&&document.querySelector('[data-testid="utility-launcher"] .browse-panel'))`),true);
+  assert.equal(await cdp.eval(`Boolean(document.querySelector('[data-testid="scheduled-tasks-screen"]')&&document.querySelector('[data-testid="utility-launcher"] .browse-panel'))`),true);
   const browserSidebarScreenshot=await cdp.send('Page.captureScreenshot',{format:'png'});await writeFile(path.join(evidence,`${mode}-browser-sidebar.png`),Buffer.from(browserSidebarScreenshot.data,'base64'));
   await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
   await wait(cdp,`!document.querySelector('[data-testid="utility-launcher"]')`);
@@ -141,7 +141,7 @@ try{
   await wait(cdp,`!document.querySelector('[data-testid="summon-panel"]')`);
   const created=await cdp.eval(`(async()=>{const provider=await window.fielora.provider.create({provider_kind:'OPENAI_COMPATIBLE',display_name:'Desktop Fixture',base_url:'https://example.com/v1',default_model:'__fielora_agent_fixture__',custom_endpoint_acknowledged:true});await window.fielora.provider.storeCredential({provider_config_id:provider.id,secret:${JSON.stringify(secret)}});const project=await window.fieloraTest.createProject({title:'Sample Project',goal:'Desktop hero flow',root_path:${JSON.stringify(projectRoot)}});return{providerId:provider.id,fieldId:project.field_id};})()`);
   providerId=created.providerId;
-  await cdp.eval(`window.dispatchEvent(new Event('fielora:providers-changed'));document.querySelector('[data-testid="projects-nav"]').click()`);
+  await cdp.eval(`window.dispatchEvent(new Event('fielora:providers-changed'));window.dispatchEvent(new CustomEvent('fielora:navigate',{detail:'PROJECTS'}))`);
   await wait(cdp,`document.querySelector('[data-testid="project-workspace"]')&&document.body.innerText.includes('Sample Project')`);
   await cdp.eval(`document.querySelector('[data-testid="settings-nav"]').click()`);
   await wait(cdp,`document.querySelector('[data-testid="settings-screen"]')`);
@@ -536,7 +536,7 @@ try{
   const resumed=await cdp.eval(`(async()=>{const projects=await window.fielora.project.list();const conversations=await window.fielora.conversation.list({field_id:projects[0].field_id});const messages=await window.fielora.conversation.listMessages({conversation_id:conversations[0].id});return{project:projects[0],conversation:conversations[0],messages};})()`);
   assert.equal(resumed.project.root_path,projectRoot);assert.equal(resumed.conversation.provider_config_id,providerId);assert.equal(resumed.messages.length>=3,true);
   await quit(cdp);
-  await writeFile(path.join(evidence,`${mode.toUpperCase()}_DESKTOP_FOUNDATION_ACCEPTANCE.json`),`${JSON.stringify({status:'PASS',schema_version:6,checks:['quiet_workbench_semantic_tokens','shared_toolbar_action_primitive','transparent_fielora_brand_mark','bounded_text_attachment_picker','composer_permission_popover','configured_model_popover','voice_transcription_to_draft','refined_send_control','agent_native_tool_loop','agent_one_time_approval','agent_file_write','agent_verification_receipt','agent_durable_timeline','integrated_windows_titlebar','application_back_forward','functional_application_menus','animated_sidebar_visibility_control','standard_settings_gear','functional_utility_launcher','shared_project_settings_workspace_surface','resizable_project_navigation','resizable_project_workspace','resizable_settings_navigation','settings_navigation_width_shared_with_project','settings_terminal_shortcut_does_not_navigate','resizable_utility_sidebar','browser_only_in_right_utility_sidebar','settings_closes_utility_sidebar','window_right_anchored_utility_controls','unframed_utility_controls_with_hover_shadow','project_actions_share_utility_control_dock','top_controls_baseline_and_hover_unified','utility_focus_control_only_when_open','sampled_utility_open_transition','utility_focus_preserves_left_navigation','extra_faint_single_utility_divider','unified_chrome_navigation_background','utility_review','utility_terminal','utility_browser','utility_files','utility_side_chat','unified_navigation_typography','new_conversation_does_not_open_folder_picker','compact_empty_project_list','functional_settings_page','provider_state_refresh_without_restart','provider_connection_probe','project_folder','persistent_conversations','persistent_conversation_turns','provider_model_selection','streaming_message','file_tree_read_edit','diff_review_accept','hash_guarded_undo','global_bottom_terminal_stream','terminal_uses_desktop_layer_not_conversation','terminal_excludes_left_navigation','left_navigation_spans_terminal_height','manual_terminal_output_stays_in_terminal','restart_resume'],provider_external_requests:0,captured_at:new Date().toISOString()},null,2)}\n`);
+  await writeFile(path.join(evidence,`${mode.toUpperCase()}_DESKTOP_FOUNDATION_ACCEPTANCE.json`),`${JSON.stringify({status:'PASS',schema_version:15,checks:['quiet_workbench_semantic_tokens','shared_toolbar_action_primitive','transparent_fielora_brand_mark','bounded_text_attachment_picker','composer_permission_popover','configured_model_popover','voice_transcription_to_draft','refined_send_control','agent_native_tool_loop','agent_one_time_approval','agent_file_write','agent_verification_receipt','agent_durable_timeline','integrated_windows_titlebar','application_back_forward','functional_application_menus','animated_sidebar_visibility_control','standard_settings_gear','functional_utility_launcher','shared_project_settings_workspace_surface','resizable_project_navigation','resizable_project_workspace','resizable_settings_navigation','settings_navigation_width_shared_with_project','settings_terminal_shortcut_does_not_navigate','resizable_utility_sidebar','browser_only_in_right_utility_sidebar','settings_closes_utility_sidebar','window_right_anchored_utility_controls','unframed_utility_controls_with_hover_shadow','project_actions_share_utility_control_dock','top_controls_baseline_and_hover_unified','utility_focus_control_only_when_open','sampled_utility_open_transition','utility_focus_preserves_left_navigation','extra_faint_single_utility_divider','unified_chrome_navigation_background','utility_review','utility_terminal','utility_browser','utility_files','utility_side_chat','unified_navigation_typography','new_conversation_does_not_open_folder_picker','compact_empty_project_list','functional_settings_page','provider_state_refresh_without_restart','provider_connection_probe','project_folder','persistent_conversations','persistent_conversation_turns','provider_model_selection','streaming_message','file_tree_read_edit','diff_review_accept','hash_guarded_undo','global_bottom_terminal_stream','terminal_uses_desktop_layer_not_conversation','terminal_excludes_left_navigation','left_navigation_spans_terminal_height','manual_terminal_output_stays_in_terminal','restart_resume'],provider_external_requests:0,captured_at:new Date().toISOString()},null,2)}\n`);
   console.log(`Desktop Foundation E2E (${mode}): PASS`);
 }finally{
   if(child&&child.exitCode===null)spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true});

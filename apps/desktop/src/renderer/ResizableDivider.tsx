@@ -5,23 +5,28 @@ interface ResizableDividerProps {
   value: number;
   min: number;
   max: number;
+  onResizeStart?: (clientPosition: number) => void;
   onResize: (clientX: number) => void;
+  onResizeEnd?: (clientX: number) => void;
   onKeyboardResize: (delta: number) => void;
   testId: string;
   className?: string;
   orientation?: 'vertical' | 'horizontal';
 }
 
-export function ResizableDivider({ label, value, min, max, onResize, onKeyboardResize, testId, className = '', orientation = 'vertical' }: ResizableDividerProps) {
+export function ResizableDivider({ label, value, min, max, onResizeStart, onResize, onResizeEnd, onKeyboardResize, testId, className = '', orientation = 'vertical' }: ResizableDividerProps) {
   const [dragging, setDragging] = useState(false);
   const animationRef = useRef<number | null>(null);
   const pendingPositionRef = useRef<number | null>(null);
+  const lastPositionRef = useRef<number | null>(null);
 
   useEffect(() => () => {
     if (animationRef.current !== null) window.cancelAnimationFrame(animationRef.current);
+    delete document.documentElement.dataset.resizing;
   }, []);
 
   function scheduleResize(position: number) {
+    lastPositionRef.current = position;
     pendingPositionRef.current = position;
     if (animationRef.current !== null) return;
     animationRef.current = window.requestAnimationFrame(() => {
@@ -35,6 +40,10 @@ export function ResizableDivider({ label, value, min, max, onResize, onKeyboardR
   function pointerDown(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    const position = orientation === 'vertical' ? event.clientX : event.clientY;
+    lastPositionRef.current = position;
+    onResizeStart?.(position);
+    document.documentElement.dataset.resizing = orientation;
     setDragging(true);
   }
 
@@ -52,6 +61,9 @@ export function ResizableDivider({ label, value, min, max, onResize, onKeyboardR
       animationRef.current = null;
       onResize(pending);
     }
+    if (lastPositionRef.current !== null) onResizeEnd?.(lastPositionRef.current);
+    lastPositionRef.current = null;
+    delete document.documentElement.dataset.resizing;
     setDragging(false);
     event.currentTarget.blur();
   }

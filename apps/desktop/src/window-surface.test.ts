@@ -9,7 +9,20 @@ test('native titlebar surface stays identical to renderer app tokens in both the
   for (const theme of ['LIGHT', 'DARK'] as const) {
     const surface = windowSurfaceColors(theme);
     assert.match(tokens, new RegExp(`--fl-color-app:\\s*${surface.background}`));
-    assert.equal(surface.height, 40);
+    assert.equal(surface.height, 44);
   }
   assert.notEqual(windowSurfaceColors('LIGHT').symbols, windowSurfaceColors('DARK').symbols);
+});
+
+test('native 44px caption plane stays continuous while workspace controls remain content-owned', () => {
+  const rendererRoot = path.join(import.meta.dirname, 'renderer');
+  const chrome = readFileSync(path.join(rendererRoot, 'DesktopChrome.tsx'), 'utf8');
+  const styles = readFileSync(path.join(rendererRoot, 'styles.css'), 'utf8');
+  const materials = readFileSync(path.join(rendererRoot, 'styles', 'materials.css'), 'utf8');
+  assert.match(chrome, /<header className="desktop-chrome"[\s\S]*?data-chrome-plane="window"[\s\S]*?<div className="chrome-drag-region" \/>[\s\S]*?<\/header>/);
+  assert.match(chrome, /<div ref=\{workAreaRef\}[\s\S]*?className=\{`utility-control-dock/);
+  assert.match(styles, /\.desktop-frame \{[^}]*grid-template-rows: 44px minmax\(0,1fr\)/);
+  assert.match(styles, /\.desktop-chrome \{[^}]*padding: 0 146px 0 10px/);
+  assert.match(styles, /\.utility-control-dock \{ right: 10px;[^}]*-webkit-app-region: no-drag/);
+  assert.match(materials, /data-chrome-plane="window"[\s\S]*?background: var\(--fl-color-app\);[\s\S]*?backdrop-filter: none/);
 });

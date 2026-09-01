@@ -1,0 +1,236 @@
+/*
+ * Stable application geometry contract.
+ * Material work may change paint, never these ownership boundaries.
+ */
+.desktop-frame,
+.desktop-work-area,
+.desktop-content,
+.project-root,
+.workspace-surface,
+.conversation-column,
+.right-workspace-dock,
+.settings-root,
+.settings-content {
+  min-width: 0;
+  min-height: 0;
+}
+
+.desktop-frame,
+.project-root,
+.workspace-surface,
+.settings-root {
+  width: 100%;
+  height: 100%;
+}
+
+.desktop-frame,
+.desktop-work-area,
+.desktop-content,
+.project-root,
+.workspace-surface {
+  overflow: hidden;
+}
+
+/* Codex-like desktop proportions are a product contract, not a theme choice.
+ * Stored widths are normalized by WorkspaceSurface/ProjectWorkspace to the
+ * same limits before these variables are applied. */
+.workspace-surface {
+  grid-template-columns: var(--workspace-navigation-width, var(--fl-layout-navigation-default)) 4px minmax(0, 1fr);
+}
+
+.project-layout {
+  grid-template-columns: var(--workspace-navigation-width, var(--fl-layout-navigation-default)) 4px minmax(0, 1fr) 0 0;
+}
+
+:root[data-resizing="vertical"] .workspace-surface {
+  transition: none;
+}
+
+/* The Dock divider remains discoverable without turning into a heavy pane
+ * border. Dragging only strengthens the same one-pixel neutral edge. */
+.project-layout.workspace-open .project-workspace-resizer span {
+  width: 1px;
+  opacity: 1;
+  background: color-mix(in srgb, var(--fl-color-text-muted) 14%, transparent);
+}
+
+.project-layout.workspace-open .project-workspace-resizer:hover span,
+.project-layout.workspace-open .project-workspace-resizer:focus-visible span,
+.project-layout.workspace-open .project-workspace-resizer.dragging span {
+  width: 1px;
+  background: color-mix(in srgb, var(--fl-color-text-muted) 24%, transparent);
+}
+
+.app-icon[data-icon="panelRight"] {
+  transform: scaleX(-1);
+}
+
+.project-layout.workspace-open {
+  grid-template-columns:
+    var(--workspace-navigation-width, var(--fl-layout-navigation-default))
+    4px
+    minmax(var(--fl-layout-conversation-min), 1fr)
+    4px
+    minmax(var(--fl-layout-workspace-dock-min), var(--project-workspace-width, var(--fl-layout-workspace-dock-default)));
+}
+
+.project-layout.workspace-open.dock-focused {
+  grid-template-columns: var(--workspace-navigation-width, var(--fl-layout-navigation-default)) 4px 0 0 minmax(var(--fl-layout-workspace-dock-min), 1fr);
+}
+
+body[data-sidebar-collapsed="true"] .workspace-surface {
+  grid-template-columns: 0 0 minmax(0, 1fr);
+}
+
+body[data-sidebar-collapsed="true"] .project-navigation,
+body[data-sidebar-collapsed="true"] .settings-navigation {
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  padding-inline: 0;
+  overflow: hidden;
+}
+
+body[data-sidebar-collapsed="true"] .project-layout {
+  grid-template-columns: 0 0 minmax(0, 1fr) 0 0;
+}
+
+body[data-sidebar-collapsed="true"] .project-layout.workspace-open {
+  grid-template-columns: 0 0 minmax(var(--fl-layout-conversation-min), 1fr) 4px minmax(var(--fl-layout-workspace-dock-min), var(--project-workspace-width, var(--fl-layout-workspace-dock-default)));
+}
+
+body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused {
+  grid-template-columns: 0 0 0 0 minmax(var(--fl-layout-workspace-dock-min), 1fr);
+}
+
+/* Conversation and right tools are two views on one continuous Content plane. */
+.workspace-surface,
+.right-workspace-dock {
+  border-radius: 0;
+  background: var(--fl-surface-content);
+  box-shadow: none;
+}
+
+/* The work canvas rounds into the shared app chrome without splitting the
+ * conversation or Settings into a separate card. */
+.conversation-column,
+.settings-content {
+  border-radius: var(--fl-radius-work-surface) 0 0 0;
+  background: var(--fl-surface-content);
+  box-shadow: none;
+}
+
+.conversation-column { overflow: hidden; }
+
+.settings-content {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Navigation resizing keeps a generous invisible hit target. Its visual edge
+ * stays quiet on hover and only becomes modestly clearer while dragging. */
+.project-navigation-resizer span {
+  width: 1px;
+  opacity: 0;
+  background: var(--fl-color-divider);
+}
+
+.project-navigation-resizer:hover span,
+.project-navigation-resizer:focus-visible span {
+  width: 1px;
+  opacity: .38;
+  background: var(--fl-color-divider);
+}
+
+.project-navigation-resizer.dragging span {
+  width: 1px;
+  opacity: .55;
+  background: var(--fl-color-divider-hover);
+}
+
+.conversation-column,
+.right-workspace-dock {
+  position: relative;
+}
+
+.message-list {
+  min-height: 0;
+  padding: var(--fl-space-8) max(var(--fl-space-8), calc((100% - var(--fl-layout-conversation-reading)) / 2)) 238px;
+  overscroll-behavior: contain;
+}
+
+.message {
+  max-width: var(--fl-layout-conversation-message);
+}
+
+.agent-turn {
+  max-width: var(--fl-layout-conversation-reading);
+}
+
+/* Floating Composer must not shorten the conversation viewport. */
+.conversation-composer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: min(calc(100% - 40px), var(--fl-layout-composer-width));
+  margin: 0 auto var(--fl-space-4);
+  padding: var(--fl-space-2) var(--fl-space-4);
+}
+
+/* Empty conversations keep the real Composer in the same reading column. */
+.conversation-column.is-empty-conversation .message-list {
+  display: grid;
+  place-items: center;
+  padding-bottom: 0;
+}
+
+.conversation-column.is-empty-conversation .conversation-empty {
+  margin: 0 0 132px;
+}
+
+.right-workspace-dock,
+.desktop-terminal-layer {
+  isolation: isolate;
+}
+
+/* Dock tools consume the complete dynamically-sized pane. Individual viewers
+ * must not introduce a second width cap inside the Workspace Dock. */
+.right-workspace-dock,
+.right-dock-active-view,
+.right-dock-view,
+.workspace-file-tool,
+.dock-resource-layout,
+.dock-resource-content,
+.right-dock-view-browser .browse-panel,
+.right-terminal-view,
+.right-terminal-view .terminal-session {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+/* Browser is a tool inside the shared Content plane. Its Page tabs are hosted
+ * by the Dock Tab Strip; the address toolbar and viewport remain on the same
+ * white surface as the other Dock tools. */
+.right-dock-view-browser,
+.right-dock-view-browser .browse-panel,
+.right-dock-view-browser .browse-content,
+.right-dock-view-browser .browse-viewport,
+.right-dock-view-browser .browse-empty {
+  background: var(--fl-surface-content);
+}
+
+@container (max-width: 560px) {
+  .message-list {
+    padding-right: var(--fl-space-5);
+    padding-bottom: 164px;
+    padding-left: var(--fl-space-5);
+  }
+
+  .conversation-composer {
+    width: calc(100% - 20px);
+    margin-bottom: var(--fl-space-3);
+  }
+}

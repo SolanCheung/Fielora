@@ -3,9 +3,16 @@ import type { ModelInvocationEvent, ProviderConfigView } from '@fielora/contract
 import fieloraMark from '../../assets/fielora-mark.svg';
 import type { AppPreferences, StartupDestination } from './app-preferences';
 import { AppearanceSettings } from './AppearanceSettings';
-import { ShellIcon, type ShellIconName } from './PrimaryNav';
+import { AppIcon, type AppIconName } from './ui';
 import { SelectMenu, SettingsToggle } from './UiPrimitives';
-import { persistWorkspaceNavigationWidth, readWorkspaceNavigationWidth, WorkspaceSurface } from './WorkspaceSurface';
+import {
+  persistWorkspaceNavigationWidth,
+  readWorkspaceNavigationWidth,
+  WORKSPACE_NAVIGATION_DEFAULT_WIDTH,
+  WORKSPACE_NAVIGATION_MAX_WIDTH,
+  WORKSPACE_NAVIGATION_MIN_WIDTH,
+  WorkspaceSurface,
+} from './WorkspaceSurface';
 import { StorageDataSettings } from './StorageDataSettings';
 import { CapabilityExtensionsSettings, type CapabilityExtensionTab } from './CapabilityExtensionsSettings';
 
@@ -19,7 +26,7 @@ interface SettingsScreenProps {
   fieldId?: string | null;
 }
 
-const categories: Array<{ id: SettingsCategory; label: string; keywords: string; icon: ShellIconName }> = [
+const categories: Array<{ id: SettingsCategory; label: string; keywords: string; icon: AppIconName }> = [
   { id: 'GENERAL', label: '常规', keywords: '启动 页面 默认', icon: 'settings' },
   { id: 'APPEARANCE', label: '外观', keywords: '主题 浅色 深色 系统 字体 密度 圆角 动效 theme appearance', icon: 'appearance' },
   { id: 'MODELS', label: '模型与服务', keywords: 'provider api key model 模型 服务', icon: 'models' },
@@ -57,7 +64,7 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
   const [providers, setProviders] = useState<ProviderConfigView[]>([]);
   const [providerError, setProviderError] = useState('');
   const [providerProbe, setProviderProbe] = useState<Record<string, string>>({});
-  const [navigationWidth, setNavigationWidth] = useState(() => readWorkspaceNavigationWidth(270, 'fielora:settings-navigation-width'));
+  const [navigationWidth, setNavigationWidth] = useState(() => readWorkspaceNavigationWidth(WORKSPACE_NAVIGATION_DEFAULT_WIDTH, 'fielora:settings-navigation-width'));
   const probeInvocations = useRef(new Map<string, string>());
 
   const refreshProviders = useCallback(async () => {
@@ -110,20 +117,20 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
   }
 
   function updateNavigationWidth(next: number) {
-    const width = Math.min(Math.max(next, 190), 360);
+    const width = Math.min(Math.max(next, WORKSPACE_NAVIGATION_MIN_WIDTH), WORKSPACE_NAVIGATION_MAX_WIDTH);
     setNavigationWidth(width);
     persistWorkspaceNavigationWidth(width, 'fielora:settings-navigation-width');
   }
 
-  return <WorkspaceSurface className="settings-root" testId="settings-screen" navigationWidth={navigationWidth} onNavigationWidthChange={updateNavigationWidth} navigationResizerTestId="settings-navigation-resizer" navigationResizerClassName="settings-navigation-resizer" navigation={<aside className="settings-navigation">
+  return <WorkspaceSurface className="settings-root" testId="settings-screen" navigationWidth={navigationWidth} onNavigationWidthChange={updateNavigationWidth} navigationResizerTestId="settings-navigation-resizer" navigationResizerClassName="settings-navigation-resizer" navigation={<aside className="settings-navigation" data-surface="chrome">
       <button className="settings-back" onClick={onBack} data-testid="settings-back">← <span>返回应用</span></button>
       <label className="settings-search"><span className="sr-only">搜索设置</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索设置…" data-testid="settings-search" /></label>
       <nav aria-label="设置分类">
-        {visibleCategories.map((item) => <button key={item.id} className={category === item.id ? 'active' : ''} onClick={() => setCategory(item.id)} data-testid={`settings-category-${item.id.toLowerCase()}`}><ShellIcon name={item.icon}/><span>{item.label}</span></button>)}
+        {visibleCategories.map((item) => <button key={item.id} className={category === item.id ? 'active' : ''} onClick={() => setCategory(item.id)} data-testid={`settings-category-${item.id.toLowerCase()}`}><AppIcon name={item.icon}/><span>{item.label}</span></button>)}
       </nav>
       <div className="settings-brand"><img src={fieloraMark} alt="" /><span>Fielora Desktop</span></div>
     </aside>}>
-    <section className="settings-content">
+    <section className="settings-content" data-surface="content">
       {category === 'GENERAL' && <div className="settings-section" data-testid="settings-general"><header><p>个人</p><h1>常规</h1></header><section className="settings-card"><div className="settings-row"><span><strong>默认工作面</strong><small>选择启动 Fielora 时显示的主要工作面。</small></span><SelectMenu value={preferences.startupDestination === 'NOW' ? 'NOW' : 'PROJECTS'} onChange={(value) => update({ startupDestination: value as StartupDestination })} ariaLabel="默认工作面" testId="startup-destination" options={[{ value: 'PROJECTS', label: '项目' }, { value: 'NOW', label: '现在' }]} /></div></section></div>}
       {category === 'BROWSER' && <div className="settings-section" data-testid="settings-browser"><header><p>浏览器</p><h1>浏览器设置</h1></header><section className="settings-card"><div className="settings-row"><span><strong>启动时恢复浏览器</strong><small>启动 Fielora 时恢复上次打开的浏览页面。</small></span><SettingsToggle value={preferences.startupDestination === 'BROWSE'} onChange={(value) => update({ startupDestination: value ? 'BROWSE' : 'PROJECTS' })} label="启动时恢复浏览器" testId="browser-startup-toggle" /></div><div className="settings-row"><span><strong>搜索引擎</strong></span><em className="settings-readonly-value">Google</em></div><div className="settings-row"><span><strong>浏览数据</strong><small>Cookie 和网站登录状态仅保留在此设备，不会包含在 Fielora 迁移备份中。</small></span><em className="settings-readonly-value">仅此设备</em></div></section></div>}
       {category === 'APPEARANCE' && <AppearanceSettings appearance={preferences.appearance} onChange={(appearance) => onChange({ ...preferences, appearance })} />}

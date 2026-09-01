@@ -22,7 +22,7 @@ import {
   type AgentTerminalStatus,
 } from './agent-presentation';
 import { MarkdownMessage } from './MarkdownMessage';
-import { ShellIcon, type ShellIconName } from './PrimaryNav';
+import { AppIcon, type AppIconName } from './ui';
 
 interface AgentTurnProps {
   run: AgentRunView | null;
@@ -115,7 +115,7 @@ function LiveEditedFiles({ review, stable, onReviewFile }: {
   </section>;
 }
 
-function activityIcon(kind: ConversationActivityGroupKind): ShellIconName {
+function activityIcon(kind: ConversationActivityGroupKind): AppIconName {
   if (kind === 'INSPECT') return 'source';
   if (kind === 'CHANGE') return 'edit';
   if (kind === 'VERIFY') return 'check';
@@ -178,7 +178,7 @@ function ActivityGroup({ item }: { item: ConversationActivityGroupItem }) {
   const remaining = Math.max(0, item.entries.length - visibleEntries.length);
   return <section className={`conversation-activity-group activity-${item.groupKind.toLowerCase()}`} data-testid="conversation-activity-group" data-activity-sequence={item.sequence} data-activity-group-kind={item.groupKind} data-completed-at={item.completedAt ?? undefined} title={groupTime || undefined} tabIndex={groupTime ? 0 : undefined}>
     <header className="conversation-activity-group-summary">
-      <ShellIcon name={activityIcon(item.groupKind)}/><strong>{item.title}</strong>
+      <AppIcon name={activityIcon(item.groupKind)}/><strong>{item.title}</strong>
     </header>
     <CompletionTime label={groupTime}/>
     <ol className="conversation-activity-entries">{visibleEntries.map((entry) => {
@@ -189,7 +189,7 @@ function ActivityGroup({ item }: { item: ConversationActivityGroupItem }) {
         <span data-activity-layout={presentation.inlineDetail ? 'inline' : undefined}><strong title={presentation.detail || presentation.title}>{presentation.title}</strong>{presentation.detail && <small title={presentation.detail}>{presentation.detail}</small>}</span>
         {result && <em data-activity-result={result}>{result === 'PASS' ? '通过' : '未通过'}</em>}<CompletionTime label={completion}/>
       </li>;
-    })}{item.entries.length > previewLimit && <li className="conversation-activity-more"><button type="button" onClick={() => setShowAll((value) => !value)} aria-expanded={showAll}><span>{showAll ? '收起其余活动' : `查看另外 ${remaining} 项`}</span><ShellIcon name="chevronDown"/></button></li>}</ol>
+    })}{item.entries.length > previewLimit && <li className="conversation-activity-more"><button type="button" onClick={() => setShowAll((value) => !value)} aria-expanded={showAll}><span>{showAll ? '收起其余活动' : `查看另外 ${remaining} 项`}</span><AppIcon name="chevronDown"/></button></li>}</ol>
   </section>;
 }
 
@@ -217,7 +217,7 @@ function ConversationActivityStream({ items, tools, approval, approvalSummary, b
   liveNarrative?: string;
 }) {
   return <div className="conversation-activity-stream" data-testid="conversation-activity-stream" data-activity-count={items.length}>
-    {items.length === 0 && !liveNarrative && <div className="conversation-activity-thinking" data-testid="conversation-activity-thinking"><ShellIcon name="source"/><small>正在准备任务上下文</small></div>}
+    {items.length === 0 && !liveNarrative && <div className="conversation-activity-thinking" data-testid="conversation-activity-thinking"><AppIcon name="source"/><small>正在准备任务上下文</small></div>}
     {items.map((item) => {
       if (item.kind === 'GROUP') return <ActivityGroup item={item} key={item.id}/>;
       if (item.kind === 'NARRATIVE') return <NarrativeBlock text={item.text} sequence={item.sequence} key={item.id}/>;
@@ -285,8 +285,8 @@ function AgentProgressSummary({ run, presentation, events, tools, review, thinki
       {run.status === 'PAUSED' && onResume && <button type="button" className="agent-resume-action" onClick={onResume}>继续工作</button>}
     </div>}
     <button type="button" className="agent-progress-summary-trigger" onClick={onToggleDetails} aria-expanded={detailsOpen} aria-controls={detailId} data-testid="agent-progress-summary">
-      <span className="agent-progress-symbol" aria-hidden="true"><ShellIcon name="source"/></span><strong>{statusLabel}</strong>
-      <span>· {presentation.elapsed}</span>{changeSummary && <span>· {changeSummary}</span>}<ShellIcon name="chevronDown"/>
+      <span className="agent-progress-symbol" aria-hidden="true"><AppIcon name="source"/></span><strong>{statusLabel}</strong>
+      <span>· {presentation.elapsed}</span>{changeSummary && <span>· {changeSummary}</span>}<AppIcon name="chevronDown"/>
     </button>
   </div>;
 }
@@ -323,7 +323,7 @@ function ChangedFiles({ review, onReview, onReviewFile }: {
   const remainingFiles = Math.max(0, review.files.length - visibleFiles.length);
   return <section className={`agent-result-changes${expanded ? ' is-expanded' : ''}`} data-testid="agent-result-changed-files" data-file-count={review.files.length} data-additions={review.additions} data-deletions={review.deletions}>
     <header className="agent-result-changes-header">
-      <span className="agent-result-changes-icon"><ShellIcon name="filePlus"/></span>
+      <span className="agent-result-changes-icon"><AppIcon name="filePlus"/></span>
       <span className="agent-result-changes-title"><strong>已编辑 {review.files.length} 个文件</strong><small><b>+{review.additions}</b><i>−{review.deletions}</i></small></span>
       {onReview && <button type="button" className="agent-full-review-action" onClick={onReview}>审核</button>}
     </header>
@@ -333,7 +333,7 @@ function ChangedFiles({ review, onReview, onReviewFile }: {
       </button>)}
     </div>
     {review.files.length > previewLimit && <button type="button" className="agent-result-changes-toggle" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} data-testid="agent-changed-files-toggle">
-      <span>{expanded ? '收起文件' : `再显示 ${remainingFiles} 个文件`}</span><ShellIcon name="chevronDown"/>
+      <span>{expanded ? '收起文件' : `再显示 ${remainingFiles} 个文件`}</span><AppIcon name="chevronDown"/>
     </button>}
   </section>;
 }
@@ -359,7 +359,7 @@ function AgentTerminalResult({ status, message, presentation, tools, canExpand, 
   const markdown = message?.content || result.detail;
   return <div className="agent-terminal-result" data-testid="agent-terminal-result" data-result-outcome={presentation?.outcome ?? status}>
     {result.duration && (canExpand
-      ? <button type="button" className="agent-terminal-runtime" aria-expanded={detailOpen} data-testid="agent-execution-detail-toggle" onClick={() => setDetailOpen((value) => !value)}><span>耗时 {result.duration}</span><ShellIcon name="chevronDown"/></button>
+      ? <button type="button" className="agent-terminal-runtime" aria-expanded={detailOpen} data-testid="agent-execution-detail-toggle" onClick={() => setDetailOpen((value) => !value)}><span>耗时 {result.duration}</span><AppIcon name="chevronDown"/></button>
       : <div className="agent-terminal-runtime"><span>耗时 {result.duration}</span></div>)}
     {detailOpen && executionDetail}
     <div className="agent-terminal-body"><MarkdownMessage content={markdown} references={message?.references ?? []} onOpenReference={onOpenReference} onOpenImage={onOpenImage}/></div>
@@ -432,6 +432,6 @@ export function AgentTurn({
     {!answerOnly && terminal && status && (
       <AgentTerminalResult status={status} message={terminalMessage} presentation={presentation} tools={tools} canExpand={canExpand} partial={partial} review={review} executionDetail={run && presentation ? <CompletedActivityHistory items={activityItems} tools={tools}/> : null} onRetry={onRetry} onReview={onReview} onReviewFile={onReviewFile} onOpenReference={onOpenReference} onOpenImage={onOpenImage}/>
     )}
-    {terminalMessage && onCopy && <footer className={`message-actions agent-turn-message-actions ${copied ? 'copy-confirmed' : ''}`}><button type="button" className={copied ? 'copied' : ''} aria-label={copied ? '消息已复制' : '复制消息'} title={copied ? '已复制' : '复制'} onClick={onCopy} data-testid="message-copy"><ShellIcon name={copied ? 'check' : 'copy'}/>{copied && <span role="status" aria-live="polite">已复制</span>}</button></footer>}
+    {terminalMessage && onCopy && <footer className={`message-actions agent-turn-message-actions ${copied ? 'copy-confirmed' : ''}`}><button type="button" className={copied ? 'copied' : ''} aria-label={copied ? '消息已复制' : '复制消息'} title={copied ? '已复制' : '复制'} onClick={onCopy} data-testid="message-copy"><AppIcon name={copied ? 'check' : 'copy'}/>{copied && <span role="status" aria-live="polite">已复制</span>}</button></footer>}
   </section>;
 }

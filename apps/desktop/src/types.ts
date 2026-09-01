@@ -56,6 +56,7 @@ import type {
   CopyWorkspaceAttachmentResult, ReadWorkspaceAttachmentRequest, SaveWorkspaceAttachmentRequest, SaveWorkspaceAttachmentResult, StoreWorkspaceAttachmentRequest,
   WorkspaceAttachmentSelection, WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceProjectRequest,
 } from './workspace-types';
+import type { CreateScheduledTaskRequest, ScheduledTaskRequest, ScheduledTaskView, UpdateScheduledTaskRequest } from './scheduled-task-types';
 
 export type Unsubscribe = () => void;
 export type AgentTextDeltaEvent = {
@@ -90,6 +91,13 @@ export interface FieloraBridge {
     archive(request: ArchiveConversationRequest): Promise<ConversationView>;
     createMessage(request: CreateConversationMessageRequest): Promise<ConversationMessageView>;
     listMessages(request: ListConversationMessagesRequest): Promise<ConversationMessageView[]>;
+  };
+  scheduledTask: {
+    list(): Promise<ScheduledTaskView[]>;
+    create(request: CreateScheduledTaskRequest): Promise<ScheduledTaskView>;
+    update(request: UpdateScheduledTaskRequest): Promise<ScheduledTaskView>;
+    delete(request: ScheduledTaskRequest): Promise<null>;
+    runNow(request: ScheduledTaskRequest): Promise<ScheduledTaskView>;
   };
   artifact: {
     list(request: ListArtifactsRequest): Promise<ArtifactListView>;

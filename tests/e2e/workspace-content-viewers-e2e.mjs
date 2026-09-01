@@ -105,17 +105,31 @@ try {
   await cdp.eval(`window.fielora.conversation.createMessage({conversation_id:${JSON.stringify(conversation.id)},role:'USER',content:'验证 Workspace Viewer。',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null})`);
   await cdp.eval(`window.fielora.conversation.createMessage({conversation_id:${JSON.stringify(conversation.id)},role:'ASSISTANT',content:'只验证本轮相关界面。',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null})`);
   await wait(cdp, `window.fielora.project.list().then((items)=>items.some((item)=>item.field_id===${JSON.stringify(project.field_id)})).catch(()=>false)`);
-  await cdp.eval(`document.querySelector('[data-testid="now-nav"]').click()`);
-  await wait(cdp, `document.querySelector('[data-testid="now-screen"]')`);
-  await cdp.eval(`document.querySelector('[data-testid="projects-nav"]').click()`);
-  await wait(cdp, `document.querySelector('[data-testid^="project-row-"]')`);
+  await cdp.eval(`location.reload()`);
+  await wait(cdp, `document.querySelector('[data-testid="project-workspace"]') && window.fieloraTest`);
+  await wait(cdp, `document.querySelector(${JSON.stringify(`[data-testid="project-${project.field_id}"]`)})`);
+  await cdp.eval(`(()=>{const button=document.querySelector(${JSON.stringify(`[data-testid="project-${project.field_id}"]`)});if(button.getAttribute('aria-expanded')!=='true')button.click();})()`);
+  await wait(cdp, `document.querySelector(${JSON.stringify(`[data-testid="project-row-${project.field_id}"]`)})`);
   await wait(cdp, `document.querySelector('[data-testid^="project-conversations-"]') && document.querySelector('.conversation-composer')`);
 
   const projectState = await cdp.eval(`(()=>{const row=document.querySelector('[data-testid^="project-row-"]');const button=row.querySelector('.project-item');return{label:button.innerText.trim(),title:button.title,expanded:button.getAttribute('aria-expanded'),conversation:Boolean(document.querySelector('[data-testid^="project-conversations-"]')),active:row.classList.contains('active')};})()`);
   assert.equal(projectState.label.includes(projectRoot), false, JSON.stringify(projectState));
-  assert.equal(projectState.title, projectRoot);
+  assert.equal(projectState.title, '');
   assert.equal(projectState.expanded, 'true');
   assert.equal(projectState.conversation, true);
+
+  const projectAnchor = await cdp.eval(`(()=>{const value=document.querySelector('[data-testid^="project-row-"] .project-item').getBoundingClientRect();return{x:value.x,y:value.y,width:value.width,height:value.height}})()`);
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: projectAnchor.x + projectAnchor.width / 2, y: projectAnchor.y + projectAnchor.height / 2 });
+  await wait(cdp, `document.querySelector('.ui-tooltip--card .sidebar-hover-preview') && getComputedStyle(document.querySelector('.ui-tooltip--card')).opacity === '1'`);
+  const projectTooltip = await cdp.eval(`(()=>{const tooltip=document.querySelector('.ui-tooltip--card');const bounds=tooltip.getBoundingClientRect();const style=getComputedStyle(tooltip);return{text:tooltip.textContent,left:Math.round(bounds.left),anchorRight:Math.round(document.querySelector('[data-testid^="project-row-"] .project-item').getBoundingClientRect().right),shadow:style.boxShadow,background:style.backgroundColor}})()`);
+  assert.ok(projectTooltip.text.includes('Viewer 定向验收'), JSON.stringify(projectTooltip));
+  assert.ok(projectTooltip.text.includes(projectRoot), JSON.stringify(projectTooltip));
+  assert.ok(projectTooltip.left > projectTooltip.anchorRight, JSON.stringify(projectTooltip));
+  assert.notEqual(projectTooltip.shadow, 'none');
+  await screenshot(cdp, '00-sidebar-hover-preview.png');
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 720, y: 220 });
+  await wait(cdp, `!document.querySelector('[data-testid="ui-tooltip"]')`);
+
   await cdp.eval(`document.querySelector('[data-testid^="project-row-"] .project-item').click()`);
   await wait(cdp, `!document.querySelector('[data-testid^="project-conversations-"]')`);
   const collapsed = await cdp.eval(`(()=>{const row=document.querySelector('[data-testid^="project-row-"]');return{expanded:row.querySelector('.project-item').getAttribute('aria-expanded'),active:row.classList.contains('active'),conversationTitle:document.querySelector('.conversation-header h2')?.textContent};})()`);
@@ -123,7 +137,7 @@ try {
   await cdp.eval(`document.querySelector('[data-testid^="project-row-"] .project-item').click()`);
   await wait(cdp, `document.querySelector('[data-testid^="project-conversations-"]')`);
   const navLabels = await cdp.eval(`[...document.querySelectorAll('.project-global-nav span')].map((item)=>item.textContent)`);
-  assert.deepEqual(navLabels, ['现在', '浏览器', '空间', '收件箱']);
+  assert.deepEqual(navLabels, ['现在', '资料库']);
 
   const conversationLayout = await cdp.eval(`(()=>{const pane=document.querySelector('.conversation-column').getBoundingClientRect();const list=document.querySelector('.message-list');const listRect=list.getBoundingClientRect();const composer=document.querySelector('.conversation-composer').getBoundingClientRect();return{paneBottom:Math.round(pane.bottom),listBottom:Math.round(listRect.bottom),paddingBottom:parseFloat(getComputedStyle(list).paddingBottom),composerHeight:Math.round(composer.height)};})()`);
   assert.ok(Math.abs(conversationLayout.paneBottom - conversationLayout.listBottom) <= 1, JSON.stringify(conversationLayout));

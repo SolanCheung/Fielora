@@ -6,6 +6,7 @@ import test from 'node:test';
 const rendererRoot = import.meta.dirname;
 const workspace = readFileSync(path.join(rendererRoot, 'ProjectWorkspace.tsx'), 'utf8');
 const turn = readFileSync(path.join(rendererRoot, 'AgentTurn.tsx'), 'utf8');
+const icons = readFileSync(path.join(rendererRoot, 'ui', 'Icon.tsx'), 'utf8');
 const projection = readFileSync(path.join(rendererRoot, 'agent-activity-projection.ts'), 'utf8');
 const markdown = readFileSync(path.join(rendererRoot, 'MarkdownMessage.tsx'), 'utf8');
 const review = readFileSync(path.join(rendererRoot, 'AgentHumanReview.tsx'), 'utf8');
@@ -15,6 +16,7 @@ const styles = [
   readFileSync(path.join(rendererRoot, 'styles.css'), 'utf8'),
   readFileSync(path.join(rendererRoot, 'styles/appearance.css'), 'utf8'),
 ].join('\n');
+const layoutStyles = readFileSync(path.join(rendererRoot, 'styles/layout.css'), 'utf8');
 
 test('production conversation has one turn-owned agent presentation path', () => {
   assert.match(workspace, /<AgentTurn/);
@@ -81,8 +83,9 @@ test('transient model-loop stages do not become permanent completed steps and re
   assert.doesNotMatch(turn, /[✓✔✅]/u);
   assert.doesNotMatch(turn, /className="agent-step-marker"|agent-execution-steps|completedSteps/);
   assert.doesNotMatch(turn, /presentation\.activeStep|presentation\.totalSteps|第 \{/);
-  assert.match(styles, /@media \(max-width: 1439px\)/);
-  assert.match(styles, /\.project-layout\.agent-review-open \.workspace-panel \{ position: absolute;[^}]*grid-column: 3 \/ -1/);
+  assert.match(layoutStyles, /\.project-layout\.workspace-open \{[^}]*grid-template-columns:/s);
+  assert.match(layoutStyles, /\.project-layout\.workspace-open\.dock-focused \{[^}]*grid-template-columns:/s);
+  assert.doesNotMatch([styles, layoutStyles].join('\n'), /\.project-layout\.agent-review-open \.workspace-panel \{[^}]*position:\s*absolute/s);
   assert.doesNotMatch([workspace, styles].join('\n'), /message-navigator/);
 });
 
@@ -180,7 +183,7 @@ test('activity visual language has no normal status dots, counts, completion bad
   const activityStylesStart = styles.indexOf('.conversation-activity-stream {');
   const activityStylesEnd = styles.indexOf('.agent-live-files {', activityStylesStart);
   const activityStyles = styles.slice(activityStylesStart, activityStylesEnd);
-  assert.match(activitySource, /<ShellIcon name=\{activityIcon\(item\.groupKind\)\}/);
+  assert.match(activitySource, /<AppIcon name=\{activityIcon\(item\.groupKind\)\}/);
   assert.match(activitySource, /<header className="conversation-activity-group-summary">/);
   assert.doesNotMatch(activitySource, /conversation-activity-group-summary"[^>]*onClick|conversation-activity-group[^\n]*is-expanded/);
   assert.doesNotMatch(activitySource, /<i aria-hidden|item\.entries\.length\} 项|>已完成</);
@@ -201,7 +204,7 @@ test('activity presentation filters runtime terminology and progressively reveal
   assert.match(turn, /data-activity-layout=\{presentation\.inlineDetail \? 'inline' : undefined\}/);
   assert.match(turn, /item\.entries\.slice\(0, previewLimit\)/);
   assert.match(turn, /`查看另外 \$\{remaining\} 项`/);
-  assert.match(turn, /className="conversation-activity-more"[^\n]*aria-expanded=\{showAll\}[^\n]*<ShellIcon name="chevronDown"/);
+  assert.match(turn, /className="conversation-activity-more"[^\n]*aria-expanded=\{showAll\}[^\n]*<AppIcon name="chevronDown"/);
   assert.match(projection, /if \(event\.kind === 'PHASE_CHANGED'\) \{\s*currentGroup = null;\s*continue;/s);
   assert.match(projection, /if \(receiptToolId && projectedToolIds\.has\(receiptToolId\)\) continue/);
 });
@@ -216,9 +219,9 @@ test('activity uses the conversation scroll only and running composer actions ke
   assert.match(styles, /li:hover > \.agent-completion-time/);
   assert.match(tokens, /--fl-font-size-agent-execution:\s*calc\(14px \* var\(--fl-ui-font-scale\)\)/);
   const appearance = readFileSync(path.join(rendererRoot, 'styles', 'appearance.css'), 'utf8');
-  assert.match(appearance, /\.conversation-composer \.composer-submit\.stop,\s*\.stop-button \{[^}]*background: var\(--fl-color-accent\)/s);
+  assert.match(appearance, /\.conversation-composer \.composer-submit\.stop,\s*\.stop-button \{[^}]*background: var\(--fl-color-emphasis\)/s);
   assert.doesNotMatch(appearance, /\.composer-submit\.stop,[^}]*background: var\(--fl-color-danger\)/s);
-  assert.match(workspace, /stop: <rect[^>]*fill="currentColor" stroke="none"/);
+  assert.match(icons, /stop: Stop/);
 });
 
 test('terminal duration leads collapsed chronology and the exact result Markdown', () => {

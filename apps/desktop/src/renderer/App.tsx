@@ -8,8 +8,9 @@ import { PrimaryNav } from './PrimaryNav';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { SettingsScreen, type SettingsCategory } from './SettingsScreen';
 import { LibraryScreen } from './LibraryScreen';
+import { ScheduledTasksScreen } from './ScheduledTasksScreen';
 import { SelectMenu, TextActionDialog } from './UiPrimitives';
-import { applyAppPreferences, readAppPreferences, resolveTheme, writeAppPreferences, type AppPreferences } from './app-preferences';
+import { applyAppPreferences, readAppPreferences, resolveAppearance, writeAppPreferences, type AppPreferences } from './app-preferences';
 import type { AppView } from './view-state';
 import {
   activityLabel,
@@ -65,8 +66,9 @@ export function App() {
       applyAppPreferences(document.documentElement, preferences, {
         prefersDark: dark.matches,
         prefersReducedMotion: reducedMotion.matches,
+        supportsBackdrop: CSS.supports('backdrop-filter', 'blur(1px)'),
       });
-      void window.fielora.window.setTitlebarTheme(resolveTheme(preferences.appearance.themePreference, dark.matches));
+      void window.fielora.window.setTitlebarTheme(resolveAppearance(preferences.appearance.themePreference, dark.matches));
     };
     apply();
     dark.addEventListener('change', apply);
@@ -121,10 +123,6 @@ export function App() {
     finally { setBusy(false); }
   }
 
-  async function createField(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault(); const form = new FormData(event.currentTarget); const target = event.currentTarget;
-    await run(async () => { await window.fielora.field.create({ title: String(form.get('title') ?? ''), goal: String(form.get('goal') ?? '') || null }); target.reset(); });
-  }
   async function openField(fieldId: string) { selectedFieldRef.current = fieldId; setAppView('FIELDS'); setBusy(true); try { await refreshReality(fieldId); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { setBusy(false); } }
   async function createState(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!resume) return; const form = new FormData(event.currentTarget); const target = event.currentTarget;
@@ -288,5 +286,5 @@ export function App() {
     </main></div>{stateEdit && <TextActionDialog title={stateEdit.mode === 'REVISE' ? '修订记录' : '替代记录'} description={stateEdit.mode === 'REVISE' ? '保留同一条记录并更新内容。' : '创建替代记录，并保留原记录的历史。'} value={stateEdit.value} multiline confirmLabel={stateEdit.mode === 'REVISE' ? '保存修订' : '确认替代'} onChange={(value) => setStateEdit((current) => current ? { ...current, value } : null)} onCancel={() => setStateEdit(null)} onConfirm={() => void saveStateEdit()} testId="state-edit-dialog" />}</>;
   }
 
-  return <div className="shell" data-testid="now-screen"><PrimaryNav active="NOW" onProjects={goProjects} onNow={() => undefined} onBrowse={goBrowse} onFields={goFields} onNewConversation={goNewConversation} onSettings={goSettings} /><main className="content"><header className="now-header"><div><p className="eyebrow">NOW</p><h1>继续真正重要的工作</h1><p>你的工作现场已从本地安全恢复。</p></div></header><div className="now-grid"><section className="continue"><h2>继续</h2>{fields.length === 0 ? <div className="empty"><h3>从第一个 Field 开始</h3><p>为一件需要持续推进的事情保存目标、进展、来源和工作现场。</p></div> : fields.slice(0,3).map((field)=><button className="field-row" key={field.id} onClick={() => void openField(field.id)} data-testid={`field-${field.title}`}><span><strong>{field.title}</strong><small>{field.goal || '未设置目标'}</small></span><em>{focusLabel(field.current_focus)} →</em></button>)}</section><section className="create"><h2>创建 Field</h2><form onSubmit={createField}><label>名称<input name="title" required maxLength={120} placeholder="例如：Fielora / Build V0.1" data-testid="create-title" /></label><label>目标（可选）<textarea name="goal" maxLength={4000} placeholder="这个 Field 要推进什么？" data-testid="create-goal" /></label><button className="primary-button" type="submit" disabled={busy} data-testid="create-field">创建 Field</button></form></section></div>{error && <p className="error">{error}</p>}</main></div>;
+  return <ScheduledTasksScreen onProjects={goProjects} onBrowse={goBrowse} onFields={goFields} onNewConversation={goNewConversation} onSettings={goSettings} />;
 }

@@ -1,6 +1,7 @@
 export type StartupDestination = 'PROJECTS' | 'NOW' | 'BROWSE';
-export type ThemePreference = 'SYSTEM' | 'LIGHT' | 'DARK';
-export type ResolvedTheme = 'LIGHT' | 'DARK';
+export type AppearanceMode = 'SYSTEM' | 'LIGHT' | 'DARK';
+export type EffectiveAppearance = 'LIGHT' | 'DARK';
+export type MaterialMode = 'GLASS' | 'SOLID';
 export type AccentPreset = 'FIELORA' | 'BLUE' | 'TEAL' | 'ORANGE' | 'CUSTOM';
 export type InterfaceDensity = 'COMFORTABLE' | 'STANDARD' | 'COMPACT';
 export type InterfaceContrast = 'SOFT' | 'STANDARD' | 'HIGH';
@@ -13,7 +14,8 @@ export type AdvancedColorKey = 'accent' | 'canvas' | 'sidebar' | 'surface' | 'fo
 export type AdvancedColorOverrides = Partial<Record<AdvancedColorKey, string>>;
 
 export interface AppearancePreferences {
-  themePreference: ThemePreference;
+  /** Persisted field name retained for UI preference compatibility. This is an appearance mode, not a Theme ID. */
+  themePreference: AppearanceMode;
   accentPreset: AccentPreset;
   customAccent: string;
   density: InterfaceDensity;
@@ -45,31 +47,13 @@ interface PreferenceStorage {
 export interface AppearanceEnvironment {
   prefersDark: boolean;
   prefersReducedMotion: boolean;
+  supportsBackdrop?: boolean;
 }
 
 const STORAGE_KEY = 'fielora.ui.preferences.v2';
 const LEGACY_STORAGE_KEY = 'fielora.ui.preferences.v1';
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const ADVANCED_COLOR_KEYS: AdvancedColorKey[] = ['accent', 'canvas', 'sidebar', 'surface', 'foreground', 'border'];
-
-const accentColors: Record<Exclude<AccentPreset, 'CUSTOM'>, string> = {
-  FIELORA: '#6546C7', BLUE: '#326BCB', TEAL: '#147D83', ORANGE: '#C15B28',
-};
-
-const uiFonts: Record<UiFont, string> = {
-  SYSTEM: '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif',
-  INTER: 'Inter, "Segoe UI Variable", "Segoe UI", sans-serif',
-  SEGOE_UI: '"Segoe UI Variable", "Segoe UI", sans-serif',
-  PINGFANG_SC: '"PingFang SC", "Microsoft YaHei UI", sans-serif',
-  MICROSOFT_YAHEI: '"Microsoft YaHei UI", "Segoe UI", sans-serif',
-};
-
-const codeFonts: Record<CodeFont, string> = {
-  SYSTEM_MONO: 'ui-monospace, "Cascadia Code", Consolas, monospace',
-  CONSOLAS: 'Consolas, "Cascadia Code", monospace',
-  CASCADIA_CODE: '"Cascadia Code", Consolas, monospace',
-  JETBRAINS_MONO: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
-};
 
 export const defaultAppearancePreferences: AppearancePreferences = {
   themePreference: 'SYSTEM', accentPreset: 'FIELORA', customAccent: '#6546C7', density: 'STANDARD', contrast: 'STANDARD', radius: 'STANDARD',
@@ -153,44 +137,43 @@ export function writeAppPreferences(storage: Pick<PreferenceStorage, 'setItem'>,
   storage.setItem(STORAGE_KEY, JSON.stringify({ ...preferences, version: 2 }));
 }
 
-export function resolveTheme(preference: ThemePreference, prefersDark: boolean): ResolvedTheme {
+export function resolveAppearance(preference: AppearanceMode, prefersDark: boolean): EffectiveAppearance {
   return preference === 'SYSTEM' ? (prefersDark ? 'DARK' : 'LIGHT') : preference;
+}
+
+export function resolveMaterial(supportsBackdrop: boolean): MaterialMode {
+  return supportsBackdrop ? 'GLASS' : 'SOLID';
 }
 
 export function resolveReducedMotion(preference: ReducedMotionPreference, prefersReducedMotion: boolean): boolean {
   return preference === 'SYSTEM' ? prefersReducedMotion : preference === 'REDUCE';
 }
 
-export function selectedAccent(appearance: AppearancePreferences): string {
-  return appearance.accentPreset === 'CUSTOM' ? appearance.customAccent : accentColors[appearance.accentPreset];
-}
-
 export function applyAppPreferences(target: HTMLElement, preferences: AppPreferences, environment: AppearanceEnvironment = { prefersDark: false, prefersReducedMotion: false }): void {
   const appearance = preferences.appearance;
-  const resolvedTheme = resolveTheme(appearance.themePreference, environment.prefersDark);
+  const effectiveAppearance = resolveAppearance(appearance.themePreference, environment.prefersDark);
+  const material = resolveMaterial(environment.supportsBackdrop ?? false);
+  target.dataset.officialTheme = 'fielora';
+  target.dataset.designLanguage = 'fielora-glass';
+  target.dataset.appearanceMode = appearance.themePreference.toLowerCase();
+  target.dataset.effectiveAppearance = effectiveAppearance.toLowerCase();
+  target.dataset.material = material.toLowerCase();
+  // Temporary compatibility markers for older non-visual E2E entry points.
   target.dataset.themePreference = appearance.themePreference.toLowerCase();
-  target.dataset.resolvedTheme = resolvedTheme.toLowerCase();
-  target.dataset.uiDensity = appearance.density.toLowerCase();
-  target.dataset.uiContrast = appearance.contrast.toLowerCase();
-  target.dataset.uiRadius = appearance.radius.toLowerCase();
-  target.dataset.translucentSidebar = String(appearance.translucentSidebar);
-  target.dataset.softElevation = String(appearance.softElevation);
+  target.dataset.resolvedTheme = effectiveAppearance.toLowerCase();
+  target.dataset.uiDensity = 'standard';
+  target.dataset.uiContrast = 'standard';
+  target.dataset.uiRadius = 'standard';
   target.dataset.reduceMotion = String(resolveReducedMotion(appearance.reducedMotionPreference, environment.prefersReducedMotion));
   target.dataset.smoothScrolling = String(appearance.smoothScrolling);
   target.dataset.pointerCursor = String(appearance.pointerCursor);
   target.dataset.highContrast = String(appearance.highContrast);
-  target.style.colorScheme = resolvedTheme.toLowerCase();
-  target.style.setProperty('--fl-color-accent', appearance.advancedColorOverrides.accent ?? selectedAccent(appearance));
-  target.style.setProperty('--fl-font-sans', uiFonts[appearance.uiFont]);
-  target.style.setProperty('--fl-font-mono', codeFonts[appearance.codeFont]);
+  target.style.colorScheme = effectiveAppearance.toLowerCase();
+  target.style.removeProperty('--fl-color-accent');
+  target.style.removeProperty('--fl-font-sans');
+  target.style.removeProperty('--fl-font-mono');
   target.style.setProperty('--fl-ui-font-scale', String(appearance.uiFontScale / 100));
-  const colorProperties: Record<Exclude<AdvancedColorKey, 'accent'>, string> = {
-    canvas: '--fl-color-canvas', sidebar: '--fl-color-navigation', surface: '--fl-color-surface-subtle', foreground: '--fl-color-text-strong', border: '--fl-color-border',
-  };
-  for (const [key, property] of Object.entries(colorProperties)) {
-    const color = appearance.advancedColorOverrides[key as AdvancedColorKey];
-    if (color) target.style.setProperty(property, color); else target.style.removeProperty(property);
-  }
+  for (const property of ['--fl-color-canvas', '--fl-color-navigation', '--fl-color-surface-subtle', '--fl-color-text-strong', '--fl-color-border']) target.style.removeProperty(property);
 }
 
 function linearChannel(value: number): number {
@@ -206,64 +189,4 @@ function luminance(color: string): number {
 export function colorContrast(left: string, right: string): number {
   const [bright, dark] = [luminance(left), luminance(right)].sort((a, b) => b - a);
   return (bright! + 0.05) / (dark! + 0.05);
-}
-
-const themeConfigKeys = new Set(['version', 'baseTheme', 'accentPreset', 'customAccent', 'density', 'contrast', 'radius', 'uiFont', 'codeFont', 'uiFontScale', 'translucentSidebar', 'softElevation', 'reducedMotionPreference', 'smoothScrolling', 'pointerCursor', 'highContrast', 'colors']);
-
-export function exportThemeConfig(appearance: AppearancePreferences): string {
-  return JSON.stringify({
-    version: 1, baseTheme: appearance.themePreference.toLowerCase(), accentPreset: appearance.accentPreset.toLowerCase(), customAccent: appearance.customAccent,
-    density: appearance.density.toLowerCase(), contrast: appearance.contrast.toLowerCase(), radius: appearance.radius.toLowerCase(), uiFont: appearance.uiFont.toLowerCase(),
-    codeFont: appearance.codeFont.toLowerCase(), uiFontScale: appearance.uiFontScale, translucentSidebar: appearance.translucentSidebar, softElevation: appearance.softElevation,
-    reducedMotionPreference: appearance.reducedMotionPreference.toLowerCase(), smoothScrolling: appearance.smoothScrolling, pointerCursor: appearance.pointerCursor,
-    highContrast: appearance.highContrast, colors: appearance.advancedColorOverrides,
-  }, null, 2);
-}
-
-function importedEnum<T extends string>(input: Record<string, unknown>, key: string, values: readonly T[], fallback: T): T {
-  const value = input[key];
-  if (value === undefined) return fallback;
-  const normalized = String(value).toUpperCase();
-  if (!values.includes(normalized as T)) throw new Error('主题格式无效');
-  return normalized as T;
-}
-
-function importedBoolean(input: Record<string, unknown>, key: string, fallback: boolean): boolean {
-  if (input[key] === undefined) return fallback;
-  if (typeof input[key] !== 'boolean') throw new Error('主题格式无效');
-  return input[key] as boolean;
-}
-
-export function importThemeConfig(source: string): AppearancePreferences {
-  let input: Record<string, unknown>;
-  try { input = record(JSON.parse(source)) ?? (() => { throw new Error('主题格式无效'); })(); }
-  catch { throw new Error('主题格式无效'); }
-  if (input.version !== 1 || Object.keys(input).some((key) => !themeConfigKeys.has(key))) throw new Error('主题格式无效');
-  if (input.customAccent !== undefined && !isHexColor(input.customAccent)) throw new Error('主题格式无效');
-  if (input.uiFontScale !== undefined && ![90, 95, 100, 105, 110, 115, 120].includes(Number(input.uiFontScale))) throw new Error('主题格式无效');
-  const colors = record(input.colors) ?? (input.colors === undefined ? {} : null);
-  if (!colors || Object.keys(colors).some((key) => !ADVANCED_COLOR_KEYS.includes(key as AdvancedColorKey)) || Object.values(colors).some((value) => !isHexColor(value))) throw new Error('主题格式无效');
-  const appearance: AppearancePreferences = {
-    themePreference: importedEnum(input, 'baseTheme', ['SYSTEM', 'LIGHT', 'DARK'], defaultAppearancePreferences.themePreference),
-    accentPreset: importedEnum(input, 'accentPreset', ['FIELORA', 'BLUE', 'TEAL', 'ORANGE', 'CUSTOM'], defaultAppearancePreferences.accentPreset),
-    customAccent: typeof input.customAccent === 'string' ? input.customAccent.toUpperCase() : defaultAppearancePreferences.customAccent,
-    density: importedEnum(input, 'density', ['COMFORTABLE', 'STANDARD', 'COMPACT'], defaultAppearancePreferences.density),
-    contrast: importedEnum(input, 'contrast', ['SOFT', 'STANDARD', 'HIGH'], defaultAppearancePreferences.contrast),
-    radius: importedEnum(input, 'radius', ['SMALL', 'STANDARD', 'LARGE'], defaultAppearancePreferences.radius),
-    uiFont: importedEnum(input, 'uiFont', ['SYSTEM', 'INTER', 'SEGOE_UI', 'PINGFANG_SC', 'MICROSOFT_YAHEI'], defaultAppearancePreferences.uiFont),
-    codeFont: importedEnum(input, 'codeFont', ['SYSTEM_MONO', 'CONSOLAS', 'CASCADIA_CODE', 'JETBRAINS_MONO'], defaultAppearancePreferences.codeFont),
-    uiFontScale: input.uiFontScale === undefined ? defaultAppearancePreferences.uiFontScale : Number(input.uiFontScale) as UiFontScale,
-    translucentSidebar: importedBoolean(input, 'translucentSidebar', defaultAppearancePreferences.translucentSidebar),
-    softElevation: importedBoolean(input, 'softElevation', defaultAppearancePreferences.softElevation),
-    reducedMotionPreference: importedEnum(input, 'reducedMotionPreference', ['SYSTEM', 'REDUCE', 'FULL'], defaultAppearancePreferences.reducedMotionPreference),
-    smoothScrolling: importedBoolean(input, 'smoothScrolling', defaultAppearancePreferences.smoothScrolling),
-    pointerCursor: importedBoolean(input, 'pointerCursor', defaultAppearancePreferences.pointerCursor),
-    highContrast: importedBoolean(input, 'highContrast', defaultAppearancePreferences.highContrast),
-    advancedColorOverrides: normalizeAdvancedColors(colors),
-  };
-  const resolved = appearance.themePreference === 'DARK' ? 'DARK' : 'LIGHT';
-  const canvas = appearance.advancedColorOverrides.canvas ?? (resolved === 'DARK' ? '#17191D' : '#FFFFFF');
-  const foreground = appearance.advancedColorOverrides.foreground ?? (resolved === 'DARK' ? '#F1F2F5' : '#181A1F');
-  if (colorContrast(canvas, foreground) < 4.5) throw new Error('主题格式无效');
-  return appearance;
 }

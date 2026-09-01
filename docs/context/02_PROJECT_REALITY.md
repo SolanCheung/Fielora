@@ -2666,3 +2666,58 @@ AGENT_SCREENSHOT_TOOL: NOT_IMPLEMENTED
 LIVE_MODEL_CALLS: 0
 SCHEMA_VERSION: 14
 ```
+
+## 105. Fielora Glass Official Design Language Implemented Candidate
+
+用户于 2026-08-30 将 **Fielora Glass** 定义为 Desktop 唯一官方设计语言，不再把 Light、Dark、Solid 或历史命名视为并列 Theme。Renderer 内建 Theme identity 已收敛为唯一 `fielora`；Settings 只暴露 System / Light / Dark appearance，Solid 只作为 `backdrop-filter` 不可用时的内部 material fallback。未来 Custom Theme 只保留 declarative token seam，Importer 尚未实现且入口禁用；脚本、React、DOM、网络、文件、credential、Tool 与 Runtime authority 均不在 seam 内。
+
+视觉结构固定为 Canvas / Content / Chrome / Floating / Overlay 五种 semantic surface。组件只声明 `data-surface`，`styles/materials.css` 集中解析 background、edge、shadow、backdrop 与同结构 Solid fallback；Feature CSS 不再复制 blur recipe。Settings、Navigation、Conversation、Composer、Workspace/Tabs、Browser Chrome 与主要 Overlay 已按该结构收敛。高频产品 glyph 统一进入 `<AppIcon>` registry；外部品牌、文件类型和内容媒体保持各自语义来源。Remote Browse WebContents 仍不注入 Fielora CSS。
+
+本 changeset 只修改 presentation、appearance preference 解释与前端静态/E2E contract；Project、Conversation、Agent、Browser runtime、安全、FIPC、Schema、Migration、Provider、Tool、Permission、Verification 与 native window glass behavior 均未改变。1280/1440/1920、Light/Dark、Settings/Conversation/Workspace/Tabs 与 forced solid fallback 将由 targeted Desktop E2E 和截图 Evidence 验证；用户 Visual Human Gate 仍是冻结前置条件。
+
+```text
+FIELORA_GLASS: SINGLE_OFFICIAL_DESIGN_LANGUAGE
+BUILT_IN_THEME_IDENTITIES: 1 / fielora
+APPEARANCE_OPTIONS: SYSTEM / LIGHT / DARK
+SEMANTIC_SURFACES: CANVAS / CONTENT / CHROME / FLOATING / OVERLAY
+SOLID: INTERNAL_FALLBACK_ONLY
+CUSTOM_THEME: DECLARATIVE_SEAM_ONLY / IMPORT_DISABLED
+PRODUCT_BEHAVIOR_CHANGED: NO
+SCHEMA_MIGRATION_FIPC_CHANGED: NO
+STATUS: IMPLEMENTED_CANDIDATE / NOT_FROZEN
+VISUAL_HUMAN_GATE: REQUIRED
+```
+
+## 106. Desktop UI/UX System Governance And Packaged Startup Repair
+
+用户于 2026-08-31 要求保持已优化的三栏、Conversation、Right Workspace Dock、Settings Content 与 Bottom Terminal ownership，不允许后续字体、图标或材质优化再次替换布局。Renderer 现只从 `styles/index.css` 进入明确 Cascade Layers；`layout.css`、`typography.css`、`controls.css` 与 `materials.css` 分别拥有 geometry、type roles、shared primitives 和 surface paint。历史 `styles.css` 被隔离为 legacy layer，raw color budget 只能下降。Phosphor 成为产品 icon system；本机应用 icon、favicon 与内容媒体保持真实来源。
+
+最新 packaged EXE 的空白窗口已定位为 `@phosphor-icons/react` 在打包依赖图中解析第二份 React，触发 `useContext` Invalid Hook Call，导致 `#root` 未挂载。Webpack Renderer 现显式 alias 单一 React/ReactDOM，静态 contract 与 packaged smoke 覆盖该回归。
+
+`docs/architecture/FIELORA_UI_UX_SYSTEM_V0.1.md` 是 UI/UX 实现 canonical；任何受管理样式、共享 primitive、icon 或 layout ownership 文件变化必须在同一 changeset 更新该文档，`pnpm verify:ui-ux` 强制检查。Agent/Core/Provider/Tool/Permission/Verification/FIPC/Schema/Migration 变化均为 0。
+
+```text
+PACKAGED_BLANK_ROOT_CAUSE: DUPLICATE_REACT / FIXED
+LAYOUT_OWNERSHIP: LOCKED
+TYPOGRAPHY_ROLES: 5 / MANAGED
+PRODUCT_ICON_SYSTEM: PHOSPHOR / MANAGED
+SHARED_CONTROLS: BUTTON / MENU / SELECT / TABS / DIALOG
+CASCADE_ENTRY: styles/index.css
+LEGACY_CSS: COMPATIBILITY_LAYER / BUDGET_DOWNWARD_ONLY
+UI_UX_DOC_SYNC: ENFORCED
+MATERIAL_VISUAL_HUMAN_GATE: PENDING
+```
+
+## 107. Scheduled Tasks And UI/UX Structural Lock
+
+用户要求将原“现在”入口收敛为 Codex-like“已安排”页面，并在既有 Desktop Foundation 上提供搜索、状态筛选、创建、编辑、暂停/恢复、立即运行、删除、下次运行与上次失败状态。Schedule 使用 Desktop local durable JSON 保存；每个新任务创建一个既有 persistent Conversation，触发时先写入正常 User Message，再调用既有 `command.agent.start` 产生正常 AgentRun。Conversation、AgentRun、Tool、Approval、Permission 与 Evidence 仍由现有 Model + Harness + Tools 链拥有，没有建立第二套 Agent Core/Runtime/State。
+
+用户同时明确锁定现有 UI/UX 页面结构。后续 Typography、Icon、Color、Material、Shadow、Motion、Spacing 或整体视觉优化不得大幅调整 App Shell、Route composition、Pane topology 或 Navigation/Conversation/Workspace/Dock/Settings ownership。结构变化必须在实现前暂停并取得用户明确批准；canonical 文档通过 `STRUCTURAL_CHANGE_REQUIRES_USER_APPROVAL` 标记和自动检查保持同步。
+
+```text
+SCHEDULED_TASKS: EXISTING_CONVERSATION_AND_AGENTRUN_PATH
+SECOND_AGENT_RUNTIME: NO
+SCHEDULE_STORAGE: DESKTOP_LOCAL_DURABLE_JSON
+UI_UX_LAYOUT_OWNERSHIP: LOCKED
+STRUCTURAL_CHANGE: USER_APPROVAL_REQUIRED_BEFORE_IMPLEMENTATION
+```

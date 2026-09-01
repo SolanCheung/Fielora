@@ -3,12 +3,22 @@ import { ResizableDivider } from './ResizableDivider';
 
 const sharedNavigationWidthKey = 'fielora:workspace-navigation-width';
 
+export const WORKSPACE_NAVIGATION_DEFAULT_WIDTH = 304;
+export const WORKSPACE_NAVIGATION_MIN_WIDTH = 220;
+export const WORKSPACE_NAVIGATION_MAX_WIDTH = 560;
+
+function clampNavigationWidth(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
 export function readWorkspaceNavigationWidth(fallback: number, legacyKey?: string): number {
   const stored = window.localStorage.getItem(sharedNavigationWidthKey)
     ?? (legacyKey ? window.localStorage.getItem(legacyKey) : null)
     ?? String(fallback);
   const value = Number.parseFloat(stored);
-  return Number.isFinite(value) ? Math.min(Math.max(value, 190), 360) : fallback;
+  if (!Number.isFinite(value)) return fallback;
+  if (value < WORKSPACE_NAVIGATION_MIN_WIDTH) return fallback;
+  return Math.min(value, WORKSPACE_NAVIGATION_MAX_WIDTH);
 }
 
 export function persistWorkspaceNavigationWidth(value: number, legacyKey?: string): void {
@@ -32,12 +42,11 @@ interface WorkspaceSurfaceProps {
   children: ReactNode;
 }
 
-export function WorkspaceSurface({ className, testId, navigation, navigationWidth, onNavigationWidthChange, navigationMin = 190, navigationMax = 360, navigationResizerTestId, navigationResizerClassName = '', surfaceRef, style, children }: WorkspaceSurfaceProps) {
+export function WorkspaceSurface({ className, testId, navigation, navigationWidth, onNavigationWidthChange, navigationMin = WORKSPACE_NAVIGATION_MIN_WIDTH, navigationMax = WORKSPACE_NAVIGATION_MAX_WIDTH, navigationResizerTestId, navigationResizerClassName = '', surfaceRef, style, children }: WorkspaceSurfaceProps) {
   const localRef = useRef<HTMLElement>(null);
   const rootRef = surfaceRef ?? localRef;
   const surfaceStyle = { ...style, '--workspace-navigation-width': `${navigationWidth}px` } as CSSProperties;
-
-  return <main ref={rootRef} className={`workspace-surface ${className}`} style={surfaceStyle} data-testid={testId}>
+  return <main ref={rootRef} className={`workspace-surface ${className}`} style={surfaceStyle} data-layout-owner="app-workspace" data-testid={testId}>
     {navigation}
     <ResizableDivider
       label="调整工作区导航宽度"
@@ -46,9 +55,14 @@ export function WorkspaceSurface({ className, testId, navigation, navigationWidt
       max={navigationMax}
       onResize={(clientX) => {
         const rect = rootRef.current?.getBoundingClientRect();
-        if (rect) onNavigationWidthChange(clientX - rect.left);
+        if (!rect) return;
+        rootRef.current?.style.setProperty('--workspace-navigation-width', `${clampNavigationWidth(clientX - rect.left, navigationMin, navigationMax)}px`);
       }}
-      onKeyboardResize={(delta) => onNavigationWidthChange(navigationWidth + delta)}
+      onResizeEnd={(clientX) => {
+        const rect = rootRef.current?.getBoundingClientRect();
+        if (rect) onNavigationWidthChange(clampNavigationWidth(clientX - rect.left, navigationMin, navigationMax));
+      }}
+      onKeyboardResize={(delta) => onNavigationWidthChange(clampNavigationWidth(navigationWidth + delta, navigationMin, navigationMax))}
       testId={navigationResizerTestId}
       className={`workspace-navigation-resizer ${navigationResizerClassName}`.trim()}
     />

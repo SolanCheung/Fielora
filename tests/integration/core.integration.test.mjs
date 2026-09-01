@@ -75,7 +75,7 @@ test('real Core persists create/focus/snapshot through close and restart', async
   const dataDir = await mkdtemp(path.join(tmpdir(), 'fielora-core-integration-'));
   t.after(() => rm(dataDir, { recursive: true, force: true }));
   const first = harness(dataDir);
-  assert.equal((await hello(first)).result.schema_version, 13);
+  assert.equal((await hello(first)).result.schema_version, 15);
   first.send('create', 'command.field.create', { title: 'Phase 01 Test', goal: 'Persistence' });
   const created = await first.next();
   const event = await first.next();
@@ -117,7 +117,7 @@ test('parent-pipe EOF exits within two seconds without explicit shutdown', async
 test('Desktop Foundation persists Project, Conversation, provider selection, and messages', async (t) => {
   const dataDir=await mkdtemp(path.join(tmpdir(),'fielora-desktop-foundation-'));t.after(()=>rm(dataDir,{recursive:true,force:true}));
   const projectRoot=path.join(dataDir,'local-project');
-  const first=harness(dataDir);const greeting=await hello(first);assert.equal(greeting.result.schema_version,13);
+  const first=harness(dataDir);const greeting=await hello(first);assert.equal(greeting.result.schema_version,15);
   for(const capability of ['project.create','project.update','project.archive','conversation.create','conversation.message.create'])assert.ok(greeting.result.capabilities.includes(capability));
   first.send('provider','command.provider.create_config',{provider_kind:'OPENAI_COMPATIBLE',display_name:'Desktop fixture',base_url:'https://example.com/v1',default_model:'__fielora_fixture__',custom_endpoint_acknowledged:true});const provider=(await first.next()).result;
   first.send('project','command.project.create',{title:'Local Project',goal:'Persist the coding loop',root_path:projectRoot});const project=(await first.next()).result;assert.equal(project.root_path,projectRoot);
@@ -143,7 +143,7 @@ test('Desktop Foundation persists Project, Conversation, provider selection, and
 test('Phase 02 FIPC reality workflow persists, resumes, and preserves atomic revisions', async (t) => {
   const dataDir=await mkdtemp(path.join(tmpdir(),'fielora-phase02-integration-'));t.after(()=>rm(dataDir,{recursive:true,force:true}));
   const h=harness(dataDir);const helloResponse=await hello(h);
-  assert.equal(helloResponse.result.schema_version,13);
+  assert.equal(helloResponse.result.schema_version,15);
   for(const capability of ['state.supersede','reference.archive','relation.attach_reference_source','surface.save_snapshot_v1','field.resume_v1'])assert.ok(helloResponse.result.capabilities.includes(capability));
   const field=await mutation(h,'p2-field','command.field.create',{title:'Phase 02 Reality',goal:'Prove durable truth'});
   const task=await mutation(h,'p2-task','command.state.create',{field_id:field.id,kind:'TASK',content:'Ship Phase 02',confidence:0.8});
@@ -211,7 +211,7 @@ test('protocol failures recover without crashing and conflict remains conflict',
 
 test('Phase 04 fixture proves provider-neutral stream, capture lifecycle, and no secret echo', async (t) => {
   const dataDir=await mkdtemp(path.join(tmpdir(),'fielora-phase04-integration-'));t.after(()=>rm(dataDir,{recursive:true,force:true}));
-  const h=harness(dataDir);assert.equal((await hello(h)).result.schema_version,13);const notifications=[];
+  const h=harness(dataDir);assert.equal((await hello(h)).result.schema_version,15);const notifications=[];
   async function response(id){for(;;){const value=await h.next();if(value.id===id)return value;notifications.push(value);}}
   h.send('provider','command.provider.create_config',{provider_kind:'OPENAI_COMPATIBLE',display_name:'Fixture provider',base_url:'https://example.com/v1',default_model:'__fielora_fixture__',custom_endpoint_acknowledged:true});
   const provider=(await response('provider')).result;t.after(()=>spawnSync('cmdkey.exe',[`/delete:Fielora/provider/${provider.id}`],{windowsHide:true,stdio:'ignore'}));assert.equal(provider.lifecycle_status,'DISABLED');assert.equal(JSON.stringify(provider).includes('credential_ref'),false);

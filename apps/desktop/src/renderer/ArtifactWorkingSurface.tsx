@@ -4,7 +4,7 @@ import type {
   ArtifactView, DocumentBlock, PresentationBlock, PresentationSlide,
   SpreadsheetCellV1, SpreadsheetRangeEmbedV1, SpreadsheetSheetV1,
 } from '@fielora/contracts';
-import { ShellIcon } from './PrimaryNav';
+import { AppIcon } from './ui';
 import {
   artifactTypeLabel, spreadsheetViewport, type ArtifactSurfaceSession,
 } from './artifact-working-surface';
@@ -53,9 +53,9 @@ export function ArtifactCatalog({ refreshToken, onOpen }: {
     </header>
     {loading && <div className="artifact-state"><span className="artifact-spinner"/>正在读取…</div>}
     {error && <div className="artifact-state artifact-error" role="alert">{error}</div>}
-    {!loading && !error && artifacts.length === 0 && <div className="artifact-empty"><ShellIcon name="filePlus"/><h3>还没有工作对象</h3><p>在当前对话中请 Agent 创建文档、演示文稿、图示或电子表格。</p></div>}
+    {!loading && !error && artifacts.length === 0 && <div className="artifact-empty"><AppIcon name="objects"/><h3>还没有工作对象</h3><p>在当前对话中请 Agent 创建文档、演示文稿、图示或电子表格。</p></div>}
     {!loading && artifacts.length > 0 && <div className="artifact-list" role="list">{artifacts.map((artifact) => <button key={artifact.artifact_id} type="button" role="listitem" onClick={() => onOpen(artifact)} data-testid={`artifact-list-${artifact.artifact_id}`}>
-      <span className={`artifact-type-mark type-${artifact.artifact_type.toLowerCase()}`}><ShellIcon name={artifact.artifact_type === 'PRESENTATION' ? 'image' : 'files'}/></span>
+      <span className={`artifact-type-mark type-${artifact.artifact_type.toLowerCase()}`}><AppIcon name={artifact.artifact_type === 'PRESENTATION' ? 'image' : 'files'}/></span>
       <span className="artifact-list-copy"><strong>{artifact.title?.trim() || `未命名${artifactTypeLabel(artifact.artifact_type)}`}</strong><small>{artifactTypeLabel(artifact.artifact_type)} · {relativeTime(artifact.updated_at)}{artifact.archived_at !== null ? ' · 已归档' : ''}</small></span>
       <span className="artifact-list-revision">当前版本</span>
     </button>)}</div>}
@@ -232,7 +232,7 @@ export function ArtifactSurface({ session, busy, onSelectRevision, onReturnCurre
   if (!read) return <div className="artifact-state artifact-error">这个工作对象暂时不可用。</div>;
   const archived = read.artifact.archived_at !== null;
   return <section className={`artifact-work-surface${session.mode === 'HISTORICAL' ? ' has-version-banner' : ''}`} data-testid="artifact-work-surface" data-artifact-id={read.artifact.artifact_id} data-view-mode={session.mode}>
-    <header className="artifact-surface-header"><div><span className={`artifact-type-mark type-${read.artifact.artifact_type.toLowerCase()}`}><ShellIcon name={read.artifact.artifact_type === 'PRESENTATION' ? 'image' : 'files'}/></span><div><strong>{read.artifact.title || `未命名${artifactTypeLabel(read.artifact.artifact_type)}`}</strong><small>{artifactTypeLabel(read.artifact.artifact_type)} · R{read.revision.sequence}{archived ? ' · 已归档' : ''}</small></div></div><div>{session.mode === 'HISTORICAL' && <button type="button" onClick={onReturnCurrent} data-testid="artifact-return-current">回到当前版本</button>}<details className="artifact-history"><summary aria-label="查看版本历史">R{read.revision.sequence}<ShellIcon name="chevronDown"/></summary><div><header><strong>版本历史</strong><small>按需读取精确版本</small></header>{session.history?.revisions.map((revision) => <RevisionItem key={revision.revision_id} revision={revision} currentId={read.artifact.current_revision_id} activeId={read.revision.revision_id} onSelect={onSelectRevision}/>) ?? <div className="artifact-state">正在读取…</div>}</div></details><button type="button" disabled={busy} onClick={() => onArchiveState(!archived)} data-testid="artifact-archive-toggle">{archived ? '恢复' : '归档'}</button></div></header>
+    <header className="artifact-surface-header"><div><span className={`artifact-type-mark type-${read.artifact.artifact_type.toLowerCase()}`}><AppIcon name={read.artifact.artifact_type === 'PRESENTATION' ? 'image' : 'files'}/></span><div><strong>{read.artifact.title || `未命名${artifactTypeLabel(read.artifact.artifact_type)}`}</strong><small>{artifactTypeLabel(read.artifact.artifact_type)} · R{read.revision.sequence}{archived ? ' · 已归档' : ''}</small></div></div><div>{session.mode === 'HISTORICAL' && <button type="button" onClick={onReturnCurrent} data-testid="artifact-return-current">回到当前版本</button>}<details className="artifact-history"><summary aria-label="查看版本历史">R{read.revision.sequence}<AppIcon name="chevronDown"/></summary><div data-surface="overlay"><header><strong>版本历史</strong><small>按需读取精确版本</small></header>{session.history?.revisions.map((revision) => <RevisionItem key={revision.revision_id} revision={revision} currentId={read.artifact.current_revision_id} activeId={read.revision.revision_id} onSelect={onSelectRevision}/>) ?? <div className="artifact-state">正在读取…</div>}</div></details><button type="button" disabled={busy} onClick={() => onArchiveState(!archived)} data-testid="artifact-archive-toggle">{archived ? '恢复' : '归档'}</button></div></header>
     {session.mode === 'HISTORICAL' && <div className="artifact-version-banner"><span>正在查看固定历史版本 R{read.revision.sequence}</span>{session.newRevisionAvailable && <strong>存在更新版本</strong>}</div>}
     <div className="artifact-surface-layout"><main className="artifact-surface-content">
       {read.revision.content.type === 'DOCUMENT' && <DocumentSurface read={read}/>}

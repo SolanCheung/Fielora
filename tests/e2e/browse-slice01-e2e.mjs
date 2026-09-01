@@ -376,7 +376,7 @@ try {
   appCdp = await connect(appTarget);
   await waitExpression(appCdp, `document.querySelector('[data-testid="project-workspace"]')`);
   await appCdp.evaluate(click('[data-testid="now-nav"]'));
-  await waitExpression(appCdp, `document.querySelector('[data-testid="now-screen"]')`);
+  await waitExpression(appCdp, `document.querySelector('[data-testid="scheduled-tasks-screen"]')`);
   const trustedOrigin = await appCdp.evaluate('location.origin');
   if (packaged) assert.equal(trustedOrigin, 'fielora://app');
   else {
@@ -388,25 +388,13 @@ try {
   checkpoint('fresh-electron-launch');
   checkpoint('trusted-app-ready');
 
-  const createButtonPresentation = await appCdp.evaluate(`(()=>{const button=document.querySelector('[data-testid="create-field"]');const style=getComputedStyle(button);const accentProbe=document.createElement('i');accentProbe.style.background='var(--fl-color-accent)';document.body.append(accentProbe);const semanticAccent=getComputedStyle(accentProbe).backgroundColor;accentProbe.remove();return{type:button.type,className:button.className,backgroundColor:style.backgroundColor,semanticAccent,borderRadius:style.borderRadius,minHeight:style.minHeight}})()`);
-  assert.equal(createButtonPresentation.backgroundColor, createButtonPresentation.semanticAccent);
-  assert.deepEqual(createButtonPresentation, {
-    type: 'submit',
-    className: 'primary-button',
-    backgroundColor: 'rgb(101, 70, 199)',
-    semanticAccent: 'rgb(101, 70, 199)',
-    borderRadius: '11px',
-    minHeight: '42px',
-  });
-  await appCdp.evaluate(`(()=>{const title=document.querySelector('[data-testid="create-title"]');const goal=document.querySelector('[data-testid="create-goal"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(title,'Browse Boundary Field');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(goal,'Must remain unchanged by loose Browse');title.dispatchEvent(new Event('input',{bubbles:true}));goal.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-testid="create-field"]').click();return true;})()`);
-  await waitExpression(appCdp, `window.fielora.field.list().then(fields=>fields.some(field=>field.title==='Browse Boundary Field'))`);
-  const field = await appCdp.evaluate(`window.fielora.field.list().then(fields=>fields.find(field=>field.title==='Browse Boundary Field'))`);
-  assert.ok(field?.id, 'the Now form must create a Field through its existing submit behavior');
-  checkpoint('field-create-form');
+  const field = await appCdp.evaluate(`window.fielora.field.create({title:'Browse Boundary Field',goal:'Must remain unchanged by loose Browse'})`);
+  assert.ok(field?.id, 'the boundary fixture must create a real durable Field');
+  checkpoint('field-create');
   const realityBefore = await fieldRealitySnapshot(appCdp, field.id);
   const fieldBefore = realityBefore.field;
 
-  await appCdp.evaluate(click('[data-testid="browse-nav"]'));
+  await appCdp.evaluate(`window.dispatchEvent(new CustomEvent('fielora:open-utility',{detail:'BROWSER'}))`);
   await waitExpression(appCdp, `document.querySelector('[data-testid="browse-screen"]')`);
   await appCdp.evaluate(`(()=>{const input=document.querySelector('[data-testid="browser-address"]');const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;setter.call(input,${JSON.stringify(firstUrl)});input.dispatchEvent(new Event('input',{bubbles:true}));input.form.requestSubmit();return true;})()`);
   await waitExpression(appCdp, `document.querySelector('[data-testid="browser-address"]')?.value===${JSON.stringify(firstUrl)}`);
@@ -741,11 +729,11 @@ try {
   checkpoint('draggable-browser-sidebar-viewport');
 
   const browseBeforeFieldTransition = await browseIdentitySnapshot(appCdp);
-  await appCdp.evaluate(click('[data-testid="fields-nav"]'));
-  await waitExpression(appCdp, `document.querySelector('[data-testid="fields-screen"]')&&!document.querySelector('[data-testid="now-screen"]')`);
+  await appCdp.evaluate(`window.dispatchEvent(new CustomEvent('fielora:navigate',{detail:'FIELDS'}))`);
+  await waitExpression(appCdp, `document.querySelector('[data-testid="fields-screen"]')&&!document.querySelector('[data-testid="scheduled-tasks-screen"]')`);
   await waitExpression(appCdp, `window.fielora.browser.getState().then(state=>state.surface.app_view==='NOT_BROWSE'&&!state.surface.visible)`);
   await waitExpression(appCdp, `document.querySelector(${JSON.stringify(`[data-testid="fields-field-${field.id}"]`)})`);
-  await appCdp.evaluate(click('[data-testid="browse-nav"]'));
+  await appCdp.evaluate(`window.dispatchEvent(new CustomEvent('fielora:open-utility',{detail:'BROWSER'}))`);
   await waitExpression(appCdp, `document.querySelector('[data-testid="browse-screen"]')`);
   await waitExpression(appCdp, `window.fielora.browser.getState().then(state=>state.url===${JSON.stringify(secondUrl)}&&state.surface.visible)`);
   await waitExpression(appCdp, `window.fielora.browser.getState().then(state=>{const rect=document.querySelector('[data-testid="browse-viewport"]')?.getBoundingClientRect();const bounds=state.surface.bounds;return rect&&Math.abs(bounds.x-Math.round(rect.left))<=1&&Math.abs(bounds.y-Math.round(rect.top))<=1&&Math.abs(bounds.width-Math.round(rect.width))<=1&&Math.abs(bounds.height-Math.round(rect.height))<=1})`);
@@ -754,27 +742,28 @@ try {
   checkpoint('browse-fields-browse');
 
   await appCdp.evaluate(click('[data-testid="now-nav"]'));
-  await waitExpression(appCdp, `document.querySelector('[data-testid="now-screen"]')`);
+  await waitExpression(appCdp, `document.querySelector('[data-testid="scheduled-tasks-screen"]')`);
   await waitExpression(appCdp, `window.fielora.browser.getState().then(state=>!state.surface.visible)`);
-  await appCdp.evaluate(click('[data-testid="browse-nav"]'));
+  await appCdp.evaluate(`window.dispatchEvent(new CustomEvent('fielora:open-utility',{detail:'BROWSER'}))`);
   await waitExpression(appCdp, `window.fielora.browser.getState().then(state=>state.url===${JSON.stringify(secondUrl)}&&state.surface.visible)`);
   checkpoint('browse-now-browse');
 
-  await appCdp.evaluate(click('[data-testid="fields-nav"]'));
+  await appCdp.evaluate(`window.dispatchEvent(new CustomEvent('fielora:navigate',{detail:'FIELDS'}))`);
   await waitExpression(appCdp, `document.querySelector('[data-testid="fields-screen"]')`);
   await appCdp.evaluate(click(`[data-testid="fields-field-${field.id}"]`));
   await waitExpression(appCdp, `document.querySelector('[data-testid="field-screen"]')`);
-  await appCdp.evaluate(click('[data-testid="browse-nav"]'));
+  await appCdp.evaluate(`window.dispatchEvent(new CustomEvent('fielora:open-utility',{detail:'BROWSER'}))`);
   await waitExpression(appCdp, `document.querySelector('[data-testid="browse-screen"]')`);
   await waitExpression(appCdp, `window.fielora.browser.getState().then(state=>state.url===${JSON.stringify(secondUrl)}&&state.surface.visible)`);
   checkpoint('field-surface-browse');
 
   await appCdp.evaluate(click('[data-testid="now-nav"]'));
-  await waitExpression(appCdp, `document.querySelector('[data-testid="now-screen"]')`);
-  await waitExpression(appCdp, `document.querySelector(${JSON.stringify(`[data-testid="field-${field.title}"]`)})`);
-  await appCdp.evaluate(click(`[data-testid="field-${field.title}"]`));
+  await waitExpression(appCdp, `document.querySelector('[data-testid="scheduled-tasks-screen"]')`);
+  await appCdp.evaluate(`window.dispatchEvent(new CustomEvent('fielora:navigate',{detail:'FIELDS'}))`);
+  await waitExpression(appCdp, `document.querySelector(${JSON.stringify(`[data-testid="fields-field-${field.id}"]`)})`);
+  await appCdp.evaluate(click(`[data-testid="fields-field-${field.id}"]`));
   await waitExpression(appCdp, `document.querySelector('[data-testid="field-screen"]')`);
-  await appCdp.evaluate(click('[data-testid="browse-nav"]'));
+  await appCdp.evaluate(`window.dispatchEvent(new CustomEvent('fielora:open-utility',{detail:'BROWSER'}))`);
   await waitExpression(appCdp, `document.querySelector('[data-testid="browse-screen"]')`);
   await waitExpression(appCdp, `document.querySelector('[data-testid="browser-address"]')?.value===${JSON.stringify(secondUrl)}`);
 

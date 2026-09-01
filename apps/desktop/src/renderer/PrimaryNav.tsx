@@ -1,50 +1,8 @@
 import type { ReactNode } from 'react';
 import fieloraMark from '../../assets/fielora-mark.svg';
+import { AppIcon } from './ui';
 
 export type PrimarySection = 'PROJECTS' | 'NOW' | 'LIBRARY' | 'BROWSE' | 'FIELDS';
-export type ShellIconName = 'compose' | 'conversation' | 'now' | 'browse' | 'fields' | 'inbox' | 'folder' | 'folderOpen' | 'files' | 'image' | 'filePlus' | 'diff' | 'terminal' | 'computer' | 'settings' | 'refresh' | 'close' | 'more' | 'models' | 'appearance' | 'extensions' | 'storage' | 'keyboard' | 'info' | 'environment' | 'branch' | 'cloud' | 'source' | 'copy' | 'check' | 'sort' | 'plus' | 'edit' | 'chevronDown' | 'panelRight';
-
-export function ShellIcon({ name }: { name: ShellIconName }) {
-  const paths: Record<ShellIconName, ReactNode> = {
-    compose: <><path d="M4 16.5V20h3.5L18 9.5 14.5 6 4 16.5Z"/><path d="m13 7.5 3.5 3.5"/><path d="M19 5.5 16.5 3 14.5 5"/></>,
-    conversation: <path d="M5 6.5h11.5a2 2 0 0 1 2 2V17H8l-3 3V9.5"/>,
-    now: <><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></>,
-    browse: <><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4a13 13 0 0 1 0 16M12 4a13 13 0 0 0 0 16"/></>,
-    fields: <><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 17h6M17 14v6"/></>,
-    inbox: <><path d="M5 5h14v14H5z"/><path d="M5 14h4l1.5 2h3L15 14h4"/></>,
-    folder: <path d="M3.75 7.25v9.5a2 2 0 0 0 2 2h12.5a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6.1l-1.8-2H5.75a2 2 0 0 0-2 2.25Z"/>,
-    folderOpen: <><path d="M3.75 9V7.25a2 2 0 0 1 2-2h4.6l1.8 2h6.1a2 2 0 0 1 2 2V10"/><path d="M4.6 10.25h14.8a1.5 1.5 0 0 1 1.45 1.87l-1.35 5.25a2 2 0 0 1-1.94 1.5H5.7a2 2 0 0 1-1.94-1.52l-1.1-4.5a2.1 2.1 0 0 1 1.94-2.6Z"/></>,
-    files: <><rect x="6" y="3.5" width="12" height="17" rx="2.5"/><path d="M9.5 9.5h5M9.5 13h5"/></>,
-    image: <><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m5.5 17 4.5-4.5 3 3 2-2 3.5 3.5"/></>,
-    filePlus: <><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 12h6M12 9v6"/></>,
-    diff: <><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h5M10.5 6.5v5M14.5 15.5h3"/></>,
-    terminal: <><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="m7 10 2.5 2L7 14M12 15h4"/></>,
-    computer: <><rect x="3.5" y="4.5" width="17" height="12" rx="2"/><path d="M8 20h8M10 16.5 9 20M14 16.5l1 3"/></>,
-    settings: <><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/></>,
-    refresh: <><path d="M19 8a7 7 0 1 0 1 6"/><path d="M19 3v5h-5"/></>,
-    close: <path d="m7 7 10 10M17 7 7 17"/>,
-    more: <><circle cx="6" cy="12" r="1.25" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.25" fill="currentColor" stroke="none"/></>,
-    models: <><rect x="5" y="5" width="14" height="14" rx="3"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></>,
-    appearance: <><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></>,
-    extensions: <path d="M8.5 4H5a1 1 0 0 0-1 1v3.5h1.5a2.5 2.5 0 1 1 0 5H4V19a1 1 0 0 0 1 1h3.5v-1.5a2.5 2.5 0 1 1 5 0V20H19a1 1 0 0 0 1-1v-5.5h-1.5a2.5 2.5 0 1 1 0-5H20V5a1 1 0 0 0-1-1h-5.5v1.5a2.5 2.5 0 1 1-5 0V4Z"/>,
-    storage: <><ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6M4.5 11.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/></>,
-    keyboard: <><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M6 10h1M10 10h1M14 10h1M18 10h.01M7 14h10"/></>,
-    info: <><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></>,
-    environment: <><path d="M5 6h14M5 12h14M5 18h14"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></>,
-    branch: <><circle cx="7" cy="5" r="2"/><circle cx="17" cy="6" r="2"/><circle cx="7" cy="19" r="2"/><path d="M7 7v10M9 9c2.5 0 3-3 6-3M9 15c4 0 4-5 6-7"/></>,
-    cloud: <><path d="M7.5 18H18a4 4 0 0 0 .5-8A6.5 6.5 0 0 0 6 8.5 4.5 4.5 0 0 0 7.5 18Z"/><path d="m9 13 3-3 3 3M12 10v7"/></>,
-    source: <><rect x="6" y="3.5" width="12" height="17" rx="2.5"/><path d="M9.5 9.5h5M9.5 13h5M9.5 16.5h3.5"/></>,
-    copy: <><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></>,
-    check: <path d="m5 12.5 4.25 4.25L19 7"/>,
-    sort: <><path d="M8 6h11M8 12h8M8 18h5"/><path d="M4 5v14m0 0-2.5-2.5M4 19l2.5-2.5"/></>,
-    plus: <path d="M12 5v14M5 12h14"/>,
-    edit: <><path d="M5 19h4l10-10-4-4L5 15z"/><path d="m13.5 6.5 4 4"/></>,
-    chevronDown: <path d="m7 10 5 5 5-5"/>,
-    panelRight: <><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M15.25 4v16"/></>,
-  };
-  return <svg className="shell-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" data-icon={name}>{paths[name]}</svg>;
-}
-
 interface PrimaryNavProps {
   active: PrimarySection;
   onProjects: () => void;
@@ -63,19 +21,20 @@ export function PrimaryNav({ active, onProjects, onNow, onBrowse, onFields, onNe
   const openLibrary = () => window.dispatchEvent(new CustomEvent('fielora:navigate', { detail: 'LIBRARY' }));
   return <aside
     className="project-navigation app-navigation"
+    data-surface="chrome"
     data-testid="project-navigation"
     data-app-navigation="true"
   >
     <header className="project-brand"><div className="project-brand-button"><img src={fieloraMark} alt="" aria-hidden="true" /><strong>Fielora</strong></div></header>
-    <button className="new-chat-button" onClick={onNewConversation} data-testid="new-conversation"><ShellIcon name="compose"/><span>新聊天</span><kbd>＋</kbd></button>
+    <button className="new-chat-button" onClick={onNewConversation} data-testid="new-conversation"><AppIcon name="compose"/><span>新聊天</span><kbd>＋</kbd></button>
     <nav className="project-global-nav" aria-label="主要功能">
-      <button className={active === 'NOW' ? 'active' : ''} onClick={onNow} data-testid="now-nav"><ShellIcon name="now"/><span>现在</span></button>
-      <button className={active === 'LIBRARY' ? 'active' : ''} onClick={openLibrary} data-testid="library-nav"><ShellIcon name="files"/><span>资料库</span></button>
+      <button className={active === 'NOW' ? 'active' : ''} onClick={onNow} data-testid="now-nav"><AppIcon name="scheduled"/><span>已安排</span></button>
+      <button className={active === 'LIBRARY' ? 'active' : ''} onClick={openLibrary} data-testid="library-nav"><AppIcon name="library"/><span>资料库</span></button>
     </nav>
     <section className="project-tree" aria-label="项目与对话">
-      <div className="section-title"><span>项目</span><div className="section-title-actions">{projectHeaderControls ?? <button onClick={onAddProject ?? onProjects} title={onAddProject ? '添加本地 Project' : '打开 Projects'}><ShellIcon name="plus"/></button>}</div></div>
-      {projectContent ?? <button className={`sidebar-project-home ${active === 'PROJECTS' ? 'active' : ''}`} onClick={onProjects}><ShellIcon name="folder"/><span>所有项目</span></button>}
+      <div className="section-title"><span>项目</span><div className="section-title-actions">{projectHeaderControls ?? <button onClick={onAddProject ?? onProjects} title={onAddProject ? '添加本地 Project' : '打开 Projects'}><AppIcon name="plus"/></button>}</div></div>
+      {projectContent ?? <button className={`sidebar-project-home ${active === 'PROJECTS' ? 'active' : ''}`} onClick={onProjects}><AppIcon name="folder"/><span>所有项目</span></button>}
     </section>
-    <footer><button onClick={onSettings} data-testid="settings-nav"><ShellIcon name="settings"/><span>设置</span></button></footer>
+    <footer><button onClick={onSettings} data-testid="settings-nav"><AppIcon name="settings"/><span>设置</span></button></footer>
   </aside>;
 }

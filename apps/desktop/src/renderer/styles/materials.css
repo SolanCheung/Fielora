@@ -1,0 +1,107 @@
+/*
+ * Fielora Glass material resolver.
+ * Components declare one of five semantic surfaces. This is the only file
+ * that maps those roles to translucency, edge highlight, blur and elevation.
+ */
+[data-surface="canvas"] {
+  background: var(--fl-surface-canvas);
+}
+
+[data-surface="content"] {
+  background: var(--fl-surface-content);
+}
+
+[data-surface="chrome"] {
+  border-color: var(--fl-effect-boundary);
+  background: var(--fl-surface-chrome);
+  box-shadow: inset 0 1px 0 var(--fl-effect-edge-highlight);
+  backdrop-filter: var(--fl-effect-backdrop-chrome);
+}
+
+[data-surface="floating"] {
+  border-color: var(--fl-effect-boundary);
+  background: var(--fl-surface-floating);
+  box-shadow: inset 0 1px 0 var(--fl-effect-edge-highlight), var(--fl-shadow-floating);
+  backdrop-filter: var(--fl-effect-backdrop-floating);
+}
+
+.conversation-composer[data-surface="floating"] {
+  box-shadow: inset 0 1px 0 var(--fl-effect-edge-highlight), var(--fl-shadow-surface);
+}
+
+[data-surface="overlay"] {
+  border-color: var(--fl-effect-boundary);
+  background: var(--fl-surface-overlay);
+  box-shadow: inset 0 1px 0 var(--fl-effect-edge-highlight), var(--fl-shadow-overlay);
+  backdrop-filter: var(--fl-effect-backdrop-overlay);
+}
+
+[data-effect="backdrop-dim"] {
+  backdrop-filter: var(--fl-effect-backdrop-dim);
+}
+
+[data-surface][aria-selected="true"],
+[data-surface].active,
+[data-surface].is-active {
+  --fl-surface-selection: var(--fl-surface-selected);
+}
+
+:root[data-material="solid"] [data-surface="chrome"] {
+  background: var(--fl-surface-chrome-solid);
+  backdrop-filter: none;
+}
+
+:root[data-material="solid"] [data-surface="floating"] {
+  background: var(--fl-surface-floating-solid);
+  backdrop-filter: none;
+}
+
+:root[data-material="solid"] [data-surface="overlay"] {
+  background: var(--fl-surface-overlay-solid);
+  backdrop-filter: none;
+}
+
+:root[data-material="solid"] [data-effect="backdrop-dim"] {
+  backdrop-filter: none;
+}
+
+/* Windows titleBarOverlay is opaque. The renderer half of the caption plane
+ * intentionally resolves to the same app color so the 40px native/app row is
+ * one continuous Chrome owner instead of two visually competing strips. */
+[data-surface="chrome"][data-chrome-plane="window"],
+:root[data-material="solid"] [data-surface="chrome"][data-chrome-plane="window"] {
+  background: var(--fl-color-app);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+/* Native titlebar, app menu and primary navigation read as one Chrome plane. */
+.project-navigation[data-surface="chrome"],
+.settings-navigation[data-surface="chrome"],
+:root[data-material="solid"] .project-navigation[data-surface="chrome"],
+:root[data-material="solid"] .settings-navigation[data-surface="chrome"] {
+  background: var(--fl-color-app);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  [data-surface="chrome"] {
+    background: var(--fl-surface-chrome-solid);
+    backdrop-filter: none;
+  }
+
+  [data-surface="floating"] {
+    background: var(--fl-surface-floating-solid);
+    backdrop-filter: none;
+  }
+
+  [data-surface="overlay"] {
+    background: var(--fl-surface-overlay-solid);
+    backdrop-filter: none;
+  }
+
+  [data-effect="backdrop-dim"] {
+    backdrop-filter: none;
+  }
+}

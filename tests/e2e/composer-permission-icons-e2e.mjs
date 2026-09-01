@@ -98,6 +98,7 @@ try {
   const cdp = await connect();
   await wait(cdp, `document.querySelector('[data-testid="project-workspace"]') && window.fieloraTest`);
   const project = await cdp.eval(`window.fieloraTest.createProject({title:'Permission Icon Fixture',goal:'Verify narrow composer permission control',root_path:${JSON.stringify(projectRoot)}})`);
+  await cdp.eval(`localStorage.setItem('fielora:project-permission:${project.field_id}','REVIEW_CHANGES');localStorage.setItem('fielora:permission:default','REVIEW_CHANGES')`);
   await cdp.eval('location.reload()');
   await wait(cdp, `document.querySelector('[data-testid="project-new-conversation-${project.field_id}"]')`);
   await cdp.eval(`document.querySelector('[data-testid="project-new-conversation-${project.field_id}"]').click()`);
@@ -115,14 +116,95 @@ try {
       permissionIcon: trigger.querySelector('[data-permission-icon]')?.dataset.permissionIcon,
     };
   })()`);
-  assert.equal(narrow.width, 34);
+  assert.equal(narrow.width, 30);
   assert.equal(narrow.labelDisplay, 'none');
   assert.equal(narrow.hasChevron, false);
   assert.equal(narrow.permissionIcon, 'REVIEW_CHANGES');
 
+  const composerGeometry = await cdp.eval(`(() => {
+    const column = document.querySelector('.conversation-column').getBoundingClientRect();
+    const composer = document.querySelector('[data-testid="conversation-composer"]').getBoundingClientRect();
+    const permission = document.querySelector('[data-testid="composer-permission"]');
+    const send = document.querySelector('[data-testid="send-message"]');
+    const permissionStyle = getComputedStyle(permission);
+    const sendStyle = getComputedStyle(send);
+    return {
+      bottomOffset: Math.round(column.bottom - composer.bottom),
+      permissionBorder: permissionStyle.borderTopWidth,
+      permissionBackground: permissionStyle.backgroundColor,
+      sendWidth: send.getBoundingClientRect().width,
+      sendRadius: sendStyle.borderRadius,
+      sendTransition: sendStyle.transitionDuration,
+    };
+  })()`);
+  assert.ok(composerGeometry.bottomOffset >= 0 && composerGeometry.bottomOffset <= 20, JSON.stringify(composerGeometry));
+  assert.equal(composerGeometry.permissionBorder, '0px');
+  assert.equal(composerGeometry.permissionBackground, 'rgba(0, 0, 0, 0)');
+  assert.equal(composerGeometry.sendWidth, 36);
+  assert.equal(composerGeometry.sendRadius, '50%');
+  assert.notEqual(composerGeometry.sendTransition, '0s');
+
+  await cdp.eval(`document.querySelector('[data-testid="conversation-composer"] textarea').focus()`);
+  await cdp.send('Input.insertText', { text: '验证发送按钮视觉状态' });
+  await wait(cdp, `!document.querySelector('[data-testid="send-message"]').disabled`);
+  await wait(cdp, `(() => {
+    const send = document.querySelector('[data-testid="send-message"]');
+    const probe = document.createElement('span');
+    probe.style.background = 'var(--fl-color-emphasis)';
+    document.body.append(probe);
+    const settled = getComputedStyle(send).backgroundColor === getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return settled;
+  })()`);
+  const activeSend = await cdp.eval(`(() => {
+    const send = document.querySelector('[data-testid="send-message"]');
+    const style = getComputedStyle(send);
+    const probe = document.createElement('span');
+    probe.style.background = 'var(--fl-color-emphasis)';
+    document.body.append(probe);
+    const expectedBackground = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return {
+      background: style.backgroundColor,
+      expectedBackground,
+      color: style.color,
+    };
+  })()`);
+  assert.equal(activeSend.background, activeSend.expectedBackground);
+  assert.equal(activeSend.color, 'rgb(255, 255, 255)');
+
   await cdp.eval(`document.querySelector('[data-testid="composer-permission"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="composer-permission-menu"]')`);
+  const permissionMotion = await cdp.eval(`(() => {
+    const menu = document.querySelector('[data-testid="composer-permission-menu"]');
+    const style = getComputedStyle(menu);
+    return { name: style.animationName, duration: style.animationDuration, origin: style.transformOrigin };
+  })()`);
+  assert.equal(permissionMotion.name, 'permission-popover-enter');
+  assert.notEqual(permissionMotion.duration, '0s');
   assert.deepEqual(await cdp.eval(`[...document.querySelectorAll('[data-testid^="composer-permission-option-"] [data-permission-icon]')].map((icon) => icon.dataset.permissionIcon)`), ['READ_ONLY', 'REVIEW_CHANGES', 'FULL_CONTROL']);
+  assert.deepEqual(await cdp.eval(`[...document.querySelectorAll('[data-testid^="composer-permission-option-"]')].map((option) => ({ title: option.querySelector('strong')?.textContent?.trim(), detail: option.querySelector('small')?.textContent?.trim() }))`), [
+    { title: '请求批准', detail: '编辑外部文件和使用互联网时始终询问' },
+    { title: '帮我批准', detail: '仅对检测到的风险操作请求批准' },
+    { title: '完全访问权限', detail: '可不受限制地访问互联网和你电脑上的任何文件' },
+  ]);
+  const optionPresentation = await cdp.eval(`(() => {
+    const options = [...document.querySelectorAll('[data-testid^="composer-permission-option-"]')];
+    return options.map((option) => {
+      const iconSlot = option.querySelector('.ui-select-option-icon');
+      return {
+        iconBackground: getComputedStyle(iconSlot).backgroundColor,
+        iconRadius: getComputedStyle(iconSlot).borderRadius,
+        detailClipped: option.querySelector('small').scrollWidth > option.querySelector('small').clientWidth,
+        selectedBackground: option.getAttribute('aria-selected') === 'true' ? getComputedStyle(option).backgroundColor : null,
+      };
+    });
+  })()`);
+  assert.equal(optionPresentation.every((option) => option.iconBackground === 'rgba(0, 0, 0, 0)' && option.iconRadius === '0px'), true, JSON.stringify(optionPresentation));
+  assert.equal(optionPresentation.every((option) => option.detailClipped === false), true, JSON.stringify(optionPresentation));
+  assert.equal(optionPresentation.find((option) => option.selectedBackground)?.selectedBackground, 'rgba(0, 0, 0, 0)');
+  const glyphPaint = await cdp.eval(`[...document.querySelectorAll('[data-testid^="composer-permission-option-"] .app-icon')].map((icon)=>{const glyph=icon.querySelector('path,rect,circle,line,polyline,polygon');const style=glyph?getComputedStyle(glyph):null;return{fill:style?.fill??'none',stroke:style?.stroke??'none',opacity:getComputedStyle(icon).opacity}})`);
+  assert.equal(glyphPaint.every((icon) => icon.opacity === '1' && (icon.fill !== 'none' || icon.stroke !== 'none')), true, JSON.stringify(glyphPaint));
   const typography = await cdp.eval(`(() => {
     const trigger = document.querySelector('[data-testid="composer-permission"]');
     const regular = document.querySelector('[data-testid="composer-permission-option-READ_ONLY"]');
@@ -149,11 +231,11 @@ try {
       expectedWarning,
     };
   })()`);
-  assert.equal(typography.triggerSize, '14px');
+  assert.equal(typography.triggerSize, '13.5px');
   assert.equal(typography.triggerWeight, '500');
-  assert.equal(typography.titleSize, '15px');
+  assert.equal(typography.titleSize, '14px');
   assert.equal(typography.titleWeight, '500');
-  assert.equal(typography.detailSize, '13.5px');
+  assert.equal(typography.detailSize, '13px');
   assert.equal(typography.detailWeight, '400');
   assert.notEqual(typography.titleColor, typography.detailColor);
   assert.equal(typography.warningColor, typography.expectedWarning);
@@ -170,14 +252,18 @@ try {
     document.body.append(probe);
     const expected = getComputedStyle(probe).color;
     probe.remove();
-    return { icon: getComputedStyle(icon).stroke, expected, value: root.dataset.value };
+    return { icon: getComputedStyle(icon).color, expected, value: root.dataset.value };
   })()`);
   assert.equal(warning.value, 'FULL_CONTROL');
   assert.equal(warning.icon, warning.expected);
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1480, height: 950, deviceScaleFactor: 1, mobile: false });
+  await wait(cdp, `document.querySelector('.conversation-column').getBoundingClientRect().width > 560`);
+  assert.equal(await cdp.eval(`document.querySelector('[data-testid="composer-permission"] .ui-select-value').textContent.trim()`), '完全访问');
   await cdp.eval(`document.querySelector('[data-testid="composer-permission"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="composer-permission-menu"]')`);
+  assert.equal(await cdp.eval(`getComputedStyle(document.querySelector('[data-testid="composer-permission-option-FULL_CONTROL"]')).backgroundColor`), 'rgba(0, 0, 0, 0)');
   const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-  await writeFile(path.join(evidenceDir, 'permission-icons-narrow.png'), Buffer.from(screenshot.data, 'base64'));
+  await writeFile(path.join(evidenceDir, 'permission-menu-codex-match.png'), Buffer.from(screenshot.data, 'base64'));
   console.log('COMPOSER_PERMISSION_ICONS_E2E: PASS');
 
   await cdp.eval('void window.fielora.core.quit()');

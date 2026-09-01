@@ -1,0 +1,50 @@
+/* Canonical type roles. Feature CSS chooses a role; it does not invent a scale. */
+:where(.desktop-frame, .settings-root, .quick-capture, .phase04-layer),
+:where(button, input, textarea, select) {
+  font-family: var(--fl-font-sans);
+  font-synthesis: none;
+}
+
+:where(.conversation-column, .settings-content, .right-workspace-dock) {
+  color: var(--fl-color-text);
+  font-family: var(--fl-font-sans);
+}
+
+:where(.markdown-body, .agent-result-body, .message.user .message-content, [data-type-role="body"]) {
+  font-size: var(--fl-type-body-size);
+  font-weight: var(--fl-type-body-weight);
+  line-height: var(--fl-type-body-line-height);
+}
+
+:where(.conversation-header h2, .agent-result-title, .ui-dialog h2, [data-type-role="title"]) {
+  font-size: var(--fl-type-title-size);
+  font-weight: var(--fl-type-title-weight);
+  line-height: var(--fl-type-title-line-height);
+  letter-spacing: var(--fl-type-title-letter-spacing);
+}
+
+:where(.section-title, .settings-section > header p, [data-type-role="section"]) {
+  font-size: var(--fl-type-section-size);
+  font-weight: var(--fl-type-section-weight);
+  line-height: var(--fl-type-section-line-height);
+}
+
+:where(.ui-button, .ui-menu-item, .ui-select, .ui-tab, .ui-toolbar-action, [data-type-role="label"]) {
+  font-size: var(--fl-type-label-size);
+  font-weight: var(--fl-type-label-weight);
+  line-height: var(--fl-type-label-line-height);
+}
+
+:where(.conversation-context-path, .right-dock-breadcrumb, .right-dock-toolbar, .agent-result-evidence, [data-type-role="meta"]) {
+  font-size: var(--fl-type-meta-size);
+  font-weight: var(--fl-type-meta-weight);
+  line-height: var(--fl-type-meta-line-height);
+}
+
+:where(code, pre, kbd, samp, .dock-code-editor-surface, .terminal-dock, .terminal-session) {
+  font-family: var(--fl-font-mono);
+}
+
+:where(.ui-button, .ui-menu-item, .ui-select, .ui-tab, .ui-toolbar-action, .right-dock-toolbar) strong {
+  font-weight: var(--fl-font-weight-medium);
+}

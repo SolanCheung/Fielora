@@ -7,6 +7,7 @@ const rendererRoot = import.meta.dirname;
 const workspace = readFileSync(path.join(rendererRoot, 'ProjectWorkspace.tsx'), 'utf8');
 const navigation = readFileSync(path.join(rendererRoot, 'PrimaryNav.tsx'), 'utf8');
 const styles = readFileSync(path.join(rendererRoot, 'styles.css'), 'utf8');
+const appearance = readFileSync(path.join(rendererRoot, 'styles', 'appearance.css'), 'utf8');
 const markdown = readFileSync(path.join(rendererRoot, 'MarkdownMessage.tsx'), 'utf8');
 const attachments = readFileSync(path.join(rendererRoot, 'AttachmentMedia.tsx'), 'utf8');
 
@@ -41,14 +42,17 @@ test('selected project title toggles its conversation branch and hides the absol
   assert.match(workspace, /const \[collapsedProjectIds, setCollapsedProjectIds\]/);
   assert.match(workspace, /aria-expanded=\{item\.field_id === projectId && !collapsedProjectIds\.has\(item\.field_id\)\}/);
   assert.match(workspace, /!collapsedProjectIds\.has\(item\.field_id\) && <div className="conversation-section"/);
-  assert.match(workspace, /className="project-item" title=\{item\.root_path\}/);
+  assert.match(workspace, /<TooltipButton className="project-item" tooltip=\{<span className="sidebar-hover-preview"/);
+  assert.match(workspace, /<small>\{item\.root_path \|\| '本地项目'\}<\/small>/);
+  assert.doesNotMatch(workspace, /className="project-item" title=\{item\.root_path\}/);
   assert.doesNotMatch(workspace, /<small>\{item\.root_path\}<\/small>/);
-  assert.match(styles, /\.conversation-section \{[^}]*border-left:/);
+  assert.doesNotMatch(styles, /\.conversation-section\s*\{[^}]*border-left/);
+  assert.match(appearance, /\.conversation-section \{[^}]*border-left:\s*0/);
 });
 
 test('system navigation labels are consistently Chinese', () => {
   assert.match(navigation, /data-testid="new-conversation"[^>]*>[\s\S]*?<span>新聊天<\/span>/);
-  assert.match(navigation, /data-testid="now-nav"[^>]*>[\s\S]*?<span>现在<\/span>/);
+  assert.match(navigation, /data-testid="now-nav"[^>]*>[\s\S]*?<span>已安排<\/span>/);
   assert.match(navigation, /data-testid="library-nav"[^>]*>[\s\S]*?<span>资料库<\/span>/);
   assert.doesNotMatch(navigation, /data-testid="(?:fields|inbox|browse)-nav"/);
   assert.doesNotMatch(navigation, /<span>(?:Now|Fields|Inbox|Browser)<\/span>/);

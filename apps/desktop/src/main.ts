@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, nativeImage, nativeTheme, protocol, shell } from 'electron';
 import type { ContextMenuParams, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
-import type { LibraryMediaKind, LibraryObjectView, PortableBlobManifestEntryView, ProfileView, ProjectView, ScreenshotEvidenceView } from '@fielora/contracts';
+import type { AgentRunView, ConversationMessageView, LibraryMediaKind, LibraryObjectView, PortableBlobManifestEntryView, ProfileView, ProjectView, ScreenshotEvidenceView } from '@fielora/contracts';
 import type { LibraryImagePreviewView } from './workspace-types';
 import { BrowserRuntime } from './browser-runtime';
 import { channels } from './channels';
@@ -45,6 +45,8 @@ import { windowSurfaceColors, type WindowSurfaceTheme } from './window-surface';
 import { StorageManager, directoryManifest, sha256File } from './storage-manager';
 import { createPortableProfile, extractPortableProfile, portableLibraryInputs, type PortableInputFile } from './portable-profile';
 import { normalizeAppPreferences } from './renderer/app-preferences';
+import { ScheduledTaskService } from './scheduled-tasks';
+import type { CreateScheduledTaskRequest, ScheduledTaskRequest, ScheduledTaskView, UpdateScheduledTaskRequest } from './scheduled-task-types';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
@@ -71,6 +73,7 @@ let browserRuntime: BrowserRuntime | undefined;
 let trustedOrigin = '';
 let quitting = false;
 let storageManager: StorageManager | undefined;
+let scheduledTaskService: ScheduledTaskService | undefined;
 const supervisor = new CoreProcessSupervisor(() => storage().coreEnvironment());
 const workspaceRuntime = new WorkspaceRuntime((event) => {
   withUsableWindow(appWindow, (window) => window.webContents.send(channels.workspaceEvent, event));
@@ -84,6 +87,47 @@ function browser(): BrowserRuntime {
 function storage(): StorageManager {
   if (!storageManager) throw new Error('StorageManager is unavailable');
   return storageManager;
+}
+
+function scheduledTasks(): ScheduledTaskService {
+  if (!scheduledTaskService) throw new Error('Scheduled tasks are unavailable');
+  return scheduledTaskService;
+}
+
+function scheduledPayload<T>(payload: unknown): T {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invalid scheduled task request');
+  return payload as T;
+}
+
+function scheduledTaskId(payload: unknown): string {
+  const request = scheduledPayload<ScheduledTaskRequest>(payload);
+  if (typeof request.id !== 'string' || request.id.trim().length === 0 || request.id.length > 256) throw new Error('Invalid scheduled task id');
+  return request.id;
+}
+
+async function executeScheduledTask(task: ScheduledTaskView): Promise<string> {
+  const message = await durableMutation(() => supervisor.request('command.conversation.message.create', {
+    conversation_id: task.conversation_id,
+    role: 'USER',
+    content: task.task,
+    status: 'COMPLETED',
+    provider_config_id: null,
+    model_id: null,
+    invocation_id: null,
+    references: [],
+  })) as ConversationMessageView;
+  const run = await durableMutation(() => supervisor.request('command.agent.start', {
+    field_id: task.field_id,
+    conversation_id: task.conversation_id,
+    user_message_id: message.id,
+    provider_config_id: task.provider_config_id,
+    model_id: task.model_id,
+    task: task.task,
+    permission: task.permission,
+    max_steps: task.max_steps,
+    attachments: [],
+  })) as AgentRunView;
+  return run.id;
 }
 
 function assertBridgeEvent(event: IpcMainInvokeEvent): void {
@@ -320,6 +364,23 @@ function registerBridgeHandlers(): void {
   handle(channels.conversationArchive, validateArchiveConversation, 'command.conversation.archive');
   handle(channels.conversationMessageCreate, validateCreateConversationMessage, 'command.conversation.message.create');
   handle(channels.conversationMessageList, validateListConversationMessages, 'query.conversation.message.list');
+  ipcMain.handle(channels.scheduledTaskList, (event) => { assertBridgeEvent(event); return scheduledTasks().list(); });
+  ipcMain.handle(channels.scheduledTaskCreate, (event, payload) => {
+    assertBridgeEvent(event);
+    return durableMutation(() => scheduledTasks().create(scheduledPayload<CreateScheduledTaskRequest>(payload)));
+  });
+  ipcMain.handle(channels.scheduledTaskUpdate, (event, payload) => {
+    assertBridgeEvent(event);
+    return durableMutation(() => scheduledTasks().update(scheduledPayload<UpdateScheduledTaskRequest>(payload)));
+  });
+  ipcMain.handle(channels.scheduledTaskDelete, (event, payload) => {
+    assertBridgeEvent(event);
+    return durableMutation(() => scheduledTasks().delete(scheduledTaskId(payload)));
+  });
+  ipcMain.handle(channels.scheduledTaskRunNow, (event, payload) => {
+    assertBridgeEvent(event);
+    return scheduledTasks().runNow(scheduledTaskId(payload));
+  });
   handle(channels.artifactList, validateListArtifacts, 'query.artifact.list');
   handle(channels.artifactRead, validateReadArtifact, 'query.artifact.read');
   handle(channels.artifactHistory, validateArtifactHistory, 'query.artifact.history');
@@ -891,6 +952,7 @@ else {
     if (!localAppData) throw new Error('LOCALAPPDATA is unavailable');
     const developmentRoot = (!app.isPackaged || process.env.FIELORA_E2E === '1') ? process.env.FIELORA_DATA_DIR : undefined;
     storageManager = await StorageManager.open(localAppData, developmentRoot);
+    scheduledTaskService = await ScheduledTaskService.open(path.join(app.getPath('userData'), 'scheduled-tasks.json'), executeScheduledTask);
     registerBridgeHandlers();
     if (app.isPackaged) await registerApplicationProtocol();
     await createWindow();
@@ -900,7 +962,9 @@ else {
     supervisor.on('health', (payload) => {
       withUsableWindow(appWindow, (window) => window.webContents.send(channels.coreEvent, { event: 'event.core.health', ...payload }));
     });
-    void supervisor.start().catch((error) => console.error('Core startup failed', error));
+    void supervisor.start()
+      .then(() => scheduledTaskService?.start())
+      .catch((error) => console.error('Core startup failed', error));
   });
 }
 
@@ -908,6 +972,7 @@ app.on('before-quit', (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
+  scheduledTaskService?.stop();
   void supervisor.shutdown().finally(() => {
     workspaceRuntime.dispose();
     browserRuntime?.destroy();

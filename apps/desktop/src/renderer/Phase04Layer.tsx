@@ -468,8 +468,8 @@ export function Phase04Layer() {
 
   return <>
     <button className="summon-button" onClick={() => void summon()} title="Summon (Ctrl+Shift+Space)" data-testid="summon-button">Summon</button>
-    {surface && <div className="summon-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
-      <section className={`experience-panel ${surface === 'SUMMON' ? 'summon-panel' : ''}`} role="dialog" aria-modal="true" aria-label={surface === 'SUMMON' ? 'Fielora Summon' : surface === 'INBOX' ? 'Fielora Inbox' : '模型服务设置'} data-testid={surface === 'SUMMON' ? 'summon-panel' : surface === 'INBOX' ? 'inbox-surface' : 'provider-setup'}>
+    {surface && <div className="summon-backdrop" data-effect="backdrop-dim" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
+      <section className={`experience-panel ${surface === 'SUMMON' ? 'summon-panel' : ''}`} role="dialog" aria-modal="true" data-surface="overlay" aria-label={surface === 'SUMMON' ? 'Fielora Summon' : surface === 'INBOX' ? 'Fielora Inbox' : '模型服务设置'} data-testid={surface === 'SUMMON' ? 'summon-panel' : surface === 'INBOX' ? 'inbox-surface' : 'provider-setup'}>
         <header>{header}</header>
 
         {surface === 'SUMMON' && <div className="summon-body summon-compose">

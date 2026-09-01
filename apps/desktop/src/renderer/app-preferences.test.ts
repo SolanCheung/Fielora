@@ -5,12 +5,10 @@ import {
   colorContrast,
   defaultAppearancePreferences,
   defaultAppPreferences,
-  exportThemeConfig,
-  importThemeConfig,
   readAppPreferences,
+  resolveAppearance,
+  resolveMaterial,
   resolveReducedMotion,
-  resolveTheme,
-  selectedAccent,
   writeAppPreferences,
   type AppPreferences,
 } from './app-preferences.ts';
@@ -62,16 +60,18 @@ test('v2 appearance preferences round-trip through the canonical storage key', (
   assert.deepEqual(readAppPreferences(storage), preferences);
 });
 
-test('System theme and motion resolve from the environment without mutating preferences', () => {
-  assert.equal(resolveTheme('SYSTEM', false), 'LIGHT');
-  assert.equal(resolveTheme('SYSTEM', true), 'DARK');
-  assert.equal(resolveTheme('LIGHT', true), 'LIGHT');
+test('System appearance and motion resolve from the environment without becoming themes', () => {
+  assert.equal(resolveAppearance('SYSTEM', false), 'LIGHT');
+  assert.equal(resolveAppearance('SYSTEM', true), 'DARK');
+  assert.equal(resolveAppearance('LIGHT', true), 'LIGHT');
+  assert.equal(resolveMaterial(true), 'GLASS');
+  assert.equal(resolveMaterial(false), 'SOLID');
   assert.equal(resolveReducedMotion('SYSTEM', true), true);
   assert.equal(resolveReducedMotion('FULL', true), false);
   assert.equal(resolveReducedMotion('REDUCE', false), true);
 });
 
-test('applying appearance sets semantic datasets, fonts, accent, and safe advanced overrides', () => {
+test('applying appearance fixes the official identity and resolves Glass material capability', () => {
   const properties = new Map<string, string>();
   const target = {
     dataset: {} as DOMStringMap,
@@ -90,46 +90,42 @@ test('applying appearance sets semantic datasets, fonts, accent, and safe advanc
       reducedMotionPreference: 'SYSTEM', pointerCursor: false, advancedColorOverrides: { canvas: '#101214', accent: '#A15AC7' },
     },
   };
-  applyAppPreferences(target, preferences, { prefersDark: true, prefersReducedMotion: true });
+  applyAppPreferences(target, preferences, { prefersDark: true, prefersReducedMotion: true, supportsBackdrop: true });
   assert.deepEqual({
-    theme: target.dataset.themePreference, resolved: target.dataset.resolvedTheme, density: target.dataset.uiDensity,
-    contrast: target.dataset.uiContrast, radius: target.dataset.uiRadius, translucent: target.dataset.translucentSidebar,
+    theme: target.dataset.officialTheme, language: target.dataset.designLanguage, mode: target.dataset.appearanceMode,
+    effective: target.dataset.effectiveAppearance, material: target.dataset.material, density: target.dataset.uiDensity,
+    contrast: target.dataset.uiContrast, radius: target.dataset.uiRadius,
     motion: target.dataset.reduceMotion, pointer: target.dataset.pointerCursor,
-  }, { theme: 'system', resolved: 'dark', density: 'compact', contrast: 'high', radius: 'large', translucent: 'true', motion: 'true', pointer: 'false' });
+  }, { theme: 'fielora', language: 'fielora-glass', mode: 'system', effective: 'dark', material: 'glass', density: 'standard', contrast: 'standard', radius: 'standard', motion: 'true', pointer: 'false' });
   assert.equal(target.style.colorScheme, 'dark');
-  assert.equal(properties.get('--fl-color-accent'), '#A15AC7');
-  assert.equal(properties.get('--fl-color-canvas'), '#101214');
-  assert.match(properties.get('--fl-font-sans') ?? '', /Microsoft YaHei/);
-  assert.match(properties.get('--fl-font-mono') ?? '', /Cascadia Code/);
+  assert.equal(properties.has('--fl-color-accent'), false);
+  assert.equal(properties.has('--fl-color-canvas'), false);
+  assert.equal(properties.has('--fl-font-sans'), false);
   assert.equal(properties.get('--fl-ui-font-scale'), '1.15');
+
+  applyAppPreferences(target, preferences, { prefersDark: false, prefersReducedMotion: false, supportsBackdrop: false });
+  assert.equal(target.dataset.material, 'solid');
+  assert.equal(target.dataset.effectiveAppearance, 'light');
 });
 
-test('accent selection and contrast helpers are deterministic', () => {
-  assert.equal(selectedAccent({ ...defaultAppearancePreferences, accentPreset: 'TEAL' }), '#147D83');
-  assert.equal(selectedAccent({ ...defaultAppearancePreferences, accentPreset: 'CUSTOM', customAccent: '#AABBCC' }), '#AABBCC');
+test('contrast helper remains deterministic', () => {
   assert.ok(colorContrast('#FFFFFF', '#181A1F') > 15);
   assert.equal(colorContrast('#FFFFFF', '#FFFFFF'), 1);
 });
 
-test('Theme Config v1 export/import round-trips and only accepts bounded data', () => {
-  const appearance = {
-    ...defaultAppearancePreferences,
-    themePreference: 'DARK' as const,
-    accentPreset: 'ORANGE' as const,
-    density: 'COMPACT' as const,
-    uiFontScale: 105 as const,
-    highContrast: true,
-    advancedColorOverrides: { canvas: '#101214', foreground: '#F4F5F7' },
-  };
-  assert.deepEqual(importThemeConfig(exportThemeConfig(appearance)), appearance);
-  for (const source of [
-    '{bad',
-    JSON.stringify({ version: 2 }),
-    JSON.stringify({ version: 1, executable: 'alert(1)' }),
-    JSON.stringify({ version: 1, customAccent: 'purple' }),
-    JSON.stringify({ version: 1, colors: { canvas: '#FFFFFF', foreground: '#FDFDFD' } }),
-    JSON.stringify({ version: 1, colors: { unknown: '#FFFFFF' } }),
-  ]) assert.throws(() => importThemeConfig(source), /主题格式无效/);
+test('legacy visual customization data remains readable but cannot replace the official design language', () => {
+  const storage = memoryStorage({ 'fielora.ui.preferences.v2': JSON.stringify({
+    version: 2,
+    startupDestination: 'PROJECTS',
+    appearance: { ...defaultAppearancePreferences, accentPreset: 'CUSTOM', customAccent: '#AABBCC', advancedColorOverrides: { canvas: '#101214' } },
+  }) });
+  const preferences = readAppPreferences(storage);
+  assert.equal(preferences.appearance.customAccent, '#AABBCC');
+  const properties = new Map<string, string>();
+  const target = { dataset: {} as DOMStringMap, style: { colorScheme: '', setProperty: (name: string, value: string) => { properties.set(name, value); }, removeProperty: (name: string) => { properties.delete(name); return ''; } } } as unknown as HTMLElement;
+  applyAppPreferences(target, preferences, { prefersDark: false, prefersReducedMotion: false, supportsBackdrop: true });
+  assert.equal(properties.has('--fl-color-canvas'), false);
+  assert.equal(target.dataset.officialTheme, 'fielora');
 });
 
 test('resetting appearance can preserve non-appearance preferences', () => {

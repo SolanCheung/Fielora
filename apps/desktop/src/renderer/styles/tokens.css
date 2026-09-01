@@ -1,32 +1,23 @@
 /*
- * Fielora Appearance System — one semantic token layer for every built-in theme.
- * Components consume --fl-* roles and never branch on Light, Dark, or System.
+ * Fielora Glass — the single official visual language.
+ * System only resolves an effective light/dark appearance. Components consume
+ * five semantic surfaces and never branch on appearance or material support.
  */
 :root {
   color-scheme: light;
   --fl-ui-font-scale: 1;
-  --fl-color-accent: #6546c7;
+  --fl-color-accent: #505761;
   --fl-color-accent-hover: color-mix(in srgb, var(--fl-color-accent) 86%, var(--fl-color-text-strong));
   --fl-color-accent-active: color-mix(in srgb, var(--fl-color-accent) 76%, var(--fl-color-text-strong));
   --fl-color-accent-soft: color-mix(in srgb, var(--fl-color-accent) 11%, var(--fl-color-canvas));
   --fl-color-accent-foreground: #ffffff;
-
-  /* Forced specimens used only by Appearance previews. */
-  --fl-preview-light-canvas: #ffffff;
-  --fl-preview-light-sidebar: #f1f2f6;
-  --fl-preview-light-text: #646a74;
-  --fl-preview-dark-canvas: #191b20;
-  --fl-preview-dark-sidebar: #22252b;
-  --fl-preview-dark-text: #d5d9df;
-  --fl-preview-system-text: #555b64;
-  --fl-preview-accent: #6546c7;
-  --fl-preview-border-light: rgba(55, 59, 68, 0.1);
-  --fl-preview-border-dark: rgba(255, 255, 255, 0.09);
+  --fl-color-emphasis: #7657ef;
+  --fl-color-emphasis-hover: #6848db;
 
   /* Brand aliases remain stable while the active accent completes the visual language. */
-  --fl-color-brand-ink: var(--fl-color-accent);
-  --fl-color-brand-ink-hover: var(--fl-color-accent-hover);
-  --fl-color-brand-accent: var(--fl-color-accent);
+  --fl-color-brand-ink: #6546c7;
+  --fl-color-brand-ink-hover: #5438ad;
+  --fl-color-brand-accent: #6546c7;
   --fl-color-brand-paper: var(--fl-color-surface-subtle);
 
   /* Typography */
@@ -35,14 +26,14 @@
   --fl-font-agent-sans: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
   --fl-font-agent-mono: "Cascadia Code", Consolas, monospace;
   --fl-font-size-caption: calc(12px * var(--fl-ui-font-scale));
-  --fl-font-size-meta: calc(12.5px * var(--fl-ui-font-scale));
-  --fl-font-size-label: calc(13.5px * var(--fl-ui-font-scale));
-  --fl-font-size-navigation: calc(13.5px * var(--fl-ui-font-scale));
-  --fl-font-size-sidebar: calc(13.5px * var(--fl-ui-font-scale));
-  --fl-font-size-project: calc(13.5px * var(--fl-ui-font-scale));
-  --fl-font-size-conversation: calc(13px * var(--fl-ui-font-scale));
-  --fl-font-size-path: calc(12.5px * var(--fl-ui-font-scale));
-  --fl-font-size-section: calc(13.5px * var(--fl-ui-font-scale));
+  --fl-font-size-meta: calc(13px * var(--fl-ui-font-scale));
+  --fl-font-size-label: calc(14px * var(--fl-ui-font-scale));
+  --fl-font-size-navigation: calc(14px * var(--fl-ui-font-scale));
+  --fl-font-size-sidebar: calc(14px * var(--fl-ui-font-scale));
+  --fl-font-size-project: calc(14px * var(--fl-ui-font-scale));
+  --fl-font-size-conversation: calc(13.5px * var(--fl-ui-font-scale));
+  --fl-font-size-path: calc(13px * var(--fl-ui-font-scale));
+  --fl-font-size-section: calc(13px * var(--fl-ui-font-scale));
   --fl-font-size-body: calc(15px * var(--fl-ui-font-scale));
   --fl-font-size-title: calc(17px * var(--fl-ui-font-scale));
   --fl-font-size-agent-meta: calc(12.5px * var(--fl-ui-font-scale));
@@ -55,13 +46,31 @@
   --fl-font-size-agent-button: calc(13.5px * var(--fl-ui-font-scale));
   --fl-font-weight-regular: 400;
   --fl-font-weight-navigation: 500;
-  --fl-font-weight-medium: 550;
-  --fl-font-weight-semibold: 650;
+  --fl-font-weight-medium: 500;
+  --fl-font-weight-semibold: 600;
   --fl-font-weight-result-title: 600;
   --fl-font-weight-result-action: 500;
   --fl-line-height-tight: 1.2;
   --fl-line-height-body: 1.55;
   --fl-line-height-agent-body: 1.7;
+
+  /* Canonical typography roles. Compatibility size tokens above resolve here over time. */
+  --fl-type-title-size: calc(17px * var(--fl-ui-font-scale));
+  --fl-type-title-weight: 600;
+  --fl-type-title-line-height: 1.3;
+  --fl-type-title-letter-spacing: -0.01em;
+  --fl-type-section-size: calc(13px * var(--fl-ui-font-scale));
+  --fl-type-section-weight: 500;
+  --fl-type-section-line-height: 1.4;
+  --fl-type-body-size: calc(15px * var(--fl-ui-font-scale));
+  --fl-type-body-weight: 400;
+  --fl-type-body-line-height: 1.7;
+  --fl-type-label-size: calc(14px * var(--fl-ui-font-scale));
+  --fl-type-label-weight: 500;
+  --fl-type-label-line-height: 1.35;
+  --fl-type-meta-size: calc(13px * var(--fl-ui-font-scale));
+  --fl-type-meta-weight: 400;
+  --fl-type-meta-line-height: 1.45;
 
   /* Spacing and density */
   --fl-space-1: 4px;
@@ -77,11 +86,23 @@
   --fl-density-composer-y: 9px;
   --fl-density-section-gap: 16px;
 
+  /* Stable workbench proportions. Paint layers must not override these values. */
+  --fl-layout-navigation-default: 304px;
+  --fl-layout-navigation-min: 260px;
+  --fl-layout-navigation-max: 360px;
+  --fl-layout-conversation-min: 340px;
+  --fl-layout-conversation-reading: 920px;
+  --fl-layout-conversation-message: 900px;
+  --fl-layout-composer-width: 920px;
+  --fl-layout-workspace-dock-default: 635px;
+  --fl-layout-workspace-dock-min: 360px;
+
   /* Shape */
   --fl-radius-control: 8px;
   --fl-radius-input: 10px;
   --fl-radius-card: 12px;
   --fl-radius-surface: 16px;
+  --fl-radius-work-surface: 28px;
   --fl-radius-composer: 16px;
   --fl-radius-dialog: 16px;
   --fl-radius-pill: 999px;
@@ -89,11 +110,17 @@
   --fl-control-md: var(--fl-density-control);
   --fl-control-lg: 38px;
   --fl-icon-sm: 14px;
-  --fl-icon-md: 17px;
+  --fl-icon-md: 16px;
+  --fl-icon-lg: 18px;
+  --fl-icon-stroke: 1.7;
 
   /* Motion */
   --fl-ease-standard: cubic-bezier(0.2, 0.72, 0.2, 1);
+  --fl-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --fl-ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --fl-ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
+  --fl-duration-fast: 120ms;
+  --fl-duration-normal: 200ms;
   --fl-duration-instant: 100ms;
   --fl-duration-control: 140ms;
   --fl-duration-surface: 220ms;
@@ -107,6 +134,12 @@
   --fl-layer-dock: 40;
   --fl-layer-popover: 160;
   --fl-layer-dialog: 240;
+  --fl-layer-tooltip: 320;
+
+  /* Managed desktop tooltip */
+  --fl-color-tooltip-background: #202124;
+  --fl-color-tooltip-foreground: #ffffff;
+  --fl-shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.16);
 
   /* Compatibility aliases while legacy surfaces migrate. */
   --fielora-ink: var(--fl-color-brand-ink);
@@ -119,31 +152,31 @@
 }
 
 :root,
-:root[data-resolved-theme="light"] {
+:root[data-effective-appearance="light"] {
   /* Backgrounds */
   --fl-color-app: #f9fafc;
-  --fl-color-canvas: #ffffff;
-  --fl-color-navigation: #f9fafc;
-  --fl-color-workbench: #fafbfd;
+  --fl-color-canvas: #f4f6fb;
+  --fl-color-navigation: #f2f5fa;
+  --fl-color-workbench: #f4f6fb;
   --fl-color-surface: #ffffff;
   --fl-color-surface-raised: rgba(255, 255, 255, 0.98);
-  --fl-color-surface-subtle: #f7f8fa;
-  --fl-color-surface-hover: #f4f3fa;
-  --fl-color-surface-hover-strong: #eeebf7;
-  --fl-color-surface-active: #ebe7f7;
+  --fl-color-surface-subtle: #f5f7fa;
+  --fl-color-surface-hover: #eef1f6;
+  --fl-color-surface-hover-strong: #e8edf4;
+  --fl-color-surface-active: #e5eaf2;
   --fl-color-surface-selected: color-mix(in srgb, var(--fl-color-accent) 10%, #ffffff);
   --fl-color-overlay: rgba(24, 26, 31, 0.24);
 
   /* Text */
   --fl-color-text-strong: #181a1f;
   --fl-color-text: #343a43;
-  --fl-color-text-muted: #5e646d;
-  --fl-color-text-subtle: #858c96;
-  --fl-color-text-faint: #9298a1;
+  --fl-color-text-muted: #565e69;
+  --fl-color-text-subtle: #717a87;
+  --fl-color-text-faint: #818a96;
   --fl-color-text-disabled: #b9bdc4;
   --fl-color-text-on-accent: #ffffff;
-  --fl-color-icon: #505660;
-  --fl-color-icon-muted: #8c929b;
+  --fl-color-icon: #505761;
+  --fl-color-icon-muted: #777f89;
   --fl-color-link: color-mix(in srgb, var(--fl-color-accent) 82%, #173e89);
 
   /* Borders and focus */
@@ -151,7 +184,7 @@
   --fl-color-border: #e2e5e9;
   --fl-color-border-soft: #eceef1;
   --fl-color-border-strong: #d7dbe1;
-  --fl-color-divider: rgba(75, 82, 94, 0.055);
+  --fl-color-divider: rgba(60, 69, 82, 0.06);
   --fl-color-divider-hover: rgba(75, 82, 94, 0.16);
   --fl-color-focus: color-mix(in srgb, var(--fl-color-accent) 42%, transparent);
 
@@ -166,17 +199,44 @@
   --fl-color-permission-warning: #e95016;
   --fl-color-text-success: #26704e;
   --fl-color-status-info: #356dcc;
+  --fl-color-file-typescript: #3876b9;
+  --fl-color-file-javascript: #9a720b;
+  --fl-color-file-code: #5e7898;
+  --fl-color-file-html: #b85d3e;
+  --fl-color-file-style: #7658ae;
+  --fl-color-file-data: #8f701d;
+  --fl-color-file-config: #4e8174;
+  --fl-color-file-markdown: #54728e;
+  --fl-color-file-image: #b84c74;
+  --fl-color-file-generic: #77818d;
   --fl-color-surface-danger: #fff3f5;
   --fl-color-surface-warning: #fff8ee;
   --fl-color-surface-success: #edf8f2;
   --fl-color-surface-info: #eff5ff;
   --fl-color-border-warning: #ecc99d;
   --fl-color-message-user: color-mix(in srgb, var(--fl-color-accent) 6%, #ffffff);
-  --fl-color-glass-shell: rgba(249, 250, 252, 0.9);
-  --fl-color-glass-strong: rgba(255, 255, 255, 0.94);
-  --fl-color-glass-border: rgba(73, 79, 89, 0.09);
+  /* Five core surfaces. Content is intentionally near-solid. */
+  --fl-surface-canvas: radial-gradient(ellipse 92% 72% at 8% -12%, rgba(114, 130, 164, 0.065), transparent 68%), radial-gradient(ellipse 76% 64% at 98% 104%, rgba(162, 133, 112, 0.035), transparent 72%), #f4f6fb;
+  --fl-surface-content: var(--fl-color-surface);
+  --fl-surface-chrome: rgba(242, 245, 250, 0.72);
+  --fl-surface-floating: rgba(255, 255, 255, 0.84);
+  --fl-surface-overlay: rgba(252, 253, 255, 0.9);
+  --fl-surface-selected: color-mix(in srgb, var(--fl-color-text-strong) 5%, transparent);
+  --fl-surface-interactive: rgba(255, 255, 255, 0.58);
+  --fl-surface-chrome-solid: #f0f3f8;
+  --fl-surface-floating-solid: #ffffff;
+  --fl-surface-overlay-solid: #ffffff;
+  --fl-effect-boundary: rgba(55, 65, 79, 0.1);
+  --fl-effect-edge-highlight: rgba(255, 255, 255, 0.72);
+  --fl-effect-backdrop-chrome: blur(14px) saturate(1.05);
+  --fl-effect-backdrop-floating: blur(16px) saturate(1.06);
+  --fl-effect-backdrop-overlay: blur(20px) saturate(1.08);
+  --fl-effect-backdrop-dim: blur(5px);
+  --fl-color-glass-shell: var(--fl-surface-chrome);
+  --fl-color-glass-strong: var(--fl-surface-floating);
+  --fl-color-glass-border: var(--fl-effect-boundary);
   --fl-color-diagram-canvas: #ffffff;
-  --fl-backdrop-shell: blur(16px) saturate(1.04);
+  --fl-backdrop-shell: var(--fl-effect-backdrop-floating);
 
   /* Code semantics */
   --fl-code-keyword: #7652b8;
@@ -191,38 +251,42 @@
   --fl-color-control-active: color-mix(in srgb, var(--fl-color-accent) 10%, transparent);
   --fl-color-control-disabled: #e4e6eb;
   --fl-shadow-subtle: 0 1px 2px rgba(24, 27, 33, 0.035);
-  --fl-shadow-surface: 0 5px 18px rgba(24, 27, 33, 0.05);
-  --fl-shadow-floating: 0 18px 52px rgba(24, 27, 33, 0.15);
+  --fl-shadow-chrome: none;
+  --fl-shadow-surface: 0 3px 12px rgba(24, 27, 33, 0.04);
+  --fl-shadow-floating: 0 7px 20px rgba(24, 27, 33, 0.09);
+  --fl-shadow-overlay: 0 14px 36px rgba(24, 27, 33, 0.16);
   --fl-shadow-control: 0 2px 8px rgba(36, 42, 50, 0.07);
   --fl-shadow-control-hover: 0 3px 10px rgba(36, 42, 50, 0.08);
-  --fl-shadow-popover: var(--fl-shadow-floating);
-  --fl-shadow-dialog: 0 24px 72px rgba(24, 29, 36, 0.2);
+  --fl-shadow-popover: var(--fl-shadow-overlay);
+  --fl-shadow-dialog: var(--fl-shadow-overlay);
   --terminal-surface: #f7f8fa;
   --terminal-ink: #272b31;
 }
 
-:root[data-resolved-theme="dark"] {
+:root[data-effective-appearance="dark"] {
+  --fl-color-emphasis: #9680ff;
+  --fl-color-emphasis-hover: #a795ff;
   --fl-color-app: #17191e;
-  --fl-color-canvas: #191b20;
-  --fl-color-navigation: #17191e;
-  --fl-color-workbench: #15171b;
-  --fl-color-surface: #191b20;
-  --fl-color-surface-raised: rgba(35, 38, 44, 0.98);
-  --fl-color-surface-subtle: #22252b;
-  --fl-color-surface-hover: #272a31;
-  --fl-color-surface-hover-strong: #2d3038;
-  --fl-color-surface-active: #31343d;
+  --fl-color-canvas: #11131a;
+  --fl-color-navigation: #171a22;
+  --fl-color-workbench: #11131a;
+  --fl-color-surface: #181b23;
+  --fl-color-surface-raised: rgba(31, 35, 45, 0.98);
+  --fl-color-surface-subtle: #20242d;
+  --fl-color-surface-hover: #272c36;
+  --fl-color-surface-hover-strong: #2e3440;
+  --fl-color-surface-active: #343a46;
   --fl-color-surface-selected: color-mix(in srgb, var(--fl-color-accent) 23%, #202329);
   --fl-color-overlay: rgba(2, 3, 5, 0.62);
   --fl-color-text-strong: #f1f2f5;
-  --fl-color-text: #d8dbe1;
-  --fl-color-text-muted: #adb3bd;
-  --fl-color-text-subtle: #8e95a1;
-  --fl-color-text-faint: #757d89;
+  --fl-color-text: #e0e3e9;
+  --fl-color-text-muted: #b6bdc8;
+  --fl-color-text-subtle: #969fac;
+  --fl-color-text-faint: #818b98;
   --fl-color-text-disabled: #626976;
   --fl-color-text-on-accent: #ffffff;
-  --fl-color-icon: #c4c9d1;
-  --fl-color-icon-muted: #818995;
+  --fl-color-icon: #d0d5dd;
+  --fl-color-icon-muted: #929ba8;
   --fl-color-link: color-mix(in srgb, var(--fl-color-accent) 65%, #b8ceff);
   --fl-color-border-subtle: #24272d;
   --fl-color-border: #30343c;
@@ -241,17 +305,43 @@
   --fl-color-permission-warning: #f28a4f;
   --fl-color-text-success: #75bf98;
   --fl-color-status-info: #77a0f0;
+  --fl-color-file-typescript: #6da6df;
+  --fl-color-file-javascript: #d1aa43;
+  --fl-color-file-code: #8fa9c4;
+  --fl-color-file-html: #dd8665;
+  --fl-color-file-style: #a58adc;
+  --fl-color-file-data: #c3a45b;
+  --fl-color-file-config: #75ae9e;
+  --fl-color-file-markdown: #82a2bf;
+  --fl-color-file-image: #dd789b;
+  --fl-color-file-generic: #a0a9b5;
   --fl-color-surface-danger: #351f26;
   --fl-color-surface-warning: #34281d;
   --fl-color-surface-success: #1d3027;
   --fl-color-surface-info: #1d293d;
   --fl-color-border-warning: #685035;
-  --fl-color-message-user: color-mix(in srgb, var(--fl-color-accent) 20%, #202228);
-  --fl-color-glass-shell: rgba(23, 25, 30, 0.9);
-  --fl-color-glass-strong: rgba(31, 34, 40, 0.94);
-  --fl-color-glass-border: rgba(220, 225, 233, 0.08);
+  --fl-color-message-user: color-mix(in srgb, var(--fl-color-accent) 14%, #202228);
+  --fl-surface-canvas: radial-gradient(ellipse 92% 74% at 6% -10%, rgba(103, 116, 151, 0.08), transparent 68%), radial-gradient(ellipse 76% 66% at 100% 106%, rgba(119, 94, 82, 0.045), transparent 72%), #11131a;
+  --fl-surface-content: var(--fl-color-surface);
+  --fl-surface-chrome: rgba(23, 26, 34, 0.72);
+  --fl-surface-floating: rgba(30, 34, 43, 0.84);
+  --fl-surface-overlay: rgba(35, 39, 49, 0.9);
+  --fl-surface-selected: color-mix(in srgb, var(--fl-color-text-strong) 10%, transparent);
+  --fl-surface-interactive: rgba(255, 255, 255, 0.045);
+  --fl-surface-chrome-solid: #171a22;
+  --fl-surface-floating-solid: #20242d;
+  --fl-surface-overlay-solid: #252a34;
+  --fl-effect-boundary: rgba(220, 226, 236, 0.1);
+  --fl-effect-edge-highlight: rgba(255, 255, 255, 0.065);
+  --fl-effect-backdrop-chrome: blur(14px) saturate(1.03);
+  --fl-effect-backdrop-floating: blur(16px) saturate(1.04);
+  --fl-effect-backdrop-overlay: blur(20px) saturate(1.05);
+  --fl-effect-backdrop-dim: blur(5px);
+  --fl-color-glass-shell: var(--fl-surface-chrome);
+  --fl-color-glass-strong: var(--fl-surface-floating);
+  --fl-color-glass-border: var(--fl-effect-boundary);
   --fl-color-diagram-canvas: #ffffff;
-  --fl-backdrop-shell: blur(16px) saturate(1.02);
+  --fl-backdrop-shell: var(--fl-effect-backdrop-floating);
   --fl-code-keyword: #b99aee;
   --fl-code-property: #ef94a7;
   --fl-code-string: #82c99f;
@@ -262,12 +352,14 @@
   --fl-color-control-active: rgba(255, 255, 255, 0.1);
   --fl-color-control-disabled: #353941;
   --fl-shadow-subtle: 0 1px 2px rgba(0, 0, 0, 0.24);
-  --fl-shadow-surface: 0 6px 22px rgba(0, 0, 0, 0.22);
-  --fl-shadow-floating: 0 20px 58px rgba(0, 0, 0, 0.46);
+  --fl-shadow-chrome: none;
+  --fl-shadow-surface: 0 4px 14px rgba(0, 0, 0, 0.18);
+  --fl-shadow-floating: 0 8px 22px rgba(0, 0, 0, 0.3);
+  --fl-shadow-overlay: 0 16px 40px rgba(0, 0, 0, 0.44);
   --fl-shadow-control: 0 2px 9px rgba(0, 0, 0, 0.22);
   --fl-shadow-control-hover: 0 3px 11px rgba(0, 0, 0, 0.24);
-  --fl-shadow-popover: var(--fl-shadow-floating);
-  --fl-shadow-dialog: 0 26px 78px rgba(0, 0, 0, 0.56);
+  --fl-shadow-popover: var(--fl-shadow-overlay);
+  --fl-shadow-dialog: var(--fl-shadow-overlay);
   --terminal-surface: #111318;
   --terminal-ink: #e3e6ea;
 }
@@ -276,9 +368,9 @@
 :root[data-ui-density="standard"] { --fl-density-row-y: 8px; --fl-density-control: 34px; --fl-density-composer-y: 9px; --fl-density-section-gap: 16px; }
 :root[data-ui-density="compact"] { --fl-density-row-y: 6px; --fl-density-control: 30px; --fl-density-composer-y: 6px; --fl-density-section-gap: 12px; }
 
-:root[data-ui-radius="small"] { --fl-radius-control: 6px; --fl-radius-input: 8px; --fl-radius-card: 10px; --fl-radius-surface: 14px; --fl-radius-composer: 14px; --fl-radius-dialog: 14px; }
-:root[data-ui-radius="standard"] { --fl-radius-control: 8px; --fl-radius-input: 10px; --fl-radius-card: 12px; --fl-radius-surface: 16px; --fl-radius-composer: 16px; --fl-radius-dialog: 16px; }
-:root[data-ui-radius="large"] { --fl-radius-control: 10px; --fl-radius-input: 12px; --fl-radius-card: 16px; --fl-radius-surface: 20px; --fl-radius-composer: 22px; --fl-radius-dialog: 20px; }
+:root[data-ui-radius="small"] { --fl-radius-control: 6px; --fl-radius-input: 8px; --fl-radius-card: 10px; --fl-radius-surface: 14px; --fl-radius-work-surface: 24px; --fl-radius-composer: 14px; --fl-radius-dialog: 14px; }
+:root[data-ui-radius="standard"] { --fl-radius-control: 8px; --fl-radius-input: 10px; --fl-radius-card: 12px; --fl-radius-surface: 16px; --fl-radius-work-surface: 28px; --fl-radius-composer: 16px; --fl-radius-dialog: 16px; }
+:root[data-ui-radius="large"] { --fl-radius-control: 10px; --fl-radius-input: 12px; --fl-radius-card: 16px; --fl-radius-surface: 20px; --fl-radius-work-surface: 32px; --fl-radius-composer: 22px; --fl-radius-dialog: 20px; }
 
 :root[data-ui-contrast="soft"] { --fl-color-text-muted: color-mix(in srgb, var(--fl-color-text-strong) 57%, var(--fl-color-canvas)); --fl-color-text-subtle: color-mix(in srgb, var(--fl-color-text-strong) 43%, var(--fl-color-canvas)); --fl-color-border: color-mix(in srgb, var(--fl-color-text-strong) 8%, var(--fl-color-canvas)); }
 :root[data-ui-contrast="high"],

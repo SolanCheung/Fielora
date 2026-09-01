@@ -8,7 +8,8 @@ import type {
 } from '@fielora/contracts';
 import type { AgentTextDeltaEvent } from '../types';
 import type { ResultImagePreviewView, WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceFileEntry, WorkspaceFileView, WorkspaceImagePreview, WorkspaceProjectOpenTarget, WorkspaceProjectOpenTargetView } from '../workspace-types';
-import { PrimaryNav, ShellIcon } from './PrimaryNav';
+import { PrimaryNav } from './PrimaryNav';
+import { AppIcon, type AppIconName } from './ui';
 import { BrowsePanel } from './BrowseScreen';
 import { AgentTurn } from './AgentTurn';
 import { AgentHumanReview } from './AgentHumanReview';
@@ -17,15 +18,22 @@ import { AGENT_PROJECTION_UNAVAILABLE_MESSAGE, loadCompleteAgentEventSequence, m
 import { buildAgentReview, buildDurableAgentReview, type AgentReviewFile } from './agent-review';
 import { MarkdownMessage } from './MarkdownMessage';
 import { ResizableDivider } from './ResizableDivider';
-import { RightWorkspaceDock, type RightWorkspaceTab } from './RightWorkspaceDock';
+import { RightWorkspaceDock, type RightWorkspaceTab, type RightWorkspaceTool } from './RightWorkspaceDock';
 import { ArtifactCatalog, ArtifactSurface } from './ArtifactWorkingSurface';
 import {
   activeArtifactContext, artifactTabId, emptyArtifactSession, pinArtifactRevision,
   refreshArtifactCurrent, type ArtifactSurfaceSession,
 } from './artifact-working-surface';
 import { WorkspaceFileTree } from './WorkspaceFileTree';
-import { IconButton, SelectMenu, TextActionDialog, ToolbarAction } from './UiPrimitives';
-import { persistWorkspaceNavigationWidth, readWorkspaceNavigationWidth, WorkspaceSurface } from './WorkspaceSurface';
+import { IconButton, SelectMenu, TextActionDialog, ToolbarAction, TooltipButton } from './UiPrimitives';
+import {
+  persistWorkspaceNavigationWidth,
+  readWorkspaceNavigationWidth,
+  WORKSPACE_NAVIGATION_DEFAULT_WIDTH,
+  WORKSPACE_NAVIGATION_MAX_WIDTH,
+  WORKSPACE_NAVIGATION_MIN_WIDTH,
+  WorkspaceSurface,
+} from './WorkspaceSurface';
 import { attachmentsForCapabilities, loadBrowserAttachments, messageAttachments, normalizeAttachmentSelection, persistMessageAttachments } from './attachment-pipeline';
 import { modelCapabilities } from './model-capabilities';
 import {
@@ -50,6 +58,12 @@ interface ProjectWorkspaceProps {
   addProjectRequest: number;
   workspaceRequest: { id: number; tool: 'FILES' | 'DIFF' | 'TERMINAL' | 'BROWSER' };
 }
+
+const PROJECT_WORKSPACE_DEFAULT_WIDTH = 635;
+const PROJECT_WORKSPACE_MIN_WIDTH = 360;
+const CONVERSATION_MIN_WIDTH = 340;
+const WORKSPACE_RESIZER_WIDTH = 4;
+const NAVIGATION_RESIZER_WIDTH = 4;
 
 interface ReviewDraft {
   relativePath: string;
@@ -126,18 +140,17 @@ type RightDockKind = 'FILES' | 'FILE' | 'IMAGE' | 'REVIEW' | 'BROWSER' | 'TERMIN
 
 function WorkspaceAppBadge({ target, iconDataUrl = null }: { target: WorkspaceProjectOpenTarget; iconDataUrl?: string | null }) {
   if (iconDataUrl) return <img className={`workspace-app-icon target-${target.toLowerCase()}`} src={iconDataUrl} alt="" aria-hidden="true" data-app-icon={target} data-icon-source="native"/>;
-  const gradientId = `workspace-app-${target.toLowerCase()}`;
-  const glyphs: Record<WorkspaceProjectOpenTarget, ReactNode> = {
-    FILE_EXPLORER: <><path fill="#f1b932" d="M2.5 7.4V5.7A1.7 1.7 0 0 1 4.2 4h6.1l1.9 2h7.6a1.7 1.7 0 0 1 1.7 1.7v4.1h-19Z"/><path fill="#ffd85e" d="M3.1 8.2h17.8v3.4H3.1Z"/><path fill="#4aa6df" d="M2.5 10.3h19l-1.8 8.2a2 2 0 0 1-2 1.5H4.4a2 2 0 0 1-1.9-1.6Z"/><path fill="#83cef3" d="M2.8 10.3h18.4l-.4 1.8H3.2Z"/></>,
-    VISUAL_STUDIO_CODE: <><path fill="#24a8e8" d="m17.8 2.6 3.1 1.5v15.8l-3.1 1.5-9.3-8.1-4.1 3.1-2-1 4.2-3.4-4.2-3.4 2-1 4.1 3.1Z"/><path fill="#0d7fbd" d="m17.8 6.7-6.4 5.3 6.4 5.3ZM8.5 10.7 6.6 12l1.9 1.3 2.9-1.3Z"/></>,
-    CURSOR: <><rect x="2" y="2" width="20" height="20" rx="5" fill="#15171a"/><path d="m6.4 5.7 11.7 6.1-5.5 1.1-2.4 5.2Z" fill="#fff"/><path d="m12.6 12.9 4.2 4.2" stroke="#fff" strokeWidth="1.5"/></>,
-    VISUAL_STUDIO: <><path fill="#8c4fba" d="m16.8 3 5.2 2.1v13.8L16.8 21 8.9 15.7 4.8 19 2 17.4V6.6L4.8 5l4.1 3.3Zm0 4.3-4.7 4.7 4.7 4.7ZM8.9 10.2 5.9 12l3 1.8 1.8-1.8Z"/><path fill="#b768d4" d="M2 6.6 4.8 5l7.3 7-3.2 3.7-4.1 3L2 17.4 7.8 12Z"/></>,
-    GIT_BASH: <><rect x="2" y="2" width="20" height="20" rx="5" fill="#31343a"/><path d="m6 8 3 3-3 3M11 15h6" fill="none" stroke="#f5f6f7" strokeWidth="1.7"/><circle cx="15.5" cy="7" r="1.2" fill="#ef6b59"/><path d="m12.5 8.5 3-1.5 2.2 2" fill="none" stroke="#ef6b59" strokeWidth="1.2"/></>,
-    INTELLIJ_IDEA: <><defs><linearGradient id={gradientId} x1="2" y1="2" x2="22" y2="22"><stop stopColor="#ff7a4d"/><stop offset=".48" stopColor="#b94bca"/><stop offset="1" stopColor="#5f63e9"/></linearGradient></defs><rect x="2" y="2" width="20" height="20" rx="5" fill={`url(#${gradientId})`}/><rect x="5" y="5" width="14" height="14" rx="2" fill="#111318"/><path d="M7.5 8h1.8v5.2H7.5Zm4.2 0h4.8v1.5h-3v3.7h-1.8Z" fill="#fff"/><path d="M7.5 16.5h5" stroke="#fff" strokeWidth="1.2"/></>,
-    PYCHARM: <><defs><linearGradient id={gradientId} x1="2" y1="22" x2="22" y2="2"><stop stopColor="#40d98a"/><stop offset=".52" stopColor="#95e45b"/><stop offset="1" stopColor="#ffe36e"/></linearGradient></defs><rect x="2" y="2" width="20" height="20" rx="5" fill={`url(#${gradientId})`}/><rect x="5" y="5" width="14" height="14" rx="2" fill="#111318"/><path d="M7.4 8h3a2 2 0 0 1 0 4h-1.2v1.4H7.4Zm1.8 1.4v1.2h1a.6.6 0 0 0 0-1.2Zm5.5-1.5c.8 0 1.5.2 2 .6l-.8 1.2a2 2 0 0 0-1.1-.3c-.8 0-1.3.5-1.3 1.3s.5 1.3 1.3 1.3c.5 0 .8-.1 1.2-.4l.8 1.2c-.6.5-1.3.7-2.1.7-1.8 0-3.1-1.1-3.1-2.8s1.3-2.8 3.1-2.8Z" fill="#fff"/><path d="M7.4 16.5h5" stroke="#fff" strokeWidth="1.2"/></>,
-    WEBSTORM: <><defs><linearGradient id={gradientId} x1="2" y1="2" x2="22" y2="22"><stop stopColor="#22d7c6"/><stop offset=".52" stopColor="#1aa9e8"/><stop offset="1" stopColor="#7467e8"/></linearGradient></defs><rect x="2" y="2" width="20" height="20" rx="5" fill={`url(#${gradientId})`}/><rect x="5" y="5" width="14" height="14" rx="2" fill="#111318"/><path d="m7.2 8 1 5.3h1.7l.7-2.8.7 2.8H13L14 8h-1.7l-.4 2.8L11.2 8H10l-.7 2.8L8.9 8Zm8.8-.1c.9 0 1.7.3 2.2.7l-.8 1.2c-.5-.3-.9-.5-1.4-.5-.4 0-.6.1-.6.3 0 .3.4.4 1.1.6 1.1.3 1.8.7 1.8 1.6 0 1.1-.9 1.7-2.4 1.7-1 0-1.9-.3-2.5-.8l.8-1.2c.5.4 1.1.6 1.7.6.4 0 .7-.1.7-.4 0-.3-.4-.4-1.1-.6-1.1-.3-1.8-.7-1.8-1.6 0-1 .9-1.6 2.3-1.6Z" fill="#fff"/><path d="M7.2 16.5h5" stroke="#fff" strokeWidth="1.2"/></>,
+  const fallbackIcons: Record<WorkspaceProjectOpenTarget, AppIconName> = {
+    FILE_EXPLORER: 'folder',
+    VISUAL_STUDIO_CODE: 'application',
+    CURSOR: 'application',
+    VISUAL_STUDIO: 'application',
+    GIT_BASH: 'terminal',
+    INTELLIJ_IDEA: 'application',
+    PYCHARM: 'application',
+    WEBSTORM: 'application',
   };
-  return <svg className={`workspace-app-icon target-${target.toLowerCase()}`} viewBox="0 0 24 24" aria-hidden="true" focusable="false" data-app-icon={target} data-icon-source="fallback">{glyphs[target]}</svg>;
+  return <AppIcon name={fallbackIcons[target]} className={`workspace-app-icon target-${target.toLowerCase()}`} data-app-icon={target} data-icon-source="fallback" />;
 }
 
 interface ProjectDockTab extends RightWorkspaceTab {
@@ -287,7 +300,7 @@ function TerminalSession({ workingDirectory, command, lastCommand, output, runni
       <form className="terminal-prompt" data-terminal-inline-prompt="true" onSubmit={(event) => { event.preventDefault(); onRun(); }}>
         <span>PS {workingDirectory}&gt;</span>
         <input ref={inputRef} value={command} onChange={(event) => onCommandChange(event.target.value)} aria-label={testId === 'terminal' ? 'Terminal command' : 'Bottom terminal command'} autoComplete="off" autoCapitalize="none" spellCheck={false} data-testid={`${testId}-command`}/>
-        {running && <button type="button" onClick={onCancel} aria-label="停止当前命令"><ShellIcon name="close"/></button>}
+        {running && <button type="button" onClick={onCancel} aria-label="停止当前命令"><AppIcon name="close"/></button>}
       </form>
     </div>
   </div>;
@@ -372,25 +385,9 @@ interface SpeechRecognitionLike {
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
-function ComposerIcon({ name }: { name: 'plus' | 'microphone' | 'send' | 'stop' | 'file' | 'close' }) {
-  const paths = {
-    plus: <path d="M12 5v14M5 12h14"/>,
-    microphone: <><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6"/></>,
-    send: <><path d="m7 12 5-5 5 5M12 7v10"/></>,
-    stop: <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none"/>,
-    file: <><path d="M7 3.5h7l3 3V20H7z"/><path d="M14 3.5V7h3"/></>,
-    close: <path d="m8 8 8 8M16 8l-8 8"/>,
-  } as const;
-  return <svg className="composer-icon" viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
-}
-
 function PermissionIcon({ permission }: { permission: ComposerPermission }) {
-  const paths = {
-    READ_ONLY: <><path d="M7.1 10.2V6.7a1.15 1.15 0 0 1 2.3 0v2.8M9.4 9.5V5.6a1.15 1.15 0 0 1 2.3 0v3.9M11.7 9.5V6.3a1.15 1.15 0 0 1 2.3 0v3.2M14 9.5V7.8a1.15 1.15 0 0 1 2.3 0v4.6a5.7 5.7 0 0 1-5.7 5.7 5.1 5.1 0 0 1-5.1-5.1v-1.5a1.3 1.3 0 0 1 2.2-.9l1.2 1.2"/></>,
-    REVIEW_CHANGES: <><rect x="3.4" y="4.2" width="13.2" height="11.6" rx="3.4"/><path d="m7 8 1.7 1.5L7 11M10.5 11h2.7M6.7 15.8l-1.5 2.1"/></>,
-    FULL_CONTROL: <><path d="m7 2.9 6 .02 4.2 4.24-.02 5.7L13 17.1l-6-.02-4.2-4.24.02-5.7L7 2.9Z"/><path d="M10 6.2v5.1M10 14.1h.01"/></>,
-  } satisfies Record<ComposerPermission, ReactNode>;
-  return <svg className="composer-icon permission-icon" data-permission-icon={permission} viewBox="0 0 20 20" aria-hidden="true">{paths[permission]}</svg>;
+  const icons: Record<ComposerPermission, AppIconName> = { READ_ONLY: 'permissionAsk', REVIEW_CHANGES: 'permissionReview', FULL_CONTROL: 'permissionFull' };
+  return <span className="composer-icon permission-icon" data-permission-icon={permission}><AppIcon name={icons[permission]}/></span>;
 }
 
 function reasonMessage(reason: unknown): string {
@@ -549,8 +546,8 @@ function ConversationActionsMenu({ onRename, onDelete }: { onRename: () => void;
     };
   }, [open]);
   return <div className={`conversation-menu ${open ? 'open' : ''}`} ref={rootRef}>
-    <IconButton className="conversation-menu-trigger" label="对话菜单" icon={<ShellIcon name="more"/>} active={open} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((current) => !current)} testId="conversation-menu-trigger" />
-    {open && <div role="menu" data-testid="conversation-menu-popover"><button type="button" role="menuitem" onClick={() => { setOpen(false); onRename(); }}>重命名</button><button type="button" role="menuitem" className="quiet" onClick={() => { setOpen(false); onDelete(); }}>删除对话</button></div>}
+    <IconButton className="conversation-menu-trigger" label="对话菜单" icon={<AppIcon name="more"/>} active={open} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((current) => !current)} testId="conversation-menu-trigger" />
+    {open && <div role="menu" data-surface="overlay" data-testid="conversation-menu-popover"><button type="button" role="menuitem" onClick={() => { setOpen(false); onRename(); }}>重命名</button><button type="button" role="menuitem" className="quiet" onClick={() => { setOpen(false); onDelete(); }}>删除对话</button></div>}
   </div>;
 }
 
@@ -577,12 +574,13 @@ function ConversationContextMenu({ state, onClose, onRename, onDelete }: {
     ref={menuRef}
     className="conversation-context-menu"
     role="menu"
+    data-surface="overlay"
     aria-label={`${state.title} 对话菜单`}
     data-testid="conversation-context-menu"
     style={{ left: state.left, top: state.top }}
   >
-    <button type="button" role="menuitem" onClick={() => { onClose(); onRename(); }}><ShellIcon name="edit"/>重命名</button>
-    <button type="button" role="menuitem" className="danger" onClick={() => { onClose(); onDelete(); }}><ShellIcon name="close"/>删除对话</button>
+    <button type="button" role="menuitem" onClick={() => { onClose(); onRename(); }}><AppIcon name="edit"/>重命名</button>
+    <button type="button" role="menuitem" className="danger" onClick={() => { onClose(); onDelete(); }}><AppIcon name="close"/>删除对话</button>
   </div>, document.body);
 }
 
@@ -610,13 +608,14 @@ function ProjectContextMenu({ state, onClose, onNewConversation, onManage, onRem
     ref={menuRef}
     className="conversation-context-menu project-context-menu"
     role="menu"
+    data-surface="overlay"
     aria-label={`${state.project.title} 项目菜单`}
     data-testid="project-context-menu"
     style={{ left: state.left, top: state.top }}
   >
-    <button type="button" role="menuitem" onClick={() => { onClose(); onNewConversation(); }}><ShellIcon name="plus"/>新建对话</button>
-    <button type="button" role="menuitem" onClick={() => { onClose(); onManage(); }}><ShellIcon name="edit"/>管理项目</button>
-    <button type="button" role="menuitem" className="danger" onClick={() => { onClose(); onRemove(); }}><ShellIcon name="close"/>从 Fielora 移除</button>
+    <button type="button" role="menuitem" onClick={() => { onClose(); onNewConversation(); }}><AppIcon name="plus"/>新建对话</button>
+    <button type="button" role="menuitem" onClick={() => { onClose(); onManage(); }}><AppIcon name="edit"/>管理项目</button>
+    <button type="button" role="menuitem" className="danger" onClick={() => { onClose(); onRemove(); }}><AppIcon name="close"/>从 Fielora 移除</button>
   </div>, document.body);
 }
 
@@ -662,8 +661,8 @@ function ProjectSortControl({ value, onChange }: { value: ProjectSort; onChange:
     { value: 'CREATED', label: '添加时间' },
   ];
   return <div className={`project-sort-control ${open ? 'open' : ''}`} ref={rootRef}>
-    <button ref={triggerRef} type="button" aria-label="整理项目" title="整理项目" aria-haspopup="menu" aria-expanded={open} onClick={() => { if (!open) updateAnchor(); setOpen((current) => !current); }} data-testid="project-sort-toggle"><ShellIcon name="sort"/></button>
-    {open && anchor && createPortal(<div ref={menuRef} className="project-sort-popover" role="menu" data-testid="project-sort-menu" style={{ left: anchor.left, top: anchor.top }}>{options.map((option) => <button key={option.value} type="button" role="menuitemradio" aria-checked={value === option.value} onClick={() => { onChange(option.value); setOpen(false); }}><span>{option.label}</span><em>{value === option.value ? '✓' : ''}</em></button>)}</div>, document.body)}
+    <button ref={triggerRef} type="button" aria-label="整理项目" title="整理项目" aria-haspopup="menu" aria-expanded={open} onClick={() => { if (!open) updateAnchor(); setOpen((current) => !current); }} data-testid="project-sort-toggle"><AppIcon name="sort"/></button>
+    {open && anchor && createPortal(<div ref={menuRef} className="project-sort-popover" role="menu" data-surface="overlay" data-testid="project-sort-menu" style={{ left: anchor.left, top: anchor.top }}>{options.map((option) => <button key={option.value} type="button" role="menuitemradio" aria-checked={value === option.value} onClick={() => { onChange(option.value); setOpen(false); }}><span>{option.label}</span><em>{value === option.value ? '✓' : ''}</em></button>)}</div>, document.body)}
   </div>;
 }
 
@@ -692,7 +691,6 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const [fileTreeSelection, setFileTreeSelection] = useState('');
   const [environment, setEnvironment] = useState<WorkspaceEnvironmentView | null>(null);
   const [environmentOpen, setEnvironmentOpen] = useState(false);
-  const [projectLauncherOpen, setProjectLauncherOpen] = useState(false);
   const [dockProjectLauncherOpen, setDockProjectLauncherOpen] = useState(false);
   const [projectOpenTargets, setProjectOpenTargets] = useState<WorkspaceProjectOpenTargetView[]>([{ target: 'FILE_EXPLORER', label: '文件资源管理器', icon_data_url: null }]);
   const [dockFileTreeCollapsed, setDockFileTreeCollapsed] = useState(false);
@@ -748,11 +746,14 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [conversationCreatingFor, setConversationCreatingFor] = useState('');
   const [newConversationStart, setNewConversationStart] = useState(false);
-  const [navigationWidth, setNavigationWidth] = useState(() => readWorkspaceNavigationWidth(270, 'fielora:project-navigation-width'));
+  const [navigationWidth, setNavigationWidth] = useState(() => readWorkspaceNavigationWidth(WORKSPACE_NAVIGATION_DEFAULT_WIDTH, 'fielora:project-navigation-width'));
   const [workspaceWidth, setWorkspaceWidth] = useState(() => {
-    const stored = Number.parseFloat(window.localStorage.getItem('fielora:project-workspace-width') ?? '520');
-    return Number.isFinite(stored) ? Math.min(Math.max(stored, 360), 900) : 520;
+    const stored = Number.parseFloat(window.localStorage.getItem('fielora:project-workspace-width') ?? String(PROJECT_WORKSPACE_DEFAULT_WIDTH));
+    if (!Number.isFinite(stored) || stored < PROJECT_WORKSPACE_MIN_WIDTH) return PROJECT_WORKSPACE_DEFAULT_WIDTH;
+    return stored;
   });
+  const workspacePreferredWidthRef = useRef(workspaceWidth);
+  const workspaceDragGeometryRef = useRef<{ right: number; maximum: number } | null>(null);
   const activeAgentRef = useRef<ActiveAgent | null>(null);
   const agentRunIdRef = useRef('');
   const agentEventsRef = useRef<AgentEventView[]>([]);
@@ -775,7 +776,6 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const messageListRef = useRef<HTMLDivElement>(null);
   const atLatestAnswerRef = useRef(true);
   const environmentMenuRef = useRef<HTMLDivElement>(null);
-  const projectLauncherRef = useRef<HTMLDivElement>(null);
   const dockProjectLauncherRef = useRef<HTMLDivElement>(null);
   const copiedMessageResetRef = useRef<number | null>(null);
   const creatingConversationForRef = useRef(new Set<string>());
@@ -921,20 +921,80 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     return layoutRef.current?.getBoundingClientRect().width ?? window.innerWidth;
   }
 
+  function renderedNavigationWidth(): number {
+    const navigation = layoutRef.current?.querySelector<HTMLElement>('[data-testid="project-navigation"]');
+    return navigation?.getBoundingClientRect().width ?? navigationWidth;
+  }
+
+  function workspaceMaximumWidth(): number {
+    const availableWorkArea = layoutWidth() - renderedNavigationWidth() - NAVIGATION_RESIZER_WIDTH;
+    return Math.max(PROJECT_WORKSPACE_MIN_WIDTH, availableWorkArea - CONVERSATION_MIN_WIDTH - WORKSPACE_RESIZER_WIDTH);
+  }
+
+  function clampWorkspaceWidth(next: number): number {
+    return Math.min(Math.max(next, PROJECT_WORKSPACE_MIN_WIDTH), workspaceMaximumWidth());
+  }
+
+  function clampWorkspaceWidthTo(next: number, maximum: number): number {
+    return Math.min(Math.max(next, PROJECT_WORKSPACE_MIN_WIDTH), maximum);
+  }
+
+  function captureWorkspaceDragGeometry(): { right: number; maximum: number } | null {
+    const surface = layoutRef.current;
+    if (!surface) return null;
+    const surfaceRect = surface.getBoundingClientRect();
+    const navigation = surface.querySelector<HTMLElement>('[data-testid="project-navigation"]');
+    const navigationWidth = navigation?.getBoundingClientRect().width ?? WORKSPACE_NAVIGATION_DEFAULT_WIDTH;
+    const availableWorkArea = surfaceRect.width - navigationWidth - NAVIGATION_RESIZER_WIDTH;
+    return {
+      right: surfaceRect.right,
+      maximum: Math.max(PROJECT_WORKSPACE_MIN_WIDTH, availableWorkArea - CONVERSATION_MIN_WIDTH - WORKSPACE_RESIZER_WIDTH),
+    };
+  }
+
+  function navigationMaximumWidth(): number {
+    const reserved = workspaceOpen && project ? workspaceWidth + CONVERSATION_MIN_WIDTH : 420;
+    return Math.min(WORKSPACE_NAVIGATION_MAX_WIDTH, Math.max(WORKSPACE_NAVIGATION_MIN_WIDTH, layoutWidth() - reserved));
+  }
+
   function updateNavigationWidth(next: number) {
-    const reserved = workspaceOpen && project ? workspaceWidth + 380 : 420;
-    const maximum = Math.min(360, Math.max(190, layoutWidth() - reserved));
-    const width = Math.min(Math.max(next, 190), maximum);
+    const maximum = navigationMaximumWidth();
+    const width = Math.min(Math.max(next, WORKSPACE_NAVIGATION_MIN_WIDTH), maximum);
     setNavigationWidth(width);
     persistWorkspaceNavigationWidth(width, 'fielora:project-navigation-width');
   }
 
   function updateWorkspaceWidth(next: number) {
-    const maximum = Math.max(360, layoutWidth() - navigationWidth - 380);
-    const width = Math.min(Math.max(next, 360), Math.min(900, maximum));
-    setWorkspaceWidth(width);
-    window.localStorage.setItem('fielora:project-workspace-width', String(Math.round(width)));
+    const preferred = clampWorkspaceWidth(next);
+    workspacePreferredWidthRef.current = preferred;
+    setWorkspaceWidth(clampWorkspaceWidth(preferred));
+    window.localStorage.setItem('fielora:project-workspace-width', String(Math.round(preferred)));
   }
+
+  useEffect(() => {
+    const surface = layoutRef.current;
+    if (!surface) return undefined;
+    let frame: number | null = null;
+    const sync = () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        const next = clampWorkspaceWidth(workspacePreferredWidthRef.current);
+        setWorkspaceWidth((current) => Math.abs(current - next) < 0.5 ? current : next);
+      });
+    };
+    const observer = new ResizeObserver(sync);
+    observer.observe(surface);
+    const navigation = surface.querySelector<HTMLElement>('[data-testid="project-navigation"]');
+    if (navigation) observer.observe(navigation);
+    window.addEventListener('resize', sync);
+    sync();
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener('resize', sync);
+    };
+  }, [navigationWidth]);
 
   function updateBottomTerminalHeight(next: number) {
     const height = Math.min(Math.max(next, 170), 520);
@@ -1046,7 +1106,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   useEffect(() => {
     if (!projectId) { setConversations([]); setConversationId(''); setFiles([]); setEnvironment(null); setDockTabs([]); setArtifactSessions({}); setActiveDockTabId(''); setWorkspaceOpen(false); setDockFocused(false); foregroundAgentRunsRef.current.clear(); return; }
     setSelectedFile(null); setFilePreview(null); setEditorContent(''); setDraft(null); setUndoChange(null);
-    setWorkspaceOpen(false); setDockTabs([]); setArtifactSessions({}); setActiveDockTabId(''); setFileDockSessions({}); setFileTreeSelection(''); setEnvironmentOpen(false); setProjectLauncherOpen(false); setDockProjectLauncherOpen(false); setDockFocused(false); handledArtifactToolCallsRef.current.clear(); foregroundAgentRunsRef.current.clear();
+    setWorkspaceOpen(false); setDockTabs([]); setArtifactSessions({}); setActiveDockTabId(''); setFileDockSessions({}); setFileTreeSelection(''); setEnvironmentOpen(false); setDockProjectLauncherOpen(false); setDockFocused(false); handledArtifactToolCallsRef.current.clear(); foregroundAgentRunsRef.current.clear();
     void Promise.all([
       refreshConversations(projectId),
       window.fielora.workspace.listFiles({ field_id: projectId }).then(setFiles),
@@ -1099,15 +1159,14 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   }
 
   useEffect(() => {
-    if (!environmentOpen && !projectLauncherOpen && !dockProjectLauncherOpen) return;
+    if (!environmentOpen && !dockProjectLauncherOpen) return;
     const close = (event: PointerEvent) => {
       if (!environmentMenuRef.current?.contains(event.target as Node)) setEnvironmentOpen(false);
-      if (!projectLauncherRef.current?.contains(event.target as Node)) setProjectLauncherOpen(false);
       if (!dockProjectLauncherRef.current?.contains(event.target as Node)) setDockProjectLauncherOpen(false);
     };
     window.addEventListener('pointerdown', close);
     return () => window.removeEventListener('pointerdown', close);
-  }, [dockProjectLauncherOpen, environmentOpen, projectLauncherOpen]);
+  }, [dockProjectLauncherOpen, environmentOpen]);
 
   const refreshChangedAgent = useCallback(async (runId: string) => {
     const refresh = agentProjectionRefreshRef.current;
@@ -1176,7 +1235,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
 
   useEffect(() => window.fielora.workspace.subscribe((event) => {
     const active = terminalRef.current;
-    if (!active || active.runId !== event.run_id) return;
+    if (!active) return;
+    if (active.runId === 'pending') active.runId = event.run_id;
+    if (active.runId !== event.run_id) return;
     if (event.kind === 'OUTPUT' && event.text) {
       active.output += event.text;
       setTerminalOutput(active.output);
@@ -1777,20 +1838,16 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     setDockTabs((current) => current.some((item) => item.id === tab.id) ? current : [...current, tab]);
     setActiveDockTabId(tab.id);
     setWorkspaceOpen(true);
-    setWorkspaceWidth((current) => {
-      const maximum = Math.max(360, layoutWidth() - navigationWidth - 420);
-      const preferred = tab.kind === 'FILES' ? 400 : tab.kind === 'REVIEW' ? 520 : tab.kind === 'IMAGE' ? 580 : tab.kind === 'ARTIFACT' || tab.kind === 'ARTIFACTS' ? 760 : 600;
-      return Math.min(Math.max(current, preferred), Math.min(900, maximum));
-    });
+    setWorkspaceWidth(clampWorkspaceWidth(workspacePreferredWidthRef.current));
   }
 
   function openDockTool(kind: 'FILES' | 'REVIEW' | 'BROWSER' | 'TERMINAL' | 'ARTIFACTS') {
     const definitions: Record<typeof kind, ProjectDockTab> = {
       FILES: { id: 'files', kind: 'FILES', label: '文件', icon: 'folder' },
       REVIEW: { id: 'review', kind: 'REVIEW', label: '审阅', icon: 'diff' },
-      BROWSER: { id: 'browser', kind: 'BROWSER', label: '浏览器', icon: 'browse' },
+      BROWSER: { id: 'browser', kind: 'BROWSER', label: '浏览器', icon: 'browse', tabHostId: 'right-workspace-browser-page-tabs' },
       TERMINAL: { id: 'terminal', kind: 'TERMINAL', label: 'PowerShell', icon: 'terminal' },
-      ARTIFACTS: { id: 'artifacts', kind: 'ARTIFACTS', label: '工作对象', icon: 'filePlus' },
+      ARTIFACTS: { id: 'artifacts', kind: 'ARTIFACTS', label: '工作对象', icon: 'objects' },
     };
     if (kind === 'REVIEW') {
       setHistoricalReview(null);
@@ -1926,17 +1983,27 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     setTerminalOutput('');
     setTerminalLastCommand(nextCommand);
     setTerminalCommand('');
+    terminalRef.current = { runId: 'pending', command: nextCommand, output: '' };
     if (presentation === 'RIGHT') openDockTool('TERMINAL');
     else setBottomTerminalOpen(true);
     try {
       const started = await window.fielora.workspace.runTerminal({ field_id: project.field_id, command: nextCommand, working_directory: workingDirectory });
       if (started.working_directory) {
+        terminalRef.current = null;
+        setTerminalRunId('');
         setTerminalWorkingDirectory(started.working_directory);
         return;
       }
-      terminalRef.current = { runId: started.run_id, command: nextCommand, output: '' };
+      const active = terminalRef.current;
+      if (!active) return;
+      active.runId = started.run_id;
       setTerminalRunId(started.run_id);
-    } catch (reason) { setError(reasonMessage(reason)); }
+    } catch (reason) {
+      terminalRef.current = null;
+      setTerminalRunId('');
+      setTerminalCommand(nextCommand);
+      setError(reasonMessage(reason));
+    }
   }
 
   function openWorkspace(tab: 'FILES' | 'DIFF' | 'TERMINAL' | 'BROWSER') {
@@ -2074,20 +2141,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     void runTerminal(command);
   }
 
-  async function toggleProjectLauncher() {
-    const next = !projectLauncherOpen;
-    setEnvironmentOpen(false);
-    setDockProjectLauncherOpen(false);
-    setProjectLauncherOpen(next);
-    if (!next || !project) return;
-    try { setProjectOpenTargets(await window.fielora.workspace.getOpenTargets({ field_id: project.field_id })); }
-    catch (reason) { setError(reasonMessage(reason)); }
-  }
-
   async function toggleDockProjectLauncher() {
     const next = !dockProjectLauncherOpen;
     setEnvironmentOpen(false);
-    setProjectLauncherOpen(false);
     setDockProjectLauncherOpen(next);
     if (!next || !project) return;
     try { setProjectOpenTargets(await window.fielora.workspace.getOpenTargets({ field_id: project.field_id })); }
@@ -2096,7 +2152,6 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
 
   async function openProjectTarget(target: WorkspaceProjectOpenTarget) {
     if (!project) return;
-    setProjectLauncherOpen(false);
     setDockProjectLauncherOpen(false);
     try { await window.fielora.workspace.openProject({ field_id: project.field_id, target }); }
     catch (reason) { setError(reasonMessage(reason)); }
@@ -2146,27 +2201,17 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     .slice(-3)
     .reverse();
   const environmentControl = project && projectActionsLayer ? createPortal(<>
-    <div className="project-launcher" ref={projectLauncherRef}>
-      <button type="button" className="project-launcher-main" aria-label="在文件资源管理器中打开 Project" title="打开 Project" onClick={() => void openProjectTarget('FILE_EXPLORER')} data-testid="project-open-default"><ShellIcon name="folder"/></button>
-      <button type="button" className={`project-launcher-more ${projectLauncherOpen ? 'active' : ''}`} aria-label="选择打开方式" title="选择打开方式" aria-expanded={projectLauncherOpen} onClick={() => void toggleProjectLauncher()} data-testid="project-open-menu-toggle"><ShellIcon name="chevronDown"/></button>
-      {projectLauncherOpen && <div className="project-launcher-popover" role="menu" data-testid="project-open-menu">
-        {projectOpenTargets.map((target) => <button key={target.target} type="button" role="menuitem" onClick={() => void openProjectTarget(target.target)}><WorkspaceAppBadge target={target.target} iconDataUrl={target.icon_data_url}/><span>{target.label}</span></button>)}
-        <div className="project-launcher-divider"/>
-        <button type="button" role="menuitem" onClick={() => { setProjectLauncherOpen(false); openDockTool('FILES'); }}><span className="workspace-app-badge target-fielora"><ShellIcon name="files"/></span><span>Fielora 文件</span></button>
-        <button type="button" role="menuitem" onClick={() => { setProjectLauncherOpen(false); openDockTool('TERMINAL'); }}><span className="workspace-app-badge target-fielora"><ShellIcon name="terminal"/></span><span>Fielora 终端</span></button>
-      </div>}
-    </div>
     <div className="environment-menu" ref={environmentMenuRef}>
-      <ToolbarAction label="切换摘要" icon={<ShellIcon name="environment"/>} active={environmentOpen} onClick={() => { const next = !environmentOpen; setProjectLauncherOpen(false); setDockProjectLauncherOpen(false); setEnvironmentOpen(next); if (next) void window.fielora.workspace.getEnvironment({ field_id: project.field_id }).then(setEnvironment).catch((reason) => setError(reasonMessage(reason))); }} aria-expanded={environmentOpen} testId="environment-menu-toggle" />
-      {environmentOpen && <div className="environment-popover" data-testid="environment-popover">
-        <header><span>环境信息</span><button type="button" aria-label="添加来源" title="添加来源" onClick={() => void pickAttachments()}><ShellIcon name="plus"/></button></header>
-        <button onClick={() => { setEnvironmentOpen(false); openWorkspace('DIFF'); }}><ShellIcon name="diff"/><span><strong>变更</strong><small className="environment-diff-stat"><em>+{displayedAgentReview.additions}</em><del>−{displayedAgentReview.deletions}</del></small></span></button>
-        <button onClick={() => runEnvironmentCommand('git status --short')}><ShellIcon name="computer"/><span><strong>本地</strong><small>{environment?.changed_files ?? 0} 个文件</small></span><ShellIcon name="chevronDown"/></button>
-        <button onClick={() => runEnvironmentCommand('git branch --show-current')} disabled={!environment?.is_git_repository}><ShellIcon name="branch"/><span><strong>{environment?.branch || (environment?.is_git_repository ? '默认分支尚未建立' : '不是 Git 仓库')}</strong><small>{environment?.upstream || '没有上游分支'}</small></span><ShellIcon name="chevronDown"/></button>
-        <button onClick={prepareVersionControl} disabled={!environment?.is_git_repository}><ShellIcon name="cloud"/><span><strong>提交或推送</strong><small>{environment?.ahead ? `领先 ${environment.ahead} · 先测试和审阅` : '测试通过后进入变更审阅'}</small></span></button>
-        <button className="environment-muted-action" disabled><ShellIcon name="source"/><span><strong>拉取请求状态</strong><small>当前 Project 未连接托管服务</small></span></button>
-        <button onClick={() => runEnvironmentCommand('git diff --stat HEAD')} disabled={!environment?.is_git_repository}><ShellIcon name="branch"/><span><strong>比较分支</strong><small>{environment?.behind ? `落后 ${environment.behind}` : '与 HEAD 比较'}</small></span></button>
-        <div className="environment-sources"><header><span>来源</span><button type="button" aria-label="添加来源" onClick={() => void pickAttachments()}><ShellIcon name="plus"/></button></header>{environmentSources.map((source) => <button key={source.id} onClick={() => { setEnvironmentOpen(false); openAttachmentInDock(source); }}><span className="environment-source-thumb">{source.data_url ? <img src={source.data_url} alt=""/> : <ShellIcon name={source.kind === 'IMAGE' ? 'image' : 'source'}/>}</span><span>{source.name}</span></button>)}{environmentSources.length === 0 && selectedFile ? <button onClick={() => { setEnvironmentOpen(false); openWorkspace('FILES'); }}><ShellIcon name="source"/><span>{selectedFile.relative_path}</span></button> : environmentSources.length === 0 ? <small>当前对话还没有来源。</small> : null}</div>
+      <ToolbarAction label="切换摘要" icon={<AppIcon name="environment"/>} active={environmentOpen} onClick={() => { const next = !environmentOpen; setDockProjectLauncherOpen(false); setEnvironmentOpen(next); if (next) void window.fielora.workspace.getEnvironment({ field_id: project.field_id }).then(setEnvironment).catch((reason) => setError(reasonMessage(reason))); }} aria-expanded={environmentOpen} testId="environment-menu-toggle" />
+      {environmentOpen && <div className="environment-popover" data-surface="overlay" data-testid="environment-popover">
+        <header><span>环境信息</span><button type="button" aria-label="添加来源" title="添加来源" onClick={() => void pickAttachments()}><AppIcon name="plus"/></button></header>
+        <button onClick={() => { setEnvironmentOpen(false); openWorkspace('DIFF'); }}><AppIcon name="diff"/><span><strong>变更</strong><small className="environment-diff-stat"><em>+{displayedAgentReview.additions}</em><del>−{displayedAgentReview.deletions}</del></small></span></button>
+        <button onClick={() => runEnvironmentCommand('git status --short')}><AppIcon name="computer"/><span><strong>本地</strong><small>{environment?.changed_files ?? 0} 个文件</small></span><AppIcon name="chevronDown"/></button>
+        <button onClick={() => runEnvironmentCommand('git branch --show-current')} disabled={!environment?.is_git_repository}><AppIcon name="branch"/><span><strong>{environment?.branch || (environment?.is_git_repository ? '默认分支尚未建立' : '不是 Git 仓库')}</strong><small>{environment?.upstream || '没有上游分支'}</small></span><AppIcon name="chevronDown"/></button>
+        <button onClick={prepareVersionControl} disabled={!environment?.is_git_repository}><AppIcon name="cloud"/><span><strong>提交或推送</strong><small>{environment?.ahead ? `领先 ${environment.ahead} · 先测试和审阅` : '测试通过后进入变更审阅'}</small></span></button>
+        <button className="environment-muted-action" disabled><AppIcon name="source"/><span><strong>拉取请求状态</strong><small>当前 Project 未连接托管服务</small></span></button>
+        <button onClick={() => runEnvironmentCommand('git diff --stat HEAD')} disabled={!environment?.is_git_repository}><AppIcon name="branch"/><span><strong>比较分支</strong><small>{environment?.behind ? `落后 ${environment.behind}` : '与 HEAD 比较'}</small></span></button>
+        <div className="environment-sources"><header><span>来源</span><button type="button" aria-label="添加来源" onClick={() => void pickAttachments()}><AppIcon name="plus"/></button></header>{environmentSources.map((source) => <button key={source.id} onClick={() => { setEnvironmentOpen(false); openAttachmentInDock(source); }}><span className="environment-source-thumb">{source.data_url ? <img src={source.data_url} alt=""/> : <AppIcon name={source.kind === 'IMAGE' ? 'image' : 'source'}/>}</span><span>{source.name}</span></button>)}{environmentSources.length === 0 && selectedFile ? <button onClick={() => { setEnvironmentOpen(false); openWorkspace('FILES'); }}><AppIcon name="source"/><span>{selectedFile.relative_path}</span></button> : environmentSources.length === 0 ? <small>当前对话还没有来源。</small> : null}</div>
       </div>}
     </div>
   </>, projectActionsLayer) : null;
@@ -2181,7 +2226,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const dockBreadcrumb = project
     ? [project.title, ...(activeDockTab?.relativePath?.replaceAll('\\', '/').split('/').filter(Boolean) ?? [])]
     : [];
-  const dockToolbar = activeDockTab && !['TERMINAL', 'ARTIFACT', 'ARTIFACTS'].includes(activeDockTab.kind) && project ? <>
+  const dockToolbar = activeDockTab && ['FILE', 'IMAGE'].includes(activeDockTab.kind) && project ? <>
     <div className="right-dock-breadcrumb" title={dockBreadcrumb.join(' / ')}>
       {dockBreadcrumb.map((segment, index) => <Fragment key={`${segment}:${index}`}>{index > 0 && <i>/</i>}<span>{segment}</span></Fragment>)}
     </div>
@@ -2192,18 +2237,26 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       </div>}
       {activeDockTab.kind === 'FILE' && activeFileSession?.file && activeFileSession.content !== activeFileSession.file.content && <button type="button" className="right-dock-review-change" onClick={() => reviewDockFileSession(activeDockTab, activeFileSession)} data-testid="review-change">审阅修改</button>}
       <div className="dock-project-launcher" ref={dockProjectLauncherRef}>
-        <button type="button" className="dock-project-launcher-main" onClick={() => void openProjectTarget('FILE_EXPLORER')} aria-label="在文件资源管理器中打开 Project" title="打开 Project" data-testid="dock-project-open-default"><ShellIcon name="folder"/><span>打开</span></button>
-        <button type="button" className={`dock-project-launcher-more ${dockProjectLauncherOpen ? 'active' : ''}`} onClick={() => void toggleDockProjectLauncher()} aria-label="选择打开方式" title="选择打开方式" aria-expanded={dockProjectLauncherOpen} data-testid="dock-project-open-menu-toggle"><ShellIcon name="chevronDown"/></button>
-        {dockProjectLauncherOpen && <div className="project-launcher-popover dock-project-launcher-popover" role="menu" data-testid="dock-project-open-menu">
+        <button type="button" className="dock-project-launcher-main" onClick={() => void openProjectTarget('FILE_EXPLORER')} aria-label="在文件资源管理器中打开 Project" title="打开 Project" data-testid="dock-project-open-default"><AppIcon name="folder"/><span>打开</span></button>
+        <button type="button" className={`dock-project-launcher-more ${dockProjectLauncherOpen ? 'active' : ''}`} onClick={() => void toggleDockProjectLauncher()} aria-label="选择打开方式" title="选择打开方式" aria-expanded={dockProjectLauncherOpen} data-testid="dock-project-open-menu-toggle"><AppIcon name="chevronDown"/></button>
+        {dockProjectLauncherOpen && <div className="project-launcher-popover dock-project-launcher-popover" role="menu" data-surface="overlay" data-testid="dock-project-open-menu">
           {projectOpenTargets.map((target) => <button key={target.target} type="button" role="menuitem" onClick={() => void openProjectTarget(target.target)}><WorkspaceAppBadge target={target.target} iconDataUrl={target.icon_data_url}/><span>{target.label}</span></button>)}
           <div className="project-launcher-divider"/>
-          <button type="button" role="menuitem" onClick={() => { setDockProjectLauncherOpen(false); openDockTool('FILES'); }}><span className="workspace-app-badge target-fielora"><ShellIcon name="files"/></span><span>Fielora 文件</span></button>
-          <button type="button" role="menuitem" onClick={() => { setDockProjectLauncherOpen(false); openDockTool('TERMINAL'); }}><span className="workspace-app-badge target-fielora"><ShellIcon name="terminal"/></span><span>Fielora 终端</span></button>
+          <button type="button" role="menuitem" onClick={() => { setDockProjectLauncherOpen(false); openDockTool('FILES'); }}><span className="workspace-app-badge target-fielora"><AppIcon name="files"/></span><span>Fielora 文件</span></button>
+          <button type="button" role="menuitem" onClick={() => { setDockProjectLauncherOpen(false); openDockTool('TERMINAL'); }}><span className="workspace-app-badge target-fielora"><AppIcon name="terminal"/></span><span>Fielora 终端</span></button>
         </div>}
       </div>
-      <button type="button" onClick={() => setDockFileTreeCollapsed((current) => !current)} aria-label={dockFileTreeCollapsed ? '展开文件菜单' : '收起文件菜单'} title={dockFileTreeCollapsed ? '展开文件菜单' : '收起文件菜单'} aria-expanded={!dockFileTreeCollapsed} data-testid="dock-file-tree-toggle"><ShellIcon name="panelRight"/></button>
+      <button type="button" onClick={() => setDockFileTreeCollapsed((current) => !current)} aria-label={dockFileTreeCollapsed ? '展开文件菜单' : '收起文件菜单'} title={dockFileTreeCollapsed ? '展开文件菜单' : '收起文件菜单'} aria-expanded={!dockFileTreeCollapsed} data-testid="dock-file-tree-toggle"><AppIcon name="panelRight"/></button>
     </div>}
   </> : null;
+  const dockTools: RightWorkspaceTool[] = [
+    { id: 'artifacts', label: '工作对象', icon: 'objects', onOpen: () => openDockTool('ARTIFACTS') },
+    { id: 'review', label: '审阅', icon: 'diff', shortcut: 'Ctrl+Shift+G', onOpen: () => openDockTool('REVIEW') },
+    { id: 'terminal', label: 'PowerShell', icon: 'terminal', shortcut: 'Ctrl+`', onOpen: () => openDockTool('TERMINAL') },
+    { id: 'browser', label: '浏览器', icon: 'browse', shortcut: 'Ctrl+T', onOpen: () => openDockTool('BROWSER') },
+    { id: 'files', label: '文件', icon: 'folder', shortcut: 'Ctrl+P', onOpen: () => openDockTool('FILES') },
+    { id: 'chat', label: '侧边聊天', icon: 'compose', shortcut: 'Ctrl+Alt+S', onOpen: () => window.dispatchEvent(new CustomEvent('fielora:open-summon')) },
+  ];
   const dockViews = project ? dockTabs.map((tab) => {
     const session = fileDockSessions[tab.id] ?? null;
     const artifactSession = artifactSessions[tab.id] ?? null;
@@ -2216,12 +2269,12 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
           {session?.file && <div className={`file-editor dock-file-editor ${undoChange?.relativePath === session.file.relative_path ? 'has-undo' : ''}`}>{undoChange?.relativePath === session.file.relative_path && <header><span/><button onClick={() => void undoAcceptedChange()} data-testid="undo-change">撤销已接受变更</button></header>}{isMarkdownFile(session.file.relative_path) && (session.markdownMode ?? 'PREVIEW') === 'PREVIEW'
             ? <div className="dock-markdown-preview" data-testid="markdown-preview"><MarkdownMessage content={session.content} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>
             : <SyntaxCodeEditor value={session.content} relativePath={session.file.relative_path} reveal={session.reveal} onChange={(content) => { setFileDockSessions((current) => ({ ...current, [tab.id]: { ...session, content } })); if (tab.id === activeDockTabId) setEditorContent(content); }}/>}</div>}
-          {session?.preview?.kind === 'UNSUPPORTED' && <div className="file-unsupported-preview" data-testid="file-unsupported-preview"><ShellIcon name="files"/><h3>无法在此预览</h3><strong>{session.preview.relativePath}</strong><p>{session.preview.message}</p></div>}
+          {session?.preview?.kind === 'UNSUPPORTED' && <div className="file-unsupported-preview" data-testid="file-unsupported-preview"><AppIcon name="files"/><h3>无法在此预览</h3><strong>{session.preview.relativePath}</strong><p>{session.preview.message}</p></div>}
         </>
       </DockResourceLayout>}
       {tab.kind === 'IMAGE' && imageAttachment && <DockResourceLayout fileTree={dockFileTree} treeWidth={dockFileTreeWidth} treeCollapsed={dockFileTreeCollapsed} onTreeWidthChange={updateDockFileTreeWidth}><div className="dock-image-preview" data-testid="file-image-preview"><button type="button" aria-label={`放大 ${imageAttachment.name}`} onClick={() => setPreviewAttachment(imageAttachment)} onContextMenu={(event) => openImageContextMenu(event, imageAttachment)}><img src={imageAttachment.data_url ?? ''} alt={imageAttachment.name}/></button><small>{imageAttachment.mime_type} · {Math.max(1, Math.ceil(imageAttachment.size / 1024))} KB · 点击放大</small></div></DockResourceLayout>}
       {tab.kind === 'REVIEW' && <div className="diff-workspace">{draft ? <><header><div><p className="eyebrow">REVIEW</p><h3>{draft.relativePath}</h3></div><span>写入前不会修改磁盘</span></header><pre className="diff-view" data-testid="diff-view">{draft.diff}</pre><footer><button className="secondary-button" onClick={() => { setDraft(null); setEditorContent(selectedFile?.content ?? ''); if (selectedFile) ensureDockTab({ id: `file:${selectedFile.relative_path}`, kind: 'FILE', label: fileTabLabel(selectedFile.relative_path), icon: 'files', relativePath: selectedFile.relative_path }); else openDockTool('FILES'); }}>放弃</button><button className="primary-button" onClick={() => void acceptDraft()} data-testid="accept-change">接受变更</button></footer></> : (tab.reviewSelection?.review ?? displayedAgentReview).files.length > 0 ? <AgentHumanReview review={tab.reviewSelection?.review ?? displayedAgentReview} task={tab.reviewSelection?.task ?? agentRun?.task ?? conversation?.title ?? ''} runId={tab.reviewSelection?.runId ?? agentRun?.id ?? ''} selectedPathHint={tab.relativePath ?? agentReviewPath} onOpenFile={(path) => void openAgentReviewFile(path)} onMarkReviewed={markAgentFileArtifactReviewed} onUndo={(file) => undoAgentFileArtifact(tab.reviewSelection?.runId ?? agentRun?.id ?? '', file)}/> : <div className="workspace-blank"><h3>{conversation ? '本次任务没有文件变更' : '当前 Project 没有可审阅的变更'}</h3><p>文件写入、补丁和替换会显示在这里。</p></div>}</div>}
-      {tab.kind === 'BROWSER' && <BrowsePanel browser={window.fielora.browser} onSaveToLibrary={(input) => window.fielora.library.saveWeb(input)} onOpenBrowserSettings={() => window.dispatchEvent(new CustomEvent('fielora:open-settings', { detail: 'BROWSER' }))}/>}
+      {tab.kind === 'BROWSER' && <BrowsePanel browser={window.fielora.browser} onSaveToLibrary={(input) => window.fielora.library.saveWeb(input)} onOpenBrowserSettings={() => window.dispatchEvent(new CustomEvent('fielora:open-settings', { detail: 'BROWSER' }))} workspaceTabHostId={tab.tabHostId} workspaceActive={workspaceOpen && tab.id === activeDockTabId} onRequestWorkspaceActivate={() => activateDockTab(tab.id)} onRequestWorkspaceClose={() => closeDockTab(tab.id)}/>}
       {tab.kind === 'TERMINAL' && <div className="right-terminal-view" data-testid="terminal-dock"><TerminalSession workingDirectory={terminalWorkingDirectory || project.root_path} command={terminalCommand} lastCommand={terminalLastCommand} output={terminalOutput} running={Boolean(terminalRunId)} active={workspaceOpen && tab.id === activeDockTabId} onCommandChange={setTerminalCommand} onRun={() => void runTerminal(terminalCommand, 'RIGHT')} onCancel={() => terminalRunId ? void window.fielora.workspace.cancelTerminal({ run_id: terminalRunId }) : undefined} testId="terminal"/></div>}
       {tab.kind === 'ARTIFACTS' && <ArtifactCatalog refreshToken={artifactRefreshToken} onOpen={openArtifact}/>}
       {tab.kind === 'ARTIFACT' && artifactSession && <ArtifactSurface
@@ -2269,6 +2322,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       className={`project-layout ${workspaceOpen && project ? 'workspace-open' : ''}${agentReviewOpen ? ' agent-review-open' : ''}${dockFocused ? ' dock-focused' : ''}`}
       testId="project-workspace-surface"
       navigationWidth={navigationWidth}
+      navigationMax={navigationMaximumWidth()}
       onNavigationWidthChange={updateNavigationWidth}
       navigationResizerTestId="project-navigation-resizer"
       navigationResizerClassName="project-navigation-resizer"
@@ -2284,33 +2338,33 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         onAddProject={() => void addProject()}
         projectHeaderControls={<>
           <ProjectSortControl value={projectSort} onChange={updateProjectSort}/>
-          <button type="button" onClick={() => void addProject()} title="添加本地 Project" aria-label="添加本地 Project" data-testid="project-add"><ShellIcon name="plus"/></button>
+          <button type="button" onClick={() => void addProject()} title="添加本地 Project" aria-label="添加本地 Project" data-testid="project-add"><AppIcon name="plus"/></button>
         </>}
         projectContent={<>
           <div className="project-list">{projects.length === 0 ? <p className="project-list-empty" data-testid="project-list-empty">还没有项目</p> : sortedProjects.map((item) => <Fragment key={item.field_id}>
             <div className={`project-item-row ${item.field_id === projectId ? 'active' : ''}`} onContextMenu={(event) => { event.preventDefault(); setProjectContextMenu({ project: item, left: Math.max(8, Math.min(window.innerWidth - 184, event.clientX)), top: Math.max(8, Math.min(window.innerHeight - 116, event.clientY)) }); }} data-testid={`project-row-${item.field_id}`}>
-              <button className="project-item" title={item.root_path} onClick={() => { setNewConversationStart(false); if (item.field_id === projectId) { setCollapsedProjectIds((current) => { const next = new Set(current); if (next.has(item.field_id)) next.delete(item.field_id); else next.add(item.field_id); return next; }); return; } setProjectId(item.field_id); setCollapsedProjectIds((current) => { if (!current.has(item.field_id)) return current; const next = new Set(current); next.delete(item.field_id); return next; }); }} onKeyDown={(event) => { if (!(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); setProjectContextMenu({ project: item, left: Math.max(8, Math.min(window.innerWidth - 184, bounds.left + 28)), top: Math.max(8, Math.min(window.innerHeight - 116, bounds.bottom)) }); }} aria-haspopup="menu" aria-expanded={item.field_id === projectId && !collapsedProjectIds.has(item.field_id)} data-testid={`project-${item.field_id}`}><span className="project-expand-indicator"><ShellIcon name="chevronDown"/></span><ShellIcon name={item.field_id === projectId ? 'folderOpen' : 'folder'}/><div><strong>{item.title}</strong></div></button>
+              <TooltipButton className="project-item" tooltip={<span className="sidebar-hover-preview"><span><strong>{item.title}</strong></span><span><AppIcon name="folder"/><small>{item.root_path || '本地项目'}</small></span></span>} onClick={() => { setNewConversationStart(false); if (item.field_id === projectId) { setCollapsedProjectIds((current) => { const next = new Set(current); if (next.has(item.field_id)) next.delete(item.field_id); else next.add(item.field_id); return next; }); return; } setProjectId(item.field_id); setCollapsedProjectIds((current) => { if (!current.has(item.field_id)) return current; const next = new Set(current); next.delete(item.field_id); return next; }); }} onKeyDown={(event) => { if (!(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); setProjectContextMenu({ project: item, left: Math.max(8, Math.min(window.innerWidth - 184, bounds.left + 28)), top: Math.max(8, Math.min(window.innerHeight - 116, bounds.bottom)) }); }} aria-haspopup="menu" aria-expanded={item.field_id === projectId && !collapsedProjectIds.has(item.field_id)} data-testid={`project-${item.field_id}`}><span className="project-expand-indicator"><AppIcon name="chevronDown"/></span><AppIcon name={item.field_id === projectId ? 'folderOpen' : 'folder'}/><div><strong>{item.title}</strong></div></TooltipButton>
               <div className="project-item-actions">
-                {!item.root_path && <button type="button" aria-label={`定位 ${item.title}`} title="原位置不可用，定位 Project" onClick={() => void rebindProject(item)} data-testid={`project-rebind-${item.field_id}`}><ShellIcon name="folderOpen"/></button>}
-                <button type="button" aria-label={`在 ${item.title} 新建对话`} title="新建对话" onClick={() => void createConversationFor(item)} data-testid={`project-new-conversation-${item.field_id}`}><ShellIcon name="plus"/></button>
-                <button type="button" aria-label={`编辑 ${item.title}`} title="编辑项目" onClick={() => setProjectDialog({ project: item, value: item.title })} data-testid={`project-edit-${item.field_id}`}><ShellIcon name="edit"/></button>
+                {!item.root_path && <button type="button" aria-label={`定位 ${item.title}`} title="原位置不可用，定位 Project" onClick={() => void rebindProject(item)} data-testid={`project-rebind-${item.field_id}`}><AppIcon name="folderOpen"/></button>}
+                <button type="button" aria-label={`在 ${item.title} 新建对话`} title="新建对话" onClick={() => void createConversationFor(item)} data-testid={`project-new-conversation-${item.field_id}`}><AppIcon name="plus"/></button>
+                <button type="button" aria-label={`编辑 ${item.title}`} title="编辑项目" onClick={() => setProjectDialog({ project: item, value: item.title })} data-testid={`project-edit-${item.field_id}`}><AppIcon name="edit"/></button>
               </div>
             </div>
-            {item.field_id === projectId && !collapsedProjectIds.has(item.field_id) && <div className="conversation-section" data-testid={`project-conversations-${item.field_id}`}>{conversations.length === 0 ? <p className="conversation-placeholder">还没有对话</p> : conversations.map((conversationItem) => <button key={conversationItem.id} className={`conversation-item ${conversationItem.id === conversationId ? 'active' : ''}`} onClick={() => activateConversation(conversationItem.id)} onContextMenu={(event) => { event.preventDefault(); activateConversation(conversationItem.id); setConversationContextMenu({ conversationId: conversationItem.id, title: conversationItem.title, left: Math.max(8, Math.min(window.innerWidth - 150, event.clientX)), top: Math.max(8, Math.min(window.innerHeight - 94, event.clientY)) }); }} onKeyDown={(event) => { if (!(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); activateConversation(conversationItem.id); setConversationContextMenu({ conversationId: conversationItem.id, title: conversationItem.title, left: Math.max(8, Math.min(window.innerWidth - 150, bounds.left + 28)), top: Math.max(8, Math.min(window.innerHeight - 94, bounds.bottom)) }); }} aria-haspopup="menu" data-testid={`conversation-${conversationItem.id}`}><span>{conversationItem.title}</span><small>{new Date(conversationItem.updated_at).toLocaleDateString()}</small></button>)}</div>}
+            {item.field_id === projectId && !collapsedProjectIds.has(item.field_id) && <div className="conversation-section" data-testid={`project-conversations-${item.field_id}`}>{conversations.length === 0 ? <p className="conversation-placeholder">还没有对话</p> : conversations.map((conversationItem) => <TooltipButton key={conversationItem.id} className={`conversation-item ${conversationItem.id === conversationId ? 'active' : ''}`} tooltip={<span className="sidebar-hover-preview"><span><strong>{conversationItem.title}</strong><time>{new Date(conversationItem.updated_at).toLocaleDateString()}</time></span><span><AppIcon name="folder"/><small>{item.title}</small></span></span>} onClick={() => activateConversation(conversationItem.id)} onContextMenu={(event) => { event.preventDefault(); activateConversation(conversationItem.id); setConversationContextMenu({ conversationId: conversationItem.id, title: conversationItem.title, left: Math.max(8, Math.min(window.innerWidth - 150, event.clientX)), top: Math.max(8, Math.min(window.innerHeight - 94, event.clientY)) }); }} onKeyDown={(event) => { if (!(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); activateConversation(conversationItem.id); setConversationContextMenu({ conversationId: conversationItem.id, title: conversationItem.title, left: Math.max(8, Math.min(window.innerWidth - 150, bounds.left + 28)), top: Math.max(8, Math.min(window.innerHeight - 94, bounds.bottom)) }); }} aria-haspopup="menu" data-testid={`conversation-${conversationItem.id}`}><span>{conversationItem.title}</span><small>{new Date(conversationItem.updated_at).toLocaleDateString()}</small></TooltipButton>)}</div>}
           </Fragment>)}</div>
         </>}
       />}
     >
 
-      <section className={`conversation-column${visibleMessages.length === 0 && !streamingOutput ? ' is-empty-conversation' : ''}`}>
-        {!project ? newConversationStart ? <div className="new-conversation-start" data-testid="new-conversation-start"><div><p className="eyebrow">新对话</p><h2>开始一条新对话</h2><p>先选择一个本地文件夹建立 Project，然后即可创建第一条对话。Project 与对话各自独立，不会修改文件夹内容。</p><button className="secondary-button" onClick={() => void addProject()} data-testid="new-conversation-choose-project"><ShellIcon name="folder"/>选择 Project 文件夹</button></div></div> : <div className="project-overview" data-testid="project-overview"><header><div><p className="eyebrow">PROJECTS</p><h1>项目</h1><p>本地文件夹、持久对话、文件变更和运行结果。</p></div><button className="secondary-button" onClick={() => void addProject()}><ShellIcon name="folder"/>打开文件夹</button></header><div className="project-overview-empty"><h2>还没有项目</h2><p>使用左侧“项目”旁的 ＋ 或上方“打开文件夹”添加第一个本地 Project。</p></div></div> : !conversation ? <div className="project-empty-conversation" data-testid="project-empty-conversation">
+      <section className={`conversation-column${visibleMessages.length === 0 && !streamingOutput ? ' is-empty-conversation' : ''}`} data-surface="content">
+        {!project ? newConversationStart ? <div className="new-conversation-start" data-testid="new-conversation-start"><div><p className="eyebrow">新对话</p><h2>开始一条新对话</h2><p>先选择一个本地文件夹建立 Project，然后即可创建第一条对话。Project 与对话各自独立，不会修改文件夹内容。</p><button className="secondary-button" onClick={() => void addProject()} data-testid="new-conversation-choose-project"><AppIcon name="folder"/>选择 Project 文件夹</button></div></div> : <div className="project-overview" data-testid="project-overview"><header><div><p className="eyebrow">PROJECTS</p><h1>项目</h1><p>本地文件夹、持久对话、文件变更和运行结果。</p></div><button className="secondary-button" onClick={() => void addProject()}><AppIcon name="folder"/>打开文件夹</button></header><div className="project-overview-empty"><h2>还没有项目</h2><p>使用左侧“项目”旁的 ＋ 或上方“打开文件夹”添加第一个本地 Project。</p></div></div> : !conversation ? <div className="project-empty-conversation" data-testid="project-empty-conversation">
           <div className="project-empty-copy"><h2>{project.title}</h2><p>开始新的工作</p></div>
           <form className="project-empty-composer" onSubmit={(event) => { event.preventDefault(); void createConversationFor(project); }} data-testid="project-empty-composer">
             <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述你想完成的任务…" aria-label="新对话内容"/>
             <div><span>对话会保存在当前 Project</span><button type="submit" disabled={conversationCreatingFor === project.field_id} data-testid="empty-conversation-create">{conversationCreatingFor === project.field_id ? '正在创建…' : '新建对话'}</button></div>
           </form>
         </div> : <>
-          <header className="conversation-header conversation-context-header"><div className="conversation-heading"><div><div className="conversation-title-line"><h2 title={conversation.title}>{conversation.title}</h2><ConversationActionsMenu onRename={() => setConversationDialog({ kind: 'RENAME', value: conversation.title })} onDelete={() => setConversationDialog({ kind: 'DELETE' })}/></div><small title={project.root_path}><span>{project.title}</span><i>/</i><span>Fielora</span></small></div></div></header>
+          <header className="conversation-header conversation-context-header"><div className="conversation-heading"><AppIcon name="folder"/><div className="conversation-title-line"><h2 title={conversation.title}>{conversation.title}</h2><ConversationActionsMenu onRename={() => setConversationDialog({ kind: 'RENAME', value: conversation.title })} onDelete={() => setConversationDialog({ kind: 'DELETE' })}/></div></div></header>
           <div className="message-list" ref={messageListRef}>
             {visibleMessages.length === 0 && !streamingOutput ? <div className="conversation-empty"><h3>从这里开始工作</h3><p>描述你想在当前项目中完成的任务。</p></div> : visibleMessages.map((message, index) => {
               const isCurrentAgentAssistant = Boolean(agentRun && agentTurn?.assistantMessageId === message.id);
@@ -2322,7 +2376,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
               const persistedImages = message.role === 'USER' ? messageAttachments(message.id) : [];
               const queuedFollowUp = message.role === 'USER' ? queuedFollowUps.find((item) => item.messageId === message.id) ?? null : null;
               return <Fragment key={message.id}>
-                <article data-message-id={message.id} className={`message ${message.role.toLowerCase()}${persistedImages.length ? ' has-image-attachments' : ''}`} data-testid={`message-${message.role.toLowerCase()}`}>{persistedImages.length > 0 && <ConversationImageGallery attachments={persistedImages} onOpen={openAttachmentInDock} onContextMenu={openImageContextMenu}/>}<div className="message-content"><MarkdownMessage content={message.content} references={message.references} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>{queuedFollowUp && <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={queuedFollowUp.afterRunId}><span aria-hidden="true"/>将在当前任务完成后继续处理</p>}<footer className={`message-actions ${copiedMessageId === message.id ? 'copy-confirmed' : ''}`}><time dateTime={new Date(message.created_at).toISOString()} title={new Date(message.created_at).toLocaleString('zh-CN')}>{messageTimeLabel(message.created_at)}</time>{message.status !== 'COMPLETED' && <span className="message-status">{messageStatusLabel(message.status)}</span>}<button type="button" className={copiedMessageId === message.id ? 'copied' : ''} aria-label={copiedMessageId === message.id ? '消息已复制' : '复制消息'} title={copiedMessageId === message.id ? '已复制' : '复制'} onClick={() => void copyMessage(message)} data-testid="message-copy"><ShellIcon name={copiedMessageId === message.id ? 'check' : 'copy'}/>{copiedMessageId === message.id && <span role="status" aria-live="polite">已复制</span>}</button></footer></article>
+                <article data-message-id={message.id} className={`message ${message.role.toLowerCase()}${persistedImages.length ? ' has-image-attachments' : ''}`} data-testid={`message-${message.role.toLowerCase()}`}>{persistedImages.length > 0 && <ConversationImageGallery attachments={persistedImages} onOpen={openAttachmentInDock} onContextMenu={openImageContextMenu}/>}<div className="message-content"><MarkdownMessage content={message.content} references={message.references} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>{queuedFollowUp && <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={queuedFollowUp.afterRunId}><span aria-hidden="true"/>将在当前任务完成后继续处理</p>}<footer className={`message-actions ${copiedMessageId === message.id ? 'copy-confirmed' : ''}`}><time dateTime={new Date(message.created_at).toISOString()} title={new Date(message.created_at).toLocaleString('zh-CN')}>{messageTimeLabel(message.created_at)}</time>{message.status !== 'COMPLETED' && <span className="message-status">{messageStatusLabel(message.status)}</span>}<button type="button" className={copiedMessageId === message.id ? 'copied' : ''} aria-label={copiedMessageId === message.id ? '消息已复制' : '复制消息'} title={copiedMessageId === message.id ? '已复制' : '复制'} onClick={() => void copyMessage(message)} data-testid="message-copy"><AppIcon name={copiedMessageId === message.id ? 'check' : 'copy'}/>{copiedMessageId === message.id && <span role="status" aria-live="polite">已复制</span>}</button></footer></article>
                 {agentRun && agentTurn?.userMessageId === message.id && currentAgentTurn}
               </Fragment>;
             })}
@@ -2331,12 +2385,12 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
           {!atLatestAnswer && <button type="button" className={`latest-answer-button ${agentRun && !agentRunIsTerminal ? 'is-generating' : 'is-complete'}${hasUnseenActivity ? ' has-unseen' : ''}`} aria-label={agentRun && !agentRunIsTerminal ? '跳转到当前任务底部' : '跳转到最新消息'} title={agentRun && !agentRunIsTerminal ? '跳转到当前任务底部' : '跳转到最新消息'} onClick={scrollToLatestAnswer} data-testid="jump-to-latest">
             {agentRun && !agentRunIsTerminal
               ? <span className="latest-answer-ellipsis" aria-hidden="true"><i/><i/><i/></span>
-              : <ShellIcon name="chevronDown"/>}
+              : <AppIcon name="chevronDown"/>}
           </button>}
-    <form className="conversation-composer" data-testid="conversation-composer" onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={handleComposerDrop} onSubmit={(event) => { event.preventDefault(); void send(prompt); }}>
+    <form className="conversation-composer" data-surface="floating" data-testid="conversation-composer" onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={handleComposerDrop} onSubmit={(event) => { event.preventDefault(); void send(prompt); }}>
             {composerAttachments.length > 0 && <div className="composer-attachments" data-testid="composer-attachments">
               {composerAttachments.filter((attachment) => attachment.kind === 'IMAGE').map((attachment) => <AttachmentThumbnail key={attachment.id} attachment={attachment} variant="composer" onOpen={openAttachmentInDock} onRemove={(id) => setAttachments((items) => items.filter((item) => item.id !== id))} onContextMenu={openImageContextMenu}/>)}
-              {composerAttachments.filter((attachment) => attachment.kind === 'TEXT').map((attachment) => <div key={attachment.id} className={`attachment-chip ${attachment.status === 'READY' ? '' : 'unsupported'}`} title={attachment.reason ?? attachment.name}><ComposerIcon name="file"/><span><strong>{attachment.name}</strong><small>{attachment.status === 'READY' ? `${Math.max(1, Math.ceil(attachment.size / 1024))} KB · 文字 Context` : attachment.reason}</small></span><button type="button" aria-label={`移除 ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((item) => item.id !== attachment.id))}><ComposerIcon name="close"/></button></div>)}
+              {composerAttachments.filter((attachment) => attachment.kind === 'TEXT').map((attachment) => <div key={attachment.id} className={`attachment-chip ${attachment.status === 'READY' ? '' : 'unsupported'}`} title={attachment.reason ?? attachment.name}><AppIcon name="file"/><span><strong>{attachment.name}</strong><small>{attachment.status === 'READY' ? `${Math.max(1, Math.ceil(attachment.size / 1024))} KB · 文字 Context` : attachment.reason}</small></span><button type="button" aria-label={`移除 ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((item) => item.id !== attachment.id))}><AppIcon name="close"/></button></div>)}
             </div>}
             <textarea
               ref={composerRef}
@@ -2350,53 +2404,51 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
                 event.currentTarget.form?.requestSubmit();
               }}
               aria-label="描述要完成的任务"
-              title="Enter 发送，Shift+Enter 换行"
               placeholder={selectedFile ? `询问或修改 ${selectedFile.relative_path}…` : composerAttachments.some((item) => item.status === 'READY') ? '询问这些附件…' : '描述要完成的任务…'}
             />
             <div className="composer-footer">
               <div className="composer-left-actions">
-                <button type="button" className="composer-icon-button" onClick={() => void pickAttachments()} aria-label="添加附件" title="添加附件" data-testid="composer-add-attachment"><ComposerIcon name="plus"/></button>
-                <SelectMenu className="composer-menu-picker permission-picker" value={permission} ariaLabel="权限" testId="composer-permission" placement="top" hideChevron leading={<PermissionIcon permission={permission}/>} options={[{ value: 'READ_ONLY', label: '请求批准', description: '修改文件和运行命令时始终询问', icon: <PermissionIcon permission="READ_ONLY"/> }, { value: 'REVIEW_CHANGES', label: '帮我批准', description: '仅对检测到的风险操作请求批准', icon: <PermissionIcon permission="REVIEW_CHANGES"/> }, { value: 'FULL_CONTROL', label: '完全访问权限', description: '自动访问文件、运行命令和使用网络', icon: <PermissionIcon permission="FULL_CONTROL"/> }]} onChange={updatePermission} />
+                <TooltipButton type="button" className="composer-icon-button" tooltip="添加附件" placement="top" variant="default" onClick={() => void pickAttachments()} aria-label="添加附件" data-testid="composer-add-attachment"><AppIcon name="plus"/></TooltipButton>
+                <SelectMenu className="composer-menu-picker permission-picker" value={permission} ariaLabel="权限" testId="composer-permission" placement="top" hideChevron leading={<PermissionIcon permission={permission}/>} options={[{ value: 'READ_ONLY', label: '请求批准', description: '编辑外部文件和使用互联网时始终询问', icon: <PermissionIcon permission="READ_ONLY"/> }, { value: 'REVIEW_CHANGES', label: '帮我批准', description: '仅对检测到的风险操作请求批准', icon: <PermissionIcon permission="REVIEW_CHANGES"/> }, { value: 'FULL_CONTROL', label: '完全访问权限', triggerLabel: '完全访问', description: '可不受限制地访问互联网和你电脑上的任何文件', icon: <PermissionIcon permission="FULL_CONTROL"/>, tone: 'warning' }]} onChange={updatePermission} />
               </div>
               <div className="composer-right-actions">
                 {activeProviders.length > 1 ? <SelectMenu className="composer-menu-picker configured-model-picker" value={conversation?.provider_config_id ?? ''} ariaLabel="模型" testId="conversation-model" placement="top" options={[{ value: '', label: '选择模型' }, ...activeProviders.map((provider) => ({ value: provider.id, label: provider.default_model, description: `${provider.display_name}${provider.credential_present ? '' : ' · 需要凭据'}`, disabled: !provider.credential_present }))]} onChange={(value) => void updateConversationSelection(value)} /> : effectiveConversationProvider && <span className="composer-model-label" title={effectiveConversationProvider.display_name}>{effectiveConversationProvider.default_model}</span>}
-                <button type="button" className={`composer-icon-button voice-button ${listening ? 'active' : ''}`} onClick={toggleVoiceInput} aria-label={listening ? '停止语音输入' : '开始语音输入'} title={listening ? '停止语音输入' : '语音输入'} data-testid="composer-voice"><ComposerIcon name="microphone"/></button>
+                <TooltipButton type="button" className={`composer-icon-button voice-button ${listening ? 'active' : ''}`} tooltip={listening ? '停止语音输入' : '语音输入'} placement="top" variant="default" onClick={toggleVoiceInput} aria-label={listening ? '停止语音输入' : '开始语音输入'} data-testid="composer-voice"><AppIcon name="microphone"/></TooltipButton>
                 {activeAgentRef.current && prompt.trim() ? <>
-                  <button type="button" className="composer-icon-button composer-running-stop" aria-label="停止 Agent" title="停止当前任务" onClick={() => void cancelAgent()} data-testid="stop-agent-secondary"><ComposerIcon name="stop"/></button>
-                  <button className="composer-submit" type="submit" disabled={busy} aria-label="追加到当前任务" title="当前任务完成后继续处理" data-testid="send-steering"><ComposerIcon name="send"/></button>
+                  <TooltipButton type="button" className="composer-icon-button composer-running-stop" tooltip="停止当前任务" placement="top" variant="default" aria-label="停止 Agent" onClick={() => void cancelAgent()} data-testid="stop-agent-secondary"><AppIcon name="stop"/></TooltipButton>
+                  <TooltipButton className="composer-submit" type="submit" tooltip="当前任务完成后继续处理" placement="top" variant="default" disabled={busy} aria-label="追加到当前任务" data-testid="send-steering"><AppIcon name="send" weight="bold"/></TooltipButton>
                 </> : activeAgentRef.current
-                  ? <button type="button" className="composer-submit stop" aria-label="停止 Agent" onClick={() => void cancelAgent()} data-testid="stop-agent"><ComposerIcon name="stop"/></button>
-                  : <button className="composer-submit" type="submit" disabled={busy || (!prompt.trim() && !composerAttachments.some((item) => item.status === 'READY'))} aria-label="发送" data-testid="send-message"><ComposerIcon name="send"/></button>}
+                  ? <button type="button" className="composer-submit stop" aria-label="停止 Agent" onClick={() => void cancelAgent()} data-testid="stop-agent"><AppIcon name="stop"/></button>
+                  : <button className="composer-submit" type="submit" disabled={busy || (!prompt.trim() && !composerAttachments.some((item) => item.status === 'READY'))} aria-label="发送" data-testid="send-message"><AppIcon name="send" weight="bold"/></button>}
               </div>
             </div>
           </form>
         </>}
       </section>
 
-      {project && <ResizableDivider label="调整文件或审阅区域宽度" value={workspaceWidth} min={360} max={900} onResize={(clientX) => {
-        const rect = layoutRef.current?.getBoundingClientRect();
-        if (rect) updateWorkspaceWidth(rect.right - clientX);
-      }} onKeyboardResize={(delta) => updateWorkspaceWidth(workspaceWidth - delta)} testId="project-workspace-resizer" className="project-workspace-resizer" />}
+      {project && <ResizableDivider label="调整文件或审阅区域宽度" value={workspaceWidth} min={PROJECT_WORKSPACE_MIN_WIDTH} max={workspaceMaximumWidth()} onResizeStart={() => {
+        workspaceDragGeometryRef.current = captureWorkspaceDragGeometry();
+      }} onResize={(clientX) => {
+        const geometry = workspaceDragGeometryRef.current;
+        if (geometry) layoutRef.current?.style.setProperty('--project-workspace-width', `${clampWorkspaceWidthTo(geometry.right - clientX, geometry.maximum)}px`);
+      }} onResizeEnd={(clientX) => {
+        const geometry = workspaceDragGeometryRef.current ?? captureWorkspaceDragGeometry();
+        workspaceDragGeometryRef.current = null;
+        if (geometry) updateWorkspaceWidth(clampWorkspaceWidthTo(geometry.right - clientX, geometry.maximum));
+      }} onKeyboardResize={(delta) => updateWorkspaceWidth(workspacePreferredWidthRef.current - delta)} testId="project-workspace-resizer" className="project-workspace-resizer" />}
 
       {project && showLegacyWorkspace && <section className="legacy-workspace-panel" aria-hidden="true">
-        <header className="workspace-panel-header"><div><ShellIcon name={workspaceTab === 'FILES' ? 'files' : 'diff'}/><strong>{workspaceTab === 'FILES' ? '文件' : '审阅变更'}</strong></div><button onClick={() => setWorkspaceOpen(false)} title="关闭工作区" data-testid="workspace-close"><ShellIcon name="close"/></button></header>
+        <header className="workspace-panel-header"><div><AppIcon name={workspaceTab === 'FILES' ? 'files' : 'diff'}/><strong>{workspaceTab === 'FILES' ? '文件' : '审阅变更'}</strong></div><button onClick={() => setWorkspaceOpen(false)} title="关闭工作区" data-testid="workspace-close"><AppIcon name="close"/></button></header>
         <div className="workspace-tabs"><button className={workspaceTab === 'FILES' ? 'active' : ''} onClick={() => setWorkspaceTab('FILES')}>文件</button><button className={workspaceTab === 'DIFF' ? 'active' : ''} onClick={() => setWorkspaceTab('DIFF')}>审阅{draft || displayedAgentReview.files.length ? ` · ${draft ? 1 : displayedAgentReview.files.length}` : ''}</button></div>
-        {workspaceTab === 'FILES' && <div className="file-workspace"><div className="file-tree"><header><strong>文件</strong><button onClick={async () => setFiles(await window.fielora.workspace.listFiles({field_id:project.field_id}))}>↻</button></header>{files.map((file) => <button key={file.relative_path} className={selectedFile?.relative_path === file.relative_path || (filePreview?.kind === 'IMAGE' ? filePreview.preview.relative_path : filePreview?.relativePath) === file.relative_path ? 'active' : ''} onClick={() => void openFile(file)} data-testid="workspace-file"><span>⌑</span>{file.relative_path}</button>)}</div>{selectedFile ? <div className="file-editor"><header><span>{selectedFile.relative_path}</span>{undoChange?.relativePath === selectedFile.relative_path && <button onClick={() => void undoAcceptedChange()} data-testid="undo-change">撤销已接受变更</button>}</header><textarea value={editorContent} onChange={(event) => setEditorContent(event.target.value)} spellCheck={false} data-testid="file-editor" /><footer><span>{editorContent === selectedFile.content ? '未修改' : '有未 review 的修改'}</span><button disabled={editorContent === selectedFile.content} onClick={reviewEditor} data-testid="review-change">Review Diff</button></footer></div> : filePreview?.kind === 'IMAGE' ? <div className="file-image-preview" data-testid="file-image-preview"><header><span>{filePreview.preview.relative_path}</span></header><div><img src={filePreview.preview.data_url} alt={filePreview.preview.relative_path}/><small>{filePreview.preview.mime_type} · {Math.max(1, Math.ceil(filePreview.preview.size / 1024))} KB</small></div></div> : filePreview?.kind === 'UNSUPPORTED' ? <div className="file-unsupported-preview" data-testid="file-unsupported-preview"><ShellIcon name="files"/><h3>无法在此预览</h3><strong>{filePreview.relativePath}</strong><p>{filePreview.message}</p></div> : <div className="workspace-blank"><p>选择文件以查看和编辑。</p></div>}</div>}
+        {workspaceTab === 'FILES' && <div className="file-workspace"><div className="file-tree"><header><strong>文件</strong><button onClick={async () => setFiles(await window.fielora.workspace.listFiles({field_id:project.field_id}))}>↻</button></header>{files.map((file) => <button key={file.relative_path} className={selectedFile?.relative_path === file.relative_path || (filePreview?.kind === 'IMAGE' ? filePreview.preview.relative_path : filePreview?.relativePath) === file.relative_path ? 'active' : ''} onClick={() => void openFile(file)} data-testid="workspace-file"><span>⌑</span>{file.relative_path}</button>)}</div>{selectedFile ? <div className="file-editor"><header><span>{selectedFile.relative_path}</span>{undoChange?.relativePath === selectedFile.relative_path && <button onClick={() => void undoAcceptedChange()} data-testid="undo-change">撤销已接受变更</button>}</header><textarea value={editorContent} onChange={(event) => setEditorContent(event.target.value)} spellCheck={false} data-testid="file-editor" /><footer><span>{editorContent === selectedFile.content ? '未修改' : '有未 review 的修改'}</span><button disabled={editorContent === selectedFile.content} onClick={reviewEditor} data-testid="review-change">Review Diff</button></footer></div> : filePreview?.kind === 'IMAGE' ? <div className="file-image-preview" data-testid="file-image-preview"><header><span>{filePreview.preview.relative_path}</span></header><div><img src={filePreview.preview.data_url} alt={filePreview.preview.relative_path}/><small>{filePreview.preview.mime_type} · {Math.max(1, Math.ceil(filePreview.preview.size / 1024))} KB</small></div></div> : filePreview?.kind === 'UNSUPPORTED' ? <div className="file-unsupported-preview" data-testid="file-unsupported-preview"><AppIcon name="files"/><h3>无法在此预览</h3><strong>{filePreview.relativePath}</strong><p>{filePreview.message}</p></div> : <div className="workspace-blank"><p>选择文件以查看和编辑。</p></div>}</div>}
         {workspaceTab === 'DIFF' && <div className="diff-workspace">{draft ? <><header><div><p className="eyebrow">REVIEW</p><h3>{draft.relativePath}</h3></div><span>写入前不会修改磁盘</span></header><pre className="diff-view" data-testid="diff-view">{draft.diff}</pre><footer><button className="secondary-button" onClick={() => {setDraft(null);setEditorContent(selectedFile?.content??'');setWorkspaceTab('FILES');}}>放弃</button><button className="primary-button" onClick={() => void acceptDraft()} data-testid="accept-change">接受变更</button></footer></> : displayedAgentReview.files.length > 0 ? <AgentHumanReview review={displayedAgentReview} task={historicalReview?.task ?? agentRun?.task ?? conversation?.title ?? ''} runId={historicalReview?.runId ?? agentRun?.id ?? ''} selectedPathHint={agentReviewPath} onOpenFile={(path) => void openAgentReviewFile(path)} onMarkReviewed={markAgentFileArtifactReviewed} onUndo={(file) => undoAgentFileArtifact(historicalReview?.runId ?? agentRun?.id ?? '', file)}/> : <div className="workspace-blank"><h3>本次任务没有文件变更</h3><p>Agent 的写入、补丁和替换会显示在这里。</p></div>}</div>}
       </section>}
       {project && <RightWorkspaceDock
         tabs={dockTabs}
         activeTabId={activeDockTabId}
         toolbar={dockToolbar}
+        tools={dockTools}
         showLauncher={workspaceOpen && dockTabs.length === 0}
-        tools={[
-          { id: 'artifacts', label: '工作对象', icon: 'filePlus', onOpen: () => openDockTool('ARTIFACTS') },
-          { id: 'review', label: '审阅', icon: 'diff', shortcut: 'Ctrl+Shift+G', onOpen: () => openDockTool('REVIEW') },
-          { id: 'terminal', label: '终端', icon: 'terminal', shortcut: 'Ctrl+`', onOpen: () => openDockTool('TERMINAL') },
-          { id: 'browser', label: '浏览器', icon: 'browse', shortcut: 'Ctrl+T', onOpen: () => openDockTool('BROWSER') },
-          { id: 'files', label: '文件', icon: 'folder', shortcut: 'Ctrl+P', onOpen: () => openDockTool('FILES') },
-          { id: 'chat', label: '侧边聊天', icon: 'compose', shortcut: 'Ctrl+Alt+S', onOpen: () => window.dispatchEvent(new CustomEvent('fielora:open-summon')) },
-        ]}
         onActivate={activateDockTab}
         onClose={closeDockTab}
       >{dockViews}</RightWorkspaceDock>}
@@ -2407,7 +2459,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     {project && terminalLayer && createPortal(<>
       <ResizableDivider orientation="horizontal" label="调整终端高度" value={bottomTerminalHeight} min={170} max={520} onResize={(clientY) => updateBottomTerminalHeight(window.innerHeight - clientY)} onKeyboardResize={(delta) => updateBottomTerminalHeight(bottomTerminalHeight - delta)} testId="bottom-terminal-resizer" className="terminal-resizer" />
       <section className="terminal-dock bottom-terminal-dock" data-testid="bottom-terminal-dock" aria-hidden={!bottomTerminalOpen}>
-        <header><div><ShellIcon name="terminal"/><strong>终端</strong><span>PowerShell</span></div><button type="button" onClick={() => setBottomTerminalOpen(false)} aria-label="关闭底部终端" data-testid="bottom-terminal-close"><ShellIcon name="close"/></button></header>
+        <header><div><AppIcon name="terminal"/><strong>PowerShell</strong></div><button type="button" onClick={() => setBottomTerminalOpen(false)} aria-label="关闭底部终端" data-testid="bottom-terminal-close"><AppIcon name="close"/></button></header>
         <TerminalSession workingDirectory={terminalWorkingDirectory || project.root_path} command={terminalCommand} lastCommand={terminalLastCommand} output={terminalOutput} running={Boolean(terminalRunId)} active={bottomTerminalOpen} onCommandChange={setTerminalCommand} onRun={() => void runTerminal(terminalCommand, 'BOTTOM')} onCancel={() => terminalRunId ? void window.fielora.workspace.cancelTerminal({ run_id: terminalRunId }) : undefined} testId="bottom-terminal"/>
       </section>
     </>, terminalLayer)}

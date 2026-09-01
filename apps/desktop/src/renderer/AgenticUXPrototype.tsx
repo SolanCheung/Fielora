@@ -5,6 +5,7 @@ import {
   type AgenticUXPrototypeView,
   type AgenticUXReviewFile,
 } from './agentic-ux-prototype-data';
+import { AppIcon, type AppIconName } from './ui';
 
 interface AgenticUXPrototypeProps {
   initialView: AgenticUXPrototypeView;
@@ -13,11 +14,14 @@ interface AgenticUXPrototypeProps {
 type ReviewMode = 'FULL_CONTROL' | 'REVIEW_CHANGES' | 'PARTIAL';
 
 function PrototypeIcon({ name }: { name: 'plus' | 'shield' | 'microphone' | 'send' | 'chevron' }) {
-  if (name === 'plus') return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>;
-  if (name === 'shield') return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8 16 5v4.4c0 3.7-2.5 6.5-6 7.8-3.5-1.3-6-4.1-6-7.8V5l6-2.2Z" /></svg>;
-  if (name === 'microphone') return <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="3" width="6" height="10" rx="3" /><path d="M4.8 10.5a5.2 5.2 0 0 0 10.4 0M10 15.7V18" /></svg>;
-  if (name === 'send') return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m3 10 14-6-4.7 12-2.4-4.5L3 10Z" /><path d="m10 11.4 7-7.4" /></svg>;
-  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>;
+  const icons: Record<typeof name, AppIconName> = {
+    plus: 'plus',
+    shield: 'permissionReview',
+    microphone: 'microphone',
+    send: 'send',
+    chevron: 'chevronDown',
+  };
+  return <AppIcon name={icons[name]} />;
 }
 
 function StepRow({ label, state, note }: { label: string; state: 'done' | 'failed' | 'skipped'; note?: string }) {
