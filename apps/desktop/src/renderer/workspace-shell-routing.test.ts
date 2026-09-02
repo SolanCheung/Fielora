@@ -50,7 +50,7 @@ test('right resource view has animated opening, a resizable collapsible tree, an
 });
 
 test('review, local environment, and installed applications use recognizable semantic icons', () => {
-  assert.match(iconSystem, /diff: GitDiff/);
+  assert.match(iconSystem, /diff: PlusMinus/);
   assert.match(workspace, /<AppIcon name="computer"\/><span><strong>本地<\/strong>/);
   for (const target of ['FILE_EXPLORER', 'VISUAL_STUDIO_CODE', 'CURSOR', 'VISUAL_STUDIO', 'GIT_BASH', 'INTELLIJ_IDEA', 'PYCHARM', 'WEBSTORM']) {
     assert.match(workspace, new RegExp(`${target}:`));
@@ -63,10 +63,17 @@ test('review, local environment, and installed applications use recognizable sem
 });
 
 test('right dock plus follows the last soft-edged tab only when tabs exist', () => {
-  assert.match(dock, /<TabStrip className="right-dock-tabs"[\s\S]*?tabs\.map[\s\S]*?<\/TabStrip>\s*\{tabs\.length > 0 && <div className="right-dock-add-wrap"/);
+  assert.match(dock, /<TabStrip innerRef=\{tabsRef\} className="right-dock-tabs"[\s\S]*?tabs\.map[\s\S]*?<\/TabStrip>\s*\{tabs\.length > 0 && <div className="right-dock-add-wrap"/);
   assert.match(dock, /<Tab[\s\S]*?className="right-dock-tab"/);
-  assert.match(styles, /\.right-dock-tab-strip \{[\s\S]*?display: flex;[\s\S]*?padding: 4px 6px 4px 5px/);
-  assert.match(styles, /\.right-dock-tabs \{[\s\S]*?width: max-content; max-width: calc\(100% - 32px\);[\s\S]*?flex: 0 1 auto/);
+  assert.match(layout, /\.right-dock-tab-strip \{[\s\S]*?overflow: visible;[\s\S]*?padding-right: 126px/);
+  assert.match(layout, /\.right-dock-tabs \{[\s\S]*?width: max-content;[\s\S]*?max-width: calc\(100% - 32px\);[\s\S]*?flex: 0 1 auto;[\s\S]*?scrollbar-width: none/);
+  assert.match(layout, /\.right-dock-tabs \.right-dock-tab,[\s\S]*?flex: 0 0 132px/);
+  assert.match(dock, /new ResizeObserver\(scheduleReveal\)/);
+  assert.match(dock, /tabRect\.right > stripRect\.right[\s\S]*?strip\.scrollLeft/);
+  assert.match(dock, /onContextMenu=\{\(event\) => \{ event\.preventDefault\(\); openTabMenu/);
+  for (const action of ['重新加载', '复制标签页', '重命名', '关闭其他标签页', '关闭右侧标签页']) assert.match(dock, new RegExp(action));
+  assert.match(dock, /data-testid="right-dock-tab-context-menu"/);
+  assert.doesNotMatch(workspace, /id: 'artifacts', label: '工作对象'/);
   assert.match(styles, /\.right-dock-tab \{[\s\S]*?border-radius: 9px/);
   assert.match(styles, /\.right-dock-tab\.active \{[\s\S]*?background: var\(--fl-color-surface-subtle\)/);
 });
@@ -79,8 +86,12 @@ test('closing all dock tabs hides the dock and reopening restores the dock-owned
   assert.match(workspace, /\{project && <RightWorkspaceDock/);
   assert.match(dock, /data-testid="right-dock-home"/);
   assert.match(dock, /data-testid="right-dock-tool-menu"/);
+  assert.match(dock, /menuAnchorRef\.current\?\.getBoundingClientRect\(\)/);
+  assert.match(dock, /createPortal\(<div ref=\{toolMenuRef\} className="right-dock-tool-menu-layer"[\s\S]*?document\.body\)/);
+  assert.match(styles, /\.right-dock-tool-menu-layer \{ position: fixed;[\s\S]*?width: 184px;/);
   assert.match(dock, /event\.key === 'Escape'/);
-  assert.doesNotMatch(dock, /WorkspaceObjectPicker|createPortal/);
+  assert.doesNotMatch(dock, /WorkspaceObjectPicker/);
+  assert.match(dock, /createPortal\(<div ref=\{contextMenuRef\}[\s\S]*?document\.body\)/);
   assert.match(styles, /\.workspace-panel \{[\s\S]*?opacity: 0; visibility: hidden;[\s\S]*?translateX\(var\(--fl-motion-distance-panel\)\)/);
   assert.doesNotMatch(styles, /\.workspace-object-picker-layer/);
   assert.doesNotMatch(styles, /\.project-layout\.workspace-open \.right-workspace-dock \{ position: absolute/);
@@ -92,6 +103,9 @@ test('top rail terminal and right launcher terminal use separate presentations',
   assert.match(workspace, /id: 'terminal'/);
   assert.match(workspace, /onRun=\{\(\) => void runTerminal\(terminalCommand, 'BOTTOM'\)\}/);
   assert.match(workspace, /onRun=\{\(\) => void runTerminal\(terminalCommand, 'RIGHT'\)\}/);
+  assert.match(chrome, /testId="rail-terminal"[\s\S]*?name="terminalPanel"|name="terminalPanel"[\s\S]*?testId="rail-terminal"/);
+  assert.match(workspace, /bottom-terminal-dock[\s\S]*?<AppIcon name="terminalPanel"\/>/);
+  assert.match(workspace, /TERMINAL: \{[^\n]*icon: 'terminal'/);
 });
 
 test('both terminals use a normal PowerShell transcript and prompt without legacy action chrome', () => {
@@ -113,7 +127,7 @@ test('both terminals use a normal PowerShell transcript and prompt without legac
   assert.match(styles, /\.terminal-prompt input \{[\s\S]*?border: 0;[\s\S]*?background: transparent;[\s\S]*?box-shadow: none/);
   assert.match(styles, /\.right-terminal-view \{[\s\S]*?background: inherit/);
   assert.match(iconSystem, /terminal: Terminal/);
-  assert.doesNotMatch(iconSystem, /TerminalWindow/);
+  assert.match(iconSystem, /terminalPanel: TerminalWindow/);
 });
 
 test('file surfaces use the shared rounded document icon language', () => {

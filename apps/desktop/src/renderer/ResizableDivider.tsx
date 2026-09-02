@@ -52,7 +52,9 @@ export function ResizableDivider({ label, value, min, max, onResizeStart, onResi
     setDragging(true);
     const move = (next: globalThis.PointerEvent) => {
       if (next.pointerId !== pointerId) return;
-      scheduleResize(orientation === 'vertical' ? next.clientX : next.clientY);
+      const samples = next.getCoalescedEvents?.() ?? [next];
+      const latest = samples.at(-1) ?? next;
+      scheduleResize(orientation === 'vertical' ? latest.clientX : latest.clientY);
     };
     const cleanup = () => {
       window.removeEventListener('pointermove', move);

@@ -32,6 +32,8 @@ test('production conversation has one turn-owned agent presentation path', () =>
   assert.match(turn, /data-testid="agent-execution-status"/);
   assert.match(turn, /data-testid="agent-terminal-result"/);
   assert.match(turn, /data-testid="agent-execution-detail"/);
+  assert.match(turn, /agent-result-changes-icon"><AppIcon name="diff"\/>/);
+  assert.match(icons, /diff: PlusMinus/);
 });
 
 test('legacy production activity and standalone result paths are absent', () => {

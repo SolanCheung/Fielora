@@ -323,7 +323,7 @@ function ChangedFiles({ review, onReview, onReviewFile }: {
   const remainingFiles = Math.max(0, review.files.length - visibleFiles.length);
   return <section className={`agent-result-changes${expanded ? ' is-expanded' : ''}`} data-testid="agent-result-changed-files" data-file-count={review.files.length} data-additions={review.additions} data-deletions={review.deletions}>
     <header className="agent-result-changes-header">
-      <span className="agent-result-changes-icon"><AppIcon name="filePlus"/></span>
+      <span className="agent-result-changes-icon"><AppIcon name="diff"/></span>
       <span className="agent-result-changes-title"><strong>已编辑 {review.files.length} 个文件</strong><small><b>+{review.additions}</b><i>−{review.deletions}</i></small></span>
       {onReview && <button type="button" className="agent-full-review-action" onClick={onReview}>审核</button>}
     </header>

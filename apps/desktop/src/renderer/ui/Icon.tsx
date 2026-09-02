@@ -4,7 +4,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  ArrowsOut,
+  ArrowsOutSimple,
   CaretDown,
   ChatCircle,
   ChatCircleDots,
@@ -27,7 +27,6 @@ import {
   FolderOpen,
   Gear,
   GitBranch,
-  GitDiff,
   Globe,
   HandPalm,
   Image,
@@ -38,6 +37,7 @@ import {
   Pause,
   PencilSimple,
   Plus,
+  PlusMinus,
   Play,
   PuzzlePiece,
   Sidebar,
@@ -49,6 +49,7 @@ import {
   Stop,
   Sun,
   Terminal,
+  TerminalWindow,
   Trash,
   Tray,
   WarningOctagon,
@@ -61,7 +62,7 @@ import {
 export type AppIconName =
   | 'compose' | 'conversation' | 'now' | 'scheduled' | 'browse' | 'fields' | 'inbox'
   | 'folder' | 'folderOpen' | 'files' | 'library' | 'file' | 'image' | 'filePlus' | 'objects'
-  | 'diff' | 'terminal' | 'computer' | 'settings' | 'refresh' | 'close'
+  | 'diff' | 'terminal' | 'terminalPanel' | 'computer' | 'settings' | 'refresh' | 'close'
   | 'more' | 'models' | 'appearance' | 'extensions' | 'storage' | 'keyboard'
   | 'info' | 'environment' | 'branch' | 'cloud' | 'source' | 'copy' | 'check'
   | 'sort' | 'plus' | 'edit' | 'search' | 'run' | 'pause' | 'delete' | 'chevronDown' | 'panelRight' | 'sidebar'
@@ -84,8 +85,9 @@ const ICONS: Record<AppIconName, Icon> = {
   image: Image,
   filePlus: FilePlus,
   objects: Shapes,
-  diff: GitDiff,
+  diff: PlusMinus,
   terminal: Terminal,
+  terminalPanel: TerminalWindow,
   computer: Desktop,
   settings: Gear,
   refresh: ArrowClockwise,
@@ -115,7 +117,7 @@ const ICONS: Record<AppIconName, Icon> = {
   sidebar: Sidebar,
   back: ArrowLeft,
   forward: ArrowRight,
-  focus: ArrowsOut,
+  focus: ArrowsOutSimple,
   tools: Columns,
   microphone: Microphone,
   send: ArrowUp,

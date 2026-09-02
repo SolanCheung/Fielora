@@ -19,7 +19,7 @@ import { buildAgentReview, buildDurableAgentReview, type AgentReviewFile } from 
 import { MarkdownMessage } from './MarkdownMessage';
 import { ResizableDivider } from './ResizableDivider';
 import { RightWorkspaceDock, type RightWorkspaceTab, type RightWorkspaceTool } from './RightWorkspaceDock';
-import { ArtifactCatalog, ArtifactSurface } from './ArtifactWorkingSurface';
+import { ArtifactSurface } from './ArtifactWorkingSurface';
 import {
   activeArtifactContext, artifactTabId, emptyArtifactSession, pinArtifactRevision,
   refreshArtifactCurrent, type ArtifactSurfaceSession,
@@ -139,7 +139,7 @@ type FilePreviewState =
   | { kind: 'UNSUPPORTED'; relativePath: string; message: string }
   | null;
 
-type RightDockKind = 'FILES' | 'FILE' | 'IMAGE' | 'REVIEW' | 'BROWSER' | 'TERMINAL' | 'ARTIFACTS' | 'ARTIFACT';
+type RightDockKind = 'FILES' | 'FILE' | 'IMAGE' | 'REVIEW' | 'BROWSER' | 'TERMINAL' | 'ARTIFACT';
 
 function WorkspaceAppBadge({ target, iconDataUrl = null }: { target: WorkspaceProjectOpenTarget; iconDataUrl?: string | null }) {
   if (iconDataUrl) return <img className={`workspace-app-icon target-${target.toLowerCase()}`} src={iconDataUrl} alt="" aria-hidden="true" data-app-icon={target} data-icon-source="native"/>;
@@ -168,6 +168,7 @@ interface FileDockSession {
   file: WorkspaceFileView | null;
   preview: FilePreviewState;
   content: string;
+  loading?: boolean;
   markdownMode?: 'PREVIEW' | 'SOURCE';
   reveal?: { lineStart: number; lineEnd: number; nonce: number };
 }
@@ -701,7 +702,6 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const [fileDockSessions, setFileDockSessions] = useState<Record<string, FileDockSession>>({});
   const fileRevealNonceRef = useRef(0);
   const [artifactSessions, setArtifactSessions] = useState<Record<string, ArtifactSurfaceSession>>({});
-  const [artifactRefreshToken, setArtifactRefreshToken] = useState(0);
   const [artifactCommandBusy, setArtifactCommandBusy] = useState(false);
   const [fileFilter, setFileFilter] = useState('');
   const [fileTreeSelection, setFileTreeSelection] = useState('');
@@ -772,6 +772,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const workspacePreferredWidthRef = useRef(workspaceWidth);
   const workspaceDragGeometryRef = useRef<{ right: number; maximum: number } | null>(null);
   const workspaceCollapsedDuringDragRef = useRef(false);
+  const dockTabCopyNonceRef = useRef(0);
   const activeAgentRef = useRef<ActiveAgent | null>(null);
   const agentRunIdRef = useRef('');
   const agentEventsRef = useRef<AgentEventView[]>([]);
@@ -1833,7 +1834,6 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         return { ...current, [tabId]: next };
       });
       updateArtifactTabLabel(read.artifact);
-      setArtifactRefreshToken((value) => value + 1);
     } catch {
       setArtifactSessions((current) => ({ ...current, [tabId]: { ...(current[tabId] ?? emptyArtifactSession(artifactId)), loading: false, error: '暂时无法读取这个工作对象或版本。' } }));
     }
@@ -1882,7 +1882,6 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         archived,
       });
       await loadArtifactRevision(session.artifactId, session.mode === 'HISTORICAL' ? session.viewedRevisionId : null, session.mode);
-      setArtifactRefreshToken((value) => value + 1);
     } catch (reason) {
       setError(reasonMessage(reason));
     } finally {
@@ -1902,7 +1901,6 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       handledArtifactToolCallsRef.current.add(tool.id);
       if (receipt.mutation_kind === 'CREATE') openArtifact(receipt.artifact_id);
       else if (receipt.mutation_kind === 'UPDATE') refreshOpenArtifact(receipt.artifact_id);
-      setArtifactRefreshToken((value) => value + 1);
     }
   }
 
@@ -1915,13 +1913,12 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     setWorkspaceWidth(clampWorkspaceWidth(workspacePreferredWidthRef.current));
   }
 
-  function openDockTool(kind: 'FILES' | 'REVIEW' | 'BROWSER' | 'TERMINAL' | 'ARTIFACTS') {
+  function openDockTool(kind: 'FILES' | 'REVIEW' | 'BROWSER' | 'TERMINAL') {
     const definitions: Record<typeof kind, ProjectDockTab> = {
       FILES: { id: 'files', kind: 'FILES', label: '文件', icon: 'folder' },
       REVIEW: { id: 'review', kind: 'REVIEW', label: '审阅', icon: 'diff' },
       BROWSER: { id: 'browser', kind: 'BROWSER', label: '浏览器', icon: 'browse', tabHostId: 'right-workspace-browser-page-tabs' },
       TERMINAL: { id: 'terminal', kind: 'TERMINAL', label: 'PowerShell', icon: 'terminal' },
-      ARTIFACTS: { id: 'artifacts', kind: 'ARTIFACTS', label: '工作对象', icon: 'objects' },
     };
     if (kind === 'REVIEW') {
       setHistoricalReview(null);
@@ -1975,50 +1972,126 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     }
   }
 
+  function discardDockSessions(ids: Set<string>) {
+    if (ids.size === 0) return;
+    setFileDockSessions((current) => {
+      const next = { ...current };
+      for (const id of ids) delete next[id];
+      return next;
+    });
+    setArtifactSessions((current) => {
+      const next = { ...current };
+      for (const id of ids) delete next[id];
+      artifactSessionsRef.current = next;
+      return next;
+    });
+  }
+
+  function duplicateDockTab(id: string) {
+    const index = dockTabs.findIndex((tab) => tab.id === id);
+    const source = dockTabs[index];
+    if (!source) return;
+    const copyId = `${source.id}:copy:${++dockTabCopyNonceRef.current}`;
+    const copy = { ...source, id: copyId, tabHostId: undefined, label: `${source.label} 副本` };
+    setDockTabs((current) => [...current.slice(0, index + 1), copy, ...current.slice(index + 1)]);
+    setFileDockSessions((current) => current[source.id]
+      ? { ...current, [copyId]: { ...current[source.id]! } }
+      : current);
+    setArtifactSessions((current) => {
+      if (!current[source.id]) return current;
+      const next = { ...current, [copyId]: { ...current[source.id]! } };
+      artifactSessionsRef.current = next;
+      return next;
+    });
+    setActiveDockTabId(copyId);
+    setWorkspaceOpen(true);
+  }
+
+  function renameDockTab(id: string, label: string) {
+    setDockTabs((current) => current.map((tab) => tab.id === id ? { ...tab, label } : tab));
+  }
+
+  function closeOtherDockTabs(id: string) {
+    const keep = dockTabs.find((tab) => tab.id === id);
+    if (!keep) return;
+    discardDockSessions(new Set(dockTabs.filter((tab) => tab.id !== id).map((tab) => tab.id)));
+    setDockTabs([keep]);
+    setActiveDockTabId(id);
+    activateDockTab(id);
+  }
+
+  function closeDockTabsToRight(id: string) {
+    const index = dockTabs.findIndex((tab) => tab.id === id);
+    if (index < 0 || index === dockTabs.length - 1) return;
+    const removed = dockTabs.slice(index + 1);
+    discardDockSessions(new Set(removed.map((tab) => tab.id)));
+    setDockTabs(dockTabs.slice(0, index + 1));
+    setActiveDockTabId(id);
+    activateDockTab(id);
+  }
+
+  function reloadDockTab(id: string) {
+    const tab = dockTabs.find((candidate) => candidate.id === id);
+    if (!project || !tab) return;
+    if (tab.relativePath) {
+      const entry = files.find((file) => file.relative_path === tab.relativePath) ?? { relative_path: tab.relativePath, size: 0 };
+      void openFile(entry, { force: true, targetTabId: id });
+      return;
+    }
+    if (tab.kind === 'FILES') {
+      void window.fielora.workspace.listFiles({ field_id: project.field_id }).then(setFiles).catch((reason) => setError(reasonMessage(reason)));
+    } else if (tab.kind === 'REVIEW' && tab.reviewSelection?.runId) {
+      void refreshFileArtifactReview(tab.reviewSelection.runId);
+    } else if (tab.kind === 'ARTIFACT' && tab.artifactId) {
+      void loadArtifactRevision(tab.artifactId, null, 'CURRENT');
+    } else if (tab.kind === 'TERMINAL') {
+      setTerminalOutput('');
+    }
+  }
+
   function openAttachmentInDock(attachment: WorkspaceAttachmentView) {
     ensureDockTab({ id: `image:${attachment.id}`, kind: 'IMAGE', label: attachment.name, icon: 'image', attachment });
   }
 
-  async function openFile(entry: WorkspaceFileEntry, options?: { lineStart?: number; lineEnd?: number; expectedSha256?: string | null }) {
+  async function openFile(entry: WorkspaceFileEntry, options?: { lineStart?: number; lineEnd?: number; expectedSha256?: string | null; force?: boolean; targetTabId?: string }) {
     if (!project) return;
     setFileTreeSelection(entry.relative_path);
-    const tabId = `file:${entry.relative_path}`;
+    const tabId = options?.targetTabId ?? `file:${entry.relative_path}`;
     const existing = fileDockSessions[tabId];
     const reveal = options?.lineStart && options.lineEnd
       ? { lineStart: options.lineStart, lineEnd: options.lineEnd, nonce: ++fileRevealNonceRef.current }
       : undefined;
-    if (existing && !reveal && !options?.expectedSha256) {
+    if (existing && !reveal && !options?.expectedSha256 && !options?.force) {
       syncFileSession(tabId);
       ensureDockTab({ id: tabId, kind: existing.preview?.kind === 'IMAGE' ? 'IMAGE' : 'FILE', label: fileTabLabel(entry.relative_path), icon: existing.preview?.kind === 'IMAGE' ? 'image' : 'files', relativePath: entry.relative_path });
       return;
     }
+    const kind = workspacePreviewKind(entry.relative_path);
+    const tabKind = kind === 'IMAGE' ? 'IMAGE' : 'FILE';
+    ensureDockTab({ id: tabId, kind: tabKind, label: fileTabLabel(entry.relative_path), icon: kind === 'IMAGE' ? 'image' : 'files', relativePath: entry.relative_path });
+    setFileDockSessions((current) => ({ ...current, [tabId]: current[tabId] ?? { file: null, preview: null, content: '', loading: true } }));
     try {
-      const kind = workspacePreviewKind(entry.relative_path);
       if (kind === 'IMAGE') {
         const preview = await window.fielora.workspace.previewFile({ field_id: project.field_id, relative_path: entry.relative_path });
         const session: FileDockSession = { file: null, preview: { kind: 'IMAGE', preview }, content: '' };
         setFileDockSessions((current) => ({ ...current, [tabId]: session }));
         setSelectedFile(null); setFilePreview(session.preview); setEditorContent(''); setDraft(null); setError('');
-        ensureDockTab({ id: tabId, kind: 'IMAGE', label: fileTabLabel(entry.relative_path), icon: 'image', relativePath: entry.relative_path });
         return;
       }
       if (kind === 'UNSUPPORTED') {
         const preview: FilePreviewState = { kind: 'UNSUPPORTED', relativePath: entry.relative_path, message: friendlyFilePreviewFailure('unsupported') };
         setFileDockSessions((current) => ({ ...current, [tabId]: { file: null, preview, content: '' } }));
         setSelectedFile(null); setFilePreview(preview); setEditorContent(''); setDraft(null); setError('');
-        ensureDockTab({ id: tabId, kind: 'FILE', label: fileTabLabel(entry.relative_path), icon: 'files', relativePath: entry.relative_path });
         return;
       }
       const file = await window.fielora.workspace.readFile({ field_id: project.field_id, relative_path: entry.relative_path });
       setFileDockSessions((current) => ({ ...current, [tabId]: { file, preview: null, content: file.content, markdownMode: reveal ? 'SOURCE' : isMarkdownFile(file.relative_path) ? 'PREVIEW' : undefined, reveal } }));
       setSelectedFile(file); setFilePreview(null); setEditorContent(file.content); setDraft(null);
       setError(options?.expectedSha256 && options.expectedSha256 !== file.sha256 ? '引用创建后文件内容已变化；当前已打开最新内容。' : '');
-      ensureDockTab({ id: tabId, kind: 'FILE', label: fileTabLabel(entry.relative_path), icon: 'files', relativePath: entry.relative_path });
     } catch (reason) {
       const preview: FilePreviewState = { kind: 'UNSUPPORTED', relativePath: entry.relative_path, message: friendlyFilePreviewFailure(reason) };
       setFileDockSessions((current) => ({ ...current, [tabId]: { file: null, preview, content: '' } }));
       setSelectedFile(null); setFilePreview(preview); setEditorContent(''); setDraft(null); setError('');
-      ensureDockTab({ id: tabId, kind: 'FILE', label: fileTabLabel(entry.relative_path), icon: 'files', relativePath: entry.relative_path });
     }
   }
 
@@ -2324,7 +2397,6 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     </div>}
   </> : null;
   const dockTools: RightWorkspaceTool[] = [
-    { id: 'artifacts', label: '工作对象', icon: 'objects', onOpen: () => openDockTool('ARTIFACTS') },
     { id: 'review', label: '审阅', icon: 'diff', shortcut: 'Ctrl+Shift+G', onOpen: () => openDockTool('REVIEW') },
     { id: 'terminal', label: 'PowerShell', icon: 'terminal', shortcut: 'Ctrl+`', onOpen: () => openDockTool('TERMINAL') },
     { id: 'browser', label: '浏览器', icon: 'browse', shortcut: 'Ctrl+T', onOpen: () => openDockTool('BROWSER') },
@@ -2339,17 +2411,17 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       {tab.kind === 'FILES' && dockFileTree}
       {tab.kind === 'FILE' && <DockResourceLayout fileTree={dockFileTree} treeWidth={dockFileTreeWidth} treeCollapsed={dockFileTreeCollapsed} onTreeWidthChange={updateDockFileTreeWidth}>
         <>
-          {session?.file && <div className={`file-editor dock-file-editor ${undoChange?.relativePath === session.file.relative_path ? 'has-undo' : ''}`}>{undoChange?.relativePath === session.file.relative_path && <header><span/><button onClick={() => void undoAcceptedChange()} data-testid="undo-change">撤销已接受变更</button></header>}{isMarkdownFile(session.file.relative_path) && (session.markdownMode ?? 'PREVIEW') === 'PREVIEW'
+          {session?.loading ? <div className="dock-resource-status" role="status"><AppIcon name="file"/><span>正在载入文件…</span></div> : session?.file && <div className={`file-editor dock-file-editor ${undoChange?.relativePath === session.file.relative_path ? 'has-undo' : ''}`}>{undoChange?.relativePath === session.file.relative_path && <header><span/><button onClick={() => void undoAcceptedChange()} data-testid="undo-change">撤销已接受变更</button></header>}{isMarkdownFile(session.file.relative_path) && (session.markdownMode ?? 'PREVIEW') === 'PREVIEW'
             ? <div className="dock-markdown-preview" data-testid="markdown-preview"><MarkdownMessage content={session.content} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>
             : <SyntaxCodeEditor value={session.content} relativePath={session.file.relative_path} reveal={session.reveal} onChange={(content) => { setFileDockSessions((current) => ({ ...current, [tab.id]: { ...session, content } })); if (tab.id === activeDockTabId) setEditorContent(content); }}/>}</div>}
           {session?.preview?.kind === 'UNSUPPORTED' && <div className="file-unsupported-preview" data-testid="file-unsupported-preview"><AppIcon name="files"/><h3>无法在此预览</h3><strong>{session.preview.relativePath}</strong><p>{session.preview.message}</p></div>}
+          {!session && <div className="dock-resource-status" role="status"><AppIcon name="file"/><span>正在载入文件…</span></div>}
         </>
       </DockResourceLayout>}
-      {tab.kind === 'IMAGE' && imageAttachment && <DockResourceLayout fileTree={dockFileTree} treeWidth={dockFileTreeWidth} treeCollapsed={dockFileTreeCollapsed} onTreeWidthChange={updateDockFileTreeWidth}><div className="dock-image-preview" data-testid="file-image-preview"><button type="button" aria-label={`放大 ${imageAttachment.name}`} onClick={() => setPreviewAttachment(imageAttachment)} onContextMenu={(event) => openImageContextMenu(event, imageAttachment)}><img src={imageAttachment.data_url ?? ''} alt={imageAttachment.name}/></button><small>{imageAttachment.mime_type} · {Math.max(1, Math.ceil(imageAttachment.size / 1024))} KB · 点击放大</small></div></DockResourceLayout>}
+      {tab.kind === 'IMAGE' && <DockResourceLayout fileTree={dockFileTree} treeWidth={dockFileTreeWidth} treeCollapsed={dockFileTreeCollapsed} onTreeWidthChange={updateDockFileTreeWidth}>{imageAttachment?.data_url ? <div className="dock-image-preview" data-testid="file-image-preview"><button type="button" aria-label={`放大 ${imageAttachment.name}`} onClick={() => setPreviewAttachment(imageAttachment)} onContextMenu={(event) => openImageContextMenu(event, imageAttachment)}><img src={imageAttachment.data_url} alt={imageAttachment.name}/></button><small>{imageAttachment.mime_type} · {Math.max(1, Math.ceil(imageAttachment.size / 1024))} KB · 点击放大</small></div> : session?.preview?.kind === 'UNSUPPORTED' ? <div className="file-unsupported-preview" data-testid="file-unsupported-preview"><AppIcon name="image"/><h3>无法在此预览</h3><strong>{session.preview.relativePath}</strong><p>{session.preview.message}</p></div> : <div className="dock-resource-status" role="status"><AppIcon name="image"/><span>正在载入图片…</span></div>}</DockResourceLayout>}
       {tab.kind === 'REVIEW' && <div className="diff-workspace">{draft ? <><header><div><p className="eyebrow">REVIEW</p><h3>{draft.relativePath}</h3></div><span>写入前不会修改磁盘</span></header><pre className="diff-view" data-testid="diff-view">{draft.diff}</pre><footer><button className="secondary-button" onClick={() => { setDraft(null); setEditorContent(selectedFile?.content ?? ''); if (selectedFile) ensureDockTab({ id: `file:${selectedFile.relative_path}`, kind: 'FILE', label: fileTabLabel(selectedFile.relative_path), icon: 'files', relativePath: selectedFile.relative_path }); else openDockTool('FILES'); }}>放弃</button><button className="primary-button" onClick={() => void acceptDraft()} data-testid="accept-change">接受变更</button></footer></> : (tab.reviewSelection?.review ?? displayedAgentReview).files.length > 0 ? <AgentHumanReview review={tab.reviewSelection?.review ?? displayedAgentReview} task={tab.reviewSelection?.task ?? agentRun?.task ?? conversation?.title ?? ''} runId={tab.reviewSelection?.runId ?? agentRun?.id ?? ''} selectedPathHint={tab.relativePath ?? agentReviewPath} onOpenFile={(path) => void openAgentReviewFile(path)} onMarkReviewed={markAgentFileArtifactReviewed} onUndo={(file) => undoAgentFileArtifact(tab.reviewSelection?.runId ?? agentRun?.id ?? '', file)}/> : <div className="workspace-blank"><h3>{conversation ? '本次任务没有文件变更' : '当前 Project 没有可审阅的变更'}</h3><p>文件写入、补丁和替换会显示在这里。</p></div>}</div>}
       {tab.kind === 'BROWSER' && <BrowsePanel browser={window.fielora.browser} onSaveToLibrary={(input) => window.fielora.library.saveWeb(input)} onOpenBrowserSettings={() => window.dispatchEvent(new CustomEvent('fielora:open-settings', { detail: 'BROWSER' }))} workspaceTabHostId={tab.tabHostId} workspaceActive={workspaceOpen && tab.id === activeDockTabId} onRequestWorkspaceActivate={() => activateDockTab(tab.id)} onRequestWorkspaceClose={() => closeDockTab(tab.id)}/>}
       {tab.kind === 'TERMINAL' && <div className="right-terminal-view" data-testid="terminal-dock"><TerminalSession workingDirectory={terminalWorkingDirectory || project.root_path} command={terminalCommand} lastCommand={terminalLastCommand} output={terminalOutput} running={Boolean(terminalRunId)} active={workspaceOpen && tab.id === activeDockTabId} onCommandChange={setTerminalCommand} onRun={() => void runTerminal(terminalCommand, 'RIGHT')} onCancel={() => terminalRunId ? void window.fielora.workspace.cancelTerminal({ run_id: terminalRunId }) : undefined} testId="terminal"/></div>}
-      {tab.kind === 'ARTIFACTS' && <ArtifactCatalog refreshToken={artifactRefreshToken} onOpen={openArtifact}/>}
       {tab.kind === 'ARTIFACT' && artifactSession && <ArtifactSurface
         session={artifactSession}
         busy={artifactCommandBusy}
@@ -2537,6 +2609,11 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         showLauncher={workspaceOpen && dockTabs.length === 0}
         onActivate={activateDockTab}
         onClose={closeDockTab}
+        onReload={reloadDockTab}
+        onDuplicate={duplicateDockTab}
+        onRename={renameDockTab}
+        onCloseOthers={closeOtherDockTabs}
+        onCloseToRight={closeDockTabsToRight}
       >{dockViews}</RightWorkspaceDock>}
     </WorkspaceSurface>
     {previewAttachment && createPortal(<ImagePreview attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} onContextMenu={previewAttachment.source === 'library' ? undefined : openImageContextMenu}/>, document.body)}
@@ -2545,7 +2622,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     {project && terminalLayer && createPortal(<>
       <ResizableDivider orientation="horizontal" label="调整终端高度" value={bottomTerminalHeight} min={170} max={520} onResize={(clientY) => updateBottomTerminalHeight(window.innerHeight - clientY)} onKeyboardResize={(delta) => updateBottomTerminalHeight(bottomTerminalHeight - delta)} testId="bottom-terminal-resizer" className="terminal-resizer" />
       <section className="terminal-dock bottom-terminal-dock" data-testid="bottom-terminal-dock" aria-hidden={!bottomTerminalOpen}>
-        <header><div><AppIcon name="terminal"/><strong>PowerShell</strong></div><button type="button" onClick={() => setBottomTerminalOpen(false)} aria-label="关闭底部终端" data-testid="bottom-terminal-close"><AppIcon name="close"/></button></header>
+        <header><div><AppIcon name="terminalPanel"/><strong>PowerShell</strong></div><button type="button" onClick={() => setBottomTerminalOpen(false)} aria-label="关闭底部终端" data-testid="bottom-terminal-close"><AppIcon name="close"/></button></header>
         <TerminalSession workingDirectory={terminalWorkingDirectory || project.root_path} command={terminalCommand} lastCommand={terminalLastCommand} output={terminalOutput} running={Boolean(terminalRunId)} active={bottomTerminalOpen} onCommandChange={setTerminalCommand} onRun={() => void runTerminal(terminalCommand, 'BOTTOM')} onCancel={() => terminalRunId ? void window.fielora.workspace.cancelTerminal({ run_id: terminalRunId }) : undefined} testId="bottom-terminal"/>
       </section>
     </>, terminalLayer)}

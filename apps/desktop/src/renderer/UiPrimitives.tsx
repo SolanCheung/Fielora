@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type Ref, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { AppIcon } from './ui';
 
@@ -216,10 +216,11 @@ export function MenuItem({ icon, label, description, trailing, className = '', .
   </button>;
 }
 
-export function TabStrip({ label, className = '', children, ...props }: HTMLAttributes<HTMLDivElement> & {
+export function TabStrip({ label, className = '', children, innerRef, ...props }: HTMLAttributes<HTMLDivElement> & {
   label: string;
+  innerRef?: Ref<HTMLDivElement>;
 }) {
-  return <div {...props} className={`ui-tab-strip ${className}`.trim()} role="tablist" aria-label={label}>{children}</div>;
+  return <div {...props} ref={innerRef} className={`ui-tab-strip ${className}`.trim()} role="tablist" aria-label={label}>{children}</div>;
 }
 
 export function Tab({ label, leading, active = false, className = '', mainClassName = '', closeClassName = '', labelClassName = '', testId, closeTestId, closeLabel, onActivate, onClose, ...props }: HTMLAttributes<HTMLDivElement> & {

@@ -109,13 +109,14 @@ try {
   await cdp.eval(`document.querySelector('[data-testid="now-nav"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="scheduled-tasks-screen"]')?.classList.contains('workspace-surface')`);
   const scheduledFrame = await cdp.eval(`(()=>{const navigation=document.querySelector('[data-testid="project-navigation"]').getBoundingClientRect();const content=document.querySelector('.scheduled-page').getBoundingClientRect();return{navigationWidth:navigation.width,contentLeft:content.left,radius:getComputedStyle(document.querySelector('.scheduled-page')).borderTopLeftRadius,resizer:Boolean(document.querySelector('[data-testid="scheduled-navigation-resizer"]'))};})()`);
-  assert.deepEqual(scheduledFrame, { ...conversationFrame, resizer: true });
+  assert.deepEqual(conversationFrame, { navigationWidth: 304, contentLeft: 308, radius: '16px' });
+  assert.deepEqual(scheduledFrame, { navigationWidth: 304, contentLeft: 308, radius: '28px', resizer: true });
   const scheduledComposition = await cdp.eval(`(()=>{const header=document.querySelector('.scheduled-header').getBoundingClientRect();const action=document.querySelector('.scheduled-create').getBoundingClientRect();const title=document.querySelector('.scheduled-header h1');const empty=document.querySelector('.scheduled-empty');return{headerLeft:header.left,actionHeight:action.height,titleSize:parseFloat(getComputedStyle(title).fontSize),emptyBorder:getComputedStyle(empty).borderTopWidth};})()`);
   await screenshot(cdp, '01a-scheduled-unified-page.png');
   await cdp.eval(`document.querySelector('[data-testid="library-nav"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="library-screen"]')?.classList.contains('workspace-surface')`);
   const libraryFrame = await cdp.eval(`(()=>{const navigation=document.querySelector('[data-testid="project-navigation"]').getBoundingClientRect();const content=document.querySelector('.library-content').getBoundingClientRect();return{navigationWidth:navigation.width,contentLeft:content.left,radius:getComputedStyle(document.querySelector('.library-content')).borderTopLeftRadius,resizer:Boolean(document.querySelector('[data-testid="library-navigation-resizer"]'))};})()`);
-  assert.deepEqual(libraryFrame, { ...conversationFrame, resizer: true });
+  assert.deepEqual(libraryFrame, { navigationWidth: 304, contentLeft: 308, radius: '28px', resizer: true });
   const libraryComposition = await cdp.eval(`(()=>{const header=document.querySelector('.library-header').getBoundingClientRect();const action=document.querySelector('[data-testid="library-add-file"]').getBoundingClientRect();const title=document.querySelector('.library-header h1');const empty=document.querySelector('.library-empty');return{headerLeft:header.left,actionHeight:action.height,titleSize:parseFloat(getComputedStyle(title).fontSize),emptyBorder:getComputedStyle(empty).borderTopWidth};})()`);
   assert.equal(Math.abs(scheduledComposition.headerLeft - libraryComposition.headerLeft) <= 1, true, JSON.stringify({ scheduledComposition, libraryComposition }));
   assert.equal(Math.abs(conversationHeaderLeft - libraryComposition.headerLeft) <= 1, true, JSON.stringify({ conversationHeaderLeft, libraryComposition }));
@@ -147,9 +148,9 @@ try {
   await cdp.eval(`document.querySelector('[data-testid="chrome-tools"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="right-dock-home"]') && document.querySelector('[data-testid="project-workspace-surface"]').classList.contains('workspace-open')`);
   const launcher = await cdp.eval(`(()=>{const buttons=[...document.querySelectorAll('[data-testid="right-dock-home"] button')];return{labels:buttons.map((button)=>button.querySelector('span')?.textContent),shortcuts:buttons.map((button)=>button.querySelector('kbd')?.textContent??null),count:buttons.length};})()`);
-  assert.deepEqual(launcher.labels, ['工作对象', '审阅', 'PowerShell', '浏览器', '文件']);
-  assert.deepEqual(launcher.shortcuts, [null, 'Ctrl+Shift+G', 'Ctrl+`', 'Ctrl+T', 'Ctrl+P']);
-  assert.equal(launcher.count, 5);
+  assert.deepEqual(launcher.labels, ['审阅', 'PowerShell', '浏览器', '文件']);
+  assert.deepEqual(launcher.shortcuts, ['Ctrl+Shift+G', 'Ctrl+`', 'Ctrl+T', 'Ctrl+P']);
+  assert.equal(launcher.count, 4);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="right-dock-add"]') === null`), true);
   await wait(cdp, `document.querySelector('[data-testid="right-workspace-dock"]').getBoundingClientRect().width >= 359.5`);
   const workbenchGeometry = await cdp.eval(`(()=>{const navigation=document.querySelector('[data-testid="project-navigation"]').getBoundingClientRect();const conversation=document.querySelector('.conversation-column').getBoundingClientRect();const dock=document.querySelector('[data-testid="right-workspace-dock"]').getBoundingClientRect();const composer=document.querySelector('[data-testid="conversation-composer"]').getBoundingClientRect();return{navigationWidth:navigation.width,conversationWidth:conversation.width,dockWidth:dock.width,composerWidth:composer.width,composerInsideConversation:composer.left>=conversation.left&&composer.right<=conversation.right};})()`);
@@ -159,7 +160,7 @@ try {
   assert.equal(workbenchGeometry.composerWidth <= 920.5, true, JSON.stringify(workbenchGeometry));
   assert.equal(workbenchGeometry.composerInsideConversation, true, JSON.stringify(workbenchGeometry));
   const launcherIcons = await cdp.eval(`(()=>{const parse=(value)=>{const match=value.match(/[\\d.]+/g);return match?.slice(0,3).map(Number)??[0,0,0]};const luminance=(rgb)=>{const values=rgb.map((value)=>{const channel=value/255;return channel<=.04045?channel/12.92:((channel+.055)/1.055)**2.4});return .2126*values[0]+.7152*values[1]+.0722*values[2]};const contrast=(foreground,background)=>{const a=luminance(parse(foreground));const b=luminance(parse(background));return (Math.max(a,b)+.05)/(Math.min(a,b)+.05)};const home=document.querySelector('[data-testid="right-dock-home"]');const background=getComputedStyle(home).backgroundColor;return[...home.querySelectorAll('button .app-icon')].map((icon)=>{const glyph=icon.querySelector('path,rect,circle,line,polyline,polygon');const iconStyle=getComputedStyle(icon);const glyphStyle=glyph?getComputedStyle(glyph):null;return{opacity:iconStyle.opacity,color:iconStyle.color,fill:glyphStyle?.fill??'none',stroke:glyphStyle?.stroke??'none',contrast:contrast(iconStyle.color,background)};});})()`);
-  assert.equal(launcherIcons.length, 5);
+  assert.equal(launcherIcons.length, 4);
   assert.equal(launcherIcons.every((icon) => icon.opacity === '1' && (icon.fill !== 'none' || icon.stroke !== 'none') && icon.contrast >= 3), true, JSON.stringify(launcherIcons));
   await new Promise((resolve) => setTimeout(resolve, 360));
   await screenshot(cdp, '02-right-workspace-launcher.png');

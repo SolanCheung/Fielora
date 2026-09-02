@@ -2949,3 +2949,136 @@ SIDE_CHAT_REINTRODUCED: NO
 DIVIDER_EDGE_COLLAPSE_RESTORE: SAME_POINTER_GESTURE
 RUNTIME_OR_SCHEMA_CHANGED: NO
 ```
+
+## 117. Neutral Right Divider And Simple Expand Icon
+
+用户基于最新 packaged Desktop 复看确认 Conversation 与 Right Workspace Dock 之间的持续淡紫线不符合
+中性工作区层级。该 divider 现在固定消费 Light/Dark 对应的 neutral gray token，默认、hover 与 dragging
+视觉宽度均为 `1px`；4px grid track 和更宽 pointer hit area 继续保留，不改变拖拽、边缘收起或恢复行为。
+
+右上工作区扩展/恢复按钮从四向 `ArrowsOut` 改为双对角 `ArrowsOutSimple`，继续通过 canonical
+`AppIcon` registry 使用 Phosphor，不增加组件内 SVG。Pane ownership、Agent/Browser runtime、FIPC、
+Schema/Migration 与 Permission/Verification 均不变。
+
+```text
+RIGHT_DOCK_DIVIDER: 1PX NEUTRAL GRAY
+RIGHT_DOCK_DIVIDER_BRAND_OR_ACTION_COLOR: NO
+WORKSPACE_FOCUS_ICON: ARROWS_OUT_SIMPLE
+POINTER_HIT_AREA_OR_EDGE_COLLAPSE_CHANGED: NO
+```
+
+## 118. Bounded Workspace Tabs, Visible Resources And Distinct Tool Icons
+
+用户在真实 Project 中同时打开多个文件后确认：Right Workspace Tab 会延伸到 window-right controls 下方，
+代码与图片 Tab 虽已建立但内容区可能保持空白；同时右侧 PowerShell 与底部 Terminal、审阅入口与 Conversation
+变更卡片缺少可辨识的图标语义。当前 Tab Strip 改为在右上 controls 前结束的 bounded horizontal lane，超出时
+只在 lane 内滚动，active Tab 自动回到可视区，`+` 与标签均不得进入 controls 区域。
+
+File/Image 打开流程现在先建立带 loading presentation 的 session-local Tab，再异步填充真实文本或 binary-safe
+image preview；任何阶段都不再静默渲染空白。Syntax paint 位于透明 textarea 之上，Image viewer 取得完整可用
+尺寸。真实 Electron E2E 不再只检查节点存在，而是验证代码 value 与 paint text、图片 `naturalWidth` 和 rendered
+size。Conversation/Right Dock 的 4px divider hit track 同时改为 Content paint，只有居中的 1px neutral gray edge
+可见，hover/dragging 不再出现品牌紫或增粗。
+
+Review 与 Conversation changed-files 统一使用 canonical `PlusSquare`；右侧 PowerShell 保留 `Terminal`，底部
+Terminal 使用 `TerminalWindow`。全部来自既有 Phosphor registry，不新增 SVG、Pane、Route、Runtime、Schema、
+Migration、Permission 或 Agent 语义。
+
+```text
+RIGHT_DOCK_TAB_OVERFLOW: BOUNDED HORIZONTAL SCROLL
+ACTIVE_TAB_VISIBILITY: AUTO_REVEAL
+WINDOW_RIGHT_CONTROL_OVERLAP: FORBIDDEN
+FILE_PREVIEW_SILENT_BLANK: FORBIDDEN
+CODE_AND_IMAGE_VISIBLE_CONTENT_E2E: PASS
+DIVIDER_HIT_TRACK_PAINT: CONTENT
+DIVIDER_VISIBLE_EDGE: 1PX NEUTRAL IN ALL STATES
+RIGHT_TERMINAL_ICON: TERMINAL
+BOTTOM_TERMINAL_ICON: TERMINAL_WINDOW
+REVIEW_ICON: PLUS_SQUARE
+```
+
+## 119. Animated Dock Focus And Frame-coalesced Divider Resize
+
+Right Workspace Dock 的扩展/恢复不再在两套不兼容的 Grid track 之间瞬切；同一注册的
+length-percentage track 现在从用户偏好宽度连续插值到可用 Work Area，Conversation 同步收窄并淡出，恢复时
+反向执行。全局 Reduced Motion 仍能把该过渡压缩为即时切换。
+
+Workspace divider 只消费每次 pointer event 的最后一个 coalesced sample，并继续以 `requestAnimationFrame`
+合并为每帧一次。直接拖动期间关闭 panel track transition、暂停重复的 syntax highlight paint，同时保持原始代码
+文字可见；pointer release 后立即恢复完整 syntax presentation。Pane、Runtime、FIPC、Schema/Migration 与用户
+宽度持久化不变。
+
+```text
+DOCK_FOCUS_TRANSITION: INTERPOLATED PANEL TRACK
+DIVIDER_POINTER_UPDATES: LATEST COALESCED SAMPLE / ONE PER FRAME
+DRAG_LAYOUT_TRANSITION: OFF
+DRAG_CODE_VISIBILITY: PRESERVED
+REDUCED_MOTION: PRESERVED
+```
+
+## 120. Workspace Tab Context Actions And Adjacent Add Control
+
+Right Workspace Tab 现在拥有受控右键菜单：重新加载、复制、重命名、关闭、关闭其他、关闭右侧。File/Image
+复制会建立独立 session-local Tab presentation，重命名只改显示标签，不修改文件路径或 Runtime identity；Browser
+Page 仍使用 Browser Runtime 既有原生 Page 菜单，聊天分支不错误进入 File/Tool Tab。
+
+“＋”恢复为紧跟 bounded Tab lane 的控制，不再被 flex 拉到右上 window controls 前；Tool Menu 越过 Header
+overflow 正常可见，仍只打开既有五种 Workspace Tool，不新增 Pane 或 Runtime。
+
+```text
+WORKSPACE_TAB_CONTEXT: RELOAD / DUPLICATE / RENAME / CLOSE / CLOSE_OTHERS / CLOSE_RIGHT
+WORKSPACE_TAB_CHAT_BRANCH: NOT_APPLICABLE
+ADD_CONTROL_POSITION: ADJACENT_TO_TAB_LANE
+ADD_TOOL_MENU_CLIPPED: NO
+```
+
+## 121. Artifact Launcher De-duplication And Plus/Minus Review Icon
+
+用户复看右侧工具启动器后确认“工作对象”与文件/资源预览形成重复心智。该常驻入口已从零标签启动页与“＋”
+Tool Menu 移除；底层 Artifact 持久化、版本、active context 与 Agent 创建后直接打开的独立 Tab 均保留，因此不是
+删除 Artifact 能力。工具启动器现在只包含审阅、PowerShell、浏览器和文件。
+
+审阅及 Conversation changed-files 的 canonical `diff` glyph 从只有“＋”的 `PlusSquare` 改为
+`PlusMinus`，由共享 optical box 增加圆角方框，确保“＋ / −”同时可辨。没有新增手绘 SVG、Pane、Route、
+Runtime、FIPC、Schema/Migration 或 Agent semantics。
+
+```text
+PERSISTENT_ARTIFACT_TOOL_ENTRY: REMOVED
+AGENT_CREATED_ARTIFACT_TAB: PRESERVED
+ARTIFACT_RUNTIME_AND_PERSISTENCE: PRESERVED
+RIGHT_DOCK_LAUNCHER: REVIEW / POWERSHELL / BROWSER / FILES
+REVIEW_ICON: BOXED_PLUS_MINUS
+```
+
+## 122. Compact Conversation Corner And Resize-aware Active Tab Reveal
+
+用户以 Codex 窗口参考确认 Conversation Content 左上 `28px` 弧度偏大。Conversation 现在使用独立
+`--fl-radius-conversation-surface`：Standard 为 `16px`，Small/Large 为 `12px / 20px`；Settings、Scheduled
+与 Library 继续使用既有 Work Surface radius，Conversation 右上保持直角。
+
+真实多标签回归同时暴露：active Tab 初次 reveal 后，Dock 宽度动画仍可能再次缩短 Tab lane。Tab Strip 现在由
+ResizeObserver 在尺寸变化后按 animation frame 重新 reveal active Tab，避免动画结束时标签被右侧 controls 截断。
+该轮只调整 Presentation 与观察时序，不改变 Pane ownership、Runtime、FIPC、Schema/Migration 或 Agent semantics。
+
+```text
+CONVERSATION_TOP_LEFT_RADIUS: 16PX STANDARD / 12PX SMALL / 20PX LARGE
+CONVERSATION_TOP_RIGHT_RADIUS: 0
+ACTIVE_TAB_REVEAL_AFTER_DOCK_RESIZE: YES
+```
+
+## 123. Window-level Workspace Tool Menu
+
+单标签 Browser host 暴露出“＋”Tool Menu 虽声明为 Overlay、实际仍挂在 Right Dock Header 内的问题：菜单左侧会被
+Dock 的 overflow 边界截断。Tool Menu 现在与通用 Tab context menu 一样通过 `document.body` Portal 承载，使用
+fixed viewport 坐标；打开、窗口 Resize 与祖先 Scroll 时重新读取触发器和菜单真实 bounds，并在窗口边缘自动翻转、
+保持至少 `8px` inset。点击菜单项、外部点击和 Escape 的关闭语义保持。
+
+真实 Electron Workspace Dock 回归增加“仅一个 Browser Tab”场景，验证 Portal parent、fixed positioning、四边
+viewport bounds 与左上命中测试，避免仅以 DOM 存在制造假绿。Pane ownership、Browser Runtime、FIPC、
+Schema/Migration、Permission 与 Agent semantics 不变。
+
+```text
+WORKSPACE_TOOL_MENU_HOST: DOCUMENT_BODY_PORTAL
+WORKSPACE_TOOL_MENU_POSITION: FIXED / MEASURED / VIEWPORT_CLAMPED
+SINGLE_BROWSER_TAB_MENU_CLIPPED: NO
+```

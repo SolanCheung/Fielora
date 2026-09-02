@@ -29,7 +29,7 @@ DesktopChrome
 ```
 
 - Conversation 与 Right Workspace Dock 是同一个连续 `Content` 背景上的两个工作视图，不建立两套页面底板。
-- Conversation、Settings 与 Scheduled 的 Content pane 使用同一个 `--fl-radius-work-surface` 左上接入 Chrome；其外层 shell 只在既有圆角切口处露出同一 Brand Chrome canvas，保证弧度真实可见而不向正文着色。Conversation 右上角保持原有直角，不随 Brand Chrome 调整。
+- Settings 与 Scheduled 的 Content pane 使用 `--fl-radius-work-surface` 左上接入 Chrome；Conversation 使用更克制的 `--fl-radius-conversation-surface`（Standard `16px`，Small/Large `12px / 20px`）。其外层 shell 只在既有圆角切口处露出同一 Brand Chrome canvas，保证弧度真实可见而不向正文着色。Conversation 右上角保持直角，不随 Brand Chrome 调整。
 - Window Chrome、Project Navigation 与 Settings Navigation 保持同一个连续 Chrome owner，并通过显式 `data-brand-chrome="top|navigation"` 消费可替换的 Brand Chrome token bundle。Light 使用一张跨整个 viewport 的低饱和近白薰衣草/雾粉画布，Navigation 以 `-44px` 纵向偏移续接顶栏；顶栏进入原生 Window Controls Overlay 前必须平滑收敛到当前 Sidebar solid/gradient 的右端色，并将同一 HEX 传给 native caption，主题切换和自定义色都不得产生竖向接缝。该作用域不得进入 Conversation、Settings Content、Right Workspace Dock、Right Dock Tab Strip、Utility Workspace 或 Overlay。
 - Settings 与 Scheduled 内容区复用同一 `Content` 背景；Scheduled 直接复用 Project 的 Primary Navigation，二者均通过共享 `WorkspaceSurface` 持有相同宽度偏好与 resizer。
 - Bottom Terminal 是工作区底层，不进入左侧导航，也不成为第四列。
@@ -38,11 +38,15 @@ DesktopChrome
 
 Canonical geometry 位于 `styles/layout.css`；真实页面结构由 `WorkspaceSurface`、`ProjectWorkspace`、`RightWorkspaceDock` 和 `DesktopChrome` 持有。
 
-Workbench 比例同样属于锁定布局，不属于材质：Project/Settings/Scheduled Navigation 默认 `304px`、允许在 `220–560px` 内调整并共享宽度偏好；Right Workspace Dock 默认 `635px`、最小 `360px`；Conversation Pane 最小 `340px`，reading column 为 `920px`，Composer 为 `920px`。应用初始窗口保持 `1180px` 宽，初始窗口高度等于允许的最小高度 `560px`；用户之后仍可正常调整窗口。Navigation 收起时必须释放整个导航列与 resizer，Conversation、Settings 或 Scheduled Content 原地扩展占用可用 Work Area。Settings、Scheduled 与 Conversation 复用同一 `WorkspaceSurface` 和 Content frame，Settings 不显示 Project 工具按钮，Settings 与 Scheduled Content 自身纵向滚动。Dock 不使用截图像素形成固定上限：可用上限始终为当前 Project Work Area 扣除实际 Navigation、Conversation 最小宽度与 resizer 后的剩余宽度。用户拖动得到的偏好宽度独立持久化；窗口缩小时仅临时 clamp，窗口再次放大时恢复该偏好宽度。历史版本持久化的极窄值在读取时恢复为当前默认比例。窄窗口策略与 Pane ownership 不变。Conversation 与 Right Workspace Dock 之间始终保留可发现但低对比的 `1px` neutral divider；拖动命中区可以更宽，但不得表现成厚边框。Project Navigation 与 Conversation 之间的 resizer 默认不可见，hover 只显示极轻 neutral edge，dragging 才适度增强；其命中宽度不得随视觉线宽变化。拖动开始时一次性缓存 Work Area、Navigation 和动态 max，pointer move 每帧只更新宽度 CSS variable，结束时才提交 React state 与持久化；Browser native view 的 bounds 同步必须 latest-only 合并，纯几何变化不得反复回写 Browser React state。
+Workbench 比例同样属于锁定布局，不属于材质：Project/Settings/Scheduled Navigation 默认 `304px`、允许在 `220–560px` 内调整并共享宽度偏好；Right Workspace Dock 默认 `635px`、最小 `360px`；Conversation Pane 最小 `340px`，reading column 为 `920px`，Composer 为 `920px`。应用初始窗口保持 `1180px` 宽，初始窗口高度等于允许的最小高度 `560px`；用户之后仍可正常调整窗口。Navigation 收起时必须释放整个导航列与 resizer，Conversation、Settings 或 Scheduled Content 原地扩展占用可用 Work Area。Settings、Scheduled 与 Conversation 复用同一 `WorkspaceSurface` 和 Content frame，Settings 不显示 Project 工具按钮，Settings 与 Scheduled Content 自身纵向滚动。Dock 不使用截图像素形成固定上限：可用上限始终为当前 Project Work Area 扣除实际 Navigation、Conversation 最小宽度与 resizer 后的剩余宽度。用户拖动得到的偏好宽度独立持久化；窗口缩小时仅临时 clamp，窗口再次放大时恢复该偏好宽度。历史版本持久化的极窄值在读取时恢复为当前默认比例。窄窗口策略与 Pane ownership 不变。Conversation 与 Right Workspace Dock 之间始终保留可发现但低对比的 `1px` neutral gray divider；它只消费 Light/Dark 对应的 `--fl-color-workspace-divider`，不得从 Brand Chrome、Accent 或用户 Action Color 混色。拖动命中区可以更宽，但视觉线及 hover/dragging 状态始终保持 `1px`，不得表现成厚边框。Project Navigation 与 Conversation 之间的 resizer 默认不可见，hover 只显示极轻 neutral edge，dragging 才适度增强；其命中宽度不得随视觉线宽变化。拖动开始时一次性缓存 Work Area、Navigation 和动态 max，pointer move 每帧只更新宽度 CSS variable，结束时才提交 React state 与持久化；Browser native view 的 bounds 同步必须 latest-only 合并，纯几何变化不得反复回写 Browser React state。
 
-Right Workspace Dock 的“＋”只在至少存在一个标签时显示；零标签状态由 Dock 内的工作对象启动页提供入口，不重复显示空 Tab Strip 操作。关闭最后一个标签或手动收起 Dock 时，Conversation minimum、divider 与 Dock width 使用可插值 length track 在 `--fl-duration-panel` 内同步收起，Panel 内容同时淡出并向右移动；若用户启用 Reduced Motion，仍遵守全局无动画设置。
+Right Workspace Dock 的“＋”只在至少存在一个标签时显示；零标签状态由 Dock 内的工具启动页提供入口，不重复显示空 Tab Strip 操作。关闭最后一个标签或手动收起 Dock 时，Conversation minimum、divider 与 Dock width 使用可插值 length track 在 `--fl-duration-panel` 内同步收起，Panel 内容同时淡出并向右移动；若用户启用 Reduced Motion，仍遵守全局无动画设置。
 
-全局 Summon、浮动 Summon 按钮、`Ctrl+Shift+Space`、右侧“侧边聊天”工具和 `Ctrl+Alt+S` 已从当前产品删除。右侧 Dock 的零标签启动页固定只提供工作对象、审阅、PowerShell、浏览器和文件五个入口；模型交互由 Project Conversation / Agent 工作流拥有，Inbox 与模型服务设置继续作为独立 Surface 存在，不以隐藏入口保留第二套 Summon UI。
+Right Workspace Dock 的扩展/恢复同样只能改变上述可插值 track：Conversation 连续收窄/恢复并淡出/淡入，Dock 在 `--fl-duration-panel` 内占满/退回用户偏好宽度，不得通过两套不兼容的 `grid-template-columns` 瞬切。直接拖动 Divider 时则关闭该 track transition；coalesced pointer samples 只取最新位置，并继续以 `requestAnimationFrame` 合并为每帧一次 CSS width 更新，结束时才提交 React state 与持久化。代码视图可以在拖动期间暂停重复 syntax paint，但必须保持原始代码文字可见并在释放后立即恢复。Reduced Motion 继续由全局设置即时关闭面板过渡。
+
+Tab Strip 的“＋”紧跟在 bounded tab lane 的右边，不得被拉伸到 window controls 前形成孤立按钮；点击后显示由 `document.body` Portal 承载的 fixed Tool Menu。该 Menu 使用触发器的 viewport bounds 定位，在窗口边缘自动翻转并保持至少 `8px` inset，不得受 Tab Strip、单标签 Browser host 或 Right Dock overflow 裁剪。通用 Workspace Tab 通过受控右键 Menu 提供重新加载、复制、重命名、关闭、关闭其他与关闭右侧标签；Browser Page 继续复用 Browser Runtime 的原生 Page context menu。Conversation branch 不属于 File/Tool Tab 语义，不得伪装成 Workspace Tab 操作。
+
+全局 Summon、浮动 Summon 按钮、`Ctrl+Shift+Space`、右侧“侧边聊天”工具和 `Ctrl+Alt+S` 已从当前产品删除。右侧 Dock 的零标签启动页固定只提供审阅、PowerShell、浏览器和文件四个入口；“工作对象”不再作为常驻工具，与文件预览形成重复心智。Agent 新建的 Artifact 仍直接打开为独立 Tab，底层持久化、版本与上下文能力保持。模型交互由 Project Conversation / Agent 工作流拥有，Inbox 与模型服务设置继续作为独立 Surface 存在，不以隐藏入口保留第二套 Summon UI。
 
 ## 2. Cascade Ownership
 
@@ -119,7 +123,9 @@ Contrast 控件使用无外围输入框的 3px neutral/action track、20px stron
 - Phosphor 组件独占 glyph 的 `fill` / `stroke` / `stroke-width` / `weight`；CSS 只管理 optical box、`currentColor`、布局和交互状态。禁止把 `<AppIcon>`、Composer、Select 或文件图标重新套入旧手绘 SVG 的 `fill:none + stroke` 规则，否则填充式 glyph 会被抹除并错误呈现为禁用态。
 - 可操作图标默认必须达到 secondary icon contrast；只有真实 `disabled` 控件允许通过控件级 opacity 降权，不能在 glyph 本身设置低透明度模拟 disabled。
 - 文件类型通过 `ui/FileTypeIcon.tsx` 使用同一 Phosphor family 和集中 file-type color tokens。
-- `工作对象` 使用 Icon Registry 中独立的 `objects → Shapes` 语义入口；不得借用表示“新建文件”的 `filePlus`，Tab、工具入口与空状态必须一致。
+- Agent 生成的 `工作对象` Tab 与空状态使用 Icon Registry 中独立的 `objects → Shapes` 语义，不再占用零标签工具启动页；不得借用表示“新建文件”的 `filePlus`。
+- `审阅` 与 Conversation 完成结果中的变更入口统一使用 `diff → PlusMinus`，并由 canonical optical box 添加圆角方框，使“＋ / −”同时可辨；不使用只有“＋”的 `PlusSquare` 或分支状 `GitDiff`。右侧 PowerShell 工具使用 `terminal → Terminal`，底部 Terminal 控件与标题使用 `terminalPanel → TerminalWindow`，同一行出现时必须可区分。
+- 右侧工作区的扩展/恢复控件固定使用 `focus → ArrowsOutSimple` 双对角展开图标，不使用四向 `ArrowsOut`。
 - 禁止组件内手绘 SVG、Unicode glyph、emoji 图标、局部 icon registry 或 CSS 伪元素画图标。
 - 例外只有真实外部应用的本机 icon、站点 favicon 和用户内容媒体；它们不是 Fielora 产品 glyph。
 - Fielora 品牌标记是另一项明确例外：`apps/desktop/assets/fielora-brand-mark.svg` 是 Renderer 的 canonical 品牌源；当前 mark 固定三条 `#5840C8` 花瓣 path 且中心保持透明负空间。`render-brand-svg.cjs` 只生成 Windows icon pipeline 消费的同形 PNG，再由既有 `icon:generate` 生成 ICO；不得在组件中复制第二份品牌图或恢复中心圆。
@@ -162,7 +168,7 @@ Brand Chrome 是 `Chrome` 内的显式产品子主题，不是第六种 Surface�
 
 所有工作区正文区域使用同一个 `Content` 基础背景。材质变化不得增加 Pane 间实色割裂、重复标题栏、大面积状态色、装饰性 gradient card 或重阴影。
 
-Conversation Header 不常驻 Project 打开方式控件；Project 外部打开器只属于 File/Resource toolbar。Right Workspace Dock 中的工作对象与 Browser viewer 均使用标准白色 `Content` plane。嵌入 Right Workspace Dock 的 Browser Page 必须直接使用 Dock 顶部的共享 Tab Strip，不得在内容区重复绘制第二层 Page Strip；active Tab 只以中性 material shift 与文字状态表达，禁止在标签底部绘制蓝色或紫色 indicator。其内部固定为 `Address Toolbar → Viewport` 两行，自上而下占满动态 Dock。独立 Browse Route 可以保留自己的 Page Strip。共享 Page Tab / Address Toolbar 分别为约 `32px / 44px`，地址框为 `34px`，导航与更多操作为 `30px`；空状态使用中性的 Browser glyph、`开始浏览` 与一行说明，不形成 Landing Page 式大标题。
+Conversation Header 不常驻 Project 打开方式控件；Project 外部打开器只属于 File/Resource toolbar。Right Workspace Dock 中的工作对象与 Browser viewer 均使用标准白色 `Content` plane。嵌入 Right Workspace Dock 的 Browser Page 必须直接使用 Dock 顶部的共享 Tab Strip，不得在内容区重复绘制第二层 Page Strip；active Tab 只以中性 material shift 与文字状态表达，禁止在标签底部绘制蓝色或紫色 indicator。共享 Tab Strip 必须在 window-right controls 前结束并保留 `126px` clearance；标签超过可视宽度时只在该 bounded lane 内横向滚动，激活标签自动滚回可视区，且 Dock 宽度动画导致 lane 再次变化时必须由 ResizeObserver 重做 reveal，不能覆盖 Focus/Terminal/Panel 控件。其内部固定为 `Address Toolbar → Viewport` 两行，自上而下占满动态 Dock。独立 Browse Route 可以保留自己的 Page Strip。共享 Page Tab / Address Toolbar 分别为约 `32px / 44px`，地址框为 `34px`，导航与更多操作为 `30px`；空状态使用中性的 Browser glyph、`开始浏览` 与一行说明，不形成 Landing Page 式大标题。
 
 ## 7. Change Protocol（强制）
 
@@ -212,7 +218,7 @@ apps/desktop/webpack.renderer.ts
 | Selected row radius | ≈8px | 8px |
 | Main readable width | ≈920px | 920px |
 | Right Workspace Dock default | ≈635px | 635px（不是 max） |
-| Divider | ≈1px / 6–8% neutral | 1px / 6% neutral |
+| Divider | ≈1px / 6–8% neutral | 1px neutral visual / 4px content-painted hit track |
 
 Light appearance 的 Content 文字/图标对比基线为：Primary `#181a1f`、Secondary `#343a43`、Muted `#717a87`、普通图标 `#505761`。工作内容中的亮紫色只用于菜单选中标记与 Composer 发送/停止主操作；Workspace 顶部 active Tab 使用 neutral material shift，不使用底部 accent line。显式 Brand Chrome 是独立例外，只覆盖 Desktop 顶栏与左导航，并使用其自有高对比 foreground/selection tokens。普通 Content 导航、展开状态、进度、文件、工具栏与焦点反馈均使用 Neutral，成功/警告/危险继续使用各自语义色。Project expanded 不是 selected；同一导航链只保留 Current Conversation 的 selection。Composer 仍由 `Floating` material resolver 绘制，但使用低一级 surface shadow，减少独立 Card 感。
 
@@ -225,10 +231,10 @@ Conversation 顶部遵循单行 Header：项目文件夹图标 → 当前 Conver
 - Packaged Renderer 能挂载真实界面，React singleton contract 有静态回归测试。
 - Design-system static tests 覆盖 cascade、type roles、Phosphor icon entry、glyph paint ownership、shared primitives、material ownership 和 legacy raw-color budget。
 - Brand Chrome static contract 验证唯一 PNG 品牌源、顶部/左导航显式作用域、同一 viewport canvas 与 `-44px` 续接坐标、只在既有 Content 圆角切口可见的 shell underlay、受控 Logo opacity、Light/Dark token bundle、native caption 连续性，以及 Conversation/Right Workspace Dock/Utility 的零品牌 token 消费；Conversation 右上几何必须保持不变。真实 Electron 视觉验收仍判断渐变、Logo 与五层 Surface 的最终质量。
-- Workspace packaged E2E 以 `data-file-kind` 验证真实 Phosphor file icon，不再依赖已删除的手绘 SVG tile path。
-- Workspace E2E 验证 Navigation/Dock 使用 `304px / 635px` 默认比例；Scheduled/Settings/Conversation 路由共享 Navigation 宽度和 Content 左上圆角，初始窗口为 `1180 × 560px`。Dock 可持续向左扩展到动态可用上限，在 `1280 / 1440 / 1920` 窗口下实时 clamp，并在窗口重新放大后恢复用户偏好宽度；零标签不显示“＋”，关闭最后标签会采样到多个中间宽度。Dock launcher 只含五个当前入口且没有侧边聊天。File / Browser / Terminal 视图占满 Dock 且不添加内部固定宽度上限。
-- Workspace presentation tests 验证 Conversation Header 不再渲染 Project launcher、工作对象统一使用 `objects` 图标和白色 Content surface、嵌入式 Browser Page 直接复用 Dock Tab Strip，且 Address Toolbar / Viewport 流体占满剩余空间。
-- Terminal 定向测试验证命令输入在 IPC 建立 run id 前仍接收首个真实事件，右侧与底部终端继续复用真实 Workspace Runtime；Terminal glyph 统一使用 Phosphor `Terminal`。
+- Workspace packaged E2E 以 `data-file-kind` 验证真实 Phosphor file icon，不再依赖已删除的手绘 SVG tile path；File/Image viewer 必须进一步证明代码输入值与上层 syntax paint 同时包含真实内容、图片完成解码且 `naturalWidth/naturalHeight` 与渲染尺寸均大于 0，禁止仅以 DOM 节点存在判定 PASS。
+- Workspace E2E 验证 Navigation/Dock 使用 `304px / 635px` 默认比例；Scheduled/Settings 使用标准 Work Surface 圆角，Conversation 使用 `16px` compact 左上圆角并共享 Navigation 宽度，初始窗口为 `1180 × 560px`。Dock 可持续向左扩展到动态可用上限，在 `1280 / 1440 / 1920` 窗口下实时 clamp，并在窗口重新放大后恢复用户偏好宽度；零标签不显示“＋”，关闭最后标签会采样到多个中间宽度。Dock launcher 只含审阅、PowerShell、浏览器、文件四个当前入口且没有侧边聊天或工作对象常驻项。File / Browser / Terminal 视图占满 Dock 且不添加内部固定宽度上限。
+- Workspace presentation tests 验证 Conversation Header 不再渲染 Project launcher、工作对象不再成为常驻工具但 Agent 生成的 Artifact 仍使用直接 Tab 与白色 Content surface、嵌入式 Browser Page 直接复用 Dock Tab Strip，且 Address Toolbar / Viewport 流体占满剩余空间。
+- Terminal 定向测试验证命令输入在 IPC 建立 run id 前仍接收首个真实事件，右侧与底部终端继续复用真实 Workspace Runtime；右侧工具使用 Phosphor `Terminal`，底部终端使用 `TerminalWindow`，语义相同但 presentation 可辨识。
 - Managed Tooltip 与 Workspace Content Viewer E2E 分别验证顶栏提示避开原生 Chrome，以及 Sidebar 无树形竖线、Project/Conversation hover card 使用真实标题、时间与路径。
 - Visual Golden E2E 固定在 `1600 × 816`，记录并断言 Typography、Icon、Sidebar、Selection、Composer、Toolbar、Dock、Divider 与无横向溢出；只生成 Sidebar + Conversation、Conversation + Composer、Workspace open、Settings 四张证据。
 - 只对本轮触达的 packaged UI 路径运行最小 E2E；不以无关 Agent/Provider/Rust 全量 Gate 代替 UI 验证。

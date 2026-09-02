@@ -33,6 +33,7 @@ async function dragDivider(cdp, delta, steps = 1) {
   const y = rect.y + Math.min(120, rect.height / 2);
   const widths = [];
   await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 16));
   for (let step = 1; step <= steps; step += 1) {
     const position = x + (delta * step / steps);
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: position, y, button: 'left', buttons: 1 });
@@ -49,6 +50,7 @@ async function dragDividerThroughCollapseAndBack(cdp, selector, collapseX, resto
   const x = rect.x + rect.width / 2;
   const y = rect.y + Math.min(120, rect.height / 2);
   await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 16));
   try {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: collapseX, y, button: 'left', buttons: 1 });
     await wait(cdp, collapsedExpression);
@@ -77,6 +79,7 @@ async function metrics(cdp) {
     const resizer=document.querySelector('[data-testid="project-workspace-resizer"]');
     const dividerLine=resizer?.querySelector('span');
     const dividerStyle=dividerLine?getComputedStyle(dividerLine):null;
+    const resizerStyle=resizer?getComputedStyle(resizer):null;
     const activeView=rect('[data-testid="right-dock-active-view"]');
     return{
       viewport:innerWidth,
@@ -84,6 +87,8 @@ async function metrics(cdp) {
       ariaMax:Number(resizer?.getAttribute('aria-valuemax')),
       dividerOpacity:dividerStyle?.opacity??null,
       dividerBackground:dividerStyle?.backgroundColor??null,
+      dividerLineWidth:dividerLine?.getBoundingClientRect().width??null,
+      dividerTrackBackground:resizerStyle?.backgroundColor??null,
       stored:Number(localStorage.getItem('fielora:project-workspace-width')),
       activeKind:document.querySelector('.right-dock-view:not([hidden])')?.getAttribute('data-dock-kind')??null,
       activeViewStyle:style('.right-dock-view:not([hidden])'),
@@ -146,7 +151,9 @@ try {
   assertDynamicMaximum(initial, '1440-default');
   assert.ok(Math.abs(initial.dock.width - 635) <= 2, JSON.stringify(initial));
   assert.ok(Number(initial.dividerOpacity) >= 0.9, `Dock divider is not visibly rendered: ${JSON.stringify(initial)}`);
-  assert.notEqual(initial.dividerBackground, 'rgba(0, 0, 0, 0)');
+  assert.equal(initial.dividerBackground, 'rgba(96, 105, 116, 0.18)');
+  assert.ok(Math.abs(initial.dividerLineWidth - 1) <= 0.1, JSON.stringify(initial));
+  assert.equal(initial.dividerTrackBackground, 'rgb(255, 255, 255)');
   assertToolFillsDock(initial, initial.fileStyle, 'File');
 
   await dragDividerThroughCollapseAndBack(

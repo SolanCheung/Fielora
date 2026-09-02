@@ -8,6 +8,12 @@
 }
 .app-icon.size-sm { width: var(--fl-icon-sm); height: var(--fl-icon-sm); }
 .app-icon.size-lg { width: var(--fl-icon-lg); height: var(--fl-icon-lg); }
+.app-icon[data-icon="diff"] {
+  box-sizing: border-box;
+  padding: 2px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+}
 
 .ui-button {
   min-height: var(--fl-control-md);

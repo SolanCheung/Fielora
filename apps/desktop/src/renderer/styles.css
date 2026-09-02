@@ -966,7 +966,8 @@ input[type="checkbox"]:checked::before { transform: translateY(-1px) rotate(-45d
 .right-dock-tab-close:hover, .right-dock-add:hover { background: var(--fl-color-surface-hover-strong); }
 .right-dock-tab-close .shell-icon, .right-dock-add .shell-icon { width: 14px; height: 14px; }
 .right-dock-add-wrap { position: relative; width: 30px; height: 32px; flex: 0 0 30px; display: grid; place-items: center; }
-.right-dock-tool-menu { position: absolute; z-index: var(--fl-layer-popover); top: calc(100% + 5px); right: 4px; width: 184px; padding: 5px; border: 1px solid var(--fl-effect-boundary); border-radius: var(--fl-radius-input); color: var(--fl-color-text); background: var(--fl-surface-overlay); box-shadow: var(--fl-shadow-overlay); }
+.right-dock-tool-menu-layer { position: fixed; z-index: var(--fl-layer-popover); width: 184px; }
+.right-dock-tool-menu { width: 100%; padding: 5px; border: 1px solid var(--fl-effect-boundary); border-radius: var(--fl-radius-input); color: var(--fl-color-text); background: var(--fl-surface-overlay); box-shadow: var(--fl-shadow-overlay); }
 .right-dock-tool-menu button { width: 100%; min-height: 34px; display: grid; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: var(--fl-radius-control); color: inherit; background: transparent; text-align: left; font: var(--fl-font-size-label)/1.35 var(--fl-font-sans); }
 .right-dock-tool-menu button:hover, .right-dock-tool-menu button:focus-visible { color: var(--fl-color-text-strong); background: var(--fl-color-control-hover); outline: 0; }
 .right-dock-tool-menu .app-icon { color: var(--fl-color-icon-muted); }

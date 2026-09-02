@@ -141,6 +141,7 @@
   --fl-radius-card: 12px;
   --fl-radius-surface: 16px;
   --fl-radius-work-surface: 28px;
+  --fl-radius-conversation-surface: 16px;
   --fl-radius-composer: 16px;
   --fl-radius-dialog: 16px;
   --fl-radius-pill: 999px;
@@ -229,6 +230,8 @@
   --fl-color-border-strong: #d7dbe1;
   --fl-color-divider: rgba(60, 69, 82, 0.06);
   --fl-color-divider-hover: rgba(75, 82, 94, 0.16);
+  --fl-color-workspace-divider: rgba(96, 105, 116, 0.18);
+  --fl-color-workspace-divider-active: rgba(96, 105, 116, 0.34);
   --fl-color-focus: color-mix(in srgb, var(--fl-color-accent) 42%, transparent);
 
   /* Semantic states */
@@ -357,6 +360,8 @@
   --fl-color-border-strong: #424751;
   --fl-color-divider: rgba(205, 211, 221, 0.065);
   --fl-color-divider-hover: rgba(205, 211, 221, 0.18);
+  --fl-color-workspace-divider: rgba(205, 211, 221, 0.18);
+  --fl-color-workspace-divider-active: rgba(205, 211, 221, 0.34);
   --fl-color-focus: color-mix(in srgb, var(--fl-color-accent) 62%, transparent);
   --fl-color-danger: #d46a7c;
   --fl-color-warning: #d49853;
@@ -431,9 +436,9 @@
 :root[data-ui-density="standard"] { --fl-density-row-y: 8px; --fl-density-control: 34px; --fl-density-composer-y: 9px; --fl-density-section-gap: 16px; }
 :root[data-ui-density="compact"] { --fl-density-row-y: 6px; --fl-density-control: 30px; --fl-density-composer-y: 6px; --fl-density-section-gap: 12px; }
 
-:root[data-ui-radius="small"] { --fl-radius-control: 6px; --fl-radius-input: 8px; --fl-radius-card: 10px; --fl-radius-surface: 14px; --fl-radius-work-surface: 24px; --fl-radius-composer: 14px; --fl-radius-dialog: 14px; }
-:root[data-ui-radius="standard"] { --fl-radius-control: 8px; --fl-radius-input: 10px; --fl-radius-card: 12px; --fl-radius-surface: 16px; --fl-radius-work-surface: 28px; --fl-radius-composer: 16px; --fl-radius-dialog: 16px; }
-:root[data-ui-radius="large"] { --fl-radius-control: 10px; --fl-radius-input: 12px; --fl-radius-card: 16px; --fl-radius-surface: 20px; --fl-radius-work-surface: 32px; --fl-radius-composer: 22px; --fl-radius-dialog: 20px; }
+:root[data-ui-radius="small"] { --fl-radius-control: 6px; --fl-radius-input: 8px; --fl-radius-card: 10px; --fl-radius-surface: 14px; --fl-radius-work-surface: 24px; --fl-radius-conversation-surface: 12px; --fl-radius-composer: 14px; --fl-radius-dialog: 14px; }
+:root[data-ui-radius="standard"] { --fl-radius-control: 8px; --fl-radius-input: 10px; --fl-radius-card: 12px; --fl-radius-surface: 16px; --fl-radius-work-surface: 28px; --fl-radius-conversation-surface: 16px; --fl-radius-composer: 16px; --fl-radius-dialog: 16px; }
+:root[data-ui-radius="large"] { --fl-radius-control: 10px; --fl-radius-input: 12px; --fl-radius-card: 16px; --fl-radius-surface: 20px; --fl-radius-work-surface: 32px; --fl-radius-conversation-surface: 20px; --fl-radius-composer: 22px; --fl-radius-dialog: 20px; }
 
 :root[data-ui-contrast="soft"] { --fl-color-text-muted: color-mix(in srgb, var(--fl-color-text-strong) 57%, var(--fl-color-canvas)); --fl-color-text-subtle: color-mix(in srgb, var(--fl-color-text-strong) 43%, var(--fl-color-canvas)); --fl-color-border: color-mix(in srgb, var(--fl-color-text-strong) 8%, var(--fl-color-canvas)); }
 :root[data-ui-contrast="high"],

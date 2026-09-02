@@ -104,6 +104,7 @@ test('app shell owns Canvas while the workspace uses one continuous Content plan
   assert.match(legacy, /\.workspace-surface \{[^}]*background: var\(--fl-surface-content\);/);
   assert.match(legacy, /\.conversation-column \{[^}]*background: var\(--fl-surface-content\);/);
   assert.match(layout, /\.conversation-column,[\s\S]*?\.settings-content,[\s\S]*?\.library-content \{[\s\S]*?border-radius: var\(--fl-radius-work-surface\) 0 0 0;/);
+  assert.match(layout, /\.conversation-column \{[\s\S]*?border-radius: var\(--fl-radius-conversation-surface\) 0 0 0;/);
   assert.match(layout, /\.project-navigation-resizer:hover span,[\s\S]*?opacity: \.38;[\s\S]*?background: var\(--fl-color-divider\);/);
   assert.match(appearance, /\.right-workspace-dock \{[^}]*background: var\(--fl-surface-content\)/);
   assert.doesNotMatch(legacy, /\.project-layout\.workspace-open \.right-workspace-dock \{ position: absolute/);
@@ -116,6 +117,10 @@ test('product icons use the managed Phosphor entry instead of component-owned sv
   assert.match(registry, /export function FieloraIcon/);
   assert.match(registry, /export const AppIcon = FieloraIcon/);
   assert.match(registry, /objects: Shapes/);
+  assert.match(registry, /focus: ArrowsOutSimple/);
+  assert.match(registry, /diff: PlusMinus/);
+  assert.match(read('styles/controls.css'), /\.app-icon\[data-icon="diff"\] \{[\s\S]*?border: 1\.5px solid currentColor;[\s\S]*?border-radius: 4px;/);
+  assert.match(registry, /terminalPanel: TerminalWindow/);
   assert.match(fileTypes, /from '@phosphor-icons\/react'/);
   assert.match(fileTypes, /weight="duotone"/);
   for (const file of ['DesktopChrome.tsx', 'ProjectWorkspace.tsx', 'SettingsScreen.tsx', 'RightWorkspaceDock.tsx', 'AgentTurn.tsx']) {
@@ -185,7 +190,8 @@ test('layout and typography ownership are explicit and documented', () => {
   assert.match(layout, /Conversation and right tools are two views on one continuous Content plane/);
   assert.match(layout, /The work canvas rounds into the shared app chrome/);
   assert.match(layout, /\.workspace-surface,[\s\S]*?\.right-workspace-dock,[\s\S]*?background: var\(--fl-surface-content\)/);
-  assert.match(layout, /\.project-layout\.workspace-open \{[\s\S]*?--fl-layout-workspace-dock-min/);
+  assert.match(layout, /\.project-layout\.workspace-open \{[\s\S]*?--fl-project-workspace-track: var\(--project-workspace-width, var\(--fl-layout-workspace-dock-default\)\)/);
+  assert.match(layout, /\.project-layout\.workspace-open\.dock-focused \{[\s\S]*?--fl-project-workspace-track: calc\(100%/);
   assert.match(layout, /\.right-workspace-dock,[\s\S]*?\.right-dock-view-browser \.browse-panel,[\s\S]*?\.right-terminal-view \.terminal-session \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?max-width: none;/);
   assert.doesNotMatch(read('ProjectWorkspace.tsx'), /PROJECT_WORKSPACE_MAX_WIDTH/);
   assert.match(layout, /\.conversation-composer \{[\s\S]*?--fl-layout-composer-width/);
@@ -229,7 +235,8 @@ test('shared navigation resize, collapse and Settings content behavior stay cano
   assert.match(layout, /\.library-content > \*,[\s\S]*?\.scheduled-page > \* \{[\s\S]*?width: 100%;/);
   assert.match(layout, /\.conversation-context-header \{[\s\S]*?calc\(\(100% - var\(--fl-layout-page-width\)\) \/ 2\)/);
   assert.match(layout, /\.conversation-column,[\s\S]*?\.scheduled-page,[\s\S]*?\.settings-content,[\s\S]*?\.library-content \{[\s\S]*?border-radius: var\(--fl-radius-work-surface\) 0 0 0;/);
-  assert.match(layout, /@property --fl-project-workspace-track[\s\S]*?syntax: "<length>"/);
+  assert.match(read('styles/tokens.css'), /--fl-radius-conversation-surface: 16px;/);
+  assert.match(layout, /@property --fl-project-workspace-track[\s\S]*?syntax: "<length-percentage>"/);
   assert.match(layout, /--fl-project-workspace-track var\(--fl-duration-panel\) var\(--fl-ease-panel\)/);
   assert.match(rightDock, /\{tabs\.length > 0 && <div className="right-dock-add-wrap"/);
   assert.match(main, /width: 1180,[\s\S]*?height: 560,[\s\S]*?minWidth: 900,[\s\S]*?minHeight: 560,/);

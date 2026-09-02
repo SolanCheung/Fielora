@@ -40,8 +40,16 @@ test('all project tools share one persistent right workspace dock with closable 
   assert.match(workspace, /tools=\{dockTools\}/);
   assert.match(dock, /data-testid="right-dock-home"/);
   assert.match(dock, /data-testid="right-dock-tool-menu"/);
-  assert.doesNotMatch(dock, /WorkspaceObjectPicker|createPortal/);
-  for (const id of ['artifacts', 'review', 'terminal', 'browser', 'files']) assert.match(workspace, new RegExp(`id: '${id}'`));
+  assert.match(dock, /createPortal\(<div ref=\{toolMenuRef\} className="right-dock-tool-menu-layer"[\s\S]*?document\.body\)/);
+  assert.match(styles, /\.right-dock-tool-menu-layer \{ position: fixed;[\s\S]*?z-index: var\(--fl-layer-popover\);/);
+  assert.match(dock, /onReload: \(id: string\) => void/);
+  assert.match(dock, /onDuplicate: \(id: string\) => void/);
+  assert.match(workspace, /onReload=\{reloadDockTab\}/);
+  assert.match(workspace, /onDuplicate=\{duplicateDockTab\}/);
+  assert.doesNotMatch(dock, /WorkspaceObjectPicker/);
+  assert.match(dock, /createPortal\(<div ref=\{contextMenuRef\}[\s\S]*?document\.body\)/);
+  for (const id of ['review', 'terminal', 'browser', 'files']) assert.match(workspace, new RegExp(`id: '${id}'`));
+  assert.doesNotMatch(workspace, /id: 'artifacts'/);
   assert.doesNotMatch(workspace, /id: 'chat'/);
 });
 
@@ -57,12 +65,20 @@ test('right workspace dock keeps a dynamic resize range and full-width tool view
   assert.match(workspace, /captureWorkspaceDragGeometry\(\)/);
   assert.match(workspace, /onResizeEnd=\{\(clientX\) =>/);
   assert.match(divider, /onResizeStart\?\.\(position\)/);
+  assert.match(divider, /requestAnimationFrame/);
+  assert.match(divider, /getCoalescedEvents/);
   assert.match(browser, /showInFlight/);
   assert.match(browser, /queuedBounds/);
   assert.doesNotMatch(browser, /browser\.show\(bounds\)\.then\(\(state\)/);
   assert.doesNotMatch(workspace, /PROJECT_WORKSPACE_MAX_WIDTH/);
   assert.match(layout, /\.right-workspace-dock,[\s\S]*?\.right-dock-view-browser \.browse-panel,[\s\S]*?\.right-terminal-view \.terminal-session \{[\s\S]*?width: 100%;[\s\S]*?max-width: none;/);
-  assert.match(layout, /\.project-layout\.workspace-open \.project-workspace-resizer span \{[\s\S]*?opacity: 1;[\s\S]*?14%/);
+  assert.match(layout, /\.project-layout\.workspace-open \.project-workspace-resizer span \{[\s\S]*?width: 1px;[\s\S]*?opacity: 1;[\s\S]*?var\(--fl-color-workspace-divider\)/);
+  assert.match(layout, /\.project-layout\.workspace-open \.project-workspace-resizer \{[\s\S]*?background: var\(--fl-surface-content\)/);
+  assert.match(layout, /\.project-layout\.workspace-open \.project-workspace-resizer\.dragging span \{[\s\S]*?width: 1px;[\s\S]*?var\(--fl-color-workspace-divider\)/);
+  assert.match(layout, /\.project-layout\.workspace-open\.dock-focused \{[\s\S]*?--fl-project-conversation-min-track: 0px;[\s\S]*?--fl-project-workspace-track: calc\(100%/);
+  assert.doesNotMatch(layout, /\.project-layout\.workspace-open\.dock-focused \{\s*grid-template-columns:/);
+  assert.match(layout, /:root\[data-resizing="vertical"\] \.project-layout \{\s*transition: none;/);
+  assert.match(layout, /:root\[data-resizing="vertical"\] \.dock-code-highlight \{\s*visibility: hidden;/);
 });
 
 test('a project can exist without a conversation and exposes a finite creation entry', () => {
@@ -79,6 +95,7 @@ test('project controls keep environment in the conversation header and file open
   assert.match(chrome, /className="project-context-controls"/);
   assert.match(chrome, /projectDockOpen\) && <ToolbarAction/);
   assert.match(chrome, /fielora:toggle-workspace-focus/);
+  assert.match(readFileSync(path.join(rendererRoot, 'ui', 'Icon.tsx'), 'utf8'), /focus: ArrowsOutSimple/);
   assert.doesNotMatch(workspace, /data-testid="project-open-menu-toggle"/);
   assert.doesNotMatch(workspace, /data-testid="project-open-default"/);
   assert.match(workspace, /data-testid="dock-project-open-menu-toggle"/);
@@ -94,14 +111,15 @@ test('project controls keep environment in the conversation header and file open
   assert.doesNotMatch(styles, /data-workspace-panel-open="true"[^\n]*\.utility-control-dock \{ right: calc/);
 });
 
-test('work objects use a dedicated semantic icon and the shared white Content surface', () => {
+test('generated work objects keep their direct Artifact surface without a duplicate launcher tool', () => {
   const icons = readFileSync(path.join(rendererRoot, 'ui', 'Icon.tsx'), 'utf8');
   const artifacts = readFileSync(path.join(rendererRoot, 'ArtifactWorkingSurface.tsx'), 'utf8');
   assert.match(icons, /objects: Shapes/);
-  assert.match(workspace, /ARTIFACTS:[^\n]*icon: 'objects'/);
-  assert.match(workspace, /id: 'artifacts', label: '工作对象', icon: 'objects'/);
+  assert.match(workspace, /kind: 'ARTIFACT'/);
+  assert.match(workspace, /<ArtifactSurface/);
+  assert.doesNotMatch(workspace, /kind: 'ARTIFACTS'|id: 'artifacts', label: '工作对象'|<ArtifactCatalog/);
   assert.match(artifacts, /<AppIcon name="objects"\/>/);
-  assert.match(styles, /\.right-dock-view-artifacts,[\s\S]*?background: var\(--fl-surface-content\)/);
+  assert.match(styles, /\.right-dock-view-artifact \{[\s\S]*?background: var\(--fl-surface-content\)/);
 });
 
 test('browser pages reuse the workspace tab strip while standalone browse keeps its own strip', () => {
@@ -122,7 +140,7 @@ test('browser pages reuse the workspace tab strip while standalone browse keeps 
 });
 
 test('files and images open as dock tabs and images expose location plus zoom', () => {
-  assert.match(workspace, /const tabId = `file:\$\{entry\.relative_path\}`/);
+  assert.match(workspace, /const tabId = options\?\.targetTabId \?\? `file:\$\{entry\.relative_path\}`/);
   assert.match(workspace, /id: `image:\$\{attachment\.id\}`/);
   assert.match(workspace, /className="dock-image-preview"/);
   assert.match(media, /image-context-menu-location/);
@@ -132,6 +150,11 @@ test('files and images open as dock tabs and images expose location plus zoom', 
   assert.match(fileTypeIcons, /data-file-kind=\{kind\}/);
   assert.match(fileTree, /data-testid="workspace-file-refresh"/);
   assert.match(workspace, /dockBreadcrumb\.map/);
+  assert.match(workspace, /loading: true/);
+  assert.match(workspace, /正在载入文件/);
+  assert.match(workspace, /正在载入图片/);
+  assert.match(layout, /\.dock-code-editor-surface > \.dock-code-highlight \{[\s\S]*?z-index: 2/);
+  assert.match(layout, /\.dock-image-preview > button \{[\s\S]*?width: 100%;[\s\S]*?height: 100%/);
   assert.doesNotMatch(workspace, /activeDockTab\.label<\/strong>/);
 });
 
