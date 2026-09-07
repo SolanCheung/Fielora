@@ -199,9 +199,8 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   overscroll-behavior: contain;
 }
 
-/* Scheduled, Library and Conversation share one page rail. Specialized
- * content may keep its own reading width, but page headers no longer jump
- * horizontally when the user moves between primary destinations. */
+/* Scheduled and Library share a page rail. Conversation keeps its reading
+ * rail and a fixed header inset matching the navigation menu. */
 .library-content {
   padding: 48px var(--fl-layout-page-gutter) 72px;
   overflow-x: hidden;
@@ -216,7 +215,32 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
 }
 
 .conversation-context-header {
-  padding-inline: max(20px, calc((100% - var(--fl-layout-page-width)) / 2));
+  min-height: 40px;
+  padding-block: 2px;
+  padding-left: calc(var(--fl-space-3) + var(--fl-space-4));
+  padding-right: max(144px, calc((100% - var(--fl-layout-page-width)) / 2));
+}
+
+.project-layout.workspace-open .conversation-context-header {
+  padding-right: 60px;
+}
+
+.conversation-heading {
+  flex: 1 1 0;
+  gap: var(--fl-space-4);
+  overflow: hidden;
+}
+
+.conversation-title-line {
+  flex: 1 1 0;
+}
+
+.conversation-title-line h2 {
+  flex: 0 1 auto;
+}
+
+.conversation-title-line > :last-child {
+  flex-shrink: 0;
 }
 
 /* Keep the section label outside the project scroller. The inset around the
@@ -265,16 +289,87 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
 
 .message-list {
   min-height: 0;
-  padding: var(--fl-space-8) max(var(--fl-space-8), calc((100% - var(--fl-layout-conversation-reading)) / 2)) 238px;
+  padding: var(--fl-space-8) max(var(--fl-layout-conversation-gutter), calc((100% - var(--fl-layout-conversation-reading)) / 2)) calc(var(--fl-composer-height, 116px) + var(--fl-queued-height, 0px) + 72px);
   overscroll-behavior: contain;
 }
 
-.message {
-  max-width: var(--fl-layout-conversation-message);
+.project-context-controls[hidden] {
+  display: none;
 }
 
-.agent-turn {
-  max-width: var(--fl-layout-conversation-reading);
+/* Turn markers stay in the pane gutter, outside the reading/composer rail. */
+.conversation-turn-navigation {
+  position: absolute;
+  z-index: var(--fl-layer-floating);
+  top: 80px;
+  bottom: calc(var(--fl-composer-height, 116px) + var(--fl-queued-height, 0px) + 28px);
+  left: 2px;
+  display: flex;
+  align-items: center;
+  width: 24px;
+  pointer-events: none;
+}
+
+.conversation-turn-markers {
+  position: relative;
+  width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  pointer-events: auto;
+}
+
+.conversation-turn-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-height: 16px;
+  padding: 7px 0;
+  border: 0;
+  border-radius: var(--fl-radius-control);
+  background: transparent;
+  box-shadow: none;
+}
+
+.conversation-turn-marker > span {
+  width: 6px;
+  height: 2px;
+  background: var(--fl-color-text-muted);
+  opacity: .45;
+}
+
+.conversation-turn-marker[aria-current] > span {
+  width: 10px;
+  background: var(--fl-color-text-strong);
+  opacity: 1;
+}
+
+.conversation-turn-marker:hover > span,
+.conversation-turn-marker:focus-visible > span {
+  width: 10px;
+  opacity: 1;
+}
+
+.message.assistant,
+.agent-turn,
+.agent-answer-body,
+.agent-terminal-result,
+.agent-terminal-body,
+.agent-terminal-runtime,
+.conversation-activity-stream,
+.conversation-activity-group,
+.conversation-activity-progress,
+.conversation-narrative,
+.agent-execution-detail.is-history,
+.agent-run-details,
+.agent-run-mcp,
+.agent-progress-summary,
+.agent-result-changes {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 /* Floating Composer must not shorten the conversation viewport. */
@@ -283,7 +378,7 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   right: 0;
   bottom: 0;
   left: 0;
-  width: min(calc(100% - 40px), var(--fl-layout-composer-width));
+  width: min(calc(100% - 2 * var(--fl-layout-conversation-gutter)), var(--fl-layout-conversation-reading));
   margin: 0 auto var(--fl-space-4);
   padding: var(--fl-space-2) var(--fl-space-4);
 }
@@ -292,16 +387,30 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   position: absolute;
   z-index: var(--fl-layer-floating);
   right: 0;
-  bottom: 116px;
+  bottom: calc(var(--fl-composer-height, 116px) + 20px);
   left: 0;
-  width: min(calc(100% - 40px), var(--fl-layout-composer-width));
+  width: min(calc(100% - 2 * var(--fl-layout-conversation-gutter)), var(--fl-layout-conversation-reading));
   max-height: min(184px, 28vh);
   margin: 0 auto;
   overflow: visible;
   pointer-events: none;
 }
 
+.latest-answer-button {
+  bottom: calc(var(--fl-composer-height, 116px) + var(--fl-queued-height, 0px) + 28px);
+}
+
 /* Empty conversations keep the real Composer in the same reading column. */
+.project-empty-conversation {
+  padding-inline: max(var(--fl-layout-conversation-gutter), calc((100% - var(--fl-layout-conversation-reading)) / 2));
+}
+
+.project-empty-composer {
+  right: 0;
+  left: 0;
+  width: min(calc(100% - 2 * var(--fl-layout-conversation-gutter)), var(--fl-layout-conversation-reading));
+}
+
 .conversation-column.is-empty-conversation .message-list {
   display: grid;
   place-items: center;
@@ -478,19 +587,7 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
 }
 
 @container (max-width: 560px) {
-  .message-list {
-    padding-right: var(--fl-space-5);
-    padding-bottom: 164px;
-    padding-left: var(--fl-space-5);
-  }
-
   .conversation-composer {
-    width: calc(100% - 20px);
     margin-bottom: var(--fl-space-3);
-  }
-
-  .queued-follow-up-stack {
-    width: calc(100% - 20px);
-    bottom: 112px;
   }
 }

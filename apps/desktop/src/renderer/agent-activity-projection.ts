@@ -149,8 +149,9 @@ function activityPhrase(kind: Exclude<ConversationActivityGroupKind, 'MIXED'>, e
     return onlyFileInspection ? (active ? '正在读取相关文件' : '已读取相关文件') : (active ? '正在检查相关信息' : '检查了相关信息');
   }
   if (kind === 'CHANGE') {
-    const count = new Set(matching.flatMap((entry) => entry.kind === 'TOOL' ? argumentPaths(entry.tool) : [])).size;
-    return active ? '正在编辑文件' : count > 0 ? `已编辑 ${count} 个文件` : '已编辑文件';
+    const completed = matching.filter((entry) => entry.status === 'COMPLETED');
+    const count = new Set(completed.flatMap((entry) => entry.kind === 'TOOL' ? argumentPaths(entry.tool) : [])).size;
+    return active ? '正在编辑文件' : count > 0 ? `已编辑 ${count} 个文件` : completed.length ? '已编辑文件' : '尝试修改文件';
   }
   if (kind === 'VERIFY') return active ? '正在运行针对性验证' : '运行了针对性验证';
   if (kind === 'COMMAND') return active ? '正在运行命令' : '运行了命令';

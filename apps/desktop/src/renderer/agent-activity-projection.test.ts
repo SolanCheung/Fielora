@@ -61,6 +61,23 @@ test('narrative is the activity boundary and the real event sequence is never re
   assert.match(groups[2]?.title ?? '', /已读取相关文件.*已编辑 1 个文件.*验证/);
 });
 
+test('failed edits are described as attempts and excluded from edited file totals', () => {
+  const failed = tool('failed', 'replace_text', 'WORKSPACE_WRITE', 'FAILED', { path: 'src/login.js' });
+  const succeeded = tool('succeeded', 'replace_text', 'WORKSPACE_WRITE', 'COMPLETED', { path: 'src/ready.js' });
+  const events = [event(1, 'TOOL_PROPOSED', { tool_call_id: failed.id }), event(2, 'TOOL_FAILED', { tool_call_id: failed.id })];
+  const failedGroup = buildConversationActivityProjection(events, [failed])[0];
+  assert.equal(failedGroup?.kind, 'GROUP');
+  if (failedGroup?.kind === 'GROUP') {
+    assert.match(failedGroup.title, /尝试修改文件/);
+    assert.doesNotMatch(failedGroup.title, /已编辑/);
+  }
+  const mixed = buildConversationActivityProjection([...events,
+    event(3, 'TOOL_PROPOSED', { tool_call_id: succeeded.id }), event(4, 'TOOL_COMPLETED', { tool_call_id: succeeded.id }),
+  ], [failed, succeeded])[0];
+  assert.equal(mixed?.kind, 'GROUP');
+  if (mixed?.kind === 'GROUP') assert.match(mixed.title, /已编辑 1 个文件/);
+});
+
 test('approved tools remain after the approval anchor and carry persisted terminal time', () => {
   const edit = tool('edit', 'replace_text', 'WORKSPACE_WRITE', 'COMPLETED', { path: 'src/AgentTurn.tsx' });
   const approvalEvents = [

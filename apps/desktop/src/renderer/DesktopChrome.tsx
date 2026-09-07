@@ -266,7 +266,8 @@ export function DesktopChrome({ children }: { children: ReactNode }) {
           <p>{t('拖动左侧分隔线调整工具区宽度。', 'Drag the left divider to resize the tool area.')}</p>
         </>}
       </aside>}
-      {!settingsRoute && route.route === 'PROJECTS' && <aside className="project-context-controls" aria-label={t('Project 控制', 'Project controls')} data-testid="project-context-controls"><div id="desktop-project-actions-layer" className="desktop-project-actions-layer" data-testid="desktop-project-actions-layer" /></aside>}
+      {/* Keep the portal host mounted while App and Chrome publish route changes independently. */}
+      <aside className="project-context-controls" hidden={route.route !== 'PROJECTS'} aria-label={t('Project 控制', 'Project controls')} data-testid="project-context-controls"><div id="desktop-project-actions-layer" className="desktop-project-actions-layer" data-testid="desktop-project-actions-layer" /></aside>
       {!settingsRoute && workspaceControlsVisible && <aside className={`utility-control-dock ${toolsOpen || projectDockOpen ? 'in-utility' : 'floating'}`} aria-label={t('工作区控制', 'Workspace controls')} data-testid="utility-rail">
         {(toolsOpen || projectDockOpen) && <ToolbarAction active={route.route === 'PROJECTS' ? projectDockFocus : focusMode} label={(route.route === 'PROJECTS' ? projectDockFocus : focusMode) ? t('恢复左右工作区', 'Restore split workspace') : t('扩展右侧工具区', 'Expand right tool area')} icon={<AppIcon name="focus"/>} onClick={() => route.route === 'PROJECTS' ? emit('fielora:toggle-workspace-focus') : toggleFocus()} testId="rail-focus" />}
         {route.route === 'PROJECTS' && <ToolbarAction active={terminalLayout.open} label={terminalLayout.open ? t('关闭底部终端', 'Close bottom terminal') : t('打开底部终端', 'Open bottom terminal')} icon={<AppIcon name="terminalPanel"/>} onClick={() => emit('fielora:toggle-terminal')} testId="rail-terminal" />}

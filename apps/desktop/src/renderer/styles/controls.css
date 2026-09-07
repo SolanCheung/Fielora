@@ -486,3 +486,47 @@
   .permission-picker .ui-select-popover { animation-duration: 1ms; }
   .ui-tooltip { animation-duration: 1ms; }
 }
+.conversation-activity-group-summary,
+.conversation-tool-summary,
+.conversation-narrative-detail > summary {
+  list-style: none;
+  cursor: pointer;
+  color: var(--fl-color-text-muted);
+  font-size: var(--fl-type-meta-size);
+  line-height: var(--fl-type-meta-line-height);
+  border-radius: var(--fl-radius-control);
+}
+
+.conversation-activity-group-summary::-webkit-details-marker,
+.conversation-tool-summary::-webkit-details-marker,
+.conversation-narrative-detail > summary::-webkit-details-marker {
+  display: none;
+}
+
+.conversation-activity-group-summary:hover,
+.conversation-tool-summary:hover,
+.conversation-narrative-detail > summary:hover {
+  color: var(--fl-color-text);
+}
+
+.conversation-activity-group-summary:focus-visible,
+.conversation-tool-summary:focus-visible,
+.conversation-narrative-detail > summary:focus-visible {
+  outline: 2px solid var(--fl-color-focus);
+  outline-offset: 3px;
+}
+
+.conversation-activity-group-summary > .app-icon:last-child,
+.conversation-tool-summary > .app-icon:last-child,
+.conversation-narrative-detail > summary > .app-icon:last-child {
+  width: 14px;
+  height: 14px;
+  transform: rotate(-90deg);
+  transition: transform var(--fl-duration-control) var(--fl-ease-standard);
+}
+
+.conversation-activity-group[open] > summary > .app-icon:last-child,
+.conversation-tool-detail[open] > summary > .app-icon:last-child,
+.conversation-narrative-detail[open] > summary > .app-icon:last-child {
+  transform: rotate(0);
+}

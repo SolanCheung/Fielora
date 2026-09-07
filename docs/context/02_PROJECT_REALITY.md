@@ -3082,3 +3082,20 @@ WORKSPACE_TOOL_MENU_HOST: DOCUMENT_BODY_PORTAL
 WORKSPACE_TOOL_MENU_POSITION: FIXED / MEASURED / VIEWPORT_CLAMPED
 SINGLE_BROWSER_TAB_MENU_CLIPPED: NO
 ```
+
+## 124. Conversation Disclosure, Summary Recovery And Turn Navigation
+
+2026-09-07 用户要求先修复 Conversation 样式与过程展示，再处理 Agent 执行质量。当前工具组、
+单项操作及长段过程说明均支持渐进展开，失败结果直接显示已有错误原因；历史文件引用只从同 Run
+成功读取回执解析，并复用既有带 SHA 校验的文件查看器。正文、执行记录、表格及 Composer 共用
+1040px 上限和 `clamp(28px, 5cqw, 56px)` 留白；顶栏标题使用 500 字重并与菜单文字保持相同侧边距离，
+正文强调与标题不再另增字号，右侧工具区展开后控制按钮按实际 Conversation 边界定位。
+
+设置、资料库或已安排页面返回后摘要按钮丢失已通过真实打包应用复现，原因是 ProjectWorkspace
+查找 Portal host 时 DesktopChrome 尚未恢复该节点。host 现在常驻并按路由隐藏，摘要菜单恢复正常。
+至少四个已展示用户轮次且内容需要滚动时显示左侧轮次导航；支持鼠标/键盘跳转、当前轮次标记、
+独立滚动和切换对话清理。开发版与打包版验证覆盖 8/40 轮、窄窗、右栏展开和摘要页面往返。
+
+UI Lane 225 项、UI/UX 23 项、打包应用启动及 single-instance 检查均 PASS，证据位于
+`artifacts/conversation-summary-navigation-packaged/`。这些是隔离数据的界面验证，模型请求为 0；
+原登录任务的 24 步终止、排查效率、编辑失败恢复与验证闭环尚未修改，不能视为 Agent 质量验收。

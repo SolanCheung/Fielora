@@ -1,6 +1,12 @@
 import { createElement, useEffect, useState, type ReactNode } from 'react';
 import type { ResultReference } from '@fielora/contracts';
 import type { ResultImagePreviewView } from '../workspace-types';
+import type { ActivityFileLink } from './agent-activity-detail';
+
+export interface ActivityFileContext {
+  resolve: (target: string) => ActivityFileLink | null;
+  open?: (file: ActivityFileLink) => void;
+}
 
 interface MarkdownMessageProps {
   content: string;
@@ -9,6 +15,7 @@ interface MarkdownMessageProps {
   references?: ResultReference[];
   onOpenReference?: (reference: ResultReference) => void;
   onOpenImage?: (preview: ResultImagePreviewView) => void;
+  activityFiles?: ActivityFileContext;
 }
 
 interface InlineMatch {
@@ -23,7 +30,7 @@ function firstInlineMatch(value: string): InlineMatch | null {
   const candidates: InlineMatch[] = [];
   const patterns: Array<[InlineMatch['kind'], RegExp]> = [
     ['code', /`([^`\n]+)`/],
-    ['link', /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+|fielora-reference:resultref_[0-9a-f]{32})\)/i],
+    ['link', /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+|fielora-reference:resultref_[0-9a-f]{32}|fielora-project-file:[^)\s]+)\)/i],
     ['strong', /\*\*([^*\n]+)\*\*/],
     ['strike', /~~([^~\n]+)~~/],
     ['emphasis', /(^|[^*])\*([^*\n]+)\*/],
@@ -46,6 +53,7 @@ function firstInlineMatch(value: string): InlineMatch | null {
 }
 
 interface ReferenceRenderContext {
+  activityFiles?: ActivityFileContext;
   references: ReadonlyMap<string, ResultReference>;
   onOpenReference?: (reference: ResultReference) => void;
   onOpenImage?: (preview: ResultImagePreviewView) => void;
@@ -116,6 +124,11 @@ function renderInline(value: string, keyPrefix: string, context?: ReferenceRende
       } else {
         result.push(<span key={key} className="markdown-reference-unavailable">{renderInline(match.label, key, context)}</span>);
       }
+    } else if (match.kind === 'link' && match.target?.toLowerCase().startsWith('fielora-project-file:')) {
+      const file = context?.activityFiles?.resolve(match.target);
+      result.push(file && context?.activityFiles?.open
+        ? <button key={key} type="button" className="markdown-typed-reference" onClick={() => context.activityFiles?.open?.(file)}>{match.label}</button>
+        : <code key={key}>{match.label}</code>);
     } else if (match.kind === 'link') result.push(<a key={key} href={match.target} target="_blank" rel="noreferrer noopener">{renderInline(match.label, key, context)}</a>);
     remaining = remaining.slice(match.index + match.length);
   }
@@ -251,7 +264,7 @@ function renderMarkdown(content: string, onCopyError?: (message: string) => void
   return blocks;
 }
 
-export function MarkdownMessage({ content, streaming = false, onCopyError, references = [], onOpenReference, onOpenImage }: MarkdownMessageProps) {
-  const context: ReferenceRenderContext = { references: new Map(references.map((reference) => [reference.id, reference])), onOpenReference, onOpenImage };
+export function MarkdownMessage({ content, streaming = false, onCopyError, references = [], onOpenReference, onOpenImage, activityFiles }: MarkdownMessageProps) {
+  const context: ReferenceRenderContext = { references: new Map(references.map((reference) => [reference.id, reference])), onOpenReference, onOpenImage, activityFiles };
   return <div className={`markdown-body${streaming ? ' is-streaming' : ''}`}>{renderMarkdown(content, onCopyError, context)}</div>;
 }

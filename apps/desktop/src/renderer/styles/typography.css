@@ -16,11 +16,33 @@
   line-height: var(--fl-type-body-line-height);
 }
 
-:where(.conversation-header h2, .agent-result-title, .ui-dialog h2, [data-type-role="title"]) {
+:where(.agent-result-title, .ui-dialog h2, [data-type-role="title"]) {
   font-size: var(--fl-type-title-size);
   font-weight: var(--fl-type-title-weight);
   line-height: var(--fl-type-title-line-height);
   letter-spacing: var(--fl-type-title-letter-spacing);
+}
+
+:where(.conversation-header h2) {
+  font-size: var(--fl-type-body-size);
+  font-weight: var(--fl-font-weight-medium);
+  line-height: var(--fl-type-label-line-height);
+  letter-spacing: 0;
+}
+
+/* Conversation emphasis changes weight, not the reading size. Keep the
+ * original heading elements so navigation and document semantics survive. */
+:where(.conversation-column .markdown-body h1, .conversation-column .markdown-body h2,
+  .conversation-column .markdown-body h3, .conversation-column .markdown-body h4,
+  .conversation-column .markdown-body h5, .conversation-column .markdown-body h6) {
+  font-size: var(--fl-type-body-size);
+  font-weight: var(--fl-font-weight-semibold);
+  line-height: var(--fl-type-body-line-height);
+}
+
+:where(.conversation-column .markdown-body strong, .conversation-column .markdown-body b) {
+  font-size: inherit;
+  font-weight: var(--fl-font-weight-semibold);
 }
 
 :where(.section-title, .settings-section > header p, [data-type-role="section"]) {

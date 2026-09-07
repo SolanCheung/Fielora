@@ -137,7 +137,8 @@ test('running presentation is narrative and activity chronology followed by hone
   assert.match(turn, /toolTitle\(tool\.name\)/);
   assert.match(turn, /toolDetail\(tool\)/);
   assert.match(turn, /activityTimestamp\(entry\.completedAt/);
-  assert.match(turn, /className="agent-completion-time" role="tooltip"/);
+  assert.match(turn, /className="conversation-tool-body"/);
+  assert.doesNotMatch(turn, /agent-completion-time|function CompletionTime/);
   assert.ok((turn.match(/<MarkdownMessage/g)?.length ?? 0) >= 3);
 });
 
@@ -181,7 +182,7 @@ test('terminal result expands changed files and routes an exact file into Human 
   assert.match(workspace, /historicalReview\?\.review \?\? agentReview/);
 });
 
-test('activity visual language has no normal status dots, counts, completion badges or warning background', () => {
+test('activity uses compact native disclosure without status dots or warning backgrounds', () => {
   const activityStart = turn.indexOf('function ActivityGroup');
   const activityEnd = turn.indexOf('function ActivityApprovalRecord', activityStart);
   const activitySource = turn.slice(activityStart, activityEnd);
@@ -189,9 +190,11 @@ test('activity visual language has no normal status dots, counts, completion bad
   const activityStylesEnd = styles.indexOf('.agent-live-files {', activityStylesStart);
   const activityStyles = styles.slice(activityStylesStart, activityStylesEnd);
   assert.match(activitySource, /<AppIcon name=\{activityIcon\(item\.groupKind\)\}/);
-  assert.match(activitySource, /<header className="conversation-activity-group-summary">/);
+  assert.match(activitySource, /<details className=\{`conversation-activity-group/);
+  assert.match(activitySource, /<summary className="conversation-activity-group-summary"/);
+  assert.doesNotMatch(activitySource, /<details[^>]*\sopen(?:[\s=>])/);
   assert.doesNotMatch(activitySource, /conversation-activity-group-summary"[^>]*onClick|conversation-activity-group[^\n]*is-expanded/);
-  assert.doesNotMatch(activitySource, /<i aria-hidden|item\.entries\.length\} 项|>已完成</);
+  assert.doesNotMatch(activitySource, /<i aria-hidden|>已完成</);
   assert.doesNotMatch(activityStyles, /conversation-activity-entries > li > i|conversation-activity-group \{[^}]*border-left|surface-warning|color-warning|color-text-success|color-text-danger/s);
   assert.match(activityStyles, /\.conversation-activity-stream \{[^}]*background: transparent;/s);
   assert.match(activityStyles, /\.conversation-activity-group \{[^}]*background: transparent;/s);
@@ -201,15 +204,15 @@ test('activity visual language has no normal status dots, counts, completion bad
   assert.match(turn, /agent-progress-symbol/);
 });
 
-test('activity presentation filters runtime terminology and progressively reveals long groups', () => {
+test('activity presentation filters runtime terminology and reveals groups and operations separately', () => {
   assert.match(projection, /tool\.name === 'delegate_readonly'/);
   assert.match(turn, /if \(!knownNames\.has\(tool\.name\)\)/);
-  assert.match(turn, /const previewLimit = 5/);
   assert.match(turn, /create_file: '创建'.*replace_text: '修改'.*write_file: '写入'/s);
-  assert.match(turn, /data-activity-layout=\{presentation\.inlineDetail \? 'inline' : undefined\}/);
-  assert.match(turn, /item\.entries\.slice\(0, previewLimit\)/);
-  assert.match(turn, /`查看另外 \$\{remaining\} 项`/);
-  assert.match(turn, /className="conversation-activity-more"[^\n]*aria-expanded=\{showAll\}[^\n]*<AppIcon name="chevronDown"/);
+  assert.match(turn, /item\.entries\.map\(\(entry\)/);
+  assert.match(turn, /<details className="conversation-tool-detail">/);
+  assert.match(turn, /<summary className="conversation-tool-summary"/);
+  assert.match(turn, /activityNarrativePreview\(text\)/);
+  assert.match(turn, /<details className="conversation-narrative-detail">/);
   assert.match(projection, /if \(event\.kind === 'PHASE_CHANGED'\) \{\s*currentGroup = null;\s*continue;/s);
   assert.match(projection, /if \(receiptToolId && projectedToolIds\.has\(receiptToolId\)\) continue/);
 });
@@ -220,8 +223,9 @@ test('activity uses the conversation scroll only and running composer actions ke
   assert.doesNotMatch(styles, /\.(?:conversation-activity-stream|agent-run-details) \{[^}]*(?:max-height|height:\s*\d|overflow(?:-y)?:\s*(?:auto|scroll))/s);
   assert.match(styles, /\.message-list \{[^}]*overflow: auto;/s);
   assert.doesNotMatch(styles, /\.agent-execution-(?:popover|dock)\b/);
-  assert.match(styles, /\.conversation-narrative \{[^}]*max-width: 700px;/s);
-  assert.match(styles, /li:hover > \.agent-completion-time/);
+  const layout = readFileSync(path.join(rendererRoot, 'styles', 'layout.css'), 'utf8');
+  assert.match(layout, /\.conversation-narrative,[\s\S]*?width: 100%;\s*max-width: 100%;\s*min-width: 0;/);
+  assert.doesNotMatch(turn, /agent-completion-time/);
   assert.match(tokens, /--fl-font-size-agent-execution:\s*calc\(14px \* var\(--fl-ui-font-scale\)\)/);
   const appearance = readFileSync(path.join(rendererRoot, 'styles', 'appearance.css'), 'utf8');
   assert.match(appearance, /\.conversation-composer \.composer-submit\.stop,\s*\.stop-button \{[^}]*background: var\(--fl-action-primary\)/s);
@@ -248,9 +252,9 @@ test('terminal duration leads collapsed chronology and the exact result Markdown
   assert.match(turn, />耗时 \{result\.duration\}</);
   assert.match(turn, /function CompletedActivityHistory/);
   assert.match(turn, /className="agent-execution-detail is-history"/);
-  assert.match(turn, /<CompletedActivityHistory items=\{activityItems\} tools=\{tools\}\/>/);
+  assert.match(turn, /<CompletedActivityHistory items=\{activityItems\} tools=\{tools\} activityFiles=\{activityFiles\}\/>/);
   const terminalRuntime = turn.indexOf('<button type="button" className="agent-terminal-runtime"');
-  const terminalDetail = turn.indexOf('{detailOpen && executionDetail}', terminalRuntime);
+  const terminalDetail = turn.indexOf('{detailOpen && <>{executionDetail}', terminalRuntime);
   const terminalMarkdown = turn.indexOf('<MarkdownMessage content={markdown} references={message?.references ?? []} onOpenReference={onOpenReference} onOpenImage={onOpenImage}/>', terminalDetail);
   assert.ok(terminalRuntime >= 0 && terminalRuntime < terminalDetail && terminalDetail < terminalMarkdown);
   assert.doesNotMatch(turn, /function ResultText|naturalResultParagraph|stripAnswerHeading/);

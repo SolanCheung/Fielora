@@ -126,9 +126,10 @@
   --fl-layout-navigation-min: 260px;
   --fl-layout-navigation-max: 360px;
   --fl-layout-conversation-min: 340px;
-  --fl-layout-conversation-reading: 920px;
+  --fl-layout-conversation-reading: 1040px;
+  --fl-layout-conversation-gutter: clamp(28px, 5cqw, 56px);
   --fl-layout-conversation-message: 900px;
-  --fl-layout-composer-width: 920px;
+  --fl-layout-composer-width: var(--fl-layout-conversation-reading);
   --fl-layout-workspace-dock-default: 635px;
   --fl-layout-workspace-dock-min: 360px;
   --fl-layout-page-width: 1040px;

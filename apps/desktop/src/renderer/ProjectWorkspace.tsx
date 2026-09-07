@@ -1,3 +1,4 @@
+import type { ActivityFileLink } from './agent-activity-detail';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type {
@@ -12,6 +13,7 @@ import { PrimaryNav } from './PrimaryNav';
 import { AppIcon, type AppIconName } from './ui';
 import { BrowsePanel } from './BrowseScreen';
 import { AgentTurn } from './AgentTurn';
+import { ConversationTurnNavigation } from './ConversationTurnNavigation';
 import { AgentHumanReview } from './AgentHumanReview';
 import { AttachmentThumbnail, ConversationImageGallery, ImageContextMenu, ImagePreview } from './AttachmentMedia';
 import { AGENT_PROJECTION_UNAVAILABLE_MESSAGE, loadCompleteAgentEventSequence, mergeAgentEventPages } from './agent-projection';
@@ -491,7 +493,7 @@ function pendingToolSummary(events: AgentEventView[], run: AgentRunView | null):
   return name;
 }
 
-function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copied, onCopy, onCopyError, onReview, onOpenReference, onOpenImage }: {
+function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copied, onCopy, onCopyError, onReview, onOpenReference, onOpenImage, onOpenActivityFile }: {
   terminalMessage: ConversationMessageView;
   requestText: string;
   userMessageId: string | null;
@@ -501,6 +503,7 @@ function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copi
   onReview: (selection: HistoricalReviewSelection) => void;
   onOpenReference: (reference: ResultReference) => void;
   onOpenImage: (preview: ResultImagePreviewView) => void;
+  onOpenActivityFile: (file: ActivityFileLink) => void;
 }) {
   const [run, setRun] = useState<AgentRunView | null>(null);
   const [events, setEvents] = useState<AgentEventView[]>([]);
@@ -542,6 +545,7 @@ function HistoricalAgentTurn({ terminalMessage, requestText, userMessageId, copi
     onCopy={onCopy}
     onCopyError={onCopyError}
     onOpenReference={onOpenReference}
+    onOpenActivityFile={onOpenActivityFile}
     onOpenImage={onOpenImage}
   />;
 }
@@ -939,8 +943,20 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
 
   useEffect(() => {
     document.body.dataset.workspacePanelOpen = String(Boolean(project && workspaceOpen));
-    document.body.style.setProperty('--desktop-project-workspace-width', `${workspaceWidth + 4}px`);
+    const surface = layoutRef.current;
+    const column = surface?.querySelector<HTMLElement>('.conversation-column');
+    const navigation = surface?.querySelector<HTMLElement>('[data-testid="project-navigation"]');
+    const syncControlEdge = () => {
+      const inset = column ? Math.max(0, window.innerWidth - column.getBoundingClientRect().right) : workspaceWidth + 4;
+      document.body.style.setProperty('--desktop-project-workspace-width', `${inset}px`);
+    };
+    const observer = new ResizeObserver(syncControlEdge);
+    for (const element of [surface, column, navigation]) if (element) observer.observe(element);
+    window.addEventListener('resize', syncControlEdge);
+    syncControlEdge();
     return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', syncControlEdge);
       delete document.body.dataset.workspacePanelOpen;
       document.body.style.removeProperty('--desktop-project-workspace-width');
     };
@@ -2207,6 +2223,27 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     }
   }
 
+  useEffect(() => {
+    const list = messageListRef.current;
+    const column = list?.closest<HTMLElement>('.conversation-column');
+    const composer = column?.querySelector<HTMLElement>('.conversation-composer');
+    const queue = column?.querySelector<HTMLElement>('.queued-follow-up-stack');
+    if (!column || !composer) return undefined;
+    const measure = () => {
+      column.style.setProperty('--fl-composer-height', `${Math.ceil(composer.getBoundingClientRect().height)}px`);
+      column.style.setProperty('--fl-queued-height', `${Math.ceil(queue?.getBoundingClientRect().height ?? 0)}px`);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(composer);
+    if (queue) observer.observe(queue);
+    measure();
+    return () => observer.disconnect();
+  }, [conversationId, queuedFollowUps.length]);
+
+  function openActivityFile(file: ActivityFileLink) {
+    void openFile({ relative_path: file.path, size: 0 }, file);
+  }
+
   async function openResultReference(reference: ResultReference) {
     const target = reference.target;
     if (target.kind === 'IMAGE') {
@@ -2453,13 +2490,15 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     onDecision={(decision) => void decideApproval(decision)}
     onCopy={currentTerminalMessage ? () => void copyMessage(currentTerminalMessage) : undefined}
     onCopyError={(reason) => setError(`复制代码失败：${reason}`)}
+    onOpenActivityFile={openActivityFile}
     onOpenReference={(reference) => void openResultReference(reference)}
     onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))}
     mcpRuntime={mcpRuntime}
     mcpBusyConnectionId={mcpBusyConnectionId}
     onActivateMcp={(connectionId) => void activateMcpConnection(connectionId)}
   /> : null;
-  const visibleMessages = messages.filter((message) => message.role !== 'ASSISTANT' || !isLegacyTerminalMessage(message.content));
+  const visibleMessages = useMemo(() => messages.filter((message) => message.role !== 'ASSISTANT' || !isLegacyTerminalMessage(message.content)), [messages]);
+  const navigationTurns = useMemo(() => visibleMessages.filter((message) => message.role === 'USER' && !queuedFollowUps.some((item) => item.messageId === message.id)), [visibleMessages, queuedFollowUps]);
 
   return <div className="project-root" data-testid="project-workspace">
     <WorkspaceSurface
@@ -2516,7 +2555,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
               if (message.role === 'ASSISTANT' && message.invocation_id) {
                 if (isCurrentAgentAssistant) return null;
                 const historicalUserMessage = [...visibleMessages.slice(0, index)].reverse().find((item) => item.role === 'USER') ?? null;
-                return <HistoricalAgentTurn key={message.id} terminalMessage={message} requestText={historicalUserMessage?.content ?? ''} userMessageId={historicalUserMessage?.id ?? null} copied={copiedMessageId === message.id} onReview={openHistoricalAgentReview} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))} onCopy={() => void copyMessage(message)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/>;
+                return <HistoricalAgentTurn onOpenActivityFile={openActivityFile} key={message.id} terminalMessage={message} requestText={historicalUserMessage?.content ?? ''} userMessageId={historicalUserMessage?.id ?? null} copied={copiedMessageId === message.id} onReview={openHistoricalAgentReview} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))} onCopy={() => void copyMessage(message)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/>;
               }
               const persistedImages = message.role === 'USER' ? messageAttachments(message.id) : [];
               const queuedFollowUp = message.role === 'USER' ? queuedFollowUps.find((item) => item.messageId === message.id) ?? null : null;
@@ -2528,6 +2567,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
             })}
             {agentProjectionNotice && <p className="agent-projection-notice" role="status" data-testid="agent-projection-notice">{agentProjectionNotice}</p>}
           </div>
+          <ConversationTurnNavigation key={conversation.id} turns={navigationTurns} scrollContainer={messageListRef} onNavigate={() => { atLatestAnswerRef.current = false; setAtLatestAnswer(false); }}/>
           {!atLatestAnswer && <button type="button" className={`latest-answer-button ${agentRun && !agentRunIsTerminal ? 'is-generating' : 'is-complete'}${hasUnseenActivity ? ' has-unseen' : ''}`} aria-label={agentRun && !agentRunIsTerminal ? '跳转到当前任务底部' : '跳转到最新消息'} title={agentRun && !agentRunIsTerminal ? '跳转到当前任务底部' : '跳转到最新消息'} onClick={scrollToLatestAnswer} data-testid="jump-to-latest">
             {agentRun && !agentRunIsTerminal
               ? <span className="latest-answer-ellipsis" aria-hidden="true"><i/><i/><i/></span>

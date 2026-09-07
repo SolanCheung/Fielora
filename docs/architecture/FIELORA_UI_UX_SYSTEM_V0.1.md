@@ -38,7 +38,35 @@ DesktopChrome
 
 Canonical geometry 位于 `styles/layout.css`；真实页面结构由 `WorkspaceSurface`、`ProjectWorkspace`、`RightWorkspaceDock` 和 `DesktopChrome` 持有。
 
-Workbench 比例同样属于锁定布局，不属于材质：Project/Settings/Scheduled Navigation 默认 `304px`、允许在 `220–560px` 内调整并共享宽度偏好；Right Workspace Dock 默认 `635px`、最小 `360px`；Conversation Pane 最小 `340px`，reading column 为 `920px`，Composer 为 `920px`。应用初始窗口保持 `1180px` 宽，初始窗口高度等于允许的最小高度 `560px`；用户之后仍可正常调整窗口。Navigation 收起时必须释放整个导航列与 resizer，Conversation、Settings 或 Scheduled Content 原地扩展占用可用 Work Area。Settings、Scheduled 与 Conversation 复用同一 `WorkspaceSurface` 和 Content frame，Settings 不显示 Project 工具按钮，Settings 与 Scheduled Content 自身纵向滚动。Dock 不使用截图像素形成固定上限：可用上限始终为当前 Project Work Area 扣除实际 Navigation、Conversation 最小宽度与 resizer 后的剩余宽度。用户拖动得到的偏好宽度独立持久化；窗口缩小时仅临时 clamp，窗口再次放大时恢复该偏好宽度。历史版本持久化的极窄值在读取时恢复为当前默认比例。窄窗口策略与 Pane ownership 不变。Conversation 与 Right Workspace Dock 之间始终保留可发现但低对比的 `1px` neutral gray divider；它只消费 Light/Dark 对应的 `--fl-color-workspace-divider`，不得从 Brand Chrome、Accent 或用户 Action Color 混色。拖动命中区可以更宽，但视觉线及 hover/dragging 状态始终保持 `1px`，不得表现成厚边框。Project Navigation 与 Conversation 之间的 resizer 默认不可见，hover 只显示极轻 neutral edge，dragging 才适度增强；其命中宽度不得随视觉线宽变化。拖动开始时一次性缓存 Work Area、Navigation 和动态 max，pointer move 每帧只更新宽度 CSS variable，结束时才提交 React state 与持久化；Browser native view 的 bounds 同步必须 latest-only 合并，纯几何变化不得反复回写 Browser React state。
+2026-09-07 Conversation 校准：用户明确要求整个对话内容区统一居中并增加左右留白。
+用户消息、Assistant 正文、运行记录、Markdown 代码/表格、结果与变更列表共用 `1040px` reading rail；
+Composer 与 queued follow-up 使用同一 rail 和 `clamp(28px, 5cqw, 56px)` 最小 gutter。
+按用户最新桌面截图将普通窗口的内容再略向内收，宽窗 rail 上限仍为 1040px，窄栏保留至少 28px。
+不再分别使用 680/700/720px 的内部宽度上限。文字保持左对齐，用户气泡仍在公共 rail 内靠右。
+Conversation Header 保持原 ownership，左 inset 固定复用 Navigation 外边距与菜单内边距之和，
+图标到标题的间距与菜单文字起点对齐，不再按宽窗 reading rail 向右缩进。Dock 关闭时为 window-right controls 预留至少 `144px`，
+打开时为 Project 摘要按钮预留 `60px`，标题及更多操作不得进入该命中区域；摘要按钮位置跟随实际
+Conversation 右边界，不能使用窄窗可能被压缩或裁切的 Dock 偏好宽度推算。
+摘要 Portal host 在 DesktopChrome 内保持挂载，离开 Project 时隐藏；设置、资料库等页面返回后，
+ProjectWorkspace 可立即找到既有 host，不能因两个组件更新路由的时序差异丢失摘要按钮。
+既有 Composer/Queue 的 ResizeObserver 只更新当前 Pane 的遮挡高度变量，滚动尾部和回到底部按钮
+随真实输入框高度避让；不改变浮动锚点、Pane topology 或 Runtime。
+
+至少四个已展示的用户轮次且对话需要纵向滚动时，在 Conversation 左侧留白显示低对比短横线导航。
+每条横线对应一个用户轮次，当前阅读轮次加深；悬停/键盘聚焦提示轮次与请求摘要，点击或 Enter
+跳转至对应用户消息。支持上下方向键及 Home/End，在大量轮次时标记区独立滚动并保持当前项可见。
+轮次列表随对话切换、新消息及排队消息状态更新；滚动、过程展开和输入框尺寸变化后重新定位。
+导航避让输入框及排队区，不改变公共 reading rail，主动回看历史后沿用既有“回到最新”行为。
+
+运行过程按真实事件顺序展示简短进展。工具组默认折叠为一行，可展开全部操作；每项操作可进一步
+展开完整路径/行号/搜索词/命令、状态、结束时间和已有错误码。时间仅在操作详情显示，删除父组与子项
+重叠 hover 提示。长段分析和包含代码块的过程说明默认显示 bounded 原文预览，点击展开完整 Markdown。
+最终答案保持完整；结束后的“查看执行记录”使用同一套折叠组件，已记录的 Run failure code 同时映射为
+直接可见的原因。此 presentation 不改变 Run 状态、预算、恢复或完成裁决。
+历史 `fielora-project-file:` 标记只在匹配本 Run 成功 read_file 的路径和 SHA 回执后变成可打开的文件链接，
+打开复用现有 Project file viewer 和 SHA guard；其他标记只显示标签，不直接导航自定义 URL。
+
+Workbench 比例同样属于锁定布局，不属于材质：Project/Settings/Scheduled Navigation 默认 `304px`、允许在 `220–560px` 内调整并共享宽度偏好；Right Workspace Dock 默认 `635px`、最小 `360px`；Conversation Pane 最小 `340px`，reading column 为 `1040px`，Composer 为 `1040px`。应用初始窗口保持 `1180px` 宽，初始窗口高度等于允许的最小高度 `560px`；用户之后仍可正常调整窗口。Navigation 收起时必须释放整个导航列与 resizer，Conversation、Settings 或 Scheduled Content 原地扩展占用可用 Work Area。Settings、Scheduled 与 Conversation 复用同一 `WorkspaceSurface` 和 Content frame，Settings 不显示 Project 工具按钮，Settings 与 Scheduled Content 自身纵向滚动。Dock 不使用截图像素形成固定上限：可用上限始终为当前 Project Work Area 扣除实际 Navigation、Conversation 最小宽度与 resizer 后的剩余宽度。用户拖动得到的偏好宽度独立持久化；窗口缩小时仅临时 clamp，窗口再次放大时恢复该偏好宽度。历史版本持久化的极窄值在读取时恢复为当前默认比例。窄窗口策略与 Pane ownership 不变。Conversation 与 Right Workspace Dock 之间始终保留可发现但低对比的 `1px` neutral gray divider；它只消费 Light/Dark 对应的 `--fl-color-workspace-divider`，不得从 Brand Chrome、Accent 或用户 Action Color 混色。拖动命中区可以更宽，但视觉线及 hover/dragging 状态始终保持 `1px`，不得表现成厚边框。Project Navigation 与 Conversation 之间的 resizer 默认不可见，hover 只显示极轻 neutral edge，dragging 才适度增强；其命中宽度不得随视觉线宽变化。拖动开始时一次性缓存 Work Area、Navigation 和动态 max，pointer move 每帧只更新宽度 CSS variable，结束时才提交 React state 与持久化；Browser native view 的 bounds 同步必须 latest-only 合并，纯几何变化不得反复回写 Browser React state。
 
 Right Workspace Dock 的“＋”只在至少存在一个标签时显示；零标签状态由 Dock 内的工具启动页提供入口，不重复显示空 Tab Strip 操作。关闭最后一个标签或手动收起 Dock 时，Conversation minimum、divider 与 Dock width 使用可插值 length track 在 `--fl-duration-panel` 内同步收起，Panel 内容同时淡出并向右移动；若用户启用 Reduced Motion，仍遵守全局无动画设置。
 
@@ -87,11 +115,16 @@ Mono：`Cascadia Code → Consolas → monospace`。
 
 | Role | Size / Weight / Line height | 用途 |
 |---|---|---|
-| Title | 17 / 600 / 1.3 | Conversation、Result、Dialog 标题 |
+| Title | 17 / 600 / 1.3 | 独立 Result 与 Dialog 标题 |
 | Section | 13 / 500 / 1.4 | 小节和导航分组 |
 | Body | 15 / 400 / 1.7 | Conversation、Markdown、说明正文 |
 | Label | 14 / 500 / 1.35 | Button、Menu、Select、Tabs |
 | Meta | 13 / 400 / 1.45 | 路径、时间、Evidence、Toolbar metadata |
+
+2026-09-07 用户字体校准：Conversation 顶部标题复用 Body 字号和 Medium 字重（默认 `15px / 500`），
+不继承独立 Title 的 `17px / 600`；标题栏使用与右侧功能行一致的 `40px` 高度，标题、更多操作和功能按钮
+垂直居中对齐。Conversation 内 Markdown 的 h1–h6 和正文强调仅以 `600` 字重区分，小标题保持 Body 字号，
+inline strong/b 继承当前字号，不因加粗放大。原有标题语义、层级间距及独立代码字号保持。
 
 代码、Diff、Terminal 只使用 Mono。UI 基础字号允许在 `12–18px` 中选择并按 15px 基线等比派生上述五个角色；代码字号在 `11–17px` 独立设置，不跟随 UI scale。新组件不得添加独立 `font-family`，不得新增未进入 role contract 的字号或 700/800 重字重。
 
@@ -208,7 +241,7 @@ apps/desktop/webpack.renderer.ts
 | Icon glyph / optical slot | 16px / ≈24px | 16px / 24px |
 | Icon / text gap | ≈12–14px | 12px |
 | UI / Meta / Title / Body | 14 / 13 / 17 / 15px | 14 / 13 / 17 / 15px |
-| Composer width / compact height | ≈920px / ≈100px | 920px / ≈100px |
+| Composer width / compact height | ≈920px / ≈100px | 1040px / ≈100px（用户收窄留白校准） |
 | Composer bottom offset | ≈12px | 12px |
 | Permission trigger / menu width | 30px compact / ≈440px | 30px compact / 440px max |
 | Send button / glyph | 36px / 17px | 36px / 17px |
@@ -216,7 +249,7 @@ apps/desktop/webpack.renderer.ts
 | Browser address / action control | ≈34px / ≈30px | 34px / 30px |
 | Toolbar control | ≈30–34px | 30–34px |
 | Selected row radius | ≈8px | 8px |
-| Main readable width | ≈920px | 920px |
+| Main readable width | ≈920px | 1040px（用户收窄留白校准） |
 | Right Workspace Dock default | ≈635px | 635px（不是 max） |
 | Divider | ≈1px / 6–8% neutral | 1px neutral visual / 4px content-painted hit track |
 

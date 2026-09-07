@@ -38,9 +38,9 @@ test('visual golden metrics keep the measured desktop calibration', () => {
   const materials = read('styles/materials.css');
   for (const [token, value] of [
     ['--fl-layout-navigation-default', '304px'],
-    ['--fl-layout-conversation-reading', '920px'],
+    ['--fl-layout-conversation-reading', '1040px'],
     ['--fl-layout-conversation-message', '900px'],
-    ['--fl-layout-composer-width', '920px'],
+    ['--fl-layout-composer-width', 'var\\(--fl-layout-conversation-reading\\)'],
     ['--fl-layout-workspace-dock-default', '635px'],
     ['--fl-layout-workspace-dock-min', '360px'],
     ['--fl-layout-conversation-min', '340px'],
@@ -194,7 +194,7 @@ test('layout and typography ownership are explicit and documented', () => {
   assert.match(layout, /\.project-layout\.workspace-open\.dock-focused \{[\s\S]*?--fl-project-workspace-track: calc\(100%/);
   assert.match(layout, /\.right-workspace-dock,[\s\S]*?\.right-dock-view-browser \.browse-panel,[\s\S]*?\.right-terminal-view \.terminal-session \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?max-width: none;/);
   assert.doesNotMatch(read('ProjectWorkspace.tsx'), /PROJECT_WORKSPACE_MAX_WIDTH/);
-  assert.match(layout, /\.conversation-composer \{[\s\S]*?--fl-layout-composer-width/);
+  assert.match(layout, /\.conversation-composer \{[\s\S]*?--fl-layout-conversation-gutter[\s\S]*?--fl-layout-conversation-reading/);
   for (const block of appearance.matchAll(/\.conversation-composer\s*\{([^}]*)\}/g)) {
     assert.doesNotMatch(block[1] ?? '', /\b(?:width|margin-bottom|padding)\s*:/, 'appearance.css cannot own Composer geometry');
   }

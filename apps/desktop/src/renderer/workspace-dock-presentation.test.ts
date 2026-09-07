@@ -212,7 +212,7 @@ test('top-right terminal control opens the animated bottom dock across the works
 
 test('manual terminal output stays in the terminal and legacy terminal messages stay out of conversation', () => {
   assert.match(workspace, /function isLegacyTerminalMessage/);
-  assert.match(workspace, /visibleMessages = messages\.filter/);
+  assert.match(workspace, /visibleMessages = useMemo\(\(\) => messages\.filter/);
   assert.doesNotMatch(workspace, /function TerminalMessageProjection/);
   assert.doesNotMatch(workspace, /data-testid="terminal-technical-output"/);
   assert.doesNotMatch(workspace, /role: 'ASSISTANT', content: transcript/);

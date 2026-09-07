@@ -21,7 +21,8 @@ import {
   type AgentPresentation,
   type AgentTerminalStatus,
 } from './agent-presentation';
-import { MarkdownMessage } from './MarkdownMessage';
+import { MarkdownMessage, type ActivityFileContext } from './MarkdownMessage';
+import { activityFailureReason, activityNarrativePreview, activityToolDescription, resolveActivityFileLink, type ActivityFileLink } from './agent-activity-detail';
 import { AppIcon, type AppIconName } from './ui';
 
 interface AgentTurnProps {
@@ -38,6 +39,7 @@ interface AgentTurnProps {
   streamingStep?: number;
   busy?: boolean;
   copied?: boolean;
+  onOpenActivityFile?: (file: ActivityFileLink) => void;
   onResume?: () => void;
   onDecision?: (decision: 'DENY' | 'ALLOW_ONCE') => void;
   onRetry?: () => void;
@@ -59,10 +61,6 @@ function isTerminalRun(run: AgentRunView | null): boolean {
 function terminalStatus(run: AgentRunView | null, message: ConversationMessageView | null): AgentTerminalStatus | null {
   if (run && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status)) return run.status as AgentTerminalStatus;
   return message?.status ?? null;
-}
-
-function CompletionTime({ label }: { label: string }) {
-  return label ? <span className="agent-completion-time" role="tooltip">{label}</span> : null;
 }
 
 function mcpActivationLabel(state: McpConnectionRuntimeView['connections'][number]['activation_state']): string {
@@ -171,42 +169,51 @@ function activityTimestamp(timestamp: number): string {
 }
 
 function ActivityGroup({ item }: { item: ConversationActivityGroupItem }) {
-  const [showAll, setShowAll] = useState(false);
-  const previewLimit = 5;
-  const groupTime = item.completedAt ? activityTimestamp(item.completedAt) : '';
-  const visibleEntries = showAll ? item.entries : item.entries.slice(0, previewLimit);
-  const remaining = Math.max(0, item.entries.length - visibleEntries.length);
-  return <section className={`conversation-activity-group activity-${item.groupKind.toLowerCase()}`} data-testid="conversation-activity-group" data-activity-sequence={item.sequence} data-activity-group-kind={item.groupKind} data-completed-at={item.completedAt ?? undefined} title={groupTime || undefined} tabIndex={groupTime ? 0 : undefined}>
-    <header className="conversation-activity-group-summary">
-      <AppIcon name={activityIcon(item.groupKind)}/><strong>{item.title}</strong>
-    </header>
-    <CompletionTime label={groupTime}/>
-    <ol className="conversation-activity-entries">{visibleEntries.map((entry) => {
+  return <details className={`conversation-activity-group activity-${item.groupKind.toLowerCase()}`} data-testid="conversation-activity-group" data-activity-sequence={item.sequence} data-activity-group-kind={item.groupKind} data-completed-at={item.completedAt ?? undefined}>
+    <summary className="conversation-activity-group-summary" data-testid="activity-group-toggle">
+      <AppIcon name={activityIcon(item.groupKind)}/><strong>{item.title}</strong><small>{item.entries.length} 项</small><AppIcon name="chevronDown"/>
+    </summary>
+    <ol className="conversation-activity-entries">{item.entries.map((entry) => {
       const completion = entry.completedAt ? activityTimestamp(entry.completedAt) : '';
       const presentation = entry.kind === 'TOOL' ? activityToolPresentation(entry.tool) : { title: entry.title, detail: entry.detail, command: false, inlineDetail: false };
       const result = activityResult(item.groupKind, entry);
-      return <li key={entry.id} data-activity-entry={entry.kind.toLowerCase()} data-activity-sequence={entry.sequence} data-activity-status={entry.status} data-activity-command={presentation.command || undefined} data-completed-at={entry.completedAt ?? undefined} title={completion || undefined} tabIndex={completion ? 0 : undefined}>
-        <span data-activity-layout={presentation.inlineDetail ? 'inline' : undefined}><strong title={presentation.detail || presentation.title}>{presentation.title}</strong>{presentation.detail && <small title={presentation.detail}>{presentation.detail}</small>}</span>
-        {result && <em data-activity-result={result}>{result === 'PASS' ? '通过' : '未通过'}</em>}<CompletionTime label={completion}/>
+      const description = entry.kind === 'TOOL' ? activityToolDescription(entry.tool) || presentation.detail || presentation.title : entry.detail;
+      const errorCode = entry.kind === 'TOOL' ? entry.tool.error_code : null;
+      const resultLabel = result === 'PASS' ? '通过' : result === 'FAIL' ? '未通过' : result;
+      return <li key={entry.id} data-activity-entry={entry.kind.toLowerCase()} data-activity-sequence={entry.sequence} data-activity-status={entry.status} data-activity-command={presentation.command || undefined} data-completed-at={entry.completedAt ?? undefined}>
+        <details className="conversation-tool-detail">
+          <summary className="conversation-tool-summary" data-testid="activity-tool-toggle">
+            <AppIcon name={activityIcon(entry.activityKind)}/><span>{presentation.command ? description : `${presentation.title}${description ? ` ${description}` : ''}`}</span>
+            {resultLabel && <em data-activity-result={result}>{resultLabel}</em>}<AppIcon name="chevronDown"/>
+          </summary>
+          <div className="conversation-tool-body" data-testid="activity-tool-detail">
+            <pre>{description}</pre>{errorCode && <code className="activity-error-code">{errorCode}</code>}
+            <small>{resultLabel || (entry.status === 'COMPLETED' ? '已完成' : '执行中')}{completion && ` · ${completion}`}</small>
+          </div>
+        </details>
       </li>;
-    })}{item.entries.length > previewLimit && <li className="conversation-activity-more"><button type="button" onClick={() => setShowAll((value) => !value)} aria-expanded={showAll}><span>{showAll ? '收起其余活动' : `查看另外 ${remaining} 项`}</span><AppIcon name="chevronDown"/></button></li>}</ol>
-  </section>;
+    })}</ol>
+  </details>;
 }
 
 function ActivityApprovalRecord({ item }: { item: Extract<ConversationActivityItem, { kind: 'APPROVAL' }> }) {
   const label = item.completedAt ? agentCompletionTimeLabel(item.completedAt, item.decision === 'ALLOW_ONCE') : '';
-  return <div className="conversation-activity-approval-record" data-activity-sequence={item.sequence} data-completed-at={item.completedAt ?? undefined} title={label || undefined} tabIndex={label ? 0 : undefined}>
-    <span>{item.decision === 'ALLOW_ONCE' ? '已允许本次操作' : item.decision === 'DENY' ? '已拒绝本次操作' : '等待操作确认'}</span><CompletionTime label={label}/>
+  return <div className="conversation-activity-approval-record" data-activity-sequence={item.sequence} data-completed-at={item.completedAt ?? undefined}>
+    <span>{item.decision === 'ALLOW_ONCE' ? '已允许本次操作' : item.decision === 'DENY' ? '已拒绝本次操作' : '等待操作确认'}</span>{label && <small>{label}</small>}
   </div>;
 }
 
-function NarrativeBlock({ text, streaming = false, sequence }: { text: string; streaming?: boolean; sequence?: number }) {
+function NarrativeBlock({ text, streaming = false, sequence, activityFiles }: { text: string; streaming?: boolean; sequence?: number; activityFiles?: ActivityFileContext }) {
+  const preview = activityNarrativePreview(text);
   return <div className={`conversation-narrative${streaming ? ' is-streaming' : ''}`} data-testid="conversation-narrative" data-activity-sequence={sequence}>
-    <MarkdownMessage content={text} streaming={streaming}/>
+    {preview ? <details className="conversation-narrative-detail">
+      <summary><span>{preview}</span><small><span className="analysis-expand-label">展开分析</span><span className="analysis-collapse-label">收起分析</span></small><AppIcon name="chevronDown"/></summary>
+      <MarkdownMessage content={text} streaming={streaming} activityFiles={activityFiles}/>
+    </details> : <MarkdownMessage content={text} streaming={streaming} activityFiles={activityFiles}/>}
   </div>;
 }
 
-function ConversationActivityStream({ items, tools, approval, approvalSummary, busy, onDecision, onOpenDetails, liveNarrative }: {
+function ConversationActivityStream({ items, tools, approval, approvalSummary, busy, onDecision, onOpenDetails, liveNarrative, activityFiles }: {
   items: ConversationActivityItem[];
   tools: AgentToolCallView[];
   approval: ApprovalView | null;
@@ -215,12 +222,13 @@ function ConversationActivityStream({ items, tools, approval, approvalSummary, b
   onDecision?: (decision: 'DENY' | 'ALLOW_ONCE') => void;
   onOpenDetails: () => void;
   liveNarrative?: string;
+  activityFiles?: ActivityFileContext;
 }) {
   return <div className="conversation-activity-stream" data-testid="conversation-activity-stream" data-activity-count={items.length}>
     {items.length === 0 && !liveNarrative && <div className="conversation-activity-thinking" data-testid="conversation-activity-thinking"><AppIcon name="source"/><small>正在准备任务上下文</small></div>}
     {items.map((item) => {
       if (item.kind === 'GROUP') return <ActivityGroup item={item} key={item.id}/>;
-      if (item.kind === 'NARRATIVE') return <NarrativeBlock text={item.text} sequence={item.sequence} key={item.id}/>;
+      if (item.kind === 'NARRATIVE') return <NarrativeBlock text={item.text} sequence={item.sequence} key={item.id} activityFiles={activityFiles}/>;
       if (item.kind === 'PHASE') return <p className="conversation-activity-phase" key={item.id} data-activity-sequence={item.sequence}>{item.title}</p>;
       if (approval?.id === item.approvalId && onDecision && !item.completedAt) {
         const tool = tools.find((candidate) => candidate.id === item.toolCallId) ?? null;
@@ -228,7 +236,7 @@ function ConversationActivityStream({ items, tools, approval, approvalSummary, b
       }
       return <ActivityApprovalRecord item={item} key={item.id}/>;
     })}
-    {liveNarrative && <NarrativeBlock text={liveNarrative} streaming/>}
+    {liveNarrative && <NarrativeBlock text={liveNarrative} streaming activityFiles={activityFiles}/>}
   </div>;
 }
 
@@ -338,7 +346,8 @@ function ChangedFiles({ review, onReview, onReviewFile }: {
   </section>;
 }
 
-function AgentTerminalResult({ status, message, presentation, tools, canExpand, partial, review, executionDetail, onRetry, onReview, onReviewFile, onOpenReference, onOpenImage }: {
+function AgentTerminalResult({ run, status, message, presentation, tools, canExpand, partial, review, executionDetail, onRetry, onReview, onReviewFile, onOpenReference, onOpenImage }: {
+  run: AgentRunView | null;
   status: AgentTerminalStatus;
   message: ConversationMessageView | null;
   presentation: AgentPresentation | null;
@@ -357,11 +366,13 @@ function AgentTerminalResult({ status, message, presentation, tools, canExpand, 
   const result = buildAgentResultViewModel(status, message?.content ?? '', presentation, tools);
   const editedReview = appliedAgentReview(review);
   const markdown = message?.content || result.detail;
+  const failureReason = activityFailureReason(run);
   return <div className="agent-terminal-result" data-testid="agent-terminal-result" data-result-outcome={presentation?.outcome ?? status}>
     {result.duration && (canExpand
-      ? <button type="button" className="agent-terminal-runtime" aria-expanded={detailOpen} data-testid="agent-execution-detail-toggle" onClick={() => setDetailOpen((value) => !value)}><span>耗时 {result.duration}</span><AppIcon name="chevronDown"/></button>
+      ? <button type="button" className="agent-terminal-runtime" aria-expanded={detailOpen} data-testid="agent-execution-detail-toggle" onClick={() => setDetailOpen((value) => !value)}><span>耗时 {result.duration}</span><span className="agent-history-label">{detailOpen ? '收起执行记录' : '查看执行记录'}</span><AppIcon name="chevronDown"/></button>
       : <div className="agent-terminal-runtime"><span>耗时 {result.duration}</span></div>)}
-    {detailOpen && executionDetail}
+    {detailOpen && <>{executionDetail}{run?.error_code && <p className="agent-run-error-detail">结束原因：<code>{run.error_code}</code></p>}</>}
+    {failureReason && <p className="agent-failure-reason" data-testid="agent-failure-reason"><AppIcon name="info"/><span>{failureReason}</span></p>}
     <div className="agent-terminal-body"><MarkdownMessage content={markdown} references={message?.references ?? []} onOpenReference={onOpenReference} onOpenImage={onOpenImage}/></div>
     {editedReview && editedReview.files.length > 0 && <ChangedFiles review={editedReview} onReview={onReview} onReviewFile={onReviewFile}/>}
     <div className="agent-terminal-actions">
@@ -371,16 +382,16 @@ function AgentTerminalResult({ status, message, presentation, tools, canExpand, 
   </div>;
 }
 
-function CompletedActivityHistory({ items, tools }: { items: ConversationActivityItem[]; tools: AgentToolCallView[] }) {
+function CompletedActivityHistory({ items, tools, activityFiles }: { items: ConversationActivityItem[]; tools: AgentToolCallView[]; activityFiles: ActivityFileContext }) {
   return <div className="agent-execution-detail is-history" data-testid="agent-execution-detail">
-    <ConversationActivityStream items={items} tools={tools} approval={null} approvalSummary="" busy={false} onOpenDetails={() => undefined}/>
+    <ConversationActivityStream items={items} tools={tools} approval={null} approvalSummary="" busy={false} onOpenDetails={() => undefined} activityFiles={activityFiles}/>
   </div>;
 }
 
 export function AgentTurn({
   run, requestText = '', userMessageId, terminalMessage, events = [], tools = [], approval = null, approvalSummary = '', review = null,
   streamingContent = '', streamingStep = 0, busy = false, copied = false, onResume, onDecision, onRetry, onReview, onReviewFile, onCopy, onCopyError, onOpenReference, onOpenImage,
-  mcpRuntime = null, mcpBusyConnectionId = '', onActivateMcp,
+  onOpenActivityFile, mcpRuntime = null, mcpBusyConnectionId = '', onActivateMcp,
 }: AgentTurnProps) {
   const terminal = Boolean(terminalMessage) || isTerminalRun(run);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -399,6 +410,7 @@ export function AgentTurn({
   const requestKind = agentRequestKind(run?.task ?? requestText);
   const answerOnly = requestKind === 'ANSWER';
   const presentation = useMemo(() => run ? buildAgentPresentation(run, events, tools, now) : null, [events, now, run, tools]);
+  const activityFiles = useMemo<ActivityFileContext>(() => ({ resolve: (target) => resolveActivityFileLink(target, tools), open: onOpenActivityFile }), [tools, onOpenActivityFile]);
   const activityItems = useMemo(() => buildConversationActivityProjection(events, tools), [events, tools]);
   const liveNarrative = useMemo(() => {
     if (terminal || answerOnly) return '';
@@ -426,11 +438,11 @@ export function AgentTurn({
       )}
     </div>}
     {!answerOnly && !terminal && run && presentation && <>
-      <ConversationActivityStream items={activityItems} tools={tools} approval={approval} approvalSummary={approvalSummary} busy={busy} onDecision={onDecision} onOpenDetails={() => setDetailsOpen(true)} liveNarrative={liveNarrative}/>
+      <ConversationActivityStream items={activityItems} tools={tools} approval={approval} approvalSummary={approvalSummary} busy={busy} onDecision={onDecision} onOpenDetails={() => setDetailsOpen(true)} liveNarrative={liveNarrative} activityFiles={activityFiles}/>
       <AgentProgressSummary run={run} presentation={presentation} events={events} tools={tools} review={review} thinking={thinking} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen((value) => !value)} onResume={onResume} onReviewFile={onReviewFile} mcpRuntime={mcpRuntime} mcpBusyConnectionId={mcpBusyConnectionId} onActivateMcp={onActivateMcp}/>
     </>}
     {!answerOnly && terminal && status && (
-      <AgentTerminalResult status={status} message={terminalMessage} presentation={presentation} tools={tools} canExpand={canExpand} partial={partial} review={review} executionDetail={run && presentation ? <CompletedActivityHistory items={activityItems} tools={tools}/> : null} onRetry={onRetry} onReview={onReview} onReviewFile={onReviewFile} onOpenReference={onOpenReference} onOpenImage={onOpenImage}/>
+      <AgentTerminalResult run={run} status={status} message={terminalMessage} presentation={presentation} tools={tools} canExpand={canExpand} partial={partial} review={review} executionDetail={run && presentation ? <CompletedActivityHistory items={activityItems} tools={tools} activityFiles={activityFiles}/> : null} onRetry={onRetry} onReview={onReview} onReviewFile={onReviewFile} onOpenReference={onOpenReference} onOpenImage={onOpenImage}/>
     )}
     {terminalMessage && onCopy && <footer className={`message-actions agent-turn-message-actions ${copied ? 'copy-confirmed' : ''}`}><button type="button" className={copied ? 'copied' : ''} aria-label={copied ? '消息已复制' : '复制消息'} title={copied ? '已复制' : '复制'} onClick={onCopy} data-testid="message-copy"><AppIcon name={copied ? 'check' : 'copy'}/>{copied && <span role="status" aria-live="polite">已复制</span>}</button></footer>}
   </section>;
