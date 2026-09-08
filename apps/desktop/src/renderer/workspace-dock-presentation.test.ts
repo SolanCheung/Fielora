@@ -78,7 +78,7 @@ test('right workspace dock keeps a dynamic resize range and full-width tool view
   assert.match(layout, /\.project-layout\.workspace-open\.dock-focused \{[\s\S]*?--fl-project-conversation-min-track: 0px;[\s\S]*?--fl-project-workspace-track: calc\(100%/);
   assert.doesNotMatch(layout, /\.project-layout\.workspace-open\.dock-focused \{\s*grid-template-columns:/);
   assert.match(layout, /:root\[data-resizing="vertical"\] \.project-layout \{\s*transition: none;/);
-  assert.match(layout, /:root\[data-resizing="vertical"\] \.dock-code-highlight \{\s*visibility: hidden;/);
+  assert.doesNotMatch(layout, /\.dock-code-highlight \{\s*visibility: hidden;/);
 });
 
 test('a project can exist without a conversation and exposes a finite creation entry', () => {
@@ -153,7 +153,7 @@ test('files and images open as dock tabs and images expose location plus zoom', 
   assert.match(workspace, /loading: true/);
   assert.match(workspace, /正在载入文件/);
   assert.match(workspace, /正在载入图片/);
-  assert.match(layout, /\.dock-code-editor-surface > \.dock-code-highlight \{[\s\S]*?z-index: 2/);
+  assert.match(workspace, /<SyntaxCodeEditor value=\{session\.content\}/);
   assert.match(layout, /\.dock-image-preview > button \{[\s\S]*?width: 100%;[\s\S]*?height: 100%/);
   assert.doesNotMatch(workspace, /activeDockTab\.label<\/strong>/);
 });
@@ -172,8 +172,8 @@ test('file types use a modern semantic icon palette and product typography', () 
     assert.match(fileTypeIcons, new RegExp(`kind: '${kind}'`));
     assert.match(styles, new RegExp(`\\.file-type-icon\\.is-${kind}`));
   }
-  assert.match(fileTypeIcons, /from '@phosphor-icons\/react'/);
-  assert.match(fileTypeIcons, /weight="duotone"/);
+  assert.match(fileTypeIcons, /data-file-icon-source="material-icon-theme"/);
+  assert.match(fileTypeIcons, /assets\/file-icons/);
   assert.doesNotMatch(fileTypeIcons, /<svg\b|<path\b|<rect\b/);
   assert.match(styles, /\.file-tree-row \{[\s\S]*?font-family: var\(--fl-font-sans\); font-size: var\(--fl-font-size-label\); font-weight: 400/);
 });
@@ -181,9 +181,10 @@ test('file types use a modern semantic icon palette and product typography', () 
 test('workspace breadcrumbs and source editor use one typography system with semantic syntax color', () => {
   assert.match(styles, /\.conversation-header h2 \{[\s\S]*?font-family: var\(--fl-font-sans\); font-size: 15px; font-weight: 600/);
   assert.match(styles, /\.right-dock-breadcrumb \{[\s\S]*?font-family: var\(--fl-font-sans\); font-size: var\(--fl-font-size-meta\); font-weight: 400/);
-  assert.match(styles, /\.dock-code-highlight, \.dock-code-editor-surface > \.dock-code-input \{[\s\S]*?font-family: var\(--fl-font-mono\); font-size: 13px; font-weight: 400/);
-  assert.match(workspace, /function SyntaxCodeEditor/);
-  assert.match(workspace, /className={`syntax-\$\{kind\}`}/);
+  const editor = readFileSync(path.join(import.meta.dirname, 'SyntaxCodeEditor.tsx'), 'utf8');
+  assert.match(editor, /fontFamily: 'var\(--fl-font-mono\)'/);
+  assert.match(editor, /fontSize: 'var\(--fl-code-font-size\)'/);
+  assert.match(editor, /syntaxHighlighting\(highlighting\)/);
   for (const token of ['keyword', 'property', 'string', 'number', 'comment', 'punctuation']) assert.match(tokens, new RegExp(`--fl-code-${token}:`));
 });
 

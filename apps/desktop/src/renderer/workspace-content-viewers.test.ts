@@ -23,11 +23,11 @@ test('markdown files default to responsive preview and keep a source toggle in t
 });
 
 test('code and markdown source viewers wrap to the available workspace width without horizontal scrolling', () => {
-  assert.match(workspace, /wrap="soft"/);
-  assert.doesNotMatch(workspace, /wrap="off"/);
-  assert.match(styles, /\.dock-code-highlight, \.dock-code-editor-surface > \.dock-code-input \{[^}]*white-space: pre-wrap;[^}]*overflow-wrap: anywhere/);
-  assert.match(styles, /\.dock-code-editor-surface > \.dock-code-input \{[^}]*overflow-x: hidden;[^}]*overflow-y: auto/);
-  assert.doesNotMatch(styles, /\.dock-code-line \{[^}]*min-width: max-content/);
+  const editor = readFileSync(path.join(rendererRoot, 'SyntaxCodeEditor.tsx'), 'utf8');
+  assert.match(editor, /EditorView\.lineWrapping/);
+  assert.match(editor, /lineNumbers\(\)/);
+  assert.match(editor, /'\.cm-scroller': \{ overflow: 'auto'/);
+  assert.match(editor, /editor\.destroy\(\)/);
 });
 
 test('chat review actions open or activate file-specific diff tabs in the existing right workspace', () => {

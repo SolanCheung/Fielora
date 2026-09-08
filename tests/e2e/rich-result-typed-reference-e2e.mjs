@@ -157,11 +157,11 @@ try {
   assert.equal(await cdp.eval(`document.querySelectorAll('.markdown-reference-unavailable').length`), 3);
 
   await cdp.eval(`document.querySelector('[data-reference-kind="PROJECT_FILE"]').click()`);
-  await wait(cdp, `document.querySelector('.right-dock-view:not([hidden]) [data-testid="file-editor"]')?.value.startsWith('// changed after reference creation')`);
+  await wait(cdp, `document.querySelector('.right-dock-view:not([hidden]) [data-testid="file-editor"]')?.textContent.startsWith('// changed after reference creation')`);
   await wait(cdp, `document.body.innerText.includes('引用创建后文件内容已变化；当前已打开最新内容。')`);
   await cdp.eval(`document.querySelector('[data-reference-kind="CODE_RANGE"]').click()`);
   await wait(cdp, `document.querySelector('.right-dock-view:not([hidden]) [data-testid="syntax-code-editor"]')?.dataset.revealLineStart==='2'`);
-  const selection = await cdp.eval(`(()=>{const editor=document.querySelector('.right-dock-view:not([hidden]) [data-testid="file-editor"]');return editor.value.slice(editor.selectionStart,editor.selectionEnd);})()`);
+  const selection = await cdp.eval(`(()=>{const editor=document.querySelector('.right-dock-view:not([hidden]) [data-testid="file-editor"]');return window.getSelection().toString();})()`);
   assert.equal(selection.includes('export const one = 1;'), true, selection);
   assert.equal(selection.includes('export const three = 3;'), true, selection);
   assert.equal(selection.includes('export const four = 4;'), false, selection);

@@ -2,6 +2,56 @@
  * Stable application geometry contract.
  * Material work may change paint, never these ownership boundaries.
  */
+/* These live inputs belong only to their grid. Inheriting them invalidates
+ * every hidden file tree and syntax token on each pointer frame. */
+@property --workspace-navigation-width {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 304px;
+}
+
+@property --project-workspace-width {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 635px;
+}
+
+@property --dock-file-tree-width {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 270px;
+}
+
+@property --dock-slide-width {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 100%;
+}
+
+@property --file-tree-slide-width {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 100%;
+}
+
+@property --code-layout-width {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 100%;
+}
+
+@property --conversation-slide-width {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --navigation-content-width {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 304px;
+}
+
 @property --fl-project-conversation-min-track {
   syntax: "<length>";
   inherits: false;
@@ -72,11 +122,9 @@
     minmax(var(--fl-project-conversation-min-track), 1fr)
     var(--fl-project-workspace-divider-track)
     minmax(0, var(--fl-project-workspace-track));
-  transition:
-    grid-template-columns var(--fl-duration-panel) var(--fl-ease-panel),
-    --fl-project-conversation-min-track var(--fl-duration-panel) var(--fl-ease-panel),
-    --fl-project-workspace-divider-track var(--fl-duration-panel) var(--fl-ease-panel),
-    --fl-project-workspace-track var(--fl-duration-panel) var(--fl-ease-panel);
+  /* Interpolate the resolved grid once. Animating its input tracks as well
+   * makes layout continuously retarget an already moving destination. */
+  transition: grid-template-columns var(--fl-duration-panel) var(--fl-ease-panel);
 }
 
 :root[data-resizing="vertical"] .workspace-surface,
@@ -110,6 +158,7 @@
 /* Pointer capture must survive a drag-triggered collapse so reversing the
  * same uninterrupted gesture can restore the panel. */
 .project-workspace-resizer.dragging,
+.project-layout.workspace-open.dock-focused .project-workspace-resizer.dragging,
 body[data-sidebar-collapsed="true"] .workspace-navigation-resizer.dragging {
   visibility: visible;
   pointer-events: auto;
@@ -135,13 +184,30 @@ body[data-sidebar-collapsed="true"] .workspace-surface {
   grid-template-columns: 0 0 minmax(0, 1fr);
 }
 
+.project-navigation,
+.settings-navigation,
 body[data-sidebar-collapsed="true"] .project-navigation,
 body[data-sidebar-collapsed="true"] .settings-navigation {
-  width: 0;
+  width: 100%;
   min-width: 0;
-  max-width: 0;
+  max-width: none;
   padding-inline: 0;
   overflow: hidden;
+  opacity: 1;
+  transform: none;
+  transition: none;
+}
+
+.project-navigation > * {
+  --navigation-content-width: inherit;
+  width: calc(var(--navigation-content-width, 304px) - 18px);
+  margin-inline: 9px;
+}
+
+.settings-navigation > * {
+  --navigation-content-width: inherit;
+  width: calc(var(--navigation-content-width, 304px) - 24px);
+  margin-inline: 12px;
 }
 
 body[data-sidebar-collapsed="true"] .project-layout {
@@ -184,6 +250,53 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   transition:
     margin-bottom var(--fl-duration-panel) var(--fl-ease-panel),
     opacity var(--fl-duration-surface) var(--fl-ease-standard);
+}
+
+/* Sliding reveals keep their content at its destination width. The owning
+ * grid supplies the clipping edge; no opacity/scale prelude exposes a blank
+ * background or squeezes text down to a final disappearing sliver. */
+.right-workspace-dock.workspace-panel,
+.project-layout.workspace-open .right-workspace-dock.workspace-panel {
+  opacity: 1;
+  transform: none;
+  transition: margin-bottom var(--fl-duration-panel) var(--fl-ease-panel), visibility 0s linear var(--fl-duration-panel);
+}
+
+.project-layout.workspace-open .right-workspace-dock.workspace-panel {
+  transition-delay: 0s;
+}
+
+.right-workspace-dock > .right-dock-tab-strip,
+.right-workspace-dock > .right-dock-toolbar,
+.right-workspace-dock > .right-dock-active-view {
+  --dock-slide-width: inherit;
+  width: var(--dock-slide-width, 100%);
+  max-width: none;
+}
+
+.project-layout[data-workspace-motion="true"] .conversation-column > .conversation-header,
+.project-layout[data-workspace-motion="true"] .conversation-column > .message-list {
+  min-width: var(--conversation-slide-width, 0px);
+}
+
+.conversation-column > * {
+  --conversation-slide-width: inherit;
+}
+
+.project-layout[data-workspace-motion="true"] .conversation-composer {
+  min-width: min(var(--fl-layout-conversation-reading), calc(var(--conversation-slide-width) - 2 * var(--fl-layout-conversation-gutter)));
+}
+
+.project-layout.workspace-open.dock-focused .conversation-column {
+  opacity: 1;
+}
+
+.right-workspace-dock.has-toolbar {
+  grid-template-rows: 40px 40px minmax(0, 1fr);
+}
+
+.right-dock-toolbar {
+  border-bottom: 1px solid var(--fl-color-workspace-divider);
 }
 
 .settings-content {
@@ -426,11 +539,36 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   isolation: isolate;
 }
 
-/* A live divider drag is direct manipulation, not a panel state change.
- * Keep it on the pointer's animation frame, suspend layout interpolation and
- * temporarily avoid painting the duplicate syntax-highlight layer. The
- * editable text remains visible while the expensive token layer is restored
- * as soon as the pointer is released. */
+/* Terminal is a single sliding edge. Its contents are full height throughout
+ * the reveal, while every pane above shares the same timing and boundary. */
+.desktop-terminal-layer {
+  background: var(--fl-surface-content);
+  transition: height var(--fl-duration-panel) var(--fl-ease-panel);
+  will-change: auto;
+}
+
+.desktop-terminal-layer .terminal-dock {
+  height: calc(var(--desktop-terminal-height, 250px) - 4px);
+  min-height: 0;
+}
+
+.desktop-terminal-layer .terminal-resizer,
+.desktop-terminal-layer .terminal-dock,
+.desktop-work-area.terminal-open .desktop-terminal-layer .terminal-resizer,
+.desktop-work-area.terminal-open .desktop-terminal-layer .terminal-dock {
+  opacity: 1;
+  transform: none;
+  transition: none;
+  will-change: auto;
+}
+
+:root[data-resizing="horizontal"] .desktop-terminal-layer,
+:root[data-resizing="horizontal"] .project-layout > :not(.project-navigation):not(.workspace-navigation-resizer) {
+  transition: none;
+}
+
+/* A live divider drag is direct manipulation. Coalesced CSS updates and
+ * containment avoid React work; syntax and line numbers remain visible. */
 :root[data-resizing="vertical"] .right-workspace-dock {
   contain: size layout paint;
 }
@@ -440,16 +578,9 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   user-select: none;
 }
 
-:root[data-resizing="vertical"] .dock-code-highlight {
-  visibility: hidden;
-}
-
-:root[data-resizing="vertical"] .dock-code-editor-surface > .dock-code-input {
-  color: var(--fl-color-text-strong);
-  -webkit-text-fill-color: currentColor;
-  white-space: pre;
-  overflow-wrap: normal;
-  word-break: normal;
+/* This edge already follows the measured conversation on every frame. */
+body[data-project-workspace="true"][data-workspace-panel-open="true"] .project-context-controls {
+  transition: opacity var(--fl-duration-control) var(--fl-ease-standard);
 }
 
 /* The app-level controls float over the top-right corner. The tab strip owns
@@ -523,19 +654,9 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   max-width: none;
 }
 
-/* Native textarea compositing must not cover the syntax layer. The editable
- * input remains the pointer/caret owner; the non-interactive tokens paint on
- * top so code is visible in both development and packaged Chromium. */
 .dock-code-editor-surface {
-  isolation: isolate;
-}
-
-.dock-code-editor-surface > .dock-code-input {
-  z-index: 1;
-}
-
-.dock-code-editor-surface > .dock-code-highlight {
-  z-index: 2;
+  width: var(--code-layout-width, 100%);
+  max-width: none;
 }
 
 .dock-image-preview > button {
@@ -569,10 +690,174 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   color: var(--fl-color-icon-muted);
 }
 
-@container (max-width: 500px) {
-  .dock-resource-layout {
-    grid-template-columns: minmax(0, 1fr) 4px minmax(160px, min(var(--dock-file-tree-width, 270px), 45cqw));
-  }
+.dock-resource-layout {
+  grid-template-columns: minmax(0, 1fr) 4px min(var(--dock-file-tree-width, 270px), max(160px, 55%));
+  transition: grid-template-columns var(--fl-duration-panel) var(--fl-ease-panel);
+}
+
+.dock-resource-layout.file-tree-collapsed {
+  grid-template-columns: minmax(0, 1fr) 0px 0px;
+}
+
+:root[data-resizing="vertical"] .dock-resource-layout {
+  transition: none;
+}
+
+.dock-resource-file-tree,
+.dock-resource-layout.file-tree-collapsed .dock-resource-file-tree {
+  display: block;
+  padding: 0;
+  border: 0;
+  animation: none;
+}
+
+.dock-file-tree-body {
+  --file-tree-slide-width: inherit;
+  width: var(--file-tree-slide-width, 100%);
+}
+
+.dock-resource-layout.file-tree-collapsed .dock-resource-file-tree {
+  visibility: hidden;
+  transition: visibility 0s linear var(--fl-duration-panel);
+}
+
+.dock-file-tree-resizer span,
+.dock-file-tree-resizer:hover span,
+.dock-file-tree-resizer.dragging span {
+  width: 1px;
+  opacity: 1;
+  background: var(--fl-color-workspace-divider);
+}
+
+.workspace-file-tool {
+  grid-template-rows: 36px minmax(0, 1fr);
+}
+
+.workspace-file-filter {
+  position: relative;
+  display: flex;
+  padding: 5px 8px 3px;
+}
+
+.workspace-file-search {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.workspace-file-search > .app-icon {
+  position: absolute;
+  left: 8px;
+  pointer-events: none;
+}
+
+.workspace-file-filter .workspace-file-search input {
+  width: 100%;
+  height: 28px;
+  padding: 3px 30px 3px 27px;
+}
+
+.workspace-file-search > button {
+  position: absolute;
+  right: 1px;
+  width: 26px;
+  height: 26px;
+}
+
+.workspace-file-refresh {
+  opacity: 0;
+}
+
+.workspace-file-search:hover .workspace-file-refresh,
+.workspace-file-search:focus-within .workspace-file-refresh {
+  opacity: 1;
+}
+
+.workspace-file-tree {
+  position: relative;
+  padding: 2px 6px 10px;
+  scrollbar-gutter: stable;
+  overflow-x: hidden;
+  overflow-anchor: none;
+  scroll-behavior: auto;
+}
+
+/* Large trees render a viewport window; this content wrapper never owns a
+ * second scrollbar or a frozen width. Native scrolling remains on the tree. */
+.workspace-file-rows {
+  width: 100%;
+  min-width: 0;
+}
+
+.workspace-file-rows > p {
+  margin: 22px 10px;
+  color: var(--fl-color-text-muted);
+  font-size: var(--fl-type-meta-size);
+}
+
+.file-tree-row-probe {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.file-tree-virtual-row {
+  position: relative;
+}
+
+.file-tree-virtual-row > .file-tree-row {
+  height: 100%;
+}
+
+.file-tree-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--fl-color-workspace-divider);
+  opacity: .25;
+  pointer-events: none;
+}
+
+.workspace-file-tree:hover .file-tree-guide,
+.workspace-file-tree:focus-within .file-tree-guide {
+  opacity: 1;
+}
+
+.file-tree-row {
+  min-height: 27px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 5px;
+  padding: 3px 6px 3px calc(7px + var(--tree-depth, 0) * 18px);
+  font-size: var(--fl-type-meta-size);
+  font-weight: var(--fl-font-weight-regular);
+}
+
+.file-tree-row.is-folder {
+  font-weight: var(--fl-font-weight-regular);
+}
+
+.file-tree-group,
+.file-tree-children {
+  position: relative;
+}
+
+.file-tree-children::before {
+  position: absolute;
+  content: '';
+  top: 0;
+  bottom: 0;
+  left: calc(15px + var(--tree-depth, 0) * 18px);
+  width: 1px;
+  background: var(--fl-color-workspace-divider);
+  opacity: .25;
+  pointer-events: none;
+}
+
+.workspace-file-tree:hover .file-tree-children::before,
+.workspace-file-tree:focus-within .file-tree-children::before {
+  opacity: 1;
 }
 
 /* Browser is a tool inside the shared Content plane. Its Page tabs are hosted

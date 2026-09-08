@@ -121,8 +121,8 @@ test('product icons use the managed Phosphor entry instead of component-owned sv
   assert.match(registry, /diff: PlusMinus/);
   assert.match(read('styles/controls.css'), /\.app-icon\[data-icon="diff"\] \{[\s\S]*?border: 1\.5px solid currentColor;[\s\S]*?border-radius: 4px;/);
   assert.match(registry, /terminalPanel: TerminalWindow/);
-  assert.match(fileTypes, /from '@phosphor-icons\/react'/);
-  assert.match(fileTypes, /weight="duotone"/);
+  assert.match(fileTypes, /data-file-icon-source="material-icon-theme"/);
+  assert.doesNotMatch(fileTypes, /https?:|<svg/);
   for (const file of ['DesktopChrome.tsx', 'ProjectWorkspace.tsx', 'SettingsScreen.tsx', 'RightWorkspaceDock.tsx', 'AgentTurn.tsx']) {
     const source = read(file);
     assert.match(source, /AppIcon/);
@@ -228,7 +228,8 @@ test('shared navigation resize, collapse and Settings content behavior stay cano
   assert.match(settings, /WORKSPACE_NAVIGATION_MIN_WIDTH/);
   assert.match(settings, /WORKSPACE_NAVIGATION_MAX_WIDTH/);
   assert.match(layout, /body\[data-sidebar-collapsed="true"\] \.workspace-surface \{[\s\S]*?grid-template-columns: 0 0 minmax\(0, 1fr\);/);
-  assert.match(layout, /body\[data-sidebar-collapsed="true"\] \.project-navigation[\s\S]*?max-width: 0;/);
+  assert.match(layout, /body\[data-sidebar-collapsed="true"\] \.project-navigation[\s\S]*?width: 100%;[\s\S]*?padding-inline: 0;[\s\S]*?overflow: hidden;/);
+  assert.match(layout, /@property --workspace-navigation-width\s*\{[^}]*inherits: false;/);
   assert.match(layout, /\.settings-content \{[\s\S]*?overflow-x: hidden;[\s\S]*?overflow-y: auto;/);
   assert.match(read('styles/tokens.css'), /--fl-layout-page-width: 1040px;[\s\S]*?--fl-layout-settings-content: 920px;/);
   assert.match(read('styles/appearance.css'), /\.settings-section,[\s\S]*?\.appearance-settings \{ width: min\(var\(--fl-layout-settings-content\), 100%\); margin-inline: auto; \}/);
@@ -237,7 +238,8 @@ test('shared navigation resize, collapse and Settings content behavior stay cano
   assert.match(layout, /\.conversation-column,[\s\S]*?\.scheduled-page,[\s\S]*?\.settings-content,[\s\S]*?\.library-content \{[\s\S]*?border-radius: var\(--fl-radius-work-surface\) 0 0 0;/);
   assert.match(read('styles/tokens.css'), /--fl-radius-conversation-surface: 16px;/);
   assert.match(layout, /@property --fl-project-workspace-track[\s\S]*?syntax: "<length-percentage>"/);
-  assert.match(layout, /--fl-project-workspace-track var\(--fl-duration-panel\) var\(--fl-ease-panel\)/);
+  assert.match(layout, /transition: grid-template-columns var\(--fl-duration-panel\) var\(--fl-ease-panel\);/);
+  assert.doesNotMatch(layout, /--fl-project-workspace-track var\(--fl-duration-panel\)/);
   assert.match(rightDock, /\{tabs\.length > 0 && <div className="right-dock-add-wrap"/);
   assert.match(main, /width: 1180,[\s\S]*?height: 560,[\s\S]*?minWidth: 900,[\s\S]*?minHeight: 560,/);
 

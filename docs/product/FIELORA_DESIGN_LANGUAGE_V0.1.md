@@ -77,7 +77,13 @@ Fallback 必须复用同一 DOM、同一 `data-surface` 与同一交互状态，
 
 高频产品图标统一通过 `ui/Icon.tsx` 的 `<AppIcon>` 使用 `@phosphor-icons/react` 输出。导航、Chrome、Composer、权限、文件工作流、设置、菜单和通用控件不得各自复制 SVG path 或建立局部 glyph component。
 
-AppIcon 使用 `currentColor`、14/17/20px 尺寸角色和统一 weight；状态由父控件的 semantic token 表达。文件类型使用同一 Phosphor family 与集中语义色；外部应用的本机图标、站点 favicon 和内容媒体不属于产品 icon grammar，可保留真实来源。
+AppIcon 使用 `currentColor`、14/17/20px 尺寸角色和统一 weight；状态由父控件的 semantic token 表达。用户于 2026-09-08 要求文件类型采用更容易辨识的彩色语言标记，文件 glyph 因此使用本地 Material Icon Theme SVG 子集（保留 MIT 许可），React/TypeScript/JSON/ESLint 等有各自标记；这只属于文件类型的例外，不替换 Phosphor 产品控件 registry。外部应用的本机图标、站点 favicon 和内容媒体可保留真实来源。
+
+文件目录与文件标签共用该类型映射，重命名标签不会改变文件图标。图标资源与代码语法主题是独立能力；代码展示使用与产品协调的紫色关键字、蓝色属性和青绿色字符串，并跟随浅色/深色外观。源文件始终显示等宽行号，软换行不重复编号；字体、滚动和拖动必须保持代码与行号对齐，不能为了动效临时隐藏行号。
+
+文件工具栏的默认“打开”使用本机文件资源管理器图标；其下拉菜单只显示其他已安装应用，不重复文件资源管理器，也不再列出 Fielora 文件/终端。侧栏、文件工作区与终端开合以连续裁切和同一移动边界表达，禁止相邻面板一块瞬移、一块缓动。拖动宽度必须局限在拥有该宽度的布局容器，不能因继承变量让所有文件节点重复计算样式；性能验收使用多文件/多标签场景及中间帧，不只检查动画末态。
+
+右侧工作区与内部目录的展开采用滑动裁切：内容随边界露出，避免先显示空白底板、文字压成窄条或结束时突然消失。拖动期间边界直接跟随指针，释放才提交宽度偏好；正常展开/恢复的控件同步使用向外/向内箭头。文件工具栏下方与正文/目录之间使用同一细 neutral divider，目录开关位于“打开”的左侧。目录缩进、弱层级线及 hover 加深帮助辨认父子关系；筛选紧靠工具栏分割线，显示搜索与清空操作。
 
 Fielora Logo 不属于通用 AppIcon grammar。唯一 canonical 品牌源是 `apps/desktop/assets/fielora-brand-mark.svg`；Renderer 直接消费 SVG，Windows icon pipeline 消费由它机械生成的同形 PNG/ICO。当前批准版本使用紫色 `#5840C8` 三瓣轮廓，中心保持透明负空间，不保留浅色圆；更换 Logo 不建立第二份组件资源。
 

@@ -1,3 +1,4 @@
+import { replaceFileContent, renderingTestArgs } from './harness/file-editor-harness.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..', '..');
 const dataRoot = await mkdtemp(path.join(tmpdir(), 'fielora-content-viewers-'));
 const projectRoot = path.join(dataRoot, 'project');
-const evidenceDir = path.join(root, 'artifacts', 'workspace-content-viewers');
+const evidenceDir = path.resolve(process.env.FIELORA_E2E_EVIDENCE_DIR ?? path.join(root, 'artifacts', 'workspace-content-viewers'));
 const runtimeNode = process.execPath;
 const forgeEntry = path.join(root, 'apps', 'desktop', 'node_modules', '@electron-forge', 'cli', 'dist', 'electron-forge.js');
 const packagedApp = process.env.FIELORA_PACKAGED_APP ?? '';
@@ -91,7 +92,7 @@ try {
   port = await freePort();
   const env = { ...process.env, Path: `${path.dirname(runtimeNode)};${process.env.Path ?? process.env.PATH ?? ''}`, APPDATA: path.join(dataRoot, 'roaming'), LOCALAPPDATA: dataRoot, FIELORA_E2E: '1', FIELORA_E2E_DEBUG_PORT: String(port), ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/' };
   child = packagedApp
-    ? spawn(packagedApp, [], { cwd: path.dirname(packagedApp), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    ? spawn(packagedApp, [...renderingTestArgs, `--user-data-dir=${path.join(dataRoot,'profile')}`], { cwd: path.dirname(packagedApp), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     : spawn(runtimeNode, [forgeEntry, 'start'], { cwd: path.join(root, 'apps', 'desktop'), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', (chunk) => output.push(String(chunk)));
   child.stderr.on('data', (chunk) => output.push(String(chunk)));
@@ -137,7 +138,7 @@ try {
   await cdp.eval(`document.querySelector('[data-testid^="project-row-"] .project-item').click()`);
   await wait(cdp, `document.querySelector('[data-testid^="project-conversations-"]')`);
   const navLabels = await cdp.eval(`[...document.querySelectorAll('.project-global-nav span')].map((item)=>item.textContent)`);
-  assert.deepEqual(navLabels, ['现在', '资料库']);
+  assert.deepEqual(navLabels, ['已安排', '资料库']);
 
   const conversationLayout = await cdp.eval(`(()=>{const pane=document.querySelector('.conversation-column').getBoundingClientRect();const list=document.querySelector('.message-list');const listRect=list.getBoundingClientRect();const composer=document.querySelector('.conversation-composer').getBoundingClientRect();return{paneBottom:Math.round(pane.bottom),listBottom:Math.round(listRect.bottom),paddingBottom:parseFloat(getComputedStyle(list).paddingBottom),composerHeight:Math.round(composer.height)};})()`);
   assert.ok(Math.abs(conversationLayout.paneBottom - conversationLayout.listBottom) <= 1, JSON.stringify(conversationLayout));
@@ -160,18 +161,18 @@ try {
 
   await cdp.eval(`document.querySelector('[data-testid="markdown-source-toggle"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="syntax-code-editor"]') && !document.querySelector('[data-testid="markdown-preview"]')`);
-  const markdownSource = await cdp.eval(`(()=>{const editor=document.querySelector('.right-dock-view:not([hidden]) [data-testid="file-editor"]');return{wrap:editor.getAttribute('wrap'),overflow:getComputedStyle(editor).overflowX,scroll:Math.ceil(editor.scrollWidth-editor.clientWidth)};})()`);
-  assert.equal(markdownSource.wrap, 'soft');
-  assert.equal(markdownSource.overflow, 'hidden');
+  const markdownSource = await cdp.eval(`(()=>{const editor=document.querySelector('.right-dock-view:not([hidden]) [data-testid="file-editor"]');return{wrap:getComputedStyle(editor).whiteSpace,overflow:getComputedStyle(editor.closest('.cm-scroller')).overflowX,scroll:Math.ceil(editor.scrollWidth-editor.clientWidth)};})()`);
+  assert.equal(markdownSource.wrap, 'break-spaces');
+  assert.equal(markdownSource.overflow, 'auto');
   assert.ok(markdownSource.scroll <= 1, JSON.stringify(markdownSource));
 
   await cdp.eval(`[...document.querySelectorAll('.right-dock-view:not([hidden]) [data-testid="workspace-file"]')].find((row)=>row.textContent.includes('responsive.ts')).click()`);
-  await wait(cdp, `document.querySelector('.right-dock-view:not([hidden]) [data-testid="syntax-code-editor"][data-language="script"]')`);
-  const source = await cdp.eval(`(()=>{const editor=document.querySelector('.right-dock-view:not([hidden]) [data-testid="file-editor"]');const surface=document.querySelector('.right-dock-view:not([hidden]) [data-testid="syntax-code-editor"]');return{wrap:editor.getAttribute('wrap'),overflow:getComputedStyle(editor).overflowX,scroll:Math.ceil(editor.scrollWidth-editor.clientWidth),surfaceWidth:Math.round(surface.getBoundingClientRect().width)};})()`);
-  assert.equal(source.wrap, 'soft');
-  assert.equal(source.overflow, 'hidden');
+  await wait(cdp, `document.querySelector('.right-dock-view:not([hidden]) [data-testid="syntax-code-editor"]')`);
+  const source = await cdp.eval(`(()=>{const editor=document.querySelector('.right-dock-view:not([hidden]) [data-testid="file-editor"]');const surface=document.querySelector('.right-dock-view:not([hidden]) [data-testid="syntax-code-editor"]');return{wrap:getComputedStyle(editor).whiteSpace,overflow:getComputedStyle(editor.closest('.cm-scroller')).overflowX,scroll:Math.ceil(editor.scrollWidth-editor.clientWidth),surfaceWidth:Math.round(surface.getBoundingClientRect().width)};})()`);
+  assert.equal(source.wrap, 'break-spaces');
+  assert.equal(source.overflow, 'auto');
   assert.ok(source.scroll <= 1, JSON.stringify(source));
-  await cdp.eval(setValue('.right-dock-view:not([hidden]) [data-testid="file-editor"]', `export const responsiveSource = true;\n`));
+  await replaceFileContent(cdp, '.right-dock-view:not([hidden]) [data-testid="file-editor"]', `export const responsiveSource = true;\n`);
   await wait(cdp, `document.querySelector('[data-testid="review-change"]')`);
   await cdp.eval(`document.querySelector('[data-testid="review-change"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="diff-view"]') && document.querySelector('[data-testid="right-dock-tab-review"]')`);

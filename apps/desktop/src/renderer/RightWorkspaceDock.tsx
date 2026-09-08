@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Menu, MenuItem, Tab, TabStrip, TextActionDialog } from './UiPrimitives';
-import { AppIcon, type AppIconName } from './ui';
+import { AppIcon, FileTypeIcon, type AppIconName } from './ui';
 
 export interface RightWorkspaceTab {
   id: string;
   label: string;
   icon: AppIconName;
+  fileIconPath?: string;
   tabHostId?: string;
 }
 
@@ -41,6 +42,7 @@ export function RightWorkspaceDock({ tabs, activeTabId, toolbar, tools, showLaun
   const toolMenuRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
+  const tabOrder = tabs.map((tab) => tab.id).join('\n');
 
   useEffect(() => {
     if (!toolsOpen && !contextMenu) return;
@@ -103,28 +105,53 @@ export function RightWorkspaceDock({ tabs, activeTabId, toolbar, tools, showLaun
     const strip = tabsRef.current;
     if (!strip) return;
     let frame = 0;
-    const revealActiveTab = () => {
+    let revealRequested = true;
+    const updateStrip = () => {
       frame = 0;
-      const activeTab = [...strip.querySelectorAll<HTMLElement>('[data-tab-id]')]
-        .find((item) => item.dataset.tabId === activeTabId);
-      if (!activeTab) return;
-      const stripRect = strip.getBoundingClientRect();
-      const tabRect = activeTab.getBoundingClientRect();
-      if (tabRect.left < stripRect.left) strip.scrollLeft -= stripRect.left - tabRect.left;
-      else if (tabRect.right > stripRect.right) strip.scrollLeft += tabRect.right - stripRect.right;
+      if (revealRequested) {
+        revealRequested = false;
+        // Browser pages arrive through a portal; use the rendered selected tab.
+        const activeTab = strip.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.closest<HTMLElement>('.ui-tab');
+        if (activeTab) {
+          const stripRect = strip.getBoundingClientRect();
+          const tabRect = activeTab.getBoundingClientRect();
+          const margin = Math.min(24, Math.max(0, (stripRect.width - tabRect.width) / 2));
+          if (tabRect.left < stripRect.left + margin) strip.scrollBy({ left: tabRect.left - stripRect.left - margin, behavior: 'instant' });
+          else if (tabRect.right > stripRect.right - margin) strip.scrollBy({ left: tabRect.right - stripRect.right + margin, behavior: 'instant' });
+        }
+      }
+      const overflowLeft = String(strip.scrollLeft > 1);
+      const overflowRight = String(strip.scrollWidth - strip.clientWidth - strip.scrollLeft > 1);
+      if (strip.dataset.overflowLeft !== overflowLeft) strip.dataset.overflowLeft = overflowLeft;
+      if (strip.dataset.overflowRight !== overflowRight) strip.dataset.overflowRight = overflowRight;
     };
-    const scheduleReveal = () => {
-      if (frame) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(revealActiveTab);
+    const scheduleUpdate = () => {
+      if (!frame) frame = requestAnimationFrame(updateStrip);
+    };
+    const scheduleReveal = () => { revealRequested = true; scheduleUpdate(); };
+    const wheel = (event: WheelEvent) => {
+      if (event.ctrlKey || strip.scrollWidth <= strip.clientWidth + 1) return;
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (!delta) return;
+      event.preventDefault();
+      const unit = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? strip.clientWidth : 1;
+      strip.scrollBy({ left: delta * unit, behavior: 'instant' });
     };
     scheduleReveal();
     const observer = new ResizeObserver(scheduleReveal);
     observer.observe(strip);
+    const tabObserver = new MutationObserver(scheduleReveal);
+    tabObserver.observe(strip, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected'] });
+    strip.addEventListener('wheel', wheel, { passive: false });
+    strip.addEventListener('scroll', scheduleUpdate, { passive: true });
     return () => {
       observer.disconnect();
+      tabObserver.disconnect();
+      strip.removeEventListener('wheel', wheel);
+      strip.removeEventListener('scroll', scheduleUpdate);
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [activeTabId, tabs]);
+  }, [activeTabId, tabOrder]);
 
   const openTool = (tool: RightWorkspaceTool) => {
     setToolsOpen(false);
@@ -171,7 +198,7 @@ export function RightWorkspaceDock({ tabs, activeTabId, toolbar, tools, showLaun
       <TabStrip innerRef={tabsRef} className="right-dock-tabs" label="工作区工具标签" data-testid="right-dock-tabs">
         {tabs.map((tab) => tab.tabHostId
           ? <div key={tab.id} id={tab.tabHostId} className="right-dock-tab-host" data-workspace-tab-id={tab.id}/>
-          : <Tab key={tab.id} className="right-dock-tab" mainClassName="right-dock-tab-main" closeClassName="right-dock-tab-close" label={tab.label} leading={<AppIcon name={tab.icon}/>} active={tab.id === activeTabId} onActivate={() => onActivate(tab.id)} onClose={() => onClose(tab.id)} onContextMenu={(event) => { event.preventDefault(); openTabMenu(tab, event.clientX, event.clientY); }} onKeyDown={(event) => { if (!(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); openTabMenu(tab, bounds.left + 14, bounds.bottom); }} testId={`right-dock-tab-${tab.id}`} closeTestId={`right-dock-close-${tab.id}`} data-tab-id={tab.id} />)}
+          : <Tab key={tab.id} className="right-dock-tab" mainClassName="right-dock-tab-main" closeClassName="right-dock-tab-close" label={tab.label} leading={tab.fileIconPath ? <FileTypeIcon path={tab.fileIconPath}/> : <AppIcon name={tab.icon}/>} active={tab.id === activeTabId} onActivate={() => onActivate(tab.id)} onClose={() => onClose(tab.id)} onContextMenu={(event) => { event.preventDefault(); openTabMenu(tab, event.clientX, event.clientY); }} onKeyDown={(event) => { if (!(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); openTabMenu(tab, bounds.left + 14, bounds.bottom); }} testId={`right-dock-tab-${tab.id}`} closeTestId={`right-dock-close-${tab.id}`} data-tab-id={tab.id} />)}
       </TabStrip>
       {tabs.length > 0 && <div className="right-dock-add-wrap" ref={menuAnchorRef}>
         <button type="button" className="right-dock-add" aria-label="打开工作区工具" title="打开工具" aria-expanded={toolsOpen} onClick={toggleToolMenu} data-testid="right-dock-add"><AppIcon name="plus"/></button>

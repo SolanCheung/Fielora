@@ -1,3 +1,4 @@
+import { replaceFileContent } from './harness/file-editor-harness.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -188,10 +189,10 @@ try {
   await screenshot(cdp, '03-files-tool-tab.png');
   await cdp.eval(`[...document.querySelectorAll('[data-testid="workspace-file"]')].find((item)=>item.title==='src/workspace.ts' || item.innerText.includes('workspace.ts')).click()`);
   await wait(cdp, `document.querySelector('[data-testid^="right-dock-tab-file:"]') && document.querySelector('.right-dock-view-file:not([hidden]) [data-testid="syntax-code-editor"]')`);
-  const codePresentation = await cdp.eval(`(()=>{const editor=document.querySelector('.right-dock-view-file:not([hidden]) [data-testid="syntax-code-editor"]');const highlight=editor.querySelector('.dock-code-highlight');const input=editor.querySelector('[data-testid="file-editor"]');const rect=highlight.getBoundingClientRect();return{value:input.value,text:highlight.innerText,width:rect.width,height:rect.height,zIndex:getComputedStyle(highlight).zIndex,visibility:getComputedStyle(highlight).visibility};})()`);
+  const codePresentation = await cdp.eval(`(()=>{const editor=document.querySelector('.right-dock-view-file:not([hidden]) [data-testid="syntax-code-editor"]');const highlight=editor.querySelector('.cm-content');const input=editor.querySelector('[data-testid="file-editor"]');const rect=highlight.getBoundingClientRect();return{value:input.textContent,text:highlight.innerText,width:rect.width,height:rect.height,zIndex:getComputedStyle(highlight).zIndex,visibility:getComputedStyle(highlight).visibility};})()`);
   assert.ok(codePresentation.value.includes('workspaceDock') && codePresentation.text.includes('workspaceDock'), JSON.stringify(codePresentation));
   assert.ok(codePresentation.width > 180 && codePresentation.height > 200, JSON.stringify(codePresentation));
-  assert.equal(codePresentation.zIndex, '2');
+  assert.ok(await cdp.eval(`document.querySelector('.right-dock-view-file:not([hidden]) .cm-content[contenteditable="true"]') !== null`));
   assert.equal(codePresentation.visibility, 'visible');
   await new Promise((resolve) => setTimeout(resolve, 220));
   const fileResourceLayout = await cdp.eval(`(()=>{const layout=document.querySelector('.right-dock-view-file:not([hidden]) [data-testid="dock-resource-layout"]').getBoundingClientRect();const content=document.querySelector('.right-dock-view-file:not([hidden]) .dock-resource-content').getBoundingClientRect();const tree=document.querySelector('.right-dock-view-file:not([hidden]) [data-testid="dock-resource-file-tree"]').getBoundingClientRect();return{layoutWidth:layout.width,contentWidth:content.width,contentRight:content.right,treeLeft:tree.left,treeWidth:tree.width};})()`);
@@ -285,10 +286,10 @@ try {
   await wait(cdp, `!document.querySelector('[data-testid="right-dock-tab-${copiedTab}"]')`);
   await cdp.eval(`document.querySelector('[data-testid="right-dock-tab-${textTab}"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="file-editor"]')`);
-  await cdp.eval(setValue('[data-testid="file-editor"]', 'export const workspaceDock = true;\nexport const toolTabs = true;\n'));
+  await replaceFileContent(cdp, '[data-testid="file-editor"]', 'export const workspaceDock = true;\nexport const toolTabs = true;\n');
   await cdp.eval(`document.querySelector('[data-testid="right-dock-tab-browser"]').click()`);
   await cdp.eval(`document.querySelector('[data-testid="right-dock-tab-${textTab}"]').click()`);
-  assert.ok((await cdp.eval(`document.querySelector('[data-testid="file-editor"]').value`)).includes('toolTabs = true'));
+  assert.ok((await cdp.eval(`document.querySelector('[data-testid="file-editor"]').textContent`)).includes('toolTabs = true'));
   await cdp.eval(`document.querySelector('[data-testid="review-change"]').click()`);
   await wait(cdp, `document.querySelector('[data-testid="diff-view"]')`);
 

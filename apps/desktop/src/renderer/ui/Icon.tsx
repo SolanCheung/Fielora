@@ -4,7 +4,9 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  ArrowUpRight,
   ArrowsOutSimple,
+  ArrowsInSimple,
   CaretDown,
   ChatCircle,
   ChatCircleDots,
@@ -25,8 +27,11 @@ import {
   Files,
   Folder,
   FolderOpen,
+  Folders,
   Gear,
   GitBranch,
+  GitCommit,
+  ListChecks,
   Globe,
   HandPalm,
   Image,
@@ -64,9 +69,9 @@ export type AppIconName =
   | 'folder' | 'folderOpen' | 'files' | 'library' | 'file' | 'image' | 'filePlus' | 'objects'
   | 'diff' | 'terminal' | 'terminalPanel' | 'computer' | 'settings' | 'refresh' | 'close'
   | 'more' | 'models' | 'appearance' | 'extensions' | 'storage' | 'keyboard'
-  | 'info' | 'environment' | 'branch' | 'cloud' | 'source' | 'copy' | 'check'
+  | 'info' | 'environment' | 'branch' | 'commit' | 'changes' | 'openAction' | 'cloud' | 'source' | 'copy' | 'check'
   | 'sort' | 'plus' | 'edit' | 'search' | 'run' | 'pause' | 'delete' | 'chevronDown' | 'panelRight' | 'sidebar'
-  | 'back' | 'forward' | 'focus' | 'tools' | 'microphone' | 'send' | 'stop'
+  | 'back' | 'forward' | 'focus' | 'unfocus' | 'fileTree' | 'tools' | 'microphone' | 'send' | 'stop'
   | 'permissionAsk' | 'permissionReview' | 'permissionFull' | 'application';
 
 const ICONS: Record<AppIconName, Icon> = {
@@ -101,6 +106,9 @@ const ICONS: Record<AppIconName, Icon> = {
   info: Info,
   environment: SlidersHorizontal,
   branch: GitBranch,
+  commit: GitCommit,
+  changes: ListChecks,
+  openAction: ArrowUpRight,
   cloud: CloudArrowUp,
   source: FileText,
   copy: Copy,
@@ -118,6 +126,8 @@ const ICONS: Record<AppIconName, Icon> = {
   back: ArrowLeft,
   forward: ArrowRight,
   focus: ArrowsOutSimple,
+  unfocus: ArrowsInSimple,
+  fileTree: Folders,
   tools: Columns,
   microphone: Microphone,
   send: ArrowUp,

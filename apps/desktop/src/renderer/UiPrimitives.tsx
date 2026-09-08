@@ -151,7 +151,7 @@ export function TooltipButton({ tooltip, placement = 'right', variant = 'card', 
   </>;
 }
 
-export function IconButton({ label, icon, active = false, testId, className = '', title, size = 'md', onPointerEnter, onPointerLeave, onFocus, onBlur, onKeyDown, ...props }: ProductButtonProps & {
+export function IconButton({ label, icon, active = false, testId, className = '', title, size = 'md', onPointerEnter, onPointerLeave, onFocus, onBlur, onKeyDown, onClick, ...props }: ProductButtonProps & {
   size?: 'sm' | 'md';
 }) {
   const managedTooltip = useManagedTooltip(title ?? label);
@@ -161,6 +161,7 @@ export function IconButton({ label, icon, active = false, testId, className = ''
       ref={managedTooltip.anchorRef}
       type={props.type ?? 'button'}
       className={`ui-icon-button ui-icon-button--${size} ${active ? 'is-active active' : ''} ${className}`.trim()}
+      onClick={(event) => { managedTooltip.hide(); onClick?.(event); }}
       aria-label={label}
       aria-describedby={managedTooltip.open ? managedTooltip.tooltipId : undefined}
       onPointerEnter={(event) => { onPointerEnter?.(event); managedTooltip.show(); }}
@@ -174,7 +175,7 @@ export function IconButton({ label, icon, active = false, testId, className = ''
   </>;
 }
 
-export function ToolbarAction({ label, icon, text, active = false, testId, className = '', title, onPointerEnter, onPointerLeave, onFocus, onBlur, onKeyDown, ...props }: ProductButtonProps & {
+export function ToolbarAction({ label, icon, text, active = false, testId, className = '', title, onPointerEnter, onPointerLeave, onFocus, onBlur, onKeyDown, onClick, ...props }: ProductButtonProps & {
   text?: string;
 }) {
   const managedTooltip = useManagedTooltip(title ?? label);
@@ -184,6 +185,7 @@ export function ToolbarAction({ label, icon, text, active = false, testId, class
       ref={managedTooltip.anchorRef}
       type={props.type ?? 'button'}
       className={`ui-toolbar-action ${text ? 'ui-toolbar-action--labeled' : ''} ${active ? 'is-active active' : ''} ${className}`.trim()}
+      onClick={(event) => { managedTooltip.hide(); onClick?.(event); }}
       aria-label={label}
       aria-describedby={managedTooltip.open ? managedTooltip.tooltipId : undefined}
       onPointerEnter={(event) => { onPointerEnter?.(event); managedTooltip.show(); }}
@@ -216,11 +218,28 @@ export function MenuItem({ icon, label, description, trailing, className = '', .
   </button>;
 }
 
-export function TabStrip({ label, className = '', children, innerRef, ...props }: HTMLAttributes<HTMLDivElement> & {
+export function TabStrip({ label, className = '', children, innerRef, onKeyDown, ...props }: HTMLAttributes<HTMLDivElement> & {
   label: string;
   innerRef?: Ref<HTMLDivElement>;
 }) {
-  return <div {...props} ref={innerRef} className={`ui-tab-strip ${className}`.trim()} role="tablist" aria-label={label}>{children}</div>;
+  return <div {...props} ref={innerRef} className={`ui-tab-strip ${className}`.trim()} role="tablist" aria-label={label} onKeyDown={(event) => {
+    onKeyDown?.(event);
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const target = (event.target as HTMLElement).closest<HTMLButtonElement>('[role="tab"]');
+    if (!target) return;
+    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]:not(:disabled)')];
+    const index = items.indexOf(target);
+    if (index < 0) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus({ preventScroll: true });
+    items[next]?.click();
+    requestAnimationFrame(() => {
+      if (!items[next]?.isConnected) return;
+      items[next].focus({ preventScroll: true });
+      items[next].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+  }}>{children}</div>;
 }
 
 export function Tab({ label, leading, active = false, className = '', mainClassName = '', closeClassName = '', labelClassName = '', testId, closeTestId, closeLabel, onActivate, onClose, ...props }: HTMLAttributes<HTMLDivElement> & {
@@ -237,10 +256,10 @@ export function Tab({ label, leading, active = false, className = '', mainClassN
   onClose: () => void;
 }) {
   return <div {...props} className={`ui-tab ${active ? 'is-active active' : ''} ${className}`.trim()}>
-    <button type="button" className={`ui-tab-main ${mainClassName}`.trim()} role="tab" aria-selected={active} title={label} onClick={onActivate} data-testid={testId}>
+    <button type="button" className={`ui-tab-main ${mainClassName}`.trim()} role="tab" aria-selected={active} tabIndex={active ? 0 : -1} title={label} onClick={onActivate} data-testid={testId}>
       {leading}<span className={`ui-tab-label ${labelClassName}`.trim()}>{label}</span>
     </button>
-    <button type="button" className={`ui-tab-close ${closeClassName}`.trim()} aria-label={closeLabel ?? `关闭 ${label}`} onClick={onClose} data-testid={closeTestId ?? (testId ? `${testId}-close` : undefined)}><AppIcon name="close" size="sm"/></button>
+    <button type="button" className={`ui-tab-close ${closeClassName}`.trim()} tabIndex={active ? 0 : -1} aria-label={closeLabel ?? `关闭 ${label}`} onClick={onClose} data-testid={closeTestId ?? (testId ? `${testId}-close` : undefined)}><AppIcon name="close" size="sm"/></button>
   </div>;
 }
 

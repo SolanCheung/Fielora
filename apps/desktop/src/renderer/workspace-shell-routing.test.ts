@@ -32,16 +32,17 @@ test('the global workspace toggle uses the right-side panel icon', () => {
 test('right resource view has animated opening, a resizable collapsible tree, and shared project launcher targets', () => {
   assert.match(styles, /\.project-layout \{[\s\S]*?transition: grid-template-columns var\(--fl-duration-panel\)/);
   assert.match(workspace, /testId="dock-file-tree-resizer"/);
-  assert.match(workspace, /data-testid="dock-file-tree-toggle"/);
+  assert.match(workspace, /testId="dock-file-tree-toggle"/);
   assert.match(workspace, /setDockFileTreeCollapsed\(\(current\) => !current\)/);
   assert.match(workspace, /fielora:dock-file-tree-width/);
   assert.match(styles, /\.dock-resource-layout \{[\s\S]*?var\(--dock-file-tree-width,270px\)/);
   assert.match(styles, /\.dock-resource-layout\.file-tree-collapsed \{[\s\S]*?0 0/);
-  assert.match(workspace, /data-testid="dock-project-open-default"><AppIcon name="folder"\/><span>打开<\/span>/);
+  assert.match(workspace, /data-testid="dock-project-open-default"><WorkspaceAppBadge target="FILE_EXPLORER" iconDataUrl=/);
   assert.match(workspace, /data-testid="dock-project-open-menu"/);
-  assert.match(workspace, /projectOpenTargets\.map\(\(target\)/);
+  assert.match(workspace, /projectOpenTargets\.filter\(\(target\) => target\.target !== 'FILE_EXPLORER'\)\.map/);
+  assert.doesNotMatch(workspace, /<span>Fielora (文件|终端)<\/span>/);
   assert.match(styles, /\.right-dock-toolbar \.project-launcher-popover > button \{[\s\S]*?width: 100%[\s\S]*?grid-template-columns: 25px minmax\(0,1fr\)/);
-  assert.equal(workspace.match(/data-testid="dock-file-tree-toggle"/g)?.length, 1);
+  assert.equal(workspace.match(/testId="dock-file-tree-toggle"/g)?.length, 1);
   assert.match(main, /app\.getFileIcon\(executable, \{ size: 'normal' \}\)/);
   assert.match(workspace, /data-icon-source="native"/);
   assert.doesNotMatch(workspace, /<footer><span>\{session\.content === session\.file\.content/);
@@ -51,7 +52,7 @@ test('right resource view has animated opening, a resizable collapsible tree, an
 
 test('review, local environment, and installed applications use recognizable semantic icons', () => {
   assert.match(iconSystem, /diff: PlusMinus/);
-  assert.match(workspace, /<AppIcon name="computer"\/><span><strong>本地<\/strong>/);
+  assert.match(workspace, /<AppIcon name="changes"\/><span><strong>工作区改动<\/strong>/);
   for (const target of ['FILE_EXPLORER', 'VISUAL_STUDIO_CODE', 'CURSOR', 'VISUAL_STUDIO', 'GIT_BASH', 'INTELLIJ_IDEA', 'PYCHARM', 'WEBSTORM']) {
     assert.match(workspace, new RegExp(`${target}:`));
   }
@@ -130,10 +131,10 @@ test('both terminals use a normal PowerShell transcript and prompt without legac
   assert.match(iconSystem, /terminalPanel: TerminalWindow/);
 });
 
-test('file surfaces use the shared rounded document icon language', () => {
+test('file types use local semantic artwork while product controls keep the shared registry', () => {
   assert.match(iconSystem, /files: Files/);
   assert.match(iconSystem, /source: FileText/);
-  assert.match(fileTypeIcons, /return \{ kind: 'file', icon: File \}/);
-  assert.match(fileTypeIcons, /weight="duotone"/);
+  assert.match(fileTypeIcons, /return \{ kind: 'file', asset: document \}/);
+  assert.match(fileTypeIcons, /data-file-icon-source="material-icon-theme"/);
   assert.doesNotMatch(primaryNav, /<svg\b|APP_ICON_REGISTRY/);
 });

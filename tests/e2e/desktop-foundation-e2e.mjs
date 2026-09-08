@@ -1,3 +1,4 @@
+import { replaceFileContent } from './harness/file-editor-harness.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -197,7 +198,7 @@ try{
   assert.equal([environmentHover,terminalHover,toolsHover].every((style)=>style.shadow!=='none'&&style.transform!=='none'),true);
 
   await cdp.eval(`document.querySelector('[data-testid="environment-menu-toggle"]').click()`);
-  await wait(cdp,`document.querySelector('[data-testid="environment-popover"]')?.innerText.includes('环境信息')`);
+  await wait(cdp,`document.querySelector('[data-testid="environment-popover"]')?.innerText.includes('工作区信息') && document.querySelector('.environment-repository')?.getAttribute('aria-busy') === 'false'`);
   assert.equal(await cdp.eval(`document.querySelector('[data-testid="environment-popover"]')?.innerText.includes('没有上游分支')`),true);
   await cdp.eval(`document.querySelector('[data-testid="environment-menu-toggle"]').click()`);
 
@@ -476,8 +477,8 @@ try{
   await cdp.eval(`document.querySelector('[data-testid="right-dock-tab-files"]').click()`);
   await wait(cdp,`document.querySelector('[data-testid="workspace-file"] span[title="src/app.ts"]')`);
   await cdp.eval(`document.querySelector('[data-testid="workspace-file"] span[title="src/app.ts"]').closest('[data-testid="workspace-file"]').click()`);
-  await wait(cdp,`document.querySelector('[data-testid="file-editor"]')?.value.includes('answer = 1')`);
-  await cdp.eval(setValue('[data-testid="file-editor"]','export const answer = 2;\n'));
+  await wait(cdp,`document.querySelector('[data-testid="file-editor"]')?.textContent.includes('answer = 1')`);
+  await replaceFileContent(cdp, '[data-testid="file-editor"]','export const answer = 2;\n');
   await cdp.eval(`document.querySelector('[data-testid="review-change"]').click()`);
   await wait(cdp,`document.querySelector('[data-testid="diff-view"]')?.innerText.includes('+export const answer = 2;')`);
   await cdp.eval(`document.querySelector('[data-testid="accept-change"]').click()`);

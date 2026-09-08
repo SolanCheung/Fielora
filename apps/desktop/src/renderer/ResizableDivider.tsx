@@ -40,6 +40,7 @@ export function ResizableDivider({ label, value, min, max, onResizeStart, onResi
   }
 
   function pointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || !event.isPrimary) return;
     event.preventDefault();
     dragCleanupRef.current?.();
     const target = event.currentTarget;
@@ -60,12 +61,18 @@ export function ResizableDivider({ label, value, min, max, onResizeStart, onResi
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', finish);
       window.removeEventListener('pointercancel', finish);
+      window.removeEventListener('blur', cancel);
+      target.removeEventListener('lostpointercapture', finish);
       dragCleanupRef.current = null;
     };
     const finish = (next: globalThis.PointerEvent) => {
       if (next.pointerId !== pointerId) return;
       cleanup();
       if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
+      if (next.type === 'pointerup') {
+        lastPositionRef.current = orientation === 'vertical' ? next.clientX : next.clientY;
+        pendingPositionRef.current = lastPositionRef.current;
+      }
       if (pendingPositionRef.current !== null) {
         const pending = pendingPositionRef.current;
         pendingPositionRef.current = null;
@@ -79,10 +86,13 @@ export function ResizableDivider({ label, value, min, max, onResizeStart, onResi
       setDragging(false);
       target.blur();
     };
+    const cancel = () => finish(new globalThis.PointerEvent('pointercancel', { pointerId }));
     dragCleanupRef.current = cleanup;
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', finish);
     window.addEventListener('pointercancel', finish);
+    window.addEventListener('blur', cancel);
+    target.addEventListener('lostpointercapture', finish);
   }
 
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {

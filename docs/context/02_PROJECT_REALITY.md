@@ -3099,3 +3099,115 @@ SINGLE_BROWSER_TAB_MENU_CLIPPED: NO
 UI Lane 225 项、UI/UX 23 项、打包应用启动及 single-instance 检查均 PASS，证据位于
 `artifacts/conversation-summary-navigation-packaged/`。这些是隔离数据的界面验证，模型请求为 0；
 原登录任务的 24 步终止、排查效率、编辑失败恢复与验证闭环尚未修改，不能视为 Agent 质量验收。
+
+## 125. Sliding File Workspace, Search And Shared File Presentation
+
+2026-09-08 用户连续提出右侧 Dock 与文件目录的拖动、展开/收起、布局、筛选和文件展示共 13 项修正。
+该切片沿用现有 Pane ownership：普通拖动缓存边界并按 animation frame 写 CSS，仅结束时保存宽度；
+向左越过普通 split 上限可进入扩展并反向恢复。点击开合由同一 grid 负责，内容按测量宽度裁切显现，
+消除旧 opacity/translate 前奏与目录 display:none 导致的突然消失。长文件在拖动和目录动效中保持
+代码排版宽度，结束后按真实可用区域重新换行；语法颜色和源文件行号始终保留。中断/失焦会释放拖动。
+
+已确认旧 textarea 字体 shorthand 与高亮层行高不同，导致滚动与换行错位；两层现共用字体、行高、
+scrollbar gutter 与即时 scroll 同步。目录 aside 继承的旧 28px padding 已清除。工具栏与目录边界
+共用 1px 中性分割线；目录开关改为 Folders，放在“打开”左侧；扩展状态改用向内的 ArrowsInSimple。
+筛选框距横线 5px，支持大小写无关的文件名/路径、多个关键词、清空/Escape、无结果反馈与过滤路径压缩；
+常规目录保留 18px 层级缩进，hover/focus 增强祖先线。
+
+用户授权文件类型图标例外：本地 MIT Material Icon Theme 子集同时用于目录与文件/图片 Tab，
+JS/TS/React/ESLint/JSON/Markdown 等按真实路径映射，Tab 重命名不改变文件类型。产品控件继续使用
+Phosphor。代码主题独立于图标资源，以紫色关键字、蓝色属性、青绿色字符串协调浅色/深色外观，
+源代码等宽行号不为软换行重复计数。不宣称该资源就是 Codex 内部使用的图标库。
+
+UI Lane 类型检查、lint 和 225 项单元检查、UI/UX 23 项检查 PASS。隔离 Core 数据和 Electron profile
+的打包应用 E2E 已验证 400 行长文件真实鼠标滚动到底、输入/高亮位置一致、双层裁切开合、内部分割线
+往返拖动/键盘/失焦清理、搜索与清空、目录层级以及实际解码的目录/Tab 图标；外侧 Dock 回归覆盖窄窗、
+宽窗、偏好恢复、扩展/还原、Reduced Motion 与 File/Browser/Terminal。证据位于
+`artifacts/workspace-file-experience/`。打包输出位于 `apps/desktop/out/fielora-file-workspace-20260908/`，
+包含 Release Core。上述自动与截图验证不替代用户对最终拖动手感的复看；Core/Agent/FIPC/Schema 未变。
+
+## 126. Workspace Motion Profiling And Native Open Default
+
+2026-09-08 用户复看仍确认三条竖向分割线、终端和整体开合卡顿，说明上一轮几何/功能检查不足以
+证明流畅度。300 文件、FILES 加 3 个文件 Tab、4798 DOM 节点的同机真实打包应用 trace 确认：
+高频宽度 CSS 变量默认继承，导致无关文件行、高亮 token 和隐藏 Tab 每帧重复计算样式。仅对三个
+宽度输入做 non-inherited ablation 就使对应样式计算耗时下降 83%–91%；这不是动效曲线猜测。
+
+当前所有 live grid 输入及临时 slide/code/content 尺寸均限定在实际消费者上，必要时只显式传递一层。
+目录树使用 memo 与稳定回调，避免开合时重复构造隐藏 Tab 的树。导航缓存拖动起点/边界，视口宽度
+校正在手势结束后执行；侧栏保持内容宽度，由同一 grid 裁切显隐，取消独立 padding/opacity 动画。
+终端层和上方 Conversation/Dock 共享 height/margin 时间曲线，终端内容保持完整高度，无额外淡入平移；
+left 直接跟随导航边界。终端拖动只预览局部尺寸，释放后一次提交 React 状态和 localStorage。
+
+“打开”默认按钮复用本机 FILE_EXPLORER native icon；下拉菜单只显示其他已安装应用，移除
+文件资源管理器重复项、Fielora 文件/终端及遗留分割线。既有系统打开行为保持。
+
+UI Lane 类型检查/lint/225 项单元检查与 UI/UX 23 项检查 PASS。打包回归覆盖全部三条竖向分割线、
+开合中间帧、终端逐步拖动与释放持久化、文件长文滚动/筛选/图标/重启恢复，以及窄宽窗口、边缘收起
+反向恢复、Reduced Motion 和 File/Browser/Terminal 宽度。证据位于
+`artifacts/workspace-motion-performance/`；交付位于 `apps/desktop/out/fielora-motion-20260908/`。
+保留旧包与用户数据；未修改 Core/Agent/FIPC/Schema，也不声称已知 Codex 内部实现或以自动结果代替
+用户最终手感判断。
+
+## 127. Real Project Directory Layout Cost And Drag-to-Collapse
+
+2026-09-08 用户确认 motion 包在文件与目录同时打开时仍严重卡顿。本次直接以用户截图中的本地
+Project 为只读输入、隔离 Core 数据和 Electron profile 复现：目录挂载 2759 个文件/文件夹行，
+整个页面 20117 个 DOM 节点。上一轮 300 文件 trace 不足以覆盖此场景。外侧/内侧分割线实际往返
+拖动的帧间隔 P95 分别为 133.5/133.4ms；样式变量的继承开销已减少，但目录中屏幕外的行仍随
+每一帧宽度变化重新 layout。仅固定目录 body 宽度的 ablation 即使两条分割线降至约 16.8ms。
+
+现有 outer/inner divider 共用 measured-width hold：手势开始时一次读取 active code surface、
+directory body 或 standalone Files 的真实宽度，手势中只改变裁切 viewport；释放、失焦、capture
+丢失或卸载均恢复响应式宽度。没有隐藏 syntax、修改目录数据、丢失选择/折叠状态或引入第二套树。
+真实项目修复后 outer/inner P95 为 17.4/16.9ms；2500 文件分层 fixture 也通过持续拖动检查。
+
+用户同时要求内部目录分割线拖到最右侧收起：live preview 可缩到保存宽度下限以下，距右缘 36px
+时进入与工具栏相同的目录 collapsed 状态；同一次 capture 手势反向拉回 80px 即恢复。收起不覆盖
+原展开宽度，按钮再次展开恢复偏好；松手后代码区域按最终可用空间排版。真实 E2E 已覆盖上述状态、
+跟手位移、手势中两层内容宽度保持、释放与失焦清理。证据位于 `artifacts/file-pane-drag/`；
+新包位于 `apps/desktop/out/fielora-file-drag-20260908/`。用户文件只读，Core/Agent/FIPC/Schema 未变。
+
+## 128. Live File Scrollports And Viewport Rendering
+
+2026-09-08 用户指出拖动时文件滚动条留在旧位置、松手才移动。已确认这是上一轮整块内容宽度
+hold 的副作用。本轮 supersede 第 127 节的 direct-drag width hold：代码、目录、筛选框和原生
+scrollport 均实时使用当前 Pane 宽度，保留现有 click-driven 裁切开合与右缘收起/反向恢复语义。
+
+目录超过 200 文件或行时，将既有过滤/折叠树展平成可视窗口，挂载 viewport 与上下 overscan；
+完整行数、字体感知行高与 spacer 维持原生滚动范围，宽度变化不回写目录 React state。实际 Project
+2759 行目录只挂载 29 行，整页由原 20117 个 DOM 节点降至 755，目录底部、筛选和 Home 导航可用。
+
+400 行长代码进一步暴露旧 textarea + 全量 syntax DOM 的双份排版开销。文件 Surface 现复用 MIT
+CodeMirror 6 的可视范围排版，统一拥有软换行、语法、行号、光标、选择、撤销与原生滚动；语法仍映射
+现有 Theme token，文件 Tab、目录、审阅/写入与 Core 文件权限不变。保留 CRLF，避免仅打开 Windows
+文件就产生未保存修改；不增加 IDE Pane、补全入口、Runtime 或文件访问通道。
+
+最终包在 2500 文件 + 400 长代码行、实际只读 Project 两组测试中，outer/inner 拖动 P95 均约 16.8ms；
+按住鼠标采样时 scrollport 边缘与 Pane 对齐，代码换行和滚动范围实时变化。单次压力测试仍出现一个
+50ms 离群帧，不宣称所有硬件或场景零掉帧。测量窗口禁用 Chromium 原生遮挡降频，产品启动参数不变。
+UI Lane 类型检查/lint/225 项检查、UI/UX 23 项检查与 targeted packaged E2E PASS，覆盖长文件滚动
+到底、可见行号位置、输入撤销、CRLF 审阅/写入/撤销精确还原、Markdown/Source、目录筛选、双层开合、
+窄宽窗口/Reduced Motion、File/Browser/Terminal 及 Core 重启恢复。证据位于 `artifacts/live-scrollbar/`；
+新包位于 `apps/desktop/out/fielora-live-scrollbar-20260908/`，保留 Release Core 和旧包。未修改用户项目
+文件、Core/Agent/FIPC/Schema；这些自动验证不替代用户最终手感复看。
+
+## 129. Workspace info 与 Tab 交互校准（2026-09-08）
+
+用户授权优化摘要菜单的图标/功能，并补充选中标签阴影、方向键竖线、滚轮横移和溢出渐隐。
+工作区信息现在区分任务 Review 与 Git 工作区计数，分支/上游为真实静态信息；状态与未暂存
+改动统计复用已有终端只读入口。GitCommit、ListChecks、ArrowUpRight 经 Phosphor registry
+统一使用；来源沿用文件类型图标，可直接返回对应文件。重复添加、伪分支下拉与未实现 PR 项移除。
+提交/推送分开生成可检查的 Composer 草稿，保留用户原文，不自动发送；没有上游时推送不可用。
+这属于 Product/Workspace 的交互纠正，未修改 Model、Harness Governance、Tools 或权限边界。
+
+标签旧样式覆盖选中阴影，且主按钮 outline 被父标签裁切为竖线；现由完整 Tab 承担键盘焦点，
+选中使用浅中性底色与 subtle shadow。共享 TabStrip 增加左右方向键/Home/End 和 roving tabindex，
+Dock 通过非 passive wheel 支持普通滚轮横移并保留横向触控板。左右 mask 根据实际溢出变化，
+不包含“＋”及窗口控制，不因无关 Conversation render 将手动滚动拉回。保持既有 Pane ownership。
+
+打包桌面已验证 12 个 File/Tool 标签、键盘连续切换及完整焦点、横纵滚轮、两侧渐隐、关闭与工具菜单，
+以及真实临时 Git 仓库状态/统计、刷新、来源图标、草稿保留且零自动发送、非 Git、窄窗口和菜单明暗外观。
+UI Lane 225 项、UI/UX 23 项通过。新包与证据分别位于
+`apps/desktop/out/fielora-workspace-info-tabs-20260908/` 和 `artifacts/workspace-info-tabs/`；
+不修改用户 Git 工作区，不执行用户项目 commit/push，不改变 Core/FIPC/Schema。

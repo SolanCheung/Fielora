@@ -139,7 +139,7 @@ try {
   assert.equal(await cdp.eval('getComputedStyle(document.querySelector(".conversation-narrative-detail[open] > summary > span")).display'), 'none', 'Expanded analysis must not duplicate its preview paragraph');
   await captureScreenshot(cdp, path.join(evidence, '03-expanded-analysis.png'));
   await click('.conversation-narrative-detail .markdown-typed-reference');
-  await wait('document.querySelector(".dock-code-input")?.value.includes("loginReady")');
+  await wait('document.querySelector(".cm-content")?.textContent.includes("loginReady")');
   assert.equal(await cdp.eval('document.querySelector(".project-layout").classList.contains("workspace-open")'), true);
   await cdp.eval('window.dispatchEvent(new CustomEvent("fielora:close-workspace-dock"))');
   await click('[data-testid="agent-execution-detail-toggle"]');

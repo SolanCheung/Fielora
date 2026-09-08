@@ -150,6 +150,17 @@ Development Workflow Hardening 已从稳定 `main@e757d050b97a3f0dd3b6812bccefc1
 
 “代码修改成功”不等于“功能验证成功”。必须区分 `Action completed` 与 `Result verified`。
 
+### 6.1 Agent 修复同时解释设计
+
+用户要求通过实际修复加深对 Agent 设计的理解。以后修复 Agent 问题时，在进展与交付说明中简要解释：
+
+- 实际故障暴露了什么设计问题，区分已确认原因与推测；
+- 问题属于 Model、Harness 或 Tools；属于 Harness 时指出相关职责域，并用通俗语言解释其作用；
+- 原机制为何会导致该故障，修改后行为如何变化，以及对应的通用 Agent 设计原则；
+- 用什么证据验证修复，哪些能力或场景仍未验证。
+
+结合本次故障举例，避免只列术语或文件名；说明随修复一起完成，不增加额外审批或设计仪式。
+
 ## 7. UI 约束
 
 默认禁止：永久 AI Sidebar、永久 Field State Dashboard、永久 Agent Activity 面板、五个 Mode 按钮常驻、多等权重 Dashboard 卡片、任意 LLM 生成 React UI、因内部状态多而全部暴露。

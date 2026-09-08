@@ -1,5 +1,5 @@
 import type { ActivityFileLink } from './agent-activity-detail';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type {
   AgentChangedEvent, AgentEventView, AgentPermission, AgentRunView, AgentToolCallView, ApprovalView,
@@ -10,7 +10,7 @@ import type {
 import type { AgentTextDeltaEvent } from '../types';
 import type { ResultImagePreviewView, WorkspaceAttachmentView, WorkspaceEnvironmentView, WorkspaceFileEntry, WorkspaceFileView, WorkspaceImagePreview, WorkspaceProjectOpenTarget, WorkspaceProjectOpenTargetView } from '../workspace-types';
 import { PrimaryNav } from './PrimaryNav';
-import { AppIcon, type AppIconName } from './ui';
+import { AppIcon, FileTypeIcon, type AppIconName } from './ui';
 import { BrowsePanel } from './BrowseScreen';
 import { AgentTurn } from './AgentTurn';
 import { ConversationTurnNavigation } from './ConversationTurnNavigation';
@@ -27,6 +27,7 @@ import {
   refreshArtifactCurrent, type ArtifactSurfaceSession,
 } from './artifact-working-surface';
 import { WorkspaceFileTree } from './WorkspaceFileTree';
+import { SyntaxCodeEditor } from './SyntaxCodeEditor';
 import { IconButton, SelectMenu, TextActionDialog, ToolbarAction, TooltipButton } from './UiPrimitives';
 import {
   persistWorkspaceNavigationWidth,
@@ -68,6 +69,8 @@ const WORKSPACE_RESIZER_WIDTH = 4;
 const NAVIGATION_RESIZER_WIDTH = 4;
 const PROJECT_WORKSPACE_COLLAPSE_THRESHOLD = 176;
 const PROJECT_WORKSPACE_RESTORE_THRESHOLD = 236;
+const PROJECT_WORKSPACE_FOCUS_OVERSHOOT = 48;
+const PROJECT_WORKSPACE_UNFOCUS_OVERSHOOT = 12;
 
 interface ReviewDraft {
   relativePath: string;
@@ -183,95 +186,22 @@ function isMarkdownFile(relativePath: string): boolean {
   return /\.(?:md|markdown)$/i.test(relativePath);
 }
 
-type SyntaxLanguage = 'SCRIPT' | 'JSON' | 'MARKUP' | 'STYLE' | 'MARKDOWN' | 'PLAIN';
-
-function syntaxLanguage(relativePath: string): SyntaxLanguage {
-  if (/\.(?:[cm]?[jt]sx?)$/i.test(relativePath)) return 'SCRIPT';
-  if (/\.(?:json|jsonc)$/i.test(relativePath)) return 'JSON';
-  if (/\.(?:html?|xml|vue|svelte)$/i.test(relativePath)) return 'MARKUP';
-  if (/\.(?:css|scss|sass|less)$/i.test(relativePath)) return 'STYLE';
-  if (/\.(?:md|mdx)$/i.test(relativePath)) return 'MARKDOWN';
-  return 'PLAIN';
-}
-
-function syntaxTokens(line: string, language: SyntaxLanguage, lineIndex: number): ReactNode[] {
-  const patterns: Record<SyntaxLanguage, RegExp> = {
-    SCRIPT: /\/\/.*|\/\*.*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b(?:as|async|await|break|case|catch|class|const|continue|default|delete|do|else|export|extends|finally|for|from|function|if|implements|import|in|instanceof|interface|let|new|of|private|protected|public|readonly|return|satisfies|static|super|switch|throw|try|type|typeof|var|void|while|with|yield)\b|\b(?:false|null|true|undefined|NaN)\b|\b(?:0x[\da-f]+|\d+(?:\.\d+)?)\b|[{}[\](),.;:]/gi,
-    JSON: /\/\/.*|\/\*.*?\*\/|"(?:\\.|[^"\\])*"|\b(?:false|null|true)\b|-?\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b|[{}[\],:]/gi,
-    MARKUP: /<!--.*?-->|<\/?[A-Za-z][^>]*>|&[A-Za-z\d#]+;/g,
-    STYLE: /\/\*.*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|--?[\w-]+(?=\s*:)|\b(?:inherit|initial|none|transparent|auto|solid|relative|absolute|fixed|flex|grid|block|inline|true|false)\b|#[\da-f]{3,8}\b|-?\b\d+(?:\.\d+)?(?:px|rem|em|%|vh|vw|s|ms|deg)?\b|[{}(),;:]/gi,
-    MARKDOWN: /`[^`]+`|!?(?:\[[^\]]*\])\([^)]*\)|^#{1,6}\s+.*|^\s*(?:[-*+] |\d+\. ).*|\*\*[^*]+\*\*/g,
-    PLAIN: /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:false|null|true)\b|-?\b\d+(?:\.\d+)?\b/g,
+// Freeze the sliding content before paint, then release it only when the
+// owning grid has settled. Reversal and reduced motion use the same cleanup.
+function trackPaneMotion(element: HTMLElement, finish: () => void): () => void {
+  let frame = 0;
+  element.dataset.workspaceMotion = 'true';
+  const clear = () => {
+    cancelAnimationFrame(frame);
+    delete element.dataset.workspaceMotion;
+    finish();
   };
-  const result: ReactNode[] = [];
-  const matcher = patterns[language];
-  let cursor = 0;
-  for (const match of line.matchAll(matcher)) {
-    const index = match.index ?? 0;
-    if (index > cursor) result.push(line.slice(cursor, index));
-    const token = match[0];
-    const remaining = line.slice(index + token.length);
-    let kind = 'punctuation';
-    if (/^(?:\/\/|\/\*|<!--)/.test(token)) kind = 'comment';
-    else if (/^["'`]/.test(token)) kind = language === 'JSON' && /^\s*:/.test(remaining) ? 'property' : 'string';
-    else if (language === 'MARKUP' && token.startsWith('<')) kind = 'keyword';
-    else if (language === 'MARKDOWN' && /^(?:#|\s*(?:[-*+] |\d+\. ))/.test(token)) kind = 'keyword';
-    else if (language === 'MARKDOWN' && token.startsWith('`')) kind = 'string';
-    else if (language === 'MARKDOWN' && /\]\(/.test(token)) kind = 'property';
-    else if (language === 'STYLE' && /^--?[\w-]+$/.test(token)) kind = 'property';
-    else if (/^(?:false|null|true|undefined|NaN)$/.test(token)) kind = 'literal';
-    else if (/^-?(?:0x[\da-f]+|\d)/i.test(token) || /^#[\da-f]{3,8}$/i.test(token)) kind = 'number';
-    else if (/^[A-Za-z]/.test(token)) kind = 'keyword';
-    result.push(<span key={`${lineIndex}:${index}`} className={`syntax-${kind}`}>{token}</span>);
-    cursor = index + token.length;
-  }
-  if (cursor < line.length) result.push(line.slice(cursor));
-  return result;
-}
-
-function lineRangeOffsets(value: string, lineStart: number, lineEnd: number): { start: number; end: number } {
-  const lines = value.split('\n');
-  const startLine = Math.min(Math.max(1, lineStart), Math.max(1, lines.length));
-  const endLine = Math.min(Math.max(startLine, lineEnd), Math.max(1, lines.length));
-  let start = 0;
-  for (let index = 1; index < startLine; index += 1) start += (lines[index - 1]?.length ?? 0) + 1;
-  let end = start;
-  for (let index = startLine; index <= endLine; index += 1) end += (lines[index - 1]?.length ?? 0) + (index < lines.length ? 1 : 0);
-  return { start, end };
-}
-
-function SyntaxCodeEditor({ value, relativePath, reveal, onChange }: { value: string; relativePath: string; reveal?: FileDockSession['reveal']; onChange: (content: string) => void }) {
-  const highlightRef = useRef<HTMLPreElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const appliedRevealNonceRef = useRef<number | null>(null);
-  const language = syntaxLanguage(relativePath);
-  const lines = value.split('\n');
-  useEffect(() => {
-    if (!reveal || !inputRef.current || appliedRevealNonceRef.current === reveal.nonce) return;
-    appliedRevealNonceRef.current = reveal.nonce;
-    const offsets = lineRangeOffsets(value, reveal.lineStart, reveal.lineEnd);
-    const input = inputRef.current;
-    input.focus();
-    input.setSelectionRange(offsets.start, offsets.end);
-    input.scrollTop = Math.max(0, (reveal.lineStart - 3) * 21);
-    if (highlightRef.current) highlightRef.current.scrollTop = input.scrollTop;
-  }, [reveal?.nonce, reveal?.lineEnd, reveal?.lineStart, value]);
-  return <div className="dock-code-editor-surface" data-language={language.toLowerCase()} data-reveal-line-start={reveal?.lineStart} data-reveal-line-end={reveal?.lineEnd} data-testid="syntax-code-editor">
-    <pre ref={highlightRef} className="dock-code-highlight" aria-hidden="true"><code>{lines.map((line, index) => <span className="dock-code-line" key={`${index}:${line}`}><i>{index + 1}</i><span>{line.length > 0 ? syntaxTokens(line, language, index) : '\u200b'}</span></span>)}</code></pre>
-    <textarea
-      ref={inputRef}
-      className="dock-code-input"
-      value={value}
-      wrap="soft"
-      onChange={(event) => onChange(event.target.value)}
-      onScroll={(event) => {
-        if (!highlightRef.current) return;
-        highlightRef.current.scrollTop = event.currentTarget.scrollTop;
-      }}
-      spellCheck={false}
-      data-testid="file-editor"
-    />
-  </div>;
+  const sample = () => {
+    if (element.getAnimations().some((animation) => animation.playState === 'running')) frame = requestAnimationFrame(sample);
+    else clear();
+  };
+  frame = requestAnimationFrame(sample);
+  return clear;
 }
 
 function TerminalSession({ workingDirectory, command, lastCommand, output, running, active, onCommandChange, onRun, onCancel, testId }: {
@@ -289,7 +219,7 @@ function TerminalSession({ workingDirectory, command, lastCommand, output, runni
   const inputRef = useRef<HTMLInputElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (active) inputRef.current?.focus();
+    if (active) inputRef.current?.focus({ preventScroll: true });
   }, [active]);
   useEffect(() => {
     const transcript = transcriptRef.current;
@@ -312,14 +242,53 @@ function TerminalSession({ workingDirectory, command, lastCommand, output, runni
   </div>;
 }
 
-function DockResourceLayout({ children, fileTree, treeWidth, treeCollapsed, onTreeWidthChange }: {
+const FILE_TREE_COLLAPSE_THRESHOLD = 36;
+const FILE_TREE_RESTORE_THRESHOLD = 80;
+
+function DockResourceLayout({ children, fileTree, treeWidth, treeCollapsed, onTreeWidthChange, onTreeCollapsedChange }: {
   children: ReactNode;
   fileTree: ReactNode;
   treeWidth: number;
   treeCollapsed: boolean;
   onTreeWidthChange: (width: number) => void;
+  onTreeCollapsedChange: (collapsed: boolean) => void;
 }) {
   const resourceLayoutRef = useRef<HTMLDivElement>(null);
+  const dragGeometryRef = useRef<{ right: number; maximum: number; collapsed: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const layout = resourceLayoutRef.current;
+    const tree = layout?.querySelector<HTMLElement>('.dock-resource-file-tree');
+    if (!layout || !tree) return;
+    const width = Math.max(tree.getBoundingClientRect().width, Math.min(treeWidth, Math.max(160, layout.clientWidth * .55)));
+    tree.style.setProperty('--file-tree-slide-width', `${width}px`);
+    const contentWidth = layout.clientWidth - (treeCollapsed ? 0 : width + WORKSPACE_RESIZER_WIDTH);
+    const editor = layout.querySelector<HTMLElement>('.dock-code-editor-surface');
+    const editorWidth = editor?.getBoundingClientRect().width ?? 0;
+    editor?.style.setProperty('--code-layout-width', `${Math.max(contentWidth, editorWidth)}px`);
+    return trackPaneMotion(layout, () => {
+      tree.style.removeProperty('--file-tree-slide-width');
+      editor?.style.removeProperty('--code-layout-width');
+    });
+  }, [treeCollapsed, treeWidth]);
+  const resizeTree = (clientX: number, commit: boolean) => {
+    const geometry = dragGeometryRef.current;
+    if (!geometry) return;
+    const rawWidth = geometry.right - clientX;
+    if (!geometry.collapsed && rawWidth <= FILE_TREE_COLLAPSE_THRESHOLD) {
+      geometry.collapsed = true;
+      resourceLayoutRef.current?.style.setProperty('--dock-file-tree-width', `${treeWidth}px`);
+      onTreeCollapsedChange(true);
+      return;
+    }
+    if (geometry.collapsed) {
+      if (rawWidth < FILE_TREE_RESTORE_THRESHOLD) return;
+      geometry.collapsed = false;
+      onTreeCollapsedChange(false);
+    }
+    const width = Math.min(Math.max(rawWidth, commit ? 160 : 0), geometry.maximum);
+    resourceLayoutRef.current?.style.setProperty('--dock-file-tree-width', `${width}px`);
+    if (commit) onTreeWidthChange(width);
+  };
   return <div
     ref={resourceLayoutRef}
     className={`dock-resource-layout ${treeCollapsed ? 'file-tree-collapsed' : ''}`}
@@ -330,12 +299,16 @@ function DockResourceLayout({ children, fileTree, treeWidth, treeCollapsed, onTr
     <ResizableDivider
       label="调整文件内容与文件菜单宽度"
       value={treeWidth}
-      min={190}
+      min={160}
       max={420}
-      onResize={(clientX) => {
-        const rect = resourceLayoutRef.current?.getBoundingClientRect();
-        if (rect) onTreeWidthChange(rect.right - clientX);
+      onResizeStart={(clientX) => {
+        const layout = resourceLayoutRef.current;
+        const rect = layout?.getBoundingClientRect();
+        const width = layout?.querySelector('.dock-resource-file-tree')?.getBoundingClientRect().width;
+        if (rect && width !== undefined) dragGeometryRef.current = { right: clientX + width, maximum: Math.min(420, Math.max(160, rect.width * .55)), collapsed: treeCollapsed };
       }}
+      onResize={(clientX) => resizeTree(clientX, false)}
+      onResizeEnd={(clientX) => { resizeTree(clientX, true); dragGeometryRef.current = null; }}
       onKeyboardResize={(delta) => onTreeWidthChange(treeWidth - delta)}
       testId="dock-file-tree-resizer"
       className="dock-file-tree-resizer"
@@ -709,14 +682,23 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const [artifactCommandBusy, setArtifactCommandBusy] = useState(false);
   const [fileFilter, setFileFilter] = useState('');
   const [fileTreeSelection, setFileTreeSelection] = useState('');
+  const openTreeFileRef = useRef(openFile);
+  useLayoutEffect(() => { openTreeFileRef.current = openFile; });
+  const openTreeFile = useCallback((file: WorkspaceFileEntry) => { void openTreeFileRef.current(file); }, []);
+  const refreshTreeFiles = useCallback(() => {
+    if (projectId) void window.fielora.workspace.listFiles({ field_id: projectId }).then(setFiles).catch((reason) => setError(reasonMessage(reason)));
+  }, [projectId]);
   const [environment, setEnvironment] = useState<WorkspaceEnvironmentView | null>(null);
   const [environmentOpen, setEnvironmentOpen] = useState(false);
+  const [environmentLoading, setEnvironmentLoading] = useState(false);
+  const [environmentError, setEnvironmentError] = useState(false);
+  const [environmentRefresh, setEnvironmentRefresh] = useState(0);
   const [dockProjectLauncherOpen, setDockProjectLauncherOpen] = useState(false);
   const [projectOpenTargets, setProjectOpenTargets] = useState<WorkspaceProjectOpenTargetView[]>([{ target: 'FILE_EXPLORER', label: '文件资源管理器', icon_data_url: null }]);
   const [dockFileTreeCollapsed, setDockFileTreeCollapsed] = useState(false);
   const [dockFileTreeWidth, setDockFileTreeWidth] = useState(() => {
     const stored = Number.parseFloat(window.localStorage.getItem('fielora:dock-file-tree-width') ?? '270');
-    return Number.isFinite(stored) ? Math.min(Math.max(stored, 190), 420) : 270;
+    return Number.isFinite(stored) ? Math.min(Math.max(stored, 160), 420) : 270;
   });
   const [dockFocused, setDockFocused] = useState(false);
   const [conversationDialog, setConversationDialog] = useState<ConversationDialog>(null);
@@ -745,6 +727,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const [terminalRunId, setTerminalRunId] = useState('');
   const [terminalWorkingDirectory, setTerminalWorkingDirectory] = useState('');
   const [bottomTerminalOpen, setBottomTerminalOpen] = useState(false);
+  const bottomTerminalDragRef = useRef<{ bottom: number; area: HTMLElement; layer: HTMLElement; dock: HTMLElement; panes: HTMLElement[] } | null>(null);
   const [bottomTerminalHeight, setBottomTerminalHeight] = useState(() => {
     const stored = Number.parseFloat(window.localStorage.getItem('fielora:terminal-dock-height') ?? '250');
     return Number.isFinite(stored) ? Math.min(Math.max(stored, 170), 520) : 250;
@@ -776,6 +759,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const workspacePreferredWidthRef = useRef(workspaceWidth);
   const workspaceDragGeometryRef = useRef<{ right: number; maximum: number } | null>(null);
   const workspaceCollapsedDuringDragRef = useRef(false);
+  const workspaceFocusedDuringDragRef = useRef(false);
   const dockTabCopyNonceRef = useRef(0);
   const activeAgentRef = useRef<ActiveAgent | null>(null);
   const agentRunIdRef = useRef('');
@@ -946,9 +930,21 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const surface = layoutRef.current;
     const column = surface?.querySelector<HTMLElement>('.conversation-column');
     const navigation = surface?.querySelector<HTMLElement>('[data-testid="project-navigation"]');
+    const controls = document.querySelector<HTMLElement>('[data-testid="project-context-controls"]');
+    let lastInset = -1;
+    let lastNavigationEdge = -1;
+    const terminal = document.getElementById('desktop-terminal-layer');
     const syncControlEdge = () => {
-      const inset = column ? Math.max(0, window.innerWidth - column.getBoundingClientRect().right) : workspaceWidth + 4;
-      document.body.style.setProperty('--desktop-project-workspace-width', `${inset}px`);
+      const columnRect = column?.getBoundingClientRect();
+      const navigationEdge = Math.round(columnRect?.left ?? 0);
+      if (navigationEdge !== lastNavigationEdge) {
+        lastNavigationEdge = navigationEdge;
+        terminal?.style.setProperty('left', `${navigationEdge}px`);
+      }
+      const inset = Math.round(columnRect ? Math.max(0, window.innerWidth - columnRect.right) : workspaceWidth + 4);
+      if (inset === lastInset) return;
+      lastInset = inset;
+      controls?.style.setProperty('--desktop-project-workspace-width', `${inset}px`);
     };
     const observer = new ResizeObserver(syncControlEdge);
     for (const element of [surface, column, navigation]) if (element) observer.observe(element);
@@ -958,9 +954,26 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       observer.disconnect();
       window.removeEventListener('resize', syncControlEdge);
       delete document.body.dataset.workspacePanelOpen;
-      document.body.style.removeProperty('--desktop-project-workspace-width');
+      controls?.style.removeProperty('--desktop-project-workspace-width');
+      terminal?.style.removeProperty('left');
     };
   }, [project, workspaceOpen, workspaceWidth]);
+
+  useLayoutEffect(() => {
+    const surface = layoutRef.current;
+    if (!surface) return;
+    const dock = surface.querySelector<HTMLElement>('.right-workspace-dock');
+    const conversation = surface.querySelector<HTMLElement>('.conversation-column');
+    if (!dock || !conversation) return;
+    const available = surface.clientWidth - renderedNavigationWidth() - (document.body.dataset.sidebarCollapsed === 'true' ? 0 : NAVIGATION_RESIZER_WIDTH);
+    const target = workspaceOpen ? (dockFocused ? available : workspaceWidth) : 0;
+    dock.style.setProperty('--dock-slide-width', `${Math.max(dock.getBoundingClientRect().width, target)}px`);
+    conversation.style.setProperty('--conversation-slide-width', `${Math.max(conversation.getBoundingClientRect().width, available - workspaceWidth - WORKSPACE_RESIZER_WIDTH, CONVERSATION_MIN_WIDTH)}px`);
+    return trackPaneMotion(surface, () => {
+      dock.style.removeProperty('--dock-slide-width');
+      conversation.style.removeProperty('--conversation-slide-width');
+    });
+  }, [dockFocused, workspaceOpen, workspaceWidth]);
 
   function layoutWidth(): number {
     return layoutRef.current?.getBoundingClientRect().width ?? window.innerWidth;
@@ -1022,6 +1035,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const rawWidth = geometry.right - clientX;
     if (!workspaceCollapsedDuringDragRef.current && rawWidth <= PROJECT_WORKSPACE_COLLAPSE_THRESHOLD) {
       workspaceCollapsedDuringDragRef.current = true;
+      workspaceFocusedDuringDragRef.current = false;
       setWorkspaceOpen(false);
       setDockFocused(false);
       return;
@@ -1031,6 +1045,19 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       workspaceCollapsedDuringDragRef.current = false;
       setWorkspaceOpen(true);
     }
+    // The split limit protects a readable conversation. Continuing left is an
+    // intentional focus gesture; keep the saved split width for Restore.
+    if (!workspaceFocusedDuringDragRef.current && rawWidth >= geometry.maximum + PROJECT_WORKSPACE_FOCUS_OVERSHOOT) {
+      workspaceFocusedDuringDragRef.current = true;
+      // Discard the uncommitted CSS preview as well as preserving the stored
+      // preference; React may otherwise keep it when the state width is equal.
+      layoutRef.current?.style.setProperty('--project-workspace-width', `${workspaceWidth}px`);
+      setDockFocused(true);
+    } else if (workspaceFocusedDuringDragRef.current && rawWidth <= geometry.maximum + PROJECT_WORKSPACE_UNFOCUS_OVERSHOOT) {
+      workspaceFocusedDuringDragRef.current = false;
+      setDockFocused(false);
+    }
+    if (workspaceFocusedDuringDragRef.current) return;
     const width = clampWorkspaceWidthTo(rawWidth, geometry.maximum);
     layoutRef.current?.style.setProperty('--project-workspace-width', `${width}px`);
     if (commit) updateWorkspaceWidth(width);
@@ -1044,6 +1071,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       if (frame !== null) window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         frame = null;
+        if (document.documentElement.dataset.resizing) return;
         const next = clampWorkspaceWidth(workspacePreferredWidthRef.current);
         setWorkspaceWidth((current) => Math.abs(current - next) < 0.5 ? current : next);
       });
@@ -1065,6 +1093,33 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const height = Math.min(Math.max(next, 170), 520);
     setBottomTerminalHeight(height);
     window.localStorage.setItem('fielora:terminal-dock-height', String(Math.round(height)));
+  }
+
+  function beginBottomTerminalDrag(clientY: number) {
+    const area = document.querySelector<HTMLElement>('[data-testid="desktop-work-area"]');
+    const layer = document.getElementById('desktop-terminal-layer');
+    const dock = layer?.querySelector<HTMLElement>('.terminal-dock');
+    if (!area || !layer || !dock) return;
+    const panes = [...area.querySelectorAll<HTMLElement>('.project-layout > .conversation-column, .project-layout > .project-workspace-resizer, .project-layout > .right-workspace-dock')];
+    bottomTerminalDragRef.current = { bottom: clientY + layer.getBoundingClientRect().height, area, layer, dock, panes };
+  }
+
+  function resizeBottomTerminalDuringDrag(clientY: number, commit: boolean) {
+    const geometry = bottomTerminalDragRef.current;
+    if (!geometry) return;
+    const height = Math.min(Math.max(geometry.bottom - clientY, 170), 520);
+    geometry.layer.style.height = `${height}px`;
+    geometry.dock.style.height = `${height - 4}px`;
+    for (const pane of geometry.panes) pane.style.marginBottom = `${height}px`;
+    if (!commit) return;
+    // Publish once before clearing the CSS preview, so there is no frame that
+    // falls back to the old height while Chrome receives its state event.
+    geometry.area.style.setProperty('--desktop-terminal-height', `${height}px`);
+    updateBottomTerminalHeight(height);
+    geometry.layer.style.removeProperty('height');
+    geometry.dock.style.removeProperty('height');
+    for (const pane of geometry.panes) pane.style.removeProperty('margin-bottom');
+    bottomTerminalDragRef.current = null;
   }
 
   const refreshProviders = useCallback(async () => setProviders(await window.fielora.provider.list()), []);
@@ -1170,15 +1225,27 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
 
   useEffect(() => {
     if (!projectId) { setConversations([]); setConversationId(''); setFiles([]); setEnvironment(null); setDockTabs([]); setArtifactSessions({}); setActiveDockTabId(''); setWorkspaceOpen(false); setDockFocused(false); foregroundAgentRunsRef.current.clear(); return; }
+    setEnvironment(null);
     setSelectedFile(null); setFilePreview(null); setEditorContent(''); setDraft(null); setUndoChange(null);
     setWorkspaceOpen(false); setDockTabs([]); setArtifactSessions({}); setActiveDockTabId(''); setFileDockSessions({}); setFileTreeSelection(''); setEnvironmentOpen(false); setDockProjectLauncherOpen(false); setDockFocused(false); handledArtifactToolCallsRef.current.clear(); foregroundAgentRunsRef.current.clear();
     void Promise.all([
       refreshConversations(projectId),
       window.fielora.workspace.listFiles({ field_id: projectId }).then(setFiles),
-      window.fielora.workspace.getEnvironment({ field_id: projectId }).then(setEnvironment),
       window.fielora.workspace.getOpenTargets({ field_id: projectId }).then(setProjectOpenTargets),
     ]).catch((reason) => setError(reasonMessage(reason)));
   }, [projectId, refreshConversations]);
+
+  useEffect(() => {
+    if (!environmentOpen || !projectId) return;
+    let cancelled = false;
+    setEnvironmentLoading(true);
+    setEnvironmentError(false);
+    void window.fielora.workspace.getEnvironment({ field_id: projectId })
+      .then((value) => { if (!cancelled) setEnvironment(value); })
+      .catch(() => { if (!cancelled) { setEnvironment(null); setEnvironmentError(true); } })
+      .finally(() => { if (!cancelled) setEnvironmentLoading(false); });
+    return () => { cancelled = true; };
+  }, [environmentOpen, environmentRefresh, projectId]);
 
   useEffect(() => {
     selectedConversationRef.current = conversationId;
@@ -1230,7 +1297,16 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       if (!dockProjectLauncherRef.current?.contains(event.target as Node)) setDockProjectLauncherOpen(false);
     };
     window.addEventListener('pointerdown', close);
-    return () => window.removeEventListener('pointerdown', close);
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (environmentOpen) {
+        setEnvironmentOpen(false);
+        environmentMenuRef.current?.querySelector<HTMLButtonElement>('[data-testid="environment-menu-toggle"]')?.focus();
+      }
+      setDockProjectLauncherOpen(false);
+    };
+    window.addEventListener('keydown', escape);
+    return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', escape); };
   }, [dockProjectLauncherOpen, environmentOpen]);
 
   const refreshChangedAgent = useCallback(async (runId: string) => {
@@ -2342,7 +2418,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   }
 
   function updateDockFileTreeWidth(width: number) {
-    const next = Math.min(Math.max(width, 190), 420);
+    const next = Math.min(Math.max(width, 160), 420);
     setDockFileTreeWidth(next);
     window.localStorage.setItem('fielora:dock-file-tree-width', String(next));
   }
@@ -2362,12 +2438,12 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     openDockTool('REVIEW');
   }
 
-  function prepareVersionControl() {
+  function prepareVersionControl(action: 'COMMIT' | 'PUSH') {
     setEnvironmentOpen(false);
-    const routing = permission === 'FULL_CONTROL'
-      ? '当前为完全访问权限，按既定范围自动完成这些 Git 操作。'
-      : 'Git 写操作按当前权限设置请求我批准。';
-    setPrompt(`请检查当前 Git 变更，运行最相关的测试，并用 git_read 审阅 diff。测试通过后，只暂存与本任务相关的文件，创建一个简洁准确的提交；如果当前分支已有上游，再推送。${routing}`);
+    const request = action === 'COMMIT'
+      ? '请检查当前 Git 变更，运行最相关的测试，并审阅 diff。测试通过后，只暂存与本任务相关的文件，创建一个简洁准确的提交；不要推送。所有操作遵循当前权限设置。'
+      : '请检查当前分支、上游以及待推送的提交，确认已有相关验证记录，再推送已有提交到当前上游。不要创建新提交、强制推送或自动设置上游；缺少上游或验证依据时说明情况。所有操作遵循当前权限设置。';
+    setPrompt((current) => current.trim() ? `${current}\n\n${request}` : request);
     window.requestAnimationFrame(() => composerRef.current?.focus());
   }
 
@@ -2382,20 +2458,47 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
 
   const environmentSources = [...attachments, ...messages.flatMap((message) => messageAttachments(message.id))]
     .filter((source, index, all) => all.findIndex((candidate) => candidate.id === source.id) === index)
-    .slice(-3)
     .reverse();
   const environmentControl = project && projectActionsLayer ? createPortal(<>
     <div className="environment-menu" ref={environmentMenuRef}>
-      <ToolbarAction label="切换摘要" icon={<AppIcon name="environment"/>} active={environmentOpen} onClick={() => { const next = !environmentOpen; setDockProjectLauncherOpen(false); setEnvironmentOpen(next); if (next) void window.fielora.workspace.getEnvironment({ field_id: project.field_id }).then(setEnvironment).catch((reason) => setError(reasonMessage(reason))); }} aria-expanded={environmentOpen} testId="environment-menu-toggle" />
+      <ToolbarAction label="工作区信息" icon={<AppIcon name="environment"/>} active={environmentOpen} onClick={() => { setDockProjectLauncherOpen(false); setEnvironmentOpen((open) => !open); }} aria-expanded={environmentOpen} testId="environment-menu-toggle" />
       {environmentOpen && <div className="environment-popover" data-surface="overlay" data-testid="environment-popover">
-        <header><span>环境信息</span><button type="button" aria-label="添加来源" title="添加来源" onClick={() => void pickAttachments()}><AppIcon name="plus"/></button></header>
-        <button onClick={() => { setEnvironmentOpen(false); openWorkspace('DIFF'); }}><AppIcon name="diff"/><span><strong>变更</strong><small className="environment-diff-stat"><em>+{displayedAgentReview.additions}</em><del>−{displayedAgentReview.deletions}</del></small></span></button>
-        <button onClick={() => runEnvironmentCommand('git status --short')}><AppIcon name="computer"/><span><strong>本地</strong><small>{environment?.changed_files ?? 0} 个文件</small></span><AppIcon name="chevronDown"/></button>
-        <button onClick={() => runEnvironmentCommand('git branch --show-current')} disabled={!environment?.is_git_repository}><AppIcon name="branch"/><span><strong>{environment?.branch || (environment?.is_git_repository ? '默认分支尚未建立' : '不是 Git 仓库')}</strong><small>{environment?.upstream || '没有上游分支'}</small></span><AppIcon name="chevronDown"/></button>
-        <button onClick={prepareVersionControl} disabled={!environment?.is_git_repository}><AppIcon name="cloud"/><span><strong>提交或推送</strong><small>{environment?.ahead ? `领先 ${environment.ahead} · 先测试和审阅` : '测试通过后进入变更审阅'}</small></span></button>
-        <button className="environment-muted-action" disabled><AppIcon name="source"/><span><strong>拉取请求状态</strong><small>当前 Project 未连接托管服务</small></span></button>
-        <button onClick={() => runEnvironmentCommand('git diff --stat HEAD')} disabled={!environment?.is_git_repository}><AppIcon name="branch"/><span><strong>比较分支</strong><small>{environment?.behind ? `落后 ${environment.behind}` : '与 HEAD 比较'}</small></span></button>
-        <div className="environment-sources"><header><span>来源</span><button type="button" aria-label="添加来源" onClick={() => void pickAttachments()}><AppIcon name="plus"/></button></header>{environmentSources.map((source) => <button key={source.id} onClick={() => { setEnvironmentOpen(false); openAttachmentInDock(source); }}><span className="environment-source-thumb">{source.data_url ? <img src={source.data_url} alt=""/> : <AppIcon name={source.kind === 'IMAGE' ? 'image' : 'source'}/>}</span><span>{source.name}</span></button>)}{environmentSources.length === 0 && selectedFile ? <button onClick={() => { setEnvironmentOpen(false); openWorkspace('FILES'); }}><AppIcon name="source"/><span>{selectedFile.relative_path}</span></button> : environmentSources.length === 0 ? <small>当前对话还没有来源。</small> : null}</div>
+        <header><strong>工作区信息</strong><IconButton size="sm" label="刷新工作区信息" icon={<AppIcon name="refresh"/>} disabled={environmentLoading} onClick={() => setEnvironmentRefresh((value) => value + 1)} testId="environment-refresh"/></header>
+        <div className="environment-repository" role="status" aria-busy={environmentLoading}>
+          <AppIcon name={environment?.is_git_repository ? 'branch' : 'folder'}/>
+          <span><strong>{environmentLoading ? '正在读取工作区…' : environmentError ? '暂时无法读取工作区' : environment?.is_git_repository ? environment.branch || '未检出分支' : '本地文件夹'}</strong>
+            <small>{environmentError ? '点击右上角刷新以重试' : environmentLoading ? project.title : environment?.is_git_repository ? environment.upstream || '没有上游分支' : '此文件夹未使用 Git'}</small></span>
+          {environment?.upstream && <small className="environment-sync-state">{environment.ahead || environment.behind ? `领先 ${environment.ahead} · 落后 ${environment.behind}` : '已同步'}</small>}
+        </div>
+        <button type="button" className="environment-action" data-testid="environment-task-changes" onClick={() => { setEnvironmentOpen(false); openWorkspace('DIFF'); }}>
+          <AppIcon name="diff"/><span><strong>任务改动</strong><small>{displayedAgentReview.files.length ? `${displayedAgentReview.files.length} 个文件 · 打开审阅` : '本次任务暂无文件改动'}</small></span>
+          {displayedAgentReview.files.length > 0 && <span className="environment-diff-stat"><em>+{displayedAgentReview.additions}</em><del>−{displayedAgentReview.deletions}</del></span>}
+        </button>
+        {environment?.is_git_repository && <>
+          <button type="button" className="environment-action" data-testid="environment-local-changes" onClick={() => runEnvironmentCommand('git status --short')}>
+            <AppIcon name="changes"/><span><strong>工作区改动</strong><small>在终端查看 Git 状态</small></span><small className="environment-count">{environment.changed_files} 个文件</small>
+          </button>
+          <button type="button" className="environment-action" data-testid="environment-diff-stat" onClick={() => runEnvironmentCommand('git diff --stat')}>
+            <AppIcon name="files"/><span><strong>查看改动统计</strong><small>未暂存的改动 · 在终端打开</small></span><AppIcon name="openAction"/>
+          </button>
+          <section className="environment-section" aria-label="AI 协助">
+            <header><span>AI 协助</span><small>填入输入框，确认后发送</small></header>
+            <button type="button" className="environment-action" data-testid="environment-prepare-commit" onClick={() => prepareVersionControl('COMMIT')}>
+              <AppIcon name="commit"/><span><strong>准备提交</strong><small>检查改动、运行测试并生成提交</small></span><AppIcon name="openAction"/>
+            </button>
+            <button type="button" className="environment-action" data-testid="environment-prepare-push" onClick={() => prepareVersionControl('PUSH')} disabled={!environment.upstream}>
+              <AppIcon name="cloud"/><span><strong>准备推送</strong><small>{environment.upstream ? '检查并推送已有提交到上游' : '设置上游分支后可用'}</small></span><AppIcon name="openAction"/>
+            </button>
+          </section>
+        </>}
+        <section className="environment-section environment-sources" aria-label="来源">
+          <header><span>{environmentSources.length === 0 && selectedFile ? '当前文件' : '对话来源'}</span><IconButton size="sm" label="添加来源" icon={<AppIcon name="plus"/>} onClick={() => void pickAttachments()}/></header>
+          <div className="environment-source-list">{environmentSources.map((source) => <button type="button" key={source.id} className="environment-source" title={source.name} onClick={() => { setEnvironmentOpen(false); openAttachmentInDock(source); }}>
+            {source.kind === 'IMAGE' && source.data_url ? <span className="environment-source-thumb"><img src={source.data_url} alt=""/></span> : <FileTypeIcon path={source.name}/>}
+            <span>{source.name}</span>
+          </button>)}
+          {environmentSources.length === 0 && selectedFile ? <button type="button" className="environment-source" data-testid="environment-current-file" title={selectedFile.relative_path} onClick={() => { setEnvironmentOpen(false); void openFile(selectedFile); }}><FileTypeIcon path={selectedFile.relative_path}/><span>{selectedFile.relative_path}</span></button> : environmentSources.length === 0 ? <small className="environment-empty">添加文件或图片作为对话参考。</small> : null}</div>
+        </section>
       </div>}
     </div>
   </>, projectActionsLayer) : null;
@@ -2420,17 +2523,14 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         <button type="button" role="tab" aria-selected={activeFileSession.markdownMode === 'SOURCE'} onClick={() => setFileDockSessions((current) => ({ ...current, [activeDockTab.id]: { ...activeFileSession, markdownMode: 'SOURCE' } }))} data-testid="markdown-source-toggle">源代码</button>
       </div>}
       {activeDockTab.kind === 'FILE' && activeFileSession?.file && activeFileSession.content !== activeFileSession.file.content && <button type="button" className="right-dock-review-change" onClick={() => reviewDockFileSession(activeDockTab, activeFileSession)} data-testid="review-change">审阅修改</button>}
+      <ToolbarAction onClick={() => setDockFileTreeCollapsed((current) => !current)} label={dockFileTreeCollapsed ? '展开文件目录' : '收起文件目录'} active={!dockFileTreeCollapsed} icon={<AppIcon name="fileTree"/>} aria-expanded={!dockFileTreeCollapsed} testId="dock-file-tree-toggle"/>
       <div className="dock-project-launcher" ref={dockProjectLauncherRef}>
-        <button type="button" className="dock-project-launcher-main" onClick={() => void openProjectTarget('FILE_EXPLORER')} aria-label="在文件资源管理器中打开 Project" title="打开 Project" data-testid="dock-project-open-default"><AppIcon name="folder"/><span>打开</span></button>
+        <button type="button" className="dock-project-launcher-main" onClick={() => void openProjectTarget('FILE_EXPLORER')} aria-label="在文件资源管理器中打开 Project" title="打开 Project" data-testid="dock-project-open-default"><WorkspaceAppBadge target="FILE_EXPLORER" iconDataUrl={projectOpenTargets.find((target) => target.target === 'FILE_EXPLORER')?.icon_data_url}/><span>打开</span></button>
         <button type="button" className={`dock-project-launcher-more ${dockProjectLauncherOpen ? 'active' : ''}`} onClick={() => void toggleDockProjectLauncher()} aria-label="选择打开方式" title="选择打开方式" aria-expanded={dockProjectLauncherOpen} data-testid="dock-project-open-menu-toggle"><AppIcon name="chevronDown"/></button>
         {dockProjectLauncherOpen && <div className="project-launcher-popover dock-project-launcher-popover" role="menu" data-surface="overlay" data-testid="dock-project-open-menu">
-          {projectOpenTargets.map((target) => <button key={target.target} type="button" role="menuitem" onClick={() => void openProjectTarget(target.target)}><WorkspaceAppBadge target={target.target} iconDataUrl={target.icon_data_url}/><span>{target.label}</span></button>)}
-          <div className="project-launcher-divider"/>
-          <button type="button" role="menuitem" onClick={() => { setDockProjectLauncherOpen(false); openDockTool('FILES'); }}><span className="workspace-app-badge target-fielora"><AppIcon name="files"/></span><span>Fielora 文件</span></button>
-          <button type="button" role="menuitem" onClick={() => { setDockProjectLauncherOpen(false); openDockTool('TERMINAL'); }}><span className="workspace-app-badge target-fielora"><AppIcon name="terminal"/></span><span>Fielora 终端</span></button>
+          {projectOpenTargets.filter((target) => target.target !== 'FILE_EXPLORER').map((target) => <button key={target.target} type="button" role="menuitem" onClick={() => void openProjectTarget(target.target)}><WorkspaceAppBadge target={target.target} iconDataUrl={target.icon_data_url}/><span>{target.label}</span></button>)}
         </div>}
       </div>
-      <button type="button" onClick={() => setDockFileTreeCollapsed((current) => !current)} aria-label={dockFileTreeCollapsed ? '展开文件菜单' : '收起文件菜单'} title={dockFileTreeCollapsed ? '展开文件菜单' : '收起文件菜单'} aria-expanded={!dockFileTreeCollapsed} data-testid="dock-file-tree-toggle"><AppIcon name="panelRight"/></button>
     </div>}
   </> : null;
   const dockTools: RightWorkspaceTool[] = [
@@ -2443,10 +2543,10 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const session = fileDockSessions[tab.id] ?? null;
     const artifactSession = artifactSessions[tab.id] ?? null;
     const imageAttachment = tab.attachment ?? (session?.preview?.kind === 'IMAGE' ? workspaceImageAttachment(session.preview.preview) : null);
-    const dockFileTree = <WorkspaceFileTree files={files} filter={fileFilter} activePath={fileTreeSelection} onFilter={setFileFilter} onRefresh={() => void window.fielora.workspace.listFiles({ field_id: project.field_id }).then(setFiles).catch((reason) => setError(reasonMessage(reason)))} onOpen={(file) => void openFile(file)}/>;
+    const dockFileTree = <WorkspaceFileTree files={files} filter={fileFilter} activePath={fileTreeSelection} onFilter={setFileFilter} onRefresh={refreshTreeFiles} onOpen={openTreeFile}/>;
     return <section key={tab.id} className={`right-dock-view right-dock-view-${tab.kind.toLowerCase()}`} hidden={tab.id !== activeDockTabId} data-dock-kind={tab.kind} data-testid={`right-dock-view-${tab.id}`}>
       {tab.kind === 'FILES' && dockFileTree}
-      {tab.kind === 'FILE' && <DockResourceLayout fileTree={dockFileTree} treeWidth={dockFileTreeWidth} treeCollapsed={dockFileTreeCollapsed} onTreeWidthChange={updateDockFileTreeWidth}>
+      {tab.kind === 'FILE' && <DockResourceLayout fileTree={dockFileTree} treeWidth={dockFileTreeWidth} treeCollapsed={dockFileTreeCollapsed} onTreeWidthChange={updateDockFileTreeWidth} onTreeCollapsedChange={setDockFileTreeCollapsed}>
         <>
           {session?.loading ? <div className="dock-resource-status" role="status"><AppIcon name="file"/><span>正在载入文件…</span></div> : session?.file && <div className={`file-editor dock-file-editor ${undoChange?.relativePath === session.file.relative_path ? 'has-undo' : ''}`}>{undoChange?.relativePath === session.file.relative_path && <header><span/><button onClick={() => void undoAcceptedChange()} data-testid="undo-change">撤销已接受变更</button></header>}{isMarkdownFile(session.file.relative_path) && (session.markdownMode ?? 'PREVIEW') === 'PREVIEW'
             ? <div className="dock-markdown-preview" data-testid="markdown-preview"><MarkdownMessage content={session.content} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div>
@@ -2455,7 +2555,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
           {!session && <div className="dock-resource-status" role="status"><AppIcon name="file"/><span>正在载入文件…</span></div>}
         </>
       </DockResourceLayout>}
-      {tab.kind === 'IMAGE' && <DockResourceLayout fileTree={dockFileTree} treeWidth={dockFileTreeWidth} treeCollapsed={dockFileTreeCollapsed} onTreeWidthChange={updateDockFileTreeWidth}>{imageAttachment?.data_url ? <div className="dock-image-preview" data-testid="file-image-preview"><button type="button" aria-label={`放大 ${imageAttachment.name}`} onClick={() => setPreviewAttachment(imageAttachment)} onContextMenu={(event) => openImageContextMenu(event, imageAttachment)}><img src={imageAttachment.data_url} alt={imageAttachment.name}/></button><small>{imageAttachment.mime_type} · {Math.max(1, Math.ceil(imageAttachment.size / 1024))} KB · 点击放大</small></div> : session?.preview?.kind === 'UNSUPPORTED' ? <div className="file-unsupported-preview" data-testid="file-unsupported-preview"><AppIcon name="image"/><h3>无法在此预览</h3><strong>{session.preview.relativePath}</strong><p>{session.preview.message}</p></div> : <div className="dock-resource-status" role="status"><AppIcon name="image"/><span>正在载入图片…</span></div>}</DockResourceLayout>}
+      {tab.kind === 'IMAGE' && <DockResourceLayout fileTree={dockFileTree} treeWidth={dockFileTreeWidth} treeCollapsed={dockFileTreeCollapsed} onTreeWidthChange={updateDockFileTreeWidth} onTreeCollapsedChange={setDockFileTreeCollapsed}>{imageAttachment?.data_url ? <div className="dock-image-preview" data-testid="file-image-preview"><button type="button" aria-label={`放大 ${imageAttachment.name}`} onClick={() => setPreviewAttachment(imageAttachment)} onContextMenu={(event) => openImageContextMenu(event, imageAttachment)}><img src={imageAttachment.data_url} alt={imageAttachment.name}/></button><small>{imageAttachment.mime_type} · {Math.max(1, Math.ceil(imageAttachment.size / 1024))} KB · 点击放大</small></div> : session?.preview?.kind === 'UNSUPPORTED' ? <div className="file-unsupported-preview" data-testid="file-unsupported-preview"><AppIcon name="image"/><h3>无法在此预览</h3><strong>{session.preview.relativePath}</strong><p>{session.preview.message}</p></div> : <div className="dock-resource-status" role="status"><AppIcon name="image"/><span>正在载入图片…</span></div>}</DockResourceLayout>}
       {tab.kind === 'REVIEW' && <div className="diff-workspace">{draft ? <><header><div><p className="eyebrow">REVIEW</p><h3>{draft.relativePath}</h3></div><span>写入前不会修改磁盘</span></header><pre className="diff-view" data-testid="diff-view">{draft.diff}</pre><footer><button className="secondary-button" onClick={() => { setDraft(null); setEditorContent(selectedFile?.content ?? ''); if (selectedFile) ensureDockTab({ id: `file:${selectedFile.relative_path}`, kind: 'FILE', label: fileTabLabel(selectedFile.relative_path), icon: 'files', relativePath: selectedFile.relative_path }); else openDockTool('FILES'); }}>放弃</button><button className="primary-button" onClick={() => void acceptDraft()} data-testid="accept-change">接受变更</button></footer></> : (tab.reviewSelection?.review ?? displayedAgentReview).files.length > 0 ? <AgentHumanReview review={tab.reviewSelection?.review ?? displayedAgentReview} task={tab.reviewSelection?.task ?? agentRun?.task ?? conversation?.title ?? ''} runId={tab.reviewSelection?.runId ?? agentRun?.id ?? ''} selectedPathHint={tab.relativePath ?? agentReviewPath} onOpenFile={(path) => void openAgentReviewFile(path)} onMarkReviewed={markAgentFileArtifactReviewed} onUndo={(file) => undoAgentFileArtifact(tab.reviewSelection?.runId ?? agentRun?.id ?? '', file)}/> : <div className="workspace-blank"><h3>{conversation ? '本次任务没有文件变更' : '当前 Project 没有可审阅的变更'}</h3><p>文件写入、补丁和替换会显示在这里。</p></div>}</div>}
       {tab.kind === 'BROWSER' && <BrowsePanel browser={window.fielora.browser} onSaveToLibrary={(input) => window.fielora.library.saveWeb(input)} onOpenBrowserSettings={() => window.dispatchEvent(new CustomEvent('fielora:open-settings', { detail: 'BROWSER' }))} workspaceTabHostId={tab.tabHostId} workspaceActive={workspaceOpen && tab.id === activeDockTabId} onRequestWorkspaceActivate={() => activateDockTab(tab.id)} onRequestWorkspaceClose={() => closeDockTab(tab.id)}/>}
       {tab.kind === 'TERMINAL' && <div className="right-terminal-view" data-testid="terminal-dock"><TerminalSession workingDirectory={terminalWorkingDirectory || project.root_path} command={terminalCommand} lastCommand={terminalLastCommand} output={terminalOutput} running={Boolean(terminalRunId)} active={workspaceOpen && tab.id === activeDockTabId} onCommandChange={setTerminalCommand} onRun={() => void runTerminal(terminalCommand, 'RIGHT')} onCancel={() => terminalRunId ? void window.fielora.workspace.cancelTerminal({ run_id: terminalRunId }) : undefined} testId="terminal"/></div>}
@@ -2630,6 +2730,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       {project && <ResizableDivider label="调整文件或审阅区域宽度" value={workspaceWidth} min={PROJECT_WORKSPACE_MIN_WIDTH} max={workspaceMaximumWidth()} onResizeStart={() => {
         workspaceDragGeometryRef.current = captureWorkspaceDragGeometry();
         workspaceCollapsedDuringDragRef.current = !workspaceOpen;
+        workspaceFocusedDuringDragRef.current = dockFocused;
       }} onResize={(clientX) => resizeWorkspaceDuringDrag(clientX, false)} onResizeEnd={(clientX) => {
         resizeWorkspaceDuringDrag(clientX, true);
         workspaceDragGeometryRef.current = null;
@@ -2642,7 +2743,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         {workspaceTab === 'DIFF' && <div className="diff-workspace">{draft ? <><header><div><p className="eyebrow">REVIEW</p><h3>{draft.relativePath}</h3></div><span>写入前不会修改磁盘</span></header><pre className="diff-view" data-testid="diff-view">{draft.diff}</pre><footer><button className="secondary-button" onClick={() => {setDraft(null);setEditorContent(selectedFile?.content??'');setWorkspaceTab('FILES');}}>放弃</button><button className="primary-button" onClick={() => void acceptDraft()} data-testid="accept-change">接受变更</button></footer></> : displayedAgentReview.files.length > 0 ? <AgentHumanReview review={displayedAgentReview} task={historicalReview?.task ?? agentRun?.task ?? conversation?.title ?? ''} runId={historicalReview?.runId ?? agentRun?.id ?? ''} selectedPathHint={agentReviewPath} onOpenFile={(path) => void openAgentReviewFile(path)} onMarkReviewed={markAgentFileArtifactReviewed} onUndo={(file) => undoAgentFileArtifact(historicalReview?.runId ?? agentRun?.id ?? '', file)}/> : <div className="workspace-blank"><h3>本次任务没有文件变更</h3><p>Agent 的写入、补丁和替换会显示在这里。</p></div>}</div>}
       </section>}
       {project && <RightWorkspaceDock
-        tabs={dockTabs}
+        tabs={dockTabs.map((tab) => ({ ...tab, fileIconPath: tab.kind === 'FILE' || tab.kind === 'IMAGE' ? tab.relativePath ?? tab.attachment?.name : undefined }))}
         activeTabId={activeDockTabId}
         toolbar={dockToolbar}
         tools={dockTools}
@@ -2660,7 +2761,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     {imageContextMenu && createPortal(<ImageContextMenu {...imageContextMenu} locationLabel={project ? `${project.title} / 当前对话 / ${imageContextMenu.attachment.name}` : `当前对话 / ${imageContextMenu.attachment.name}`} onShow={(attachment) => { setImageContextMenu(null); openAttachmentInDock(attachment); }} onCopy={(attachment) => void copyImageAttachment(attachment)} onSave={(attachment) => void saveImageAttachment(attachment)} onClose={() => setImageContextMenu(null)}/>, document.body)}
     {environmentControl}
     {project && terminalLayer && createPortal(<>
-      <ResizableDivider orientation="horizontal" label="调整终端高度" value={bottomTerminalHeight} min={170} max={520} onResize={(clientY) => updateBottomTerminalHeight(window.innerHeight - clientY)} onKeyboardResize={(delta) => updateBottomTerminalHeight(bottomTerminalHeight - delta)} testId="bottom-terminal-resizer" className="terminal-resizer" />
+      <ResizableDivider orientation="horizontal" label="调整终端高度" value={bottomTerminalHeight} min={170} max={520} onResizeStart={beginBottomTerminalDrag} onResize={(clientY) => resizeBottomTerminalDuringDrag(clientY, false)} onResizeEnd={(clientY) => resizeBottomTerminalDuringDrag(clientY, true)} onKeyboardResize={(delta) => updateBottomTerminalHeight(bottomTerminalHeight - delta)} testId="bottom-terminal-resizer" className="terminal-resizer" />
       <section className="terminal-dock bottom-terminal-dock" data-testid="bottom-terminal-dock" aria-hidden={!bottomTerminalOpen}>
         <header><div><AppIcon name="terminalPanel"/><strong>PowerShell</strong></div><button type="button" onClick={() => setBottomTerminalOpen(false)} aria-label="关闭底部终端" data-testid="bottom-terminal-close"><AppIcon name="close"/></button></header>
         <TerminalSession workingDirectory={terminalWorkingDirectory || project.root_path} command={terminalCommand} lastCommand={terminalLastCommand} output={terminalOutput} running={Boolean(terminalRunId)} active={bottomTerminalOpen} onCommandChange={setTerminalCommand} onRun={() => void runTerminal(terminalCommand, 'BOTTOM')} onCancel={() => terminalRunId ? void window.fielora.workspace.cancelTerminal({ run_id: terminalRunId }) : undefined} testId="bottom-terminal"/>

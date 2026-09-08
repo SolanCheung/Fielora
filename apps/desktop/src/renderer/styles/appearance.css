@@ -379,11 +379,8 @@ button[type="submit"]:disabled { background: var(--fl-action-primary-disabled); 
 .right-workspace-dock.workspace-panel { grid-template-rows: 42px minmax(0,1fr); }
 .right-workspace-dock.workspace-panel.has-toolbar { grid-template-rows: 42px 36px minmax(0,1fr); }
 .right-dock-tab-strip { padding-block: var(--fl-space-1); }
-.right-dock-tabs { gap: var(--fl-space-1); scrollbar-width: auto; }
-.right-dock-tabs::-webkit-scrollbar { display: block; height: 2px; }
-.right-dock-tabs::-webkit-scrollbar-thumb { background: color-mix(in srgb,var(--fl-color-text-muted) 16%,transparent); }
+.right-dock-tabs { gap: var(--fl-space-1); }
 .right-dock-tab { min-width: 100px; max-width: 148px; height: 34px; flex: 0 0 124px; border-radius: var(--fl-radius-control); }
-.right-dock-tab.active { border-color: var(--fl-color-border-soft); background: var(--fl-color-surface); box-shadow: var(--fl-shadow-subtle); }
 .right-dock-tab.active { min-width: 160px; max-width: 220px; flex-basis: 180px; }
 .right-dock-tab-main { font-size: var(--fl-font-size-meta); font-weight: var(--fl-font-weight-regular); }
 .right-dock-tab-close { opacity: 0; }
@@ -757,7 +754,6 @@ button[type="submit"]:disabled { background: var(--fl-action-primary-disabled); 
 .right-dock-tab-strip,
 .right-dock-toolbar { border-bottom: 0; background: transparent; }
 .right-dock-tab { position: relative; border-color: transparent; background: transparent; box-shadow: none; }
-.right-dock-tab.active { border-color: transparent; background: var(--fl-surface-interactive); box-shadow: none; }
 .browser-page-strip {
   min-height: 34px;
   gap: var(--fl-space-1);

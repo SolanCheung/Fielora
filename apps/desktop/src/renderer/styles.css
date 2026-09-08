@@ -197,30 +197,6 @@ button:disabled { opacity: .55; cursor: wait; }
 .workspace-app-badge.target-fielora { color: var(--fl-color-accent); background: var(--fl-color-accent-soft); }
 
 .environment-popover { position: absolute; z-index: var(--fl-layer-popover); top: calc(100% + 7px); right: 0; width: 352px; max-height: min(520px,calc(100vh - 86px)); padding: 9px; overflow: auto; border: 1px solid var(--fl-effect-boundary); border-radius: var(--fl-radius-card); color: var(--fl-color-text); background: var(--fl-surface-overlay); box-shadow: var(--fl-shadow-overlay); }
-.environment-popover > header, .environment-sources > header { min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 3px 7px 5px; color: var(--fl-color-text-faint); font-size: 12.5px; font-weight: 400; }
-.environment-popover header button { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--fl-color-text-muted); background: transparent; }
-.environment-popover header button:hover { background: var(--fl-color-surface-hover); }
-.environment-popover header .shell-icon { width: 15px; height: 15px; }
-.environment-popover > button { width: 100%; min-height: 38px; display: grid; grid-template-columns: 20px minmax(0,1fr) 16px; align-items: center; gap: 9px; padding: 6px 8px; border: 0; border-radius: 9px; color: var(--fl-color-text); background: transparent; text-align: left; }
-.environment-popover > button:hover:not(:disabled) { background: var(--fl-color-surface-hover); }
-.environment-popover > button:disabled { cursor: default; }
-.environment-popover > button.environment-muted-action { opacity: .55; }
-.environment-popover > button > .shell-icon { width: 17px; height: 17px; color: var(--fl-color-icon); }
-.environment-popover > button > .shell-icon:last-child { width: 13px; height: 13px; color: var(--fl-color-text-subtle); }
-.environment-popover > button > span { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.environment-popover > button strong { overflow: hidden; color: var(--fl-color-text); text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 400; }
-.environment-popover > button small { overflow: hidden; color: var(--fl-color-text-faint); text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 400; }
-.environment-diff-stat { display: flex; gap: 7px; }
-.environment-diff-stat em, .environment-diff-stat del { font-style: normal; text-decoration: none; }
-.environment-diff-stat em, .environment-diff-stat del { color: var(--fl-color-text-muted); }
-.environment-sources { display: grid; gap: 2px; margin-top: 5px; padding: 7px 0 1px; border-top: 1px solid var(--fl-color-divider); }
-.environment-sources > small { padding: 4px 7px 8px; color: var(--fl-color-text-faint); font-size: 11.5px; }
-.environment-sources > button { min-width: 0; min-height: 36px; display: grid; grid-template-columns: 24px minmax(0,1fr); align-items: center; gap: 8px; padding: 5px 7px; overflow: hidden; border: 0; border-radius: 8px; color: var(--fl-color-text-muted); background: transparent; text-align: left; font-size: 12.5px; }
-.environment-sources > button:hover { color: var(--fl-color-text); background: var(--fl-color-surface-hover); }
-.environment-sources > button > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.environment-source-thumb { width: 22px; height: 22px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--fl-color-border-soft); border-radius: 5px; background: var(--fl-color-surface-subtle); }
-.environment-source-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.environment-source-thumb .shell-icon { width: 14px; height: 14px; }
 .conversation-menu { position: relative; flex: 0 0 auto; }
 .conversation-menu-trigger { width: 25px; height: 25px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; color: #7b8189; background: transparent; }
 .conversation-menu-trigger:hover, .conversation-menu.open .conversation-menu-trigger { color: #353a41; background: #eef1f4; }
@@ -1044,14 +1020,6 @@ input[type="checkbox"]:checked::before { transform: translateY(-1px) rotate(-45d
 .dock-file-editor.has-undo { grid-template-rows: 38px minmax(0,1fr); }
 @keyframes dock-file-tree-enter { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
 .dock-code-editor-surface { position: relative; min-width: 0; min-height: 0; overflow: hidden; color: var(--fl-color-text-strong); background: inherit; }
-.dock-code-highlight, .dock-code-editor-surface > .dock-code-input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; border: 0; border-radius: 0; font-family: var(--fl-font-mono); font-size: 13px; font-weight: 400; line-height: 1.65; letter-spacing: 0; tab-size: 2; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-.dock-code-highlight { padding: 11px 0 18px; overflow: hidden; color: var(--fl-color-text-strong); background: transparent; pointer-events: none; }
-.dock-code-highlight code { width: 100%; min-width: 0; display: block; font: inherit; }
-.dock-code-line { width: 100%; min-width: 0; min-height: 21.45px; display: grid; grid-template-columns: 44px minmax(0,1fr); }
-.dock-code-line > i { padding-right: 12px; color: var(--fl-color-text-faint); font-style: normal; text-align: right; user-select: none; }
-.dock-code-line > span { min-width: 0; padding-right: 14px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-.dock-code-editor-surface > .dock-code-input { z-index: 1; padding: 11px 14px 18px 44px; overflow-x: hidden; overflow-y: auto; resize: none; color: transparent; background: transparent; box-shadow: none; caret-color: var(--fl-color-text-strong); -webkit-text-fill-color: transparent; }
-.dock-code-editor-surface > .dock-code-input::selection { background: color-mix(in srgb,var(--fl-color-accent) 24%,transparent); }
 .syntax-keyword { color: var(--fl-code-keyword); }
 .syntax-property { color: var(--fl-code-property); }
 .syntax-string { color: var(--fl-code-string); }

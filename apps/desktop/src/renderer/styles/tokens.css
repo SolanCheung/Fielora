@@ -287,8 +287,8 @@
 
   /* Code semantics */
   --fl-code-keyword: #7652b8;
-  --fl-code-property: #ad4058;
-  --fl-code-string: #287e4f;
+  --fl-code-property: #2679a5;
+  --fl-code-string: #24785b;
   --fl-code-number: #b15c20;
   --fl-code-comment: #7d8690;
   --fl-code-punctuation: #6f7782;
@@ -412,8 +412,8 @@
   --fl-color-diagram-canvas: #ffffff;
   --fl-backdrop-shell: var(--fl-effect-backdrop-floating);
   --fl-code-keyword: #b99aee;
-  --fl-code-property: #ef94a7;
-  --fl-code-string: #82c99f;
+  --fl-code-property: #80c3e8;
+  --fl-code-string: #83cfb1;
   --fl-code-number: #e2a36f;
   --fl-code-comment: #858d99;
   --fl-code-punctuation: #aeb5bf;
