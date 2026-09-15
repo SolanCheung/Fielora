@@ -72,3 +72,13 @@ Complete Agent 现已实现 Project-scoped 持久 Run、Context、typed file too
 日常开发与人工体验长期运行 `pnpm dev`。根据变更范围使用 `pnpm verify:dev:docs`、`verify:dev:ui`、`verify:dev:core` 或 `verify:dev:cross`；任何准备进入 main 的变更运行 `pnpm verify:premerge`。Packaging-sensitive 变更额外执行 targeted packaged smoke；重大 Contract/Schema/Permission/Reality/Verification 变化先形成 `CHANGE IMPACT` 并运行受影响兼容性与 Hero Flow regression。正式阶段仍运行冻结的完整 Phase Gate。精确定义见 `docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md`。
 
 Desktop UI 的 canonical 设计语言是 **Fielora Quiet Workbench / 静默工作台**。新增或修改界面必须遵循 `docs/product/FIELORA_DESIGN_LANGUAGE_V0.1.md`，优先使用 semantic token 与共享 primitive，不再为单页复制颜色、控件或动效。
+
+## License
+
+Fielora source code and documentation are licensed under the
+[Apache License, Version 2.0](LICENSE), except where a file or directory
+identifies a separate license. See [NOTICE](NOTICE) for project attribution.
+Third-party dependencies and vendored materials retain their original licenses
+and notices.
+
+See [the adoption record](docs/engineering/APACHE_2_0_ADOPTION.md).
