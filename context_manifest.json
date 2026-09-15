@@ -31,8 +31,8 @@
       "bytes": 2973
     },
     "README.md": {
-      "sha256": "7a2dbb4ae7bfff9db48dfcae805fc86165098d67300e0f22355a9f5908f4e2f0",
-      "bytes": 12872
+      "sha256": "e8653c840f1512a1196517defb3769c806bce8e89e4e3c8f0b0cae472ebcd8d0",
+      "bytes": 13257
     },
     "AGENTS.md": {
       "sha256": "19d11269434e83620c00d01cbf4d1c1128bd363d2895ee3dcab32bd60e4b5592",
@@ -47,12 +47,12 @@
       "bytes": 12753
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "088d7104becb6b68e41a240ed86d6fecceade3a378132b94ce45e6d3e42d0e85",
-      "bytes": 144568
+      "sha256": "a16b245aeefadc93e92022966d40625f64d302e8c6bdce3868365ee13727d98a",
+      "bytes": 145086
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "168384201b55c593f147fe5315705fc0f23e228bd95f7bd401099cff3115cc68",
-      "bytes": 77907
+      "sha256": "4ae7b715e111d6dc95826301b88012e37eda0c8eb7137be919cb139375c7231c",
+      "bytes": 78252
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
       "sha256": "0b4f9bd00ad5b9a198e4f3a6523503aaacbf8b5630aaa5d029577ee08abbc160",
@@ -341,6 +341,18 @@
     "docs/product/RAPID_DESKTOP_EXECUTION_V0.1.md": {
       "sha256": "54f14733a05587fb2019671c2e562bb1cd930091584bb70bbe2e490aeb536ee0",
       "bytes": 5318
+    },
+    "LICENSE": {
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    "NOTICE": {
+      "sha256": "1ba032cd968f08451f121df1a051c210e97374c115c58aaec0e85e94780933cd",
+      "bytes": 207
+    },
+    "docs/engineering/APACHE_2_0_ADOPTION.md": {
+      "sha256": "710584efd600abfe78b7bb16cd4d617a1580516d97f0a619e98d71dc71377d92",
+      "bytes": 1653
     }
   }
 }

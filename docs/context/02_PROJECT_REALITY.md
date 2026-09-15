@@ -1548,3 +1548,7 @@ FRESH_VERIFICATION_REVISION: ENFORCED
 BACKGROUND_SCHEDULER: NOT_IMPLEMENTED
 AEGIS_DXE_IDR_AG_UI: DEFERRED
 ```
+
+## Apache-2.0 正式开源（2026-09-15）
+
+用户明确选择 Apache-2.0，用于 IDR 与 Fielora。Fielora 新增根目录 LICENSE、NOTICE，Cargo 与 npm 包元数据统一为 Apache-2.0，README 指向完整协议。项目自有源码与文档按此声明开放；第三方材料保留原许可证。private/publish 标记保留，不发布 npm/crates 包，不修改运行时或既有验收结论。此次授权不追溯重写历史 Evidence。详情见 [开源决定](../engineering/APACHE_2_0_ADOPTION.md)。
