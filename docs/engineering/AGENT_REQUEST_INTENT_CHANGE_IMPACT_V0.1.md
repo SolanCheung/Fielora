@@ -1,0 +1,11 @@
+# Current-request interpretation and completion — 2026-09-18
+
+Flow: a user asks why an earlier report review ignored crossed-out columns. The current build delivered the image on all three calls but substring `删除` made an explanatory response require a workspace action. Run `01a0b3a3-4efc-7cb1-b914-95b911af3572` recorded three `AGENT_ACTION_REQUIRED` evaluations and paused. The model also independently contradicted the user's explanation of the red marks; receiving an image is not understanding it.
+
+Change: add an optional provider-neutral Observe tool to record the existing model's interpretation of the current request (answer, action, workspace change), citing current user wording. Persist it in the existing ToolCall ledger, bound by the Harness to the current Run and request digest. Use this interpretation instead of lexical hints when available. Lexical hints remain a conservative fallback, with an explicit route to correct a mismatch; they are not proof of intent. No second classifier, model call pipeline, permission store, schema, or FIPC changes.
+
+Boundary: the model interpretation is not permission, proof of completion or verification. It cannot clear actual side effects, unknown outcomes, failed actions, browser acceptance or reference obligations. Restore only from the current Run's successful native tool receipts. Actual action attempts retain their evidence obligations even if the model later calls them an answer. Existing access-confirmation limits, approvals, cancellation and revision-bound verification remain unchanged. Completion never closes an older Run.
+
+Context: current user corrections take precedence over earlier assistant interpretations. Separate visible UI state, human annotations and requested changes; never infer deletion/retention solely from a checkbox. This is model guidance, not a deterministic vision guarantee.
+
+Validation: exact Chinese question and paraphrases, interpretation source validation, foreign/stale receipts, restart restoration, mixed explanation+repair, failed/pending/unknown action and unverified writes, fresh verification and prior Run isolation. Exercise development and packaged Electron with deterministic providers; report real-model understanding separately. Rollback by reverting this tool and its completion integration; existing receipts remain readable as historical metadata.

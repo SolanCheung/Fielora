@@ -1,4 +1,6 @@
 mod agent_browser;
+mod agent_image_history;
+mod agent_request_intent;
 mod agent_request_scope;
 mod agent_runtime;
 mod agent_turn_context;

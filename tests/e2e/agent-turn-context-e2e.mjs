@@ -12,18 +12,37 @@ const evidence = path.resolve(process.env.FIELORA_E2E_EVIDENCE_DIR ?? path.join(
 const output = []; let child; let cdp; let ids;
 const wait = expression => waitForExpression(cdp, expression, { timeoutMs: 60000, output });
 const base = Array.from({ length: 18 }, (_, i) => `// setting evidence ${i + 1} ${'context '.repeat(260)}`).join('\n') + "\nexports.value = 'wrong';\n";
+async function launch() {
+  const launched = await launchElectron({ root: path.join(root, 'apps/desktop'), dataRoot, output,
+    executablePath: process.env.FIELORA_PACKAGED_EXE ?? process.execPath,
+    args: process.env.FIELORA_PACKAGED_EXE ? [] : [path.join(root, 'node_modules/@electron-forge/cli/dist/electron-forge.js'), 'start'],
+    extraEnv: { Path: `${path.dirname(process.execPath)};${process.env.Path ?? ''}` },
+  });
+  child=launched.child;
+  cdp=await connectToFieloraApp({port:launched.port,output,timeoutMs:120000,enablePage:true});
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1478,height:800,deviceScaleFactor:1,mobile:false});
+  await wait("window.fieloraTest && window.fielora.core.getHealth().then(h=>h.state==='READY')");
+}
+async function restartApp() {
+  await cdp.eval('setTimeout(()=>window.fielora.core.quit(),0);true');
+  await Promise.race([new Promise(resolve=>child.exitCode!==null?resolve():child.once('exit',resolve)),new Promise((_,reject)=>setTimeout(()=>reject(Error('test app did not exit normally')),15000))]);
+  cdp.close();cdp=null;await cleanupElectronProcess(child);child=null;
+  await launch();
+}
 async function create(title) {
   return cdp.eval(`window.fielora.conversation.create({field_id:${JSON.stringify(ids.project.field_id)},title:${JSON.stringify(title)},provider_config_id:${JSON.stringify(ids.provider.id)},model_id:${JSON.stringify(ids.provider.default_model)}})`);
 }
-async function start(conversation, task, attachments = []) {
-  return cdp.eval(`(async()=>{const message=await window.fielora.conversation.createMessage({conversation_id:${JSON.stringify(conversation.id)},role:'USER',content:${JSON.stringify(task)},status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[]});return window.fielora.agent.start({field_id:${JSON.stringify(ids.project.field_id)},conversation_id:message.conversation_id,user_message_id:message.id,provider_config_id:${JSON.stringify(ids.provider.id)},model_id:${JSON.stringify(ids.provider.default_model)},task:${JSON.stringify(task)},permission:'FULL_CONTROL',max_steps:null,attachments:${JSON.stringify(attachments)}})})()`);
+async function start(conversation, task, attachments = [], maxSteps = null) {
+  return cdp.eval(`(async()=>{const message=await window.fielora.conversation.createMessage({conversation_id:${JSON.stringify(conversation.id)},role:'USER',content:${JSON.stringify(task)},status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[]});return window.fielora.agent.start({field_id:${JSON.stringify(ids.project.field_id)},conversation_id:message.conversation_id,user_message_id:message.id,provider_config_id:${JSON.stringify(ids.provider.id)},model_id:${JSON.stringify(ids.provider.default_model)},task:${JSON.stringify(task)},permission:'FULL_CONTROL',max_steps:${JSON.stringify(maxSteps)},attachments:${JSON.stringify(attachments)}})})()`);
 }
 async function settled(run) {
   await wait(`window.fielora.agent.get({run_id:${JSON.stringify(run.id)}}).then(r=>['COMPLETED','FAILED','PAUSED'].includes(r.status))`);
   return cdp.eval(`(async()=>{const id=${JSON.stringify(run.id)};return {run:await window.fielora.agent.get({run_id:id}),events:await window.fielora.agent.events({run_id:id,after_sequence:null,limit:500}),tools:await window.fielora.agent.toolCalls({run_id:id})}})()`);
 }
 async function show(conversation) {
+  await cdp.eval('window.__intentReload=true');
   await cdp.send('Page.reload');
+  await wait("typeof window.__intentReload==='undefined' && window.fieloraTest && window.fielora.core.getHealth().then(h=>h.state==='READY')");
   await wait(`document.querySelector('[data-testid="conversation-${conversation.id}"]')`);
   await cdp.eval(`document.querySelector('[data-testid="conversation-${conversation.id}"]').click()`);
 }
@@ -33,15 +52,7 @@ try {
   await writeFile(path.join(projectRoot, 'verify.cjs'), "require('node:assert/strict').equal(require('./settings.js').value, 'right');\n");
   await writeFile(path.join(projectRoot, 'evidence.txt'), 'Original screenshot evidence.\n');
   assert.equal(spawnSync('git.exe', ['init'], { cwd: projectRoot, windowsHide: true }).status, 0);
-  const launched = await launchElectron({ root: path.join(root, 'apps/desktop'), dataRoot, output,
-    executablePath: process.env.FIELORA_PACKAGED_EXE ?? process.execPath,
-    args: process.env.FIELORA_PACKAGED_EXE ? [] : [path.join(root, 'node_modules/@electron-forge/cli/dist/electron-forge.js'), 'start'],
-    extraEnv: { Path: `${path.dirname(process.execPath)};${process.env.Path ?? ''}` },
-  });
-  child = launched.child;
-  cdp = await connectToFieloraApp({ port: launched.port, output, timeoutMs: 120000, enablePage: true });
-  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1478, height: 800, deviceScaleFactor: 1, mobile: false });
-  await wait("window.fieloraTest && window.fielora.core.getHealth().then(h=>h.state==='READY')");
+  await launch();
   ids = await cdp.eval(`(async()=>{const provider=await window.fielora.provider.create({provider_kind:'OPENAI_COMPATIBLE',display_name:'Turn context fixture',base_url:'https://dashscope.aliyuncs.com/compatible-mode/v1',default_model:'__fielora_agent_fixture_turn_context__',custom_endpoint_acknowledged:true});await window.fielora.provider.storeCredential({provider_config_id:provider.id,secret:'fixture-only'});const project=await window.fieloraTest.createProject({title:'目标驱动回归',goal:null,root_path:${JSON.stringify(projectRoot)}});return {provider,project}})()`);
 
   const conversation = await create('失败后追问原因');
@@ -55,9 +66,7 @@ try {
   const stopped=await cdp.eval(`window.fielora.agent.get({run_id:${JSON.stringify(failed.run.id)}})`);
   assert.equal(stopped.status,'CANCELLED');
   const before = await readFile(path.join(projectRoot,'settings.js'),'utf8');
-  const pid = await cdp.eval('window.fielora.core.getHealth().then(h=>h.pid)');
-  await cdp.eval('window.fieloraTest.killCore()');
-  await wait(`window.fielora.core.getHealth().then(h=>h.state==='READY'&&h.pid!==${pid})`);
+  await restartApp();
   const explanation = await settled(await start(conversation,'为什么这次没有改成功'));
   await writeFile(path.join(evidence,'explanation.json'),JSON.stringify(explanation,null,2));
   assert.equal(explanation.run.status,'COMPLETED');
@@ -87,6 +96,60 @@ try {
   await show(conversation);
   await wait("document.body.innerText.includes('待替换文本没有匹配')");
   await captureScreenshot(cdp,path.join(evidence,'cause-answer.png'));
+  // Exact production regression: the first plain answer hits the legacy hint,
+  // then the same provider loop supplies a current-request interpretation.
+  // Pause after that receipt and restart Core to prove it is durably scoped.
+  const attachments=await cdp.eval(`(()=>{const c=document.createElement('canvas');c.width=400;c.height=180;const x=c.getContext('2d');x.fillStyle='white';x.fillRect(0,0,400,180);x.fillStyle='black';x.fillText('KPI columns',10,40);x.strokeStyle='red';x.beginPath();x.moveTo(10,40);x.lineTo(200,40);x.stroke();const data_url=c.toDataURL('image/png');return [{id:'marked-report',filename:'report.png',mime_type:'image/png',size:atob(data_url.split(',')[1]).length,width:400,height:180,source:'clipboard',data_url}];})()`);
+  await cdp.eval(`window.fielora.conversation.createMessage({conversation_id:${JSON.stringify(conversation.id)},role:'ASSISTANT',content:'旧的错误解读：红线表示勾选后应保留。',status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[]})`);
+  const exact='对啊 为什么你之前做的检查不是被红色划线标记（应隐藏/删除）这部分';
+  const checkpointed=await settled(await start(conversation,exact,attachments,2));
+  assert.equal(checkpointed.run.status,'PAUSED');
+  assert.equal(checkpointed.run.error_code,'AGENT_BUDGET_EXHAUSTED');
+  assert.equal(checkpointed.tools.length,1);
+  assert.equal(checkpointed.tools[0].name,'record_request_intent');
+  assert.equal(checkpointed.tools[0].receipt.intent,'answer_only');
+  await restartApp();
+  await cdp.eval(`window.fielora.agent.resume({run_id:${JSON.stringify(checkpointed.run.id)}})`);
+  const answered=await settled(checkpointed.run);
+  assert.equal(answered.run.status,'COMPLETED');
+  assert.equal(answered.tools.length,1,'resume must not record/replay the tool twice');
+  const evals=answered.events.filter(e=>e.payload.kind==='TURN_COMPLETION_EVALUATED');
+  assert.equal(evals[0].payload.reason,'AGENT_ACTION_REQUIRED');
+  assert.equal(evals.at(-1).payload.action_request_hint,true);
+  assert.equal(evals.at(-1).payload.request_interpretation,'answer_only');
+  assert.equal(evals.at(-1).payload.reason,null);
+  assert.equal(evals.at(-1).payload.requires_workspace_change,false);
+  assert.ok(answered.events.filter(e=>e.kind==='MODEL_COMPLETED').every(e=>e.payload.prompt.image_count===1));
+  assert.equal(answered.events.find(e=>e.kind==='RUN_COMPLETED').payload.completion_basis,'ANSWER');
+  assert.equal(await readFile(path.join(projectRoot,'settings.js'),'utf8'),before);
+  await writeFile(path.join(evidence,'intent-exact-restart.json'),JSON.stringify(answered,null,2));
+  for(const task of ['为什么之前删除了它？','你说修改好了，依据是什么？','Explain why the previous delete failed']) {
+    const result=await settled(await start(conversation,task));
+    assert.equal(result.run.status,'COMPLETED');
+    assert.equal(result.tools.length,1);
+    assert.equal(result.tools[0].receipt.intent,'answer_only');
+    assert.equal(result.events.find(e=>e.kind==='RUN_COMPLETED').payload.verification_passed,false);
+    assert.ok(result.events.filter(e=>e.kind==='MODEL_COMPLETED').every(e=>e.payload.prompt.image_count===1));
+  }
+  const mixed=await settled(await start(conversation,'解释原因并删除错误配置'));
+  assert.equal(mixed.run.status,'PAUSED');
+  assert.equal(mixed.run.error_code,'AGENT_ACTION_REQUIRED');
+  assert.equal(mixed.tools[0].receipt.intent,'workspace_change');
+  assert.ok(!mixed.events.some(e=>e.kind==='RUN_COMPLETED'));
+  await cdp.eval(`window.fielora.agent.cancel({run_id:${JSON.stringify(mixed.run.id)}})`);
+  const unverified=await settled(await start(conversation,'FIELORA_INTENT_UNVERIFIED 修改后只解释'));
+  assert.equal(unverified.run.status,'PAUSED');
+  assert.equal(unverified.run.error_code,'AGENT_VERIFICATION_REQUIRED');
+  assert.ok(unverified.tools.some(t=>t.name==='replace_text'&&t.status==='COMPLETED'));
+  assert.ok(unverified.tools.some(t=>t.name==='record_request_intent'&&t.receipt.intent==='answer_only'));
+  assert.ok(!unverified.events.some(e=>e.kind==='RUN_COMPLETED'));
+  await writeFile(path.join(evidence,'intent-obligation-guards.json'),JSON.stringify({mixed,unverified},null,2));
+  await cdp.eval(`window.fielora.agent.cancel({run_id:${JSON.stringify(unverified.run.id)}})`);
+  await writeFile(path.join(projectRoot,'settings.js'),before);
+  await show(conversation);
+  await wait("document.body.innerText.includes('此前检查目标偏离了该要求')");
+  await captureScreenshot(cdp,path.join(evidence,'intent-answer.png'));
+
   // Reproduce the actual follow-up after a historical implementation. The
   // provider deliberately proposes three forbidden effects before the read,
   // and another write after it. Neither FULL_CONTROL nor history grants them.
@@ -122,7 +185,7 @@ try {
   assert.ok(repair.tools.some(t=>t.name==='replace_text'&&t.status==='COMPLETED'));
   assert.ok(repair.tools.some(t=>t.name==='run_command'&&t.receipt.success===true));
   assert.ok((await readFile(path.join(projectRoot,'settings.js'),'utf8')).includes("value = 'right'"));
-  await writeFile(path.join(evidence,'summary.json'),JSON.stringify({status:'PASS',model:'deterministic fixture; no real provider',failed:failed.run.id,explanation:explanation.run.id,access:access.run.id,accessWrites:0,deniedEffects:3,accessModelCalls:1,repair:repair.run.id,explanationTools:explanation.tools.length,explanationWrites:0,coreRestart:true},null,2));
+  await writeFile(path.join(evidence,'summary.json'),JSON.stringify({status:'PASS',model:'deterministic fixture; no real provider',failed:failed.run.id,explanation:explanation.run.id,access:access.run.id,accessWrites:0,deniedEffects:3,accessModelCalls:1,repair:repair.run.id,explanationTools:explanation.tools.length,explanationWrites:0,coreRestart:true,requestIntent:{exact:answered.run.id,restored:true,paraphrases:3,mixedGuard:mixed.run.id,unverifiedWriteGuard:unverified.run.id,visualSemantics:'NOT_TESTED; fixture asserts prompt inputs, not model understanding'}},null,2));
   console.log('AGENT_TURN_CONTEXT_E2E=PASS');
 
 } finally {

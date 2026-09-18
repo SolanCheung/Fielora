@@ -69,6 +69,9 @@ pub fn turn(
             _ => None,
         })
         .unwrap_or(Value::Null);
+    if let Some(turn) = request_intent_turn(task, request, step, context, &previous)? {
+        return Ok(turn);
+    }
     let mut text = "正在检查当前请求的执行证据。".to_owned();
     let tool = if task == "为什么这次没有改成功" {
         if step == 1 {
@@ -126,4 +129,90 @@ pub fn turn(
             output_tokens: Some(30),
         }),
     })
+}
+
+// Semantic choices here are deterministic test inputs, NOT a vision/intent model.
+fn request_intent_turn(
+    task: &str,
+    request: &AgentModelRequest,
+    step: u32,
+    context: &str,
+    previous: &Value,
+) -> Result<Option<AgentModelTurn>, ModelError> {
+    let question = task.starts_with("对啊 为什么")
+        || task.starts_with("为什么之前删除")
+        || task.starts_with("Explain why")
+        || task.starts_with("你说修改好了");
+    let mixed = task == "解释原因并删除错误配置";
+    let unverified = task == "FIELORA_INTENT_UNVERIFIED 修改后只解释";
+    if !question && !mixed && !unverified {
+        return Ok(None);
+    }
+    if !request
+        .tools
+        .iter()
+        .any(|t| t.name == crate::agent_request_intent::TOOL)
+        || !context.contains(crate::agent_request_intent::GUIDANCE)
+        || !context.contains(
+            "Current explicit user corrections override earlier assistant interpretations",
+        )
+    {
+        return Err(ModelError::ProviderProtocolError);
+    }
+    if question && step >= 3 {
+        let data: Value = serde_json::from_str(
+            context
+                .strip_prefix(crate::agent_turn_context::MARKER)
+                .unwrap()
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .map_err(|_| ModelError::ProviderProtocolError)?;
+        if data["current_request_interpretation"] != "answer_only"
+            || data["interpretation_is_permission_or_verification"] != false
+        {
+            return Err(ModelError::ProviderProtocolError);
+        }
+    }
+    let mut text = "本轮是在追问检查为何偏离要求；用户已说明红线表示移除或隐藏，不能按复选框把它改解为保留。此前检查目标偏离了该要求。此回答不代表报表已经修复。".to_owned();
+    let tool = if unverified {
+        match step {
+            1 => Some(("read_file", json!({"path":"settings.js"}))),
+            2 => Some((
+                "replace_text",
+                json!({"path":"settings.js","expected_sha256":previous["receipt"]["sha256"],"old_text":"wrong","new_text":"right"}),
+            )),
+            3 => Some((
+                crate::agent_request_intent::TOOL,
+                json!({"intent":"answer_only","request_quote":task}),
+            )),
+            _ => None,
+        }
+    } else if step == 2 {
+        Some((
+            crate::agent_request_intent::TOOL,
+            json!({"intent":if mixed {"workspace_change"}else{"answer_only"},"request_quote":task}),
+        ))
+    } else {
+        None
+    };
+    if mixed || unverified {
+        text = "处理完成。".into();
+    }
+    Ok(Some(AgentModelTurn {
+        text,
+        tool_calls: tool
+            .into_iter()
+            .map(|(name, arguments)| AgentModelToolCall {
+                id: format!("intent-{step}"),
+                name: name.into(),
+                arguments,
+            })
+            .collect(),
+        usage: Some(ModelUsage {
+            input_tokens: Some(100),
+            output_tokens: Some(30),
+        }),
+    }))
 }

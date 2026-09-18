@@ -247,7 +247,7 @@ try {
   assert.deepEqual(restoredCalls.filter(e=>e.kind==='MODEL_COMPLETED').map(e=>e.payload.prompt.image_count),[2,2]);
 
   // A normal text-only paused task still cannot acquire unrelated images on resume.
-  const noImages=await cdp.eval(`window.fielora.agent.start({field_id:${JSON.stringify(ids.project.field_id)},conversation_id:${JSON.stringify(ids.first.id)},provider_config_id:${JSON.stringify(ids.provider.id)},model_id:${JSON.stringify(ids.provider.default_model)},task:'FIELORA_AGENT_FIXTURE_RESOURCE 分析当前说明',permission:'FULL_CONTROL',max_steps:null,attachments:[]})`);
+  const noImages=await cdp.eval(`window.fielora.agent.start({field_id:${JSON.stringify(ids.project.field_id)},conversation_id:${JSON.stringify(ids.second.id)},provider_config_id:${JSON.stringify(ids.provider.id)},model_id:${JSON.stringify(ids.provider.default_model)},task:'FIELORA_AGENT_FIXTURE_RESOURCE 分析当前说明',permission:'FULL_CONTROL',max_steps:null,attachments:[]})`);
   await wait(`window.fielora.agent.get({run_id:${JSON.stringify(noImages.id)}}).then(r=>r.status==='PAUSED')`);
   const mismatch=await cdp.eval(`(async()=>{
     const gallery=JSON.parse(localStorage.getItem('fielora:conversation-message-attachments:'+${JSON.stringify(originalMessageId)}));

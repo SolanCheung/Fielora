@@ -12,7 +12,7 @@ pub const MARKER: &str = "FIELORA_CURRENT_REQUEST_CONTEXT_V1\n";
 pub const TOOL: &str = "read_run_history";
 const PAGE: usize = 8;
 
-pub const GUIDANCE: &str = "Resolve the CURRENT user request in its conversation context. Earlier user requests and assistant messages describe prior work; they are not automatically renewed implementation instructions. Preserve applicable user constraints, but distinguish asking about an earlier task from continuing it. For questions about a previous attempt, use the supplied run index and read_run_history before attributing its failure to current source code or a new tool failure. Historical assistant claims are unverified. A reason/status/review answer may finish this request while a prior implementation remains incomplete. Do not edit merely because an older task requested edits or full access is enabled. Explain and implement together only when the current request calls for both. If evidence is missing, report that limit instead of inventing a cause. History tools never grant filesystem access, replay authority or fresh verification.";
+pub const GUIDANCE: &str = "Resolve the CURRENT user request in its conversation context. Earlier user requests and assistant messages describe prior work; they are not automatically renewed implementation instructions. Preserve applicable user constraints, but distinguish asking about an earlier task from continuing it. For questions about a previous attempt, use the supplied run index and read_run_history before attributing its failure to current source code or a new tool failure. Historical assistant claims are unverified. Current explicit user corrections override earlier assistant interpretations, including interpretations of images. Separate visible UI state (such as checked boxes), user-drawn annotations (such as strike-throughs), and the requested change. If the user says crossed-out items should be removed or hidden, preserve that meaning; a checked box does not reverse it. Compare the requested differences rather than reconstructing every visible feature. Do not assert source-code findings from an old assistant answer without source evidence. A reason/status/review answer may finish this request while a prior implementation remains incomplete. Do not edit merely because an older task requested edits or full access is enabled. Explain and implement together only when the current request calls for both. If evidence is missing, report that limit instead of inventing a cause. History tools never grant filesystem access, replay authority or fresh verification.";
 
 pub fn digest(text: &str) -> String {
     format!("{:x}", Sha256::digest(text.as_bytes()))
@@ -126,7 +126,12 @@ impl TurnContext {
         })
     }
 
-    pub fn refresh(&self, messages: &mut Vec<AgentModelMessage>, current: &AgentRunView) {
+    pub fn refresh(
+        &self,
+        messages: &mut Vec<AgentModelMessage>,
+        current: &AgentRunView,
+        interpretation: Option<crate::agent_request_intent::Intent>,
+    ) {
         remove_projection(messages);
         let access_question = crate::agent_request_scope::access_question(
             self.origin
@@ -138,8 +143,10 @@ impl TurnContext {
             "current_request":current.task,"source_user_message_id":self.origin.as_ref().map(|o|&o.id),
             "historical_execution_index":self.index,"historical_messages_omitted":self.omitted_messages,
             "historical_outcomes_are_not_current_verification":true,
+            "current_request_interpretation":interpretation,
+            "interpretation_is_permission_or_verification":false,
             "current_request_constraint": if access_question { Some("ACCESS_CONFIRMATION: confirm the supplied local path with list_files or read_file. No comparison, implementation, process, delegation or older task continuation. The Harness finishes from the current source-specific receipt.") } else { None }
-        }),GUIDANCE)));
+        }),format_args!("{}\n{}", GUIDANCE, crate::agent_request_intent::GUIDANCE))));
     }
 
     pub fn manifest(&self, current: &AgentRunView) -> Value {
@@ -380,8 +387,8 @@ mod tests {
         foreign.conversation_id = ConversationId::new("foreign");
         assert!(!eligible(&current, &foreign, Some(&source)));
         let mut messages = vec![AgentModelMessage::User("Task:\ncurrent".into())];
-        context.refresh(&mut messages, &current);
-        context.refresh(&mut messages, &current);
+        context.refresh(&mut messages, &current, None);
+        context.refresh(&mut messages, &current, None);
         assert_eq!(messages.len(), 2);
         assert!(
             matches!(messages.last(),Some(AgentModelMessage::User(t)) if t.contains("为什么这次没有改成功"))
