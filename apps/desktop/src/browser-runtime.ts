@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { browserAgentDom } from './browser-agent-dom';
+import { dispatchBrowserClick } from './browser-agent-input';
 import { BrowserWindow, Menu, WebContentsView, clipboard, nativeImage, session } from 'electron';
 import type { ContextMenuParams, MenuItemConstructorOptions, Session, WebContents } from 'electron';
 import {
@@ -14,10 +16,13 @@ import { assertCaptureIdentityCurrent, assertScreenshotBounds, waitForBoundedCap
 import type { BrowserPage, BrowserPageState, BrowserViewBounds, BrowserViewportCapture } from './browser-types';
 
 interface RuntimePage {
+  agentViewport?: { width: number; height: number };
+  appliedEmulation?: { key: string; scale: number };
   state: BrowserPage;
   view?: WebContentsView;
   committedUrl: string;
   navigationGeneration: number;
+  mainFrameError?: string;
   pendingNavigation?: {
     target: string;
     initiator: BrowserNavigationInitiator;
@@ -39,6 +44,192 @@ const ALLOWED_FAVICON_TYPES = new Set([
 ]);
 
 export class BrowserRuntime {
+  private readonly agentPages = new Map<string, { pageId?: string; viewport?: { width: number; height: number } }>();
+  private readonly agentSnapshots = new Map<string, { id: string; generation: number; url: string }>();
+
+  async executeAgent(runId: string, args: Parameters<typeof browserAgentDom>[0] & { url?: string; width?: number; height?: number }, signal: AbortSignal): Promise<Record<string, unknown>> {
+    const execution = { inputState: 'NOT_DISPATCHED' };
+    try { return await this.executeAgentOperation(runId, args, signal, execution); }
+    catch (error) {
+      const code = error instanceof Error && /^BROWSER_[A-Z_]+$/.test(error.message) ? error.message : 'BROWSER_OPERATION_FAILED';
+      const unknown = execution.inputState === 'DISPATCHING';
+      return { success: false, error_code: code, input_state: execution.inputState, outcome_unknown: unknown,
+        observation_required: execution.inputState === 'DISPATCHED',
+        guidance: execution.inputState === 'NOT_DISPATCHED'
+          ? 'No requested input was dispatched. Inspect the page for fresh refs and current navigation before acting.'
+          : 'Do not repeat the input. Inspect the current page to determine its result; input delivery is not task verification.' };
+    }
+  }
+
+  private async executeAgentOperation(runId: string, args: Parameters<typeof browserAgentDom>[0] & { url?: string; width?: number; height?: number }, signal: AbortSignal, execution: { inputState: string }): Promise<Record<string, unknown>> {
+    const live = () => { if (signal.aborted) throw new Error('BROWSER_CANCELLED'); };
+    live();
+    const binding = this.agentPages.get(runId) ?? {};
+    let page = this.pages.get(binding.pageId ?? '');
+    if (args.action === 'resize') {
+      if (!Number.isInteger(args.width) || !Number.isInteger(args.height) || args.width! < 640 || args.width! > 2560 || args.height! < 480 || args.height! > 1600) throw new Error('BROWSER_INVALID_VIEWPORT');
+      // A viewport preference does not create a page or disturb another run's
+      // visible document. Open creates the run's page through the normal path.
+      binding.viewport = { width: args.width!, height: args.height! };
+      this.agentPages.set(runId, binding);
+      if (page) page.agentViewport = binding.viewport;
+      this.agentSnapshots.delete(runId);
+      if (!page?.view || page.view.webContents.isDestroyed() || this.activePageId !== page.state.id || !this.requestedVisible) {
+        return { success: true, ...(page ? { page_id: page.state.id } : {}), page_loaded: false, viewport_requested: binding.viewport,
+          pending_next_open: true, observation_state: 'CONFIGURED_ONLY', verification_eligible: false,
+          guidance: 'Viewport configured for this run. Open the observed project URL next; no document has been observed or verified by this configuration.' };
+      }
+    }
+    if (args.action === 'open') {
+      const url = new URL(args.url!);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('BROWSER_URL_REJECTED');
+      if (!page) { page = this.addPage(); binding.pageId = page.state.id; this.agentPages.set(runId, binding); }
+      page.agentViewport = binding.viewport;
+      this.activePageId = page.state.id;
+      this.agentSnapshots.delete(runId);
+      this.layout('agent-open');
+      // Attach the native page after the dock has reached its actual position.
+      // Attaching at zero width during the opening transform can leave Chromium
+      // without a composited surface even though DOM queries already work.
+      const opening = Date.now();
+      let previousBounds = '';
+      let stableSince = Date.now();
+      while (Date.now() - opening < 2000) {
+        live();
+        const bounds = this.requestedBounds ? fitBrowserBounds(this.requestedBounds, this.host.contentView.getBounds()) : null;
+        const key = JSON.stringify(bounds);
+        if (key !== previousBounds) { previousBounds = key; stableSince = Date.now(); }
+        if (this.requestedVisible && bounds && bounds.width > 0 && bounds.height > 0 && Date.now() - stableSince >= 160) break;
+        await new Promise(resolve => setTimeout(resolve, 40));
+      }
+      await this.loadTarget(page, url.href, 'USER');
+      this.layout('agent-open');
+      page.view?.webContents.focus();
+    }
+    if (!page?.view || page.view.webContents.isDestroyed() || this.activePageId !== page.state.id) throw new Error('BROWSER_PAGE_NOT_ACTIVE');
+    const current = page;
+    const contents = page.view.webContents;
+    if (args.action === 'reload') { this.agentSnapshots.delete(runId); this.reloadPage(page); }
+    const started = Date.now();
+    while (current.state.is_loading || !this.requestedVisible || this.visiblePageId !== current.state.id) {
+      live();
+      if (Date.now() - started > 12_000 || !this.isLivePage(current) || this.activePageId !== current.state.id) throw new Error('BROWSER_PAGE_NOT_READY');
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
+    // loadURL may resolve before did-stop-loading. Apply a preconfigured
+    // viewport only now, when Chromium has a committed live RenderWidget.
+    if (['open', 'reload', 'resize'].includes(args.action)) {
+      this.layout('agent-ready-viewport');
+      contents.focus();
+    }
+    live();
+    let generation = current.navigationGeneration;
+    let url = contents.getURL();
+    if (current.mainFrameError || !current.committedUrl || generation === 0) {
+      this.agentSnapshots.delete(runId);
+      return { success: false, error_code: 'BROWSER_NAVIGATION_FAILED', network_error: current.mainFrameError ?? 'NAVIGATION_UNCOMMITTED',
+        requested_url: args.url ?? current.state.url, committed_url: current.committedUrl || null,
+        url: current.state.url, page_id: current.state.id, navigation_generation: generation,
+        page_loaded: false, content_state: 'UNAVAILABLE',
+        guidance: 'No successful target document was loaded. Check server output and the configured host/port/protocol, then retry the correct address. This is not evidence of a login requirement. Do not substitute source reads for the missing page check.' };
+    }
+    if (!/^https?:\/\//.test(url)) throw new Error('BROWSER_URL_REJECTED');
+    const assertCurrent = () => {
+      live();
+      if (!this.isLivePage(current) || contents.isDestroyed() || this.activePageId !== current.state.id || current.navigationGeneration !== generation || contents.getURL() !== url) throw new Error('BROWSER_STALE_PAGE');
+    };
+    if (!['open', 'inspect', 'reload', 'screenshot', 'resize'].includes(args.action)) {
+      const snapshot = this.agentSnapshots.get(runId);
+      if (!snapshot || snapshot.id !== args.snapshot_id || snapshot.generation !== generation || snapshot.url !== url) throw new Error('BROWSER_STALE_SNAPSHOT');
+    }
+    const inspect = async (action: string) => {
+      assertCurrent();
+      const input = { ...args, action, next_snapshot_id: randomUUID() };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (['fill', 'select'].includes(action)) {
+        this.agentSnapshots.delete(runId);
+        execution.inputState = 'DISPATCHING';
+      }
+      const result = await Promise.race([
+        contents.executeJavaScriptInIsolatedWorld(1004, [{ code: `(${browserAgentDom.toString()})(${JSON.stringify(input)})` }], false),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('BROWSER_OPERATION_UNKNOWN')), 5000); }),
+      ]).finally(() => clearTimeout(timer)) as Record<string, unknown>;
+      if (typeof result.input_state === 'string') execution.inputState = result.input_state;
+      assertCurrent();
+      if (typeof result.snapshot_id === 'string') this.agentSnapshots.set(runId, { id: result.snapshot_id, generation, url });
+      return result;
+    };
+    const readOnly = ['open', 'inspect', 'reload', 'screenshot', 'resize'].includes(args.action);
+    let result: Record<string, unknown>;
+    if (readOnly) {
+      // A document's load event precedes many SPA routes/forms. Observe the
+      // rendered state for a bounded settling interval, without replaying any
+      // click/fill/verify. A route change invalidates the previous sample.
+      const observing = Date.now();
+      let previous = ''; let stableSince = observing;
+      for (;;) {
+        live();
+        generation = current.navigationGeneration; url = contents.getURL();
+        if (current.mainFrameError || !/^https?:\/\//.test(url)) throw new Error('BROWSER_PAGE_NOT_READY');
+        try { result = await inspect('inspect'); }
+        catch (error) {
+          if (!(error instanceof Error) || error.message !== 'BROWSER_STALE_PAGE' || Date.now() - observing >= 4000) throw error;
+          previous = ''; stableSince = Date.now();
+          await new Promise(resolve => setTimeout(resolve, 100)); continue;
+        }
+        const state = JSON.stringify([url, generation, result.content_state, result.has_password_input, result.text, result.elements]);
+        if (state !== previous) { previous = state; stableSince = Date.now(); }
+        const settled = result.content_state === 'PRESENT' && !current.state.is_loading
+          && Date.now() - stableSince >= 300 && Date.now() - observing >= 800;
+        if (settled || Date.now() - observing >= 4000) {
+          result.observation_state = settled ? 'SETTLED' : 'BOUNDED_WAIT_EXPIRED'; break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    } else result = await inspect(args.action);
+    const scrolledDuringPreflight = result.scroll_performed === true;
+    if (args.action === 'click' && result.success !== false) {
+      // PNG capture is observation, not an input capability. Chromium can accept
+      // targeted input while its display surface is unavailable for screenshots.
+      // Recheck the current document and native hit point before acknowledged
+      // input; subsequent observation/verification establishes the actual result.
+      assertCurrent();
+      result = await inspect('click');
+    }
+    if (args.action === 'click' && result.success !== false) {
+      const point = result.click as { x: number; y: number };
+      assertCurrent();
+      this.agentSnapshots.delete(runId);
+      if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) throw new Error('BROWSER_INVALID_POINT');
+      // Electron desktop emulation scales the native input surface. DOM refs
+      // remain in the requested CSS viewport; CDP input addresses that surface.
+      const scale = current.appliedEmulation?.scale ?? 1;
+      const nativePoint = { x: point.x * scale, y: point.y * scale };
+      // Fixed Chromium input commands target this WebContentsView directly and
+      // acknowledge each event. Never expose the debugger or arbitrary CDP to a
+      // model/page, and never detach a debugger owned by another caller.
+      const attachedHere = !contents.debugger.isAttached();
+      if (attachedHere) contents.debugger.attach('1.3');
+      try {
+        const dispatched = await dispatchBrowserClick(execution,
+          async type => {
+            assertCurrent();
+            await contents.debugger.sendCommand('Input.dispatchMouseEvent', {
+              type: { mouseMove: 'mouseMoved', mouseDown: 'mousePressed', mouseUp: 'mouseReleased' }[type],
+              button: type === 'mouseMove' ? 'none' : 'left', clickCount: type === 'mouseMove' ? 0 : 1, ...nativePoint,
+            });
+          },
+          async () => {
+            await new Promise(resolve => setTimeout(resolve, 80));
+            return this.executeAgent(runId, { action: 'inspect', next_snapshot_id: '' }, signal);
+          });
+        return { ...dispatched, click_point: point, native_input_point: nativePoint, scroll_performed: scrolledDuringPreflight || result.scroll_performed === true };
+      } finally {
+        if (attachedHere && !contents.isDestroyed() && contents.debugger.isAttached()) contents.debugger.detach();
+      }
+    }
+    return { ...result, page_loaded: true, page_id: current.state.id, navigation_generation: generation, url, title: current.state.title };
+  }
   private readonly pages = new Map<string, RuntimePage>();
   private pageOrder: string[] = [];
   private activePageId = '';
@@ -207,6 +398,22 @@ export class BrowserRuntime {
     return {page_id:capturedPageId,navigation_generation:capturedGeneration,url:page.state.url,title:page.state.title,page_text:result.page_text,selection_text:result.selection_text,is_partial:result.is_partial};
   }
 
+  private captureNativeFrame(contents: WebContentsView['webContents'], options: BrowserCaptureGuardOptions) {
+      const nativeCapture = async () => {
+        for (let attempt = 0; ; attempt++) {
+          if (options.signal?.aborted || contents.isDestroyed()) throw new Error('Screenshot capture cancelled');
+          try { return await contents.capturePage(undefined, { stayHidden: true, stayAwake: true }); }
+          catch (error) {
+            if (!(error instanceof Error) || error.message !== 'UnknownVizError' || attempt >= 3) throw error;
+            // loadURL can resolve before Chromium publishes the first compositor
+            // frame. Retry the observation only, never an interaction.
+            await new Promise(resolve => setTimeout(resolve, 120 * (attempt + 1)));
+          }
+        }
+      };
+    return waitForBoundedCapture(nativeCapture(), options);
+  }
+
   async captureCurrentViewport(options: BrowserCaptureGuardOptions = {}): Promise<BrowserViewportCapture> {
     const page = this.activePage;
     const view = page?.view;
@@ -221,7 +428,7 @@ export class BrowserRuntime {
       url: contents.getURL(),
     };
     if (!captured.url || captured.url !== page.state.url) throw new Error('Browse screenshot context is unstable');
-    const image = await waitForBoundedCapture(contents.capturePage(), options);
+    const image = await this.captureNativeFrame(contents, options);
     const currentView = page.view;
     const currentContents = currentView?.webContents;
     assertCaptureIdentityCurrent(captured, this.isLivePage(page) && this.activePageId === page.state.id
@@ -299,6 +506,7 @@ export class BrowserRuntime {
   private async loadTarget(page: RuntimePage, target: string, initiator: BrowserNavigationInitiator): Promise<BrowserPageState> {
     if (!isAllowedBrowseNavigation(target, initiator)) throw new Error('Browse navigation blocked by policy');
     const authorization = { target, initiator };
+    page.mainFrameError = undefined;
     page.directNavigation = authorization;
     page.pendingNavigation = authorization;
     const contents = this.ensureView(page).webContents;
@@ -307,6 +515,7 @@ export class BrowserRuntime {
     try {
       await contents.loadURL(target);
     } catch (reason) {
+      if (this.isLivePage(page)) page.mainFrameError = networkFailureCode(reason);
       if (this.isLivePage(page) && !page.state.error) {
         page.pendingNavigation = undefined;
         page.state = {
@@ -374,7 +583,7 @@ export class BrowserRuntime {
       page.state = { ...this.readPageState(page), is_loading: false, error: page.state.error };
       this.emit();
     });
-    contents.on('did-navigate', () => { page.navigationGeneration += 1; this.commitPageNavigation(page); });
+    contents.on('did-navigate', () => { page.mainFrameError = undefined; page.navigationGeneration += 1; this.commitPageNavigation(page); });
     contents.on('did-navigate-in-page', () => { page.navigationGeneration += 1; this.commitPageNavigation(page); });
     contents.on('page-title-updated', (event) => {
       event.preventDefault();
@@ -385,6 +594,7 @@ export class BrowserRuntime {
     });
     contents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
       if (!this.isLivePage(page) || !isMainFrame || errorCode === -3) return;
+      page.mainFrameError = networkFailureCode(errorDescription);
       page.pendingNavigation = undefined;
       page.state = {
         ...this.readPageState(page),
@@ -555,6 +765,7 @@ export class BrowserRuntime {
   private reloadPage(page: RuntimePage): void {
     const contents = page.view?.webContents;
     if (!contents || contents.isDestroyed()) return;
+    page.mainFrameError = undefined;
     const target = contents.getURL();
     if (target) page.pendingNavigation = { target, initiator: 'USER' };
     contents.reload();
@@ -601,6 +812,7 @@ export class BrowserRuntime {
   private destroyPageView(page: RuntimePage): void {
     const view = page.view;
     page.view = undefined;
+    page.appliedEmulation = undefined;
     if (!view) return;
     if (this.host.contentView.children.includes(view)) this.host.contentView.removeChildView(view);
     if (!view.webContents.isDestroyed()) view.webContents.close();
@@ -615,7 +827,7 @@ export class BrowserRuntime {
       if (!page.view) continue;
       if (bounds) {
         const previous = page.view.getBounds();
-        page.view.setBounds(bounds);
+        if (previous.x !== bounds.x || previous.y !== bounds.y || previous.width !== bounds.width || previous.height !== bounds.height) page.view.setBounds(bounds);
         const resizingLoadedActivePage = pageId === this.activePageId
           && this.requestedVisible
           && Boolean(page.state.url)
@@ -626,15 +838,21 @@ export class BrowserRuntime {
         // already-loaded RenderWidget at its previous CSS viewport. Applying the
         // matching desktop viewport only for a live resize avoids that stale frame
         // without changing the site's session, DPR, mobile mode, or page scale.
-        if (resizingLoadedActivePage && !page.view.webContents.isDestroyed()) {
+        if ((resizingLoadedActivePage || page.agentViewport) && page.committedUrl && !page.state.is_loading && !page.view.webContents.isDestroyed()) {
+          const viewport = page.agentViewport ?? bounds;
+          const scale = page.agentViewport ? Math.min(1, bounds.width / viewport.width, bounds.height / viewport.height) : 1;
+          const key = JSON.stringify([viewport.width, viewport.height, scale]);
+          if (page.appliedEmulation?.key !== key) {
           page.view.webContents.enableDeviceEmulation({
             screenPosition: 'desktop',
-            screenSize: { width: bounds.width, height: bounds.height },
+            screenSize: { width: viewport.width, height: viewport.height },
             viewPosition: { x: 0, y: 0 },
             deviceScaleFactor: 0,
-            viewSize: { width: bounds.width, height: bounds.height },
-            scale: 1,
+            viewSize: { width: viewport.width, height: viewport.height },
+            scale,
           });
+          page.appliedEmulation = { key, scale };
+          }
         }
       }
       const visible = Boolean(
@@ -692,6 +910,11 @@ function diagnosticUrl(value: string): string {
   } catch {
     return '(invalid)';
   }
+}
+
+function networkFailureCode(reason: unknown): string {
+  const message = reason instanceof Error ? reason.message : String(reason ?? '');
+  return /\bERR_[A-Z_]+\b/.exec(message)?.[0] ?? 'NAVIGATION_FAILED';
 }
 
 function protocolOf(value: string): string {

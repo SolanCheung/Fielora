@@ -1146,3 +1146,44 @@ button[type="submit"]:disabled { background: var(--fl-action-primary-disabled); 
   .appearance-contrast-row > label { width: 100%; }
   .appearance-gradient-editor { grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr); }
 }
+
+.agent-pause-notice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--fl-space-2); margin-bottom: var(--fl-space-3); }
+.agent-pause-notice p { flex-basis: 100%; margin: 0 0 var(--fl-space-1); color: var(--fl-color-text-muted); font-size: var(--fl-type-body-size); }
+
+/* One changing progress preview; durable history is opened explicitly. */
+.agent-current-activity { opacity: 1; transition: opacity 180ms ease; }
+.agent-current-activity.is-retiring { opacity: 0; }
+.agent-current-activity:has(.conversation-activity-stream:empty) { display: none; }
+.agent-current-activity:has(.agent-current-operations) { display: block; }
+.agent-current-narrative { min-height: 2lh; }
+.agent-current-operations { min-height: 42px; }
+.agent-current-narrative .conversation-activity-stream, .agent-current-operations .conversation-activity-stream { margin: 0; }
+.agent-current-narrative .conversation-narrative { margin: 0; max-width: none; }
+.agent-current-narrative .markdown-body.is-streaming::after { display: none; }
+.agent-current-narrative .markdown-body.is-streaming > p:last-child::after { content: ''; display: inline-block; width: 2px; height: 1em; margin-left: 3px; vertical-align: -0.12em; background: var(--fl-color-text-subtle); animation: agent-pulse 1s ease-in-out infinite; }
+.agent-current-operations .conversation-activity-group { margin: 12px 0 0; }
+.conversation-activity-entries .activity-note { margin: 14px 0 8px; color: var(--fl-color-text-muted); }
+.markdown-status-marker { display: inline-flex; vertical-align: -0.16em; margin-right: 0.45em; color: var(--fl-color-text-muted); }
+.markdown-status-marker .shell-icon { width: 1em; height: 1em; }
+.agent-prior-attempts { margin: 18px 0; color: var(--fl-color-text-muted); }
+.agent-prior-attempts > summary { display: flex; align-items: center; gap: 8px; width: fit-content; cursor: pointer; list-style: none; font-size: var(--fl-type-body-size); }
+.agent-prior-attempts > summary .shell-icon { width: 14px; height: 14px; transform: rotate(-90deg); }
+.agent-prior-attempts[open] > summary .shell-icon { transform: none; }
+.agent-prior-attempts > summary:focus-visible { outline: 2px solid var(--fl-color-border); outline-offset: 4px; border-radius: 4px; }
+.agent-status-indicator { width: 12px; height: 12px; flex: 0 0 12px; border: 1.5px solid var(--fl-color-border); border-radius: 50%; }
+.agent-status-indicator.is-active { border-top-color: var(--fl-color-text-muted); animation: agent-status-spin 1.2s linear infinite; }
+@keyframes agent-status-spin { to { transform: rotate(360deg); } }
+.agent-terminal-actions { gap: 12px; }
+.agent-terminal-actions > * + *::before { content: none; }
+.agent-terminal-actions .agent-primary-action { min-height: 34px; }
+.agent-result-changes-icon { width: 24px; height: 24px; background: transparent; }
+.agent-result-file-list > button { display: flex; gap: 10px; align-items: center; }
+.agent-result-file-list > button > span { flex: 1; min-width: 0; }
+.agent-result-file-list .file-type-icon { flex: 0 0 18px; }
+.latest-answer-button.is-generating { width: 38px; border-radius: 50%; color: var(--fl-color-text); }
+.latest-answer-button.has-unseen { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .agent-current-activity { transition: none; }
+  .agent-status-indicator.is-active { animation: none; }
+  .agent-current-narrative .markdown-body.is-streaming > p:last-child::after { animation: none; }
+}

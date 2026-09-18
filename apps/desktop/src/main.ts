@@ -7,6 +7,7 @@ import type { ContextMenuParams, IpcMainInvokeEvent, MenuItemConstructorOptions 
 import type { AgentRunView, ConversationMessageView, LibraryMediaKind, LibraryObjectView, PortableBlobManifestEntryView, ProfileView, ProjectView, ScreenshotEvidenceView } from '@fielora/contracts';
 import type { LibraryImagePreviewView } from './workspace-types';
 import { BrowserRuntime } from './browser-runtime';
+import { AgentBrowserHost } from './agent-browser-host';
 import { channels } from './channels';
 import { assertTrustedSender, isAllowedNavigation, trustedOriginFor } from './security';
 import { CoreProcessSupervisor } from './supervisor';
@@ -26,8 +27,8 @@ import {
   validateConversationReference, validateUpdateConversation, validateArchiveConversation,
   validateCreateConversationMessage, validateListConversationMessages, validateWorkspaceFile,
   validateApplyWorkspaceFile, validateRunTerminal, validateCancelTerminal, validateOpenWorkspaceProject,
-  validateStartAgent, validateAgentRun, validateListAgentRuns, validateListAgentEvents,
-  validateResolveAgentApproval,
+  validateStartAgent, validateAgentRun, validateResumeAgent, validateListAgentRuns, validateListAgentEvents,
+  validateResolveAgentApproval, validateModelUsageReport,
   validateActivateMcpConnection,
   validateSkillCatalog, validateRegisterLocalPlugin, validateUnregisterLocalPlugin,
   validateListArtifacts, validateReadArtifact, validateArtifactHistory,
@@ -50,6 +51,16 @@ import type { CreateScheduledTaskRequest, ScheduledTaskRequest, ScheduledTaskVie
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
+
+// Windows native occlusion can mark a focused, visible WebContentsView hidden,
+// leaving DOM reads alive while its compositor and native input stop. Keep
+// explicit page/window visibility and background throttling; disable only this
+// OS occlusion heuristic before Chromium starts (see native-repro evidence).
+if (process.platform === 'win32') {
+  const disabledFeatures = new Set(app.commandLine.getSwitchValue('disable-features').split(',').filter(Boolean));
+  disabledFeatures.add('CalculateNativeWinOcclusion');
+  app.commandLine.appendSwitch('disable-features', [...disabledFeatures].join(','));
+}
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'fielora', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -75,6 +86,9 @@ let quitting = false;
 let storageManager: StorageManager | undefined;
 let scheduledTaskService: ScheduledTaskService | undefined;
 const supervisor = new CoreProcessSupervisor(() => storage().coreEnvironment());
+const agentBrowserHost = new AgentBrowserHost(browser, (method, params) => supervisor.request(method, params), (runId, conversationId) => {
+  withUsableWindow(appWindow, window => window.webContents.send(channels.coreEvent, { event: 'event.agent.browser', run_id: runId, conversation_id: conversationId }));
+}, () => workspaceRuntime);
 const workspaceRuntime = new WorkspaceRuntime((event) => {
   withUsableWindow(appWindow, (window) => window.webContents.send(channels.workspaceEvent, event));
 });
@@ -557,11 +571,12 @@ function registerBridgeHandlers(): void {
   handle(channels.agentStart, validateStartAgent, 'command.agent.start');
   handle(channels.agentGet, validateAgentRun, 'query.agent.get');
   handle(channels.agentList, validateListAgentRuns, 'query.agent.list');
+  handle(channels.agentUsage, validateModelUsageReport, 'query.agent.usage');
   handle(channels.agentEvents, validateListAgentEvents, 'query.agent.events');
   handle(channels.agentToolCalls, validateAgentRun, 'query.agent.tool_calls');
   handle(channels.agentCancel, validateAgentRun, 'command.agent.cancel');
   handle(channels.agentPause, validateAgentRun, 'command.agent.pause');
-  handle(channels.agentResume, validateAgentRun, 'command.agent.resume');
+  handle(channels.agentResume, validateResumeAgent, 'command.agent.resume');
   handle(channels.agentResolveApproval, validateResolveAgentApproval, 'command.agent.resolve_approval');
   ipcMain.handle(channels.agentMcpConnections, (event) => { assertBridgeEvent(event); return supervisor.request('query.agent.mcp_connections'); });
   handle(channels.agentMcpRuntime, validateAgentRun, 'query.agent.mcp_runtime');
@@ -960,9 +975,12 @@ else {
     if (app.isPackaged) await registerApplicationProtocol();
     await createWindow();
     supervisor.on('notification', (message) => {
+      if (message.method === 'host.browser.execute') { agentBrowserHost.handle(message.params); return; }
+      if (message.method === 'host.browser.cancel') { agentBrowserHost.cancel(message.params.request_id); return; }
       withUsableWindow(appWindow, (window) => window.webContents.send(channels.coreEvent, (message as { params: unknown }).params));
     });
     supervisor.on('health', (payload) => {
+      if (payload.state !== 'READY') agentBrowserHost.reset();
       withUsableWindow(appWindow, (window) => window.webContents.send(channels.coreEvent, { event: 'event.core.health', ...payload }));
     });
     void supervisor.start()

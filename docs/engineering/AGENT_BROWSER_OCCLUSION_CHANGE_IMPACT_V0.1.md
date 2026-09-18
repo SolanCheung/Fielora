@@ -1,0 +1,9 @@
+# Browser occlusion repair — 2026-09-13
+
+Flow: after continuation, operate the observed invoice action in a nested scrolling page with fixed headers, then use the resulting modal to diagnose and verify the user's requested change.
+
+Production calls 321–414 show that named empty icon refs now exist, but click repeatedly returns COVERED for both source and frozen-column copies. The adapter unconditionally scrolls to center and tests only the bounding-box center; failures omit the blocking element and current actionable alternatives. Source confirms fixed headers and duplicated frozen-column markup. The precise production geometry was not recorded by the old adapter, so it cannot establish which overlay intercepted every failed attempt.
+
+Repair: preserve an already reachable target; search actual visible client rectangles for a native hit point, settle bounded scroll/layout changes, and try normal end/start alignment when needed. On failure return fresh observed refs and bounded target/blocker facts, including same-label candidates, rather than requiring another blind inspect. Do not retarget automatically, force input through an overlay, alter page CSS, call application handlers or expose arbitrary JavaScript/CDP. Existing permission, ownership, freshness, signature, capture readiness and native dispatch remain authoritative. No schema, credential, business source or database changes.
+
+Verify genuine blocking overlays remain rejected without dispatch; fixed-header/nested-scroll and partially exposed targets become normally clickable; duplicate targets require explicit choice of an observed actionable ref. Exercise actual isolated Electron and preserve the previous input, login, verification and continuation regressions. This does not constitute real Qwen business-task acceptance.

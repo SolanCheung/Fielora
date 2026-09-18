@@ -1,6 +1,6 @@
 import type { AgentEventView, AgentToolCallView } from '@fielora/contracts';
 
-export type ConversationActivityGroupKind = 'INSPECT' | 'CHANGE' | 'VERIFY' | 'COMMAND' | 'VERSION' | 'NETWORK' | 'OTHER' | 'MIXED';
+export type ConversationActivityGroupKind = 'INSPECT' | 'SEARCH' | 'DIRECTORY' | 'CHANGE' | 'VERIFY' | 'COMMAND' | 'VERSION' | 'NETWORK' | 'OTHER' | 'MIXED';
 
 export interface ConversationToolActivityEntry {
   id: string;
@@ -37,6 +37,7 @@ export interface ConversationActivityGroupItem {
   groupKind: ConversationActivityGroupKind;
   title: string;
   entries: ConversationActivityEntry[];
+  notes?: ConversationActivityNarrativeItem[];
 }
 
 export interface ConversationActivityNarrativeItem {
@@ -69,6 +70,39 @@ export interface ConversationActivityApprovalItem {
 }
 
 export type ConversationActivityItem = ConversationActivityGroupItem | ConversationActivityNarrativeItem | ConversationActivityPhaseItem | ConversationActivityApprovalItem;
+
+/** A small current preview; the full ordered projection remains the history. */
+export function currentActivityPreview(items: readonly ConversationActivityItem[], liveNarrative: string): ConversationActivityItem[] {
+  const eligible = compactActivityHistory(items).filter((item) => item.kind === 'NARRATIVE' || item.kind === 'GROUP');
+  if (liveNarrative) return eligible.filter((item) => item.kind === 'GROUP').slice(-1);
+  const lastNarrative = eligible.map((item) => item.kind).lastIndexOf('NARRATIVE');
+  if (lastNarrative < 0) return eligible.slice(-1);
+  return [eligible[lastNarrative]!, ...eligible.slice(lastNarrative + 1).filter((item) => item.kind === 'GROUP').slice(-1)];
+}
+
+/** Merge adjacent observation work, keeping all notes and receipts in order. */
+export function compactActivityHistory(items: readonly ConversationActivityItem[]): ConversationActivityItem[] {
+  const result: ConversationActivityItem[] = [];
+  let pending: ConversationActivityItem[] = [];
+  const flush = () => {
+    const groups = pending.filter((item): item is ConversationActivityGroupItem => item.kind === 'GROUP');
+    if (groups.length < 2) result.push(...pending);
+    else {
+      const notes = pending.filter((item): item is ConversationActivityNarrativeItem => item.kind === 'NARRATIVE');
+      const entries = groups.flatMap((group) => group.entries);
+      const last = notes.at(-1);
+      if (last) result.push(last);
+      result.push({ ...groups[0]!, entries, notes, title: groupTitle(entries), groupKind: groupKind(entries), completedAt: entries.every(entry => entry.completedAt !== null) ? Math.max(...entries.map(entry => entry.completedAt!)) : null });
+    }
+    pending = [];
+  };
+  for (const item of items) {
+    if (item.kind === 'NARRATIVE' || (item.kind === 'GROUP' && item.entries.every(entry => ['INSPECT', 'SEARCH', 'DIRECTORY'].includes(entry.activityKind)))) pending.push(item);
+    else { flush(); result.push(item); }
+  }
+  flush();
+  return result;
+}
 
 export function reconcileLiveNarrative(
   items: readonly ConversationActivityItem[],
@@ -119,6 +153,8 @@ function toolIsVerification(tool: AgentToolCallView, verificationToolIds: Readon
 function activityKindFor(tool: AgentToolCallView, verificationToolIds: ReadonlySet<string>): Exclude<ConversationActivityGroupKind, 'MIXED'> {
   if (toolIsVerification(tool, verificationToolIds)) return 'VERIFY';
   if (tool.name.startsWith('git_')) return 'VERSION';
+  if (tool.name === 'search_text') return 'SEARCH';
+  if (['list_files', 'stat_path'].includes(tool.name)) return 'DIRECTORY';
   if (tool.effect === 'OBSERVE') return 'INSPECT';
   if (tool.effect === 'WORKSPACE_WRITE' || tool.effect === 'DESTRUCTIVE') return 'CHANGE';
   if (tool.effect === 'PROCESS') return 'COMMAND';
@@ -144,7 +180,10 @@ function argumentPaths(tool: AgentToolCallView): string[] {
 
 function activityPhrase(kind: Exclude<ConversationActivityGroupKind, 'MIXED'>, entries: readonly ConversationActivityEntry[], active: boolean): string {
   const matching = entries.filter((entry) => entry.activityKind === kind);
+  if (kind === 'SEARCH') return active ? '正在搜索代码' : '已搜索代码';
+  if (kind === 'DIRECTORY') return active ? '正在查看项目目录' : '已查看项目目录';
   if (kind === 'INSPECT') {
+    if (matching.every(entry => entry.kind === 'TOOL' && entry.tool.name === 'work_plan')) return active ? '正在整理工作计划' : '已记录工作计划';
     const onlyFileInspection = matching.every((entry) => entry.kind !== 'TOOL' || ['list_files', 'read_file', 'search_text', 'stat_path'].includes(entry.tool.name));
     return onlyFileInspection ? (active ? '正在读取相关文件' : '已读取相关文件') : (active ? '正在检查相关信息' : '检查了相关信息');
   }
@@ -159,7 +198,10 @@ function activityPhrase(kind: Exclude<ConversationActivityGroupKind, 'MIXED'>, e
     const onlyRead = matching.every((entry) => entry.kind !== 'TOOL' || ['git_read', 'git_status'].includes(entry.tool.name));
     return onlyRead ? (active ? '正在检查 Git 状态' : '检查了 Git 状态') : (active ? '正在处理版本变更' : '处理了版本变更');
   }
-  if (kind === 'NETWORK') return active ? '正在访问外部服务' : '访问了外部服务';
+  if (kind === 'NETWORK') {
+    if (matching.every(entry => entry.kind !== 'TOOL' || entry.tool.name.startsWith('browser'))) return active ? '正在检查浏览器页面' : '已检查浏览器页面';
+    return active ? '正在访问外部服务' : '访问了外部服务';
+  }
   return active ? '正在执行操作' : '执行了操作';
 }
 
@@ -168,7 +210,7 @@ function groupTitle(entries: readonly ConversationActivityEntry[]): string {
   const failed = entries.some((entry) => entry.status === 'FAILED' || entry.status === 'UNKNOWN');
   const kinds = [...new Set(entries.map((entry) => entry.activityKind))];
   if (!active && failed && kinds.length === 1 && kinds[0] === 'VERIFY') return '针对性验证未通过';
-  const title = kinds.map((kind) => activityPhrase(kind, entries, active)).join('并');
+  const title = kinds.length > 1 && kinds.every(kind => ['INSPECT', 'SEARCH', 'DIRECTORY'].includes(kind)) ? (active ? '正在查看与搜索项目' : '已查看与搜索项目') : kinds.map((kind) => activityPhrase(kind, entries, active)).join('并');
   return !active && failed ? `${title}，其中有操作未完成` : title;
 }
 
@@ -281,7 +323,7 @@ export function buildConversationActivityProjection(
       completedAt: terminal?.created_at ?? (['COMPLETED', 'FAILED', 'DENIED', 'CANCELLED', 'UNKNOWN'].includes(tool.status) ? tool.updated_at : null),
       activityKind: activityKindFor(tool, verificationToolIds),
       tool,
-      status: tool.status,
+      status: tool.status === 'COMPLETED' && tool.receipt && typeof tool.receipt === 'object' && !Array.isArray(tool.receipt) && (tool.receipt as EventPayload).success === false ? 'FAILED' : tool.status,
       toolId: tool.id,
     });
   };

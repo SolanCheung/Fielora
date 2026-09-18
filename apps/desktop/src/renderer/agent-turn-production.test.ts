@@ -32,7 +32,7 @@ test('production conversation has one turn-owned agent presentation path', () =>
   assert.match(turn, /data-testid="agent-execution-status"/);
   assert.match(turn, /data-testid="agent-terminal-result"/);
   assert.match(turn, /data-testid="agent-execution-detail"/);
-  assert.match(turn, /agent-result-changes-icon"><AppIcon name="diff"\/>/);
+  assert.match(turn, /agent-result-changes-icon"><AppIcon name="changes"\/>/);
   assert.match(icons, /diff: PlusMinus/);
 });
 
@@ -114,7 +114,7 @@ test('single create review removes the duplicate file row and small modify uses 
 test('action execution starts with a factual preparation state and never invents model progress', () => {
   assert.match(turn, /activityItems\.length === 0/);
   assert.match(turn, /data-execution-stage=\{thinking \? 'THINKING' : 'ACTIVE'\}/);
-  assert.match(turn, /正在准备任务上下文/);
+  assert.doesNotMatch(turn, /正在准备任务上下文/);
   assert.match(projection, /event\.kind !== 'ASSISTANT_NARRATIVE'/);
   assert.doesNotMatch(projection, /text_delta[^\n]*Narrative/);
   assert.match(turn, /liveNarrative=\{liveNarrative\}/);
@@ -123,7 +123,7 @@ test('action execution starts with a factual preparation state and never invents
 
 test('running presentation is narrative and activity chronology followed by honest current state', () => {
   assert.doesNotMatch(workspace, /agent-execution-layer|setExecutionHost|executionHost=\{/);
-  assert.match(turn, /<ConversationActivityStream items=\{activityItems\}/);
+  assert.match(turn, /<LiveActivityPreview items=\{activityItems\}/);
   assert.match(turn, /<AgentProgressSummary run=\{run\}/);
   assert.match(turn, /data-testid="agent-execution-status"/);
   assert.match(turn, /data-testid="agent-run-details"/);
@@ -143,7 +143,7 @@ test('running presentation is narrative and activity chronology followed by hone
 });
 
 test('composer queues steering without parallel runs and keeps an explicit user turn status', () => {
-  assert.match(workspace, /if \(activeAgentRef\.current\) \{ await queueFollowUp\(content\); return; \}/);
+  assert.match(workspace, /if \(activeAgentRef\.current\) \{\s*sendingRef\.current = true;[\s\S]*?await queueFollowUp\(content\)/);
   assert.match(workspace, /data-testid="queued-follow-up-status"/);
   assert.match(workspace, /data-after-run-id=\{item\.afterRunId\}/);
   assert.match(workspace, /data-testid="queued-follow-up-card"/);
@@ -159,7 +159,7 @@ test('auto follow can be paused by scrolling and restored to the active task', (
   assert.match(workspace, /atLatestAnswerRef\.current = next/);
   assert.match(workspace, /if \(atLatestAnswerRef\.current\)/);
   assert.match(workspace, /setHasUnseenActivity\(true\)/);
-  assert.match(workspace, /className="latest-answer-ellipsis"/);
+  assert.match(workspace, /<AppIcon name="arrowDown"/);
   assert.match(workspace, /'跳转到当前任务底部'/);
   assert.doesNotMatch(workspace, />返回当前任务</);
   assert.match(workspace, /scrollToLatestAnswer\(\);/);
@@ -189,7 +189,7 @@ test('activity uses compact native disclosure without status dots or warning bac
   const activityStylesStart = styles.indexOf('.conversation-activity-stream {');
   const activityStylesEnd = styles.indexOf('.agent-live-files {', activityStylesStart);
   const activityStyles = styles.slice(activityStylesStart, activityStylesEnd);
-  assert.match(activitySource, /<AppIcon name=\{activityIcon\(item\.groupKind\)\}/);
+  assert.match(activitySource, /<AppIcon name=\{inspectionBatch \? 'folderOpen' : activityIcon\(item\.groupKind\)\}/);
   assert.match(activitySource, /<details className=\{`conversation-activity-group/);
   assert.match(activitySource, /<summary className="conversation-activity-group-summary"/);
   assert.doesNotMatch(activitySource, /<details[^>]*\sopen(?:[\s=>])/);
@@ -201,14 +201,14 @@ test('activity uses compact native disclosure without status dots or warning bac
   assert.match(activityStyles, /\.agent-progress-summary \{[^}]*background: transparent;/s);
   assert.match(activityStyles, /\.agent-progress-summary-trigger \{[^}]*border-top: 1px solid var\(--fl-color-border-soft\);[^}]*background: transparent;[^}]*box-shadow: none;/s);
   assert.doesNotMatch(turn, /agent-progress-orbit/);
-  assert.match(turn, /agent-progress-symbol/);
+  assert.match(turn, /agent-status-indicator/);
 });
 
 test('activity presentation filters runtime terminology and reveals groups and operations separately', () => {
   assert.match(projection, /tool\.name === 'delegate_readonly'/);
   assert.match(turn, /if \(!knownNames\.has\(tool\.name\)\)/);
   assert.match(turn, /create_file: '创建'.*replace_text: '修改'.*write_file: '写入'/s);
-  assert.match(turn, /item\.entries\.map\(\(entry\)/);
+  assert.match(turn, /item\.entries, \.\.\.\(item\.notes/);
   assert.match(turn, /<details className="conversation-tool-detail">/);
   assert.match(turn, /<summary className="conversation-tool-summary"/);
   assert.match(turn, /activityNarrativePreview\(text\)/);
@@ -252,10 +252,10 @@ test('terminal duration leads collapsed chronology and the exact result Markdown
   assert.match(turn, />耗时 \{result\.duration\}</);
   assert.match(turn, /function CompletedActivityHistory/);
   assert.match(turn, /className="agent-execution-detail is-history"/);
-  assert.match(turn, /<CompletedActivityHistory items=\{activityItems\} tools=\{tools\} activityFiles=\{activityFiles\}\/>/);
+  assert.match(turn, /<CompletedActivityHistory events=\{events\} items=\{activityItems\} tools=\{tools\} activityFiles=\{activityFiles\}\/>/);
   const terminalRuntime = turn.indexOf('<button type="button" className="agent-terminal-runtime"');
   const terminalDetail = turn.indexOf('{detailOpen && <>{executionDetail}', terminalRuntime);
-  const terminalMarkdown = turn.indexOf('<MarkdownMessage content={markdown} references={message?.references ?? []} onOpenReference={onOpenReference} onOpenImage={onOpenImage}/>', terminalDetail);
+  const terminalMarkdown = turn.indexOf('<MarkdownMessage content={markdown} references={message?.references ?? []} onOpenReference={onOpenReference} onOpenImage={onOpenImage} modernStatusMarkers/>', terminalDetail);
   assert.ok(terminalRuntime >= 0 && terminalRuntime < terminalDetail && terminalDetail < terminalMarkdown);
   assert.doesNotMatch(turn, /function ResultText|naturalResultParagraph|stripAnswerHeading/);
   assert.match(turn, /const markdown = message\?\.content \|\| result\.detail/);

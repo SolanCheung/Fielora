@@ -3,6 +3,8 @@ import type { ModelInvocationEvent, ProviderConfigView } from '@fielora/contract
 import fieloraMark from '../../assets/fielora-brand-mark.svg';
 import { resolveUiLocale, type AppPreferences, type StartupDestination, type UiLanguagePreference } from './app-preferences';
 import { AppearanceSettings } from './AppearanceSettings';
+import { ModelUsageSettings } from './ModelUsageSettings';
+import type { SelectedUsageModel } from './model-usage';
 import { AppIcon, type AppIconName } from './ui';
 import { SelectMenu, SettingsToggle } from './UiPrimitives';
 import {
@@ -17,7 +19,7 @@ import { StorageDataSettings } from './StorageDataSettings';
 import { CapabilityExtensionsSettings, type CapabilityExtensionTab } from './CapabilityExtensionsSettings';
 import { useUiLocale, type UiTranslator } from './ui-locale';
 
-export type SettingsCategory = 'GENERAL' | 'APPEARANCE' | 'MODELS' | 'EXTENSIONS' | 'SKILLS' | 'MCP' | 'PLUGINS' | 'STORAGE_DATA' | 'SHORTCUTS' | 'ABOUT' | 'BROWSER';
+export type SettingsCategory = 'GENERAL' | 'APPEARANCE' | 'MODELS' | 'USAGE' | 'EXTENSIONS' | 'SKILLS' | 'MCP' | 'PLUGINS' | 'STORAGE_DATA' | 'SHORTCUTS' | 'ABOUT' | 'BROWSER';
 
 interface SettingsScreenProps {
   preferences: AppPreferences;
@@ -25,6 +27,7 @@ interface SettingsScreenProps {
   onBack: () => void;
   initialCategory?: SettingsCategory;
   fieldId?: string | null;
+  modelSelection?: SelectedUsageModel | null;
 }
 
 function settingsCategories(t: UiTranslator): Array<{ id: SettingsCategory; label: string; keywords: string; icon: AppIconName }> {
@@ -32,6 +35,7 @@ function settingsCategories(t: UiTranslator): Array<{ id: SettingsCategory; labe
     { id: 'GENERAL', label: t('常规', 'General'), keywords: '启动 页面 默认 language 语言 startup default', icon: 'settings' },
     { id: 'APPEARANCE', label: t('外观', 'Appearance'), keywords: '主题 浅色 深色 系统 字体 密度 圆角 动效 theme appearance', icon: 'appearance' },
     { id: 'MODELS', label: t('模型与服务', 'Models & services'), keywords: 'provider api key model 模型 服务', icon: 'models' },
+    { id: 'USAGE', label: t('模型计费统计', 'Model usage & cost'), keywords: 'token usage billing cost chart 模型 计费 统计 消耗 图表 费用', icon: 'usage' },
     { id: 'EXTENSIONS', label: t('能力与扩展', 'Capabilities & extensions'), keywords: 'skills agent skill mcp tool server stdio plugin extension local unpacked 插件 扩展 本地 工具 连接', icon: 'extensions' },
     { id: 'STORAGE_DATA', label: t('存储与数据', 'Storage & data'), keywords: 'storage data library cache profile backup import export 存储 数据 资料库 缓存 备份 迁移', icon: 'storage' },
     { id: 'SHORTCUTS', label: t('键盘快捷键', 'Keyboard shortcuts'), keywords: '快捷键 keyboard shortcut', icon: 'keyboard' },
@@ -60,7 +64,7 @@ function probeFailureLabel(provider: ProviderConfigView, t: UiTranslator, code?:
   return `${t('连接失败', 'Connection failed')} · ${labels[code ?? ''] ?? code ?? t('服务异常', 'Service error')}`;
 }
 
-export function SettingsScreen({ preferences, onChange, onBack, initialCategory = 'GENERAL', fieldId = null }: SettingsScreenProps) {
+export function SettingsScreen({ preferences, onChange, onBack, initialCategory = 'GENERAL', fieldId = null, modelSelection = null }: SettingsScreenProps) {
   const { t } = useUiLocale();
   const [category, setCategory] = useState<SettingsCategory>(() => normalizedCategory(initialCategory));
   const [extensionTab, setExtensionTab] = useState<CapabilityExtensionTab>(() => extensionTabFor(initialCategory));
@@ -149,6 +153,7 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
       </section></div>}
       {category === 'BROWSER' && <div className="settings-section" data-testid="settings-browser"><header><p>浏览器</p><h1>浏览器设置</h1></header><section className="settings-card"><div className="settings-row"><span><strong>启动时恢复浏览器</strong><small>启动 Fielora 时恢复上次打开的浏览页面。</small></span><SettingsToggle value={preferences.startupDestination === 'BROWSE'} onChange={(value) => update({ startupDestination: value ? 'BROWSE' : 'PROJECTS' })} label="启动时恢复浏览器" testId="browser-startup-toggle" /></div><div className="settings-row"><span><strong>搜索引擎</strong></span><em className="settings-readonly-value">Google</em></div><div className="settings-row"><span><strong>浏览数据</strong><small>Cookie 和网站登录状态仅保留在此设备，不会包含在 Fielora 迁移备份中。</small></span><em className="settings-readonly-value">仅此设备</em></div></section></div>}
       {category === 'APPEARANCE' && <AppearanceSettings appearance={preferences.appearance} onChange={(appearance) => onChange({ ...preferences, appearance })} />}
+      {category === 'USAGE' && <ModelUsageSettings providers={providers} selection={modelSelection} />}
       {category === 'MODELS' && <div className="settings-section" data-testid="settings-models">
         <header><p>模型</p><h1>模型与服务</h1></header>
         <section className="settings-card settings-provider-card">

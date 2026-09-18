@@ -37,12 +37,15 @@ import {
   WORKSPACE_NAVIGATION_MIN_WIDTH,
   WorkspaceSurface,
 } from './WorkspaceSurface';
+import { referencedConversationImages } from './referenced-images';
 import { attachmentsForCapabilities, loadBrowserAttachments, messageAttachments, normalizeAttachmentSelection, persistMessageAttachments } from './attachment-pipeline';
 import { modelCapabilities } from './model-capabilities';
+import { composerDraftKey, useComposerDraft } from './composer-drafts';
 import {
   collapseDuplicateUnsentConversations,
   conversationTitleFromContent,
   agentTurnOwnership,
+  previousAgentAttempts,
   friendlyFilePreviewFailure,
   hasUserMessage,
   isDefaultConversationTitle,
@@ -53,6 +56,7 @@ import {
 } from './workspace-presentation';
 
 interface ProjectWorkspaceProps {
+  onModelSelectionChange?: (selection: { providerId: string; modelId: string } | null) => void;
   onNow: () => void;
   onBrowse: () => void;
   onFields: () => void;
@@ -375,6 +379,7 @@ function reasonMessage(reason: unknown): string {
   if (raw.includes('FILE_CHANGED_SINCE_REVIEW')) return '文件在 review 后已被其他程序修改，请重新载入再确认。';
   if (raw.includes('CREDENTIAL_REJECTED')) return '模型凭据无效，请在设置中更新。';
   if (raw.includes('PROVIDER_RATE_LIMITED')) return '模型服务当前限流，请稍后重试。';
+  if (raw.includes('AGENT_RUN_ALREADY_ACTIVE')) return '本对话还有未结束的任务，请继续或停止当前任务后再发送。输入内容已保留。';
   return raw;
 }
 
@@ -660,7 +665,7 @@ function ProjectSortControl({ value, onChange }: { value: ProjectSort; onChange:
   </div>;
 }
 
-export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newConversationRequest, addProjectRequest, workspaceRequest }: ProjectWorkspaceProps) {
+export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newConversationRequest, addProjectRequest, workspaceRequest, onModelSelectionChange }: ProjectWorkspaceProps) {
   const [projects, setProjects] = useState<ProjectView[]>([]);
   const [projectId, setProjectId] = useState('');
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(() => new Set());
@@ -732,8 +737,9 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const stored = Number.parseFloat(window.localStorage.getItem('fielora:terminal-dock-height') ?? '250');
     return Number.isFinite(stored) ? Math.min(Math.max(stored, 170), 520) : 250;
   });
-  const [prompt, setPrompt] = useState('');
-  const [attachments, setAttachments] = useState<WorkspaceAttachmentView[]>([]);
+  const composerScope = composerDraftKey(projectId, conversationId);
+  const { prompt, setPrompt, attachments, setAttachments, update: updateComposerDraft, move: moveComposerDraft, clear: clearComposerDraft } = useComposerDraft(composerScope);
+  const [projectDraftProviderId, setProjectDraftProviderId] = useState<string | null>(null);
   const [previewAttachment, setPreviewAttachment] = useState<WorkspaceAttachmentView | null>(null);
   const [imageContextMenu, setImageContextMenu] = useState<{ left: number; top: number; attachment: WorkspaceAttachmentView } | null>(null);
   const [permission, setPermission] = useState<ComposerPermission>('REVIEW_CHANGES');
@@ -786,6 +792,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const dockProjectLauncherRef = useRef<HTMLDivElement>(null);
   const copiedMessageResetRef = useRef<number | null>(null);
   const creatingConversationForRef = useRef(new Set<string>());
+  const sendingRef = useRef(false);
   const queuedFollowUpStartingRef = useRef(false);
   const conversationRefreshGenerationRef = useRef(0);
   const [projectActionsLayer, setProjectActionsLayer] = useState<HTMLElement | null>(null);
@@ -897,13 +904,17 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   const conversation = conversations.find((item) => item.id === conversationId) ?? null;
   const activeProviders = useMemo(() => providers.filter((item) => item.lifecycle_status !== 'REMOVED'), [providers]);
   const singleActiveProvider = useMemo(() => (activeProviders.length === 1 ? activeProviders[0] : null), [activeProviders]);
+  const defaultConversationProvider = useMemo(() => activeProviders.find((item) => item.credential_present) ?? singleActiveProvider ?? activeProviders[0] ?? null, [activeProviders, singleActiveProvider]);
   const effectiveConversationProvider = useMemo(() => {
-    if (!conversation) return null;
+    if (!conversation) return projectDraftProviderId === null ? defaultConversationProvider : activeProviders.find((item) => item.id === projectDraftProviderId) ?? null;
     return conversation.provider_config_id
       ? activeProviders.find((item) => item.id === conversation.provider_config_id) ?? singleActiveProvider
       : singleActiveProvider;
-  }, [activeProviders, conversation, singleActiveProvider]);
+  }, [activeProviders, conversation, defaultConversationProvider, projectDraftProviderId, singleActiveProvider]);
   const currentModelCapabilities = useMemo(() => modelCapabilities(effectiveConversationProvider), [effectiveConversationProvider]);
+  useEffect(() => {
+    onModelSelectionChange?.(effectiveConversationProvider ? { providerId: effectiveConversationProvider.id, modelId: effectiveConversationProvider.default_model } : null);
+  }, [effectiveConversationProvider?.id, effectiveConversationProvider?.default_model, onModelSelectionChange]);
   const composerAttachments = useMemo(() => attachmentsForCapabilities(attachments, currentModelCapabilities), [attachments, currentModelCapabilities]);
   const approval = useMemo(() => pendingApproval(agentEvents, agentRun), [agentEvents, agentRun]);
   const approvalToolSummary = useMemo(() => pendingToolSummary(agentEvents, agentRun), [agentEvents, agentRun]);
@@ -1202,7 +1213,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     setAgentRun(run); setAgentEvents(events); setAgentTools(tools); setAgentFileRevisions(fileReviewList.revisions); setMcpRuntime(nextMcpRuntime); setAgentProjectionNotice('');
     performance.clearMeasures('fielora.agent.projection');
     performance.measure('fielora.agent.projection', { start: projectionStarted });
-    if (['QUEUED', 'RUNNING', 'WAITING_APPROVAL'].includes(run.status)) {
+    if (['QUEUED', 'RUNNING', 'WAITING_APPROVAL', 'PAUSED'].includes(run.status)) {
       if (activeAgentRef.current?.runId !== run.id) activeAgentRef.current = { runId: run.id, conversationId: run.conversation_id, output: '', step: 0 };
     } else if (activeAgentRef.current?.runId === run.id) activeAgentRef.current = null;
   }, []);
@@ -1225,6 +1236,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
 
   useEffect(() => {
     if (!projectId) { setConversations([]); setConversationId(''); setFiles([]); setEnvironment(null); setDockTabs([]); setArtifactSessions({}); setActiveDockTabId(''); setWorkspaceOpen(false); setDockFocused(false); foregroundAgentRunsRef.current.clear(); return; }
+    setProjectDraftProviderId(null);
     setEnvironment(null);
     setSelectedFile(null); setFilePreview(null); setEditorContent(''); setDraft(null); setUndoChange(null);
     setWorkspaceOpen(false); setDockTabs([]); setArtifactSessions({}); setActiveDockTabId(''); setFileDockSessions({}); setFileTreeSelection(''); setEnvironmentOpen(false); setDockProjectLauncherOpen(false); setDockFocused(false); handledArtifactToolCallsRef.current.clear(); foregroundAgentRunsRef.current.clear();
@@ -1251,7 +1263,6 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     selectedConversationRef.current = conversationId;
     setStreamingOutput('');
     setStreamingStep(0);
-    setPrompt(''); setAttachments([]);
     setQueuedFollowUps(readQueuedFollowUps(conversationId));
     queuedFollowUpStartingRef.current = false;
     setHistoricalReview(null); setAgentReviewPath('');
@@ -1344,6 +1355,10 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   }, [loadAgentRun, refreshConversations, refreshMessages]);
 
   useEffect(() => window.fielora.core.subscribe((event) => {
+    if (event.event === 'event.agent.browser') {
+      if (activeAgentRef.current?.runId === (event as { run_id: string }).run_id) openDockTool('BROWSER');
+      return;
+    }
     if (event.event === 'event.agent.text_delta') {
       const delta = event as AgentTextDeltaEvent;
       const active = activeAgentRef.current;
@@ -1406,7 +1421,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     } catch (reason) { setError(reasonMessage(reason)); }
   }
 
-  async function createConversationFor(targetProject: ProjectView): Promise<ConversationView | null> {
+  async function createConversationFor(targetProject: ProjectView, options: { provider?: ProviderConfigView; preserveComposer?: boolean } = {}): Promise<ConversationView | null> {
     const fieldId = targetProject.field_id;
     setProjectId(fieldId);
     setCollapsedProjectIds((current) => {
@@ -1425,14 +1440,22 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       for (const candidate of existing.filter((item) => isDefaultConversationTitle(item.title))) {
         const history = await withUiTimeout(window.fielora.conversation.listMessages({ conversation_id: candidate.id }), 12_000, '读取现有对话超时，请重试。');
         if (!hasUserMessage(history)) {
+          if (options.preserveComposer) {
+            moveComposerDraft(composerScope, composerDraftKey(fieldId, candidate.id));
+            localStorage.setItem(`fielora:conversation-permission:${candidate.id}`, permission);
+          }
           await refreshConversations(fieldId, candidate.id);
           return candidate;
         }
       }
-      const ready = singleActiveProvider?.credential_present ? singleActiveProvider : (activeProviders.find((item) => item.credential_present) ?? singleActiveProvider ?? activeProviders[0] ?? null);
+      const ready = options.provider ?? defaultConversationProvider;
       const created = await withUiTimeout(window.fielora.conversation.create({
         field_id: fieldId, title: '新对话', provider_config_id: ready?.id ?? null, model_id: ready?.default_model ?? null,
       }), 12_000, '创建对话超时，请重试。');
+      if (options.preserveComposer) {
+        moveComposerDraft(composerScope, composerDraftKey(fieldId, created.id));
+        localStorage.setItem(`fielora:conversation-permission:${created.id}`, permission);
+      }
       await refreshConversations(fieldId, created.id);
       return created;
     } catch (reason) {
@@ -1546,7 +1569,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   }
 
   async function updateConversationSelection(providerId: string, modelId?: string) {
-    if (!conversation) return;
+    if (!conversation) { setProjectDraftProviderId(providerId); return; }
     const provider = activeProviders.find((item) => item.id === providerId) ?? null;
     try {
       const updated = await window.fielora.conversation.update({
@@ -1576,9 +1599,16 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   }
 
   async function resumeAgent() {
-    if (!agentRun) return;
-    try { const next = await window.fielora.agent.resume({ run_id: agentRun.id }); activeAgentRef.current = { runId: next.id, conversationId: next.conversation_id, output: '', step: 0 }; await loadAgentRun(next); }
+    if (!agentRun || sendingRef.current) return;
+    sendingRef.current = true;
+    try {
+      const ownership = agentTurnOwnership(messages, agentRun, agentEvents);
+      const images = await restoredAgentImages(agentRun.task, agentRun.conversation_id, ownership.userMessageId);
+      const next = await window.fielora.agent.resume({ run_id: agentRun.id, attachments: agentImageInputs(images) });
+      activeAgentRef.current = { runId: next.id, conversationId: next.conversation_id, output: '', step: 0 }; await loadAgentRun(next);
+    }
     catch (reason) { setError(reasonMessage(reason)); }
+    finally { sendingRef.current = false; }
   }
 
   async function activateMcpConnection(connectionId: string) {
@@ -1604,17 +1634,14 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   }
 
   async function retryAgent() {
-    if (!project || !conversation || !agentRun || agentRun.status !== 'FAILED' || activeAgentRef.current) return;
+    if (!project || !conversation || !agentRun || agentRun.status !== 'FAILED' || activeAgentRef.current || sendingRef.current) return;
     const provider = activeProviders.find((item) => item.id === agentRun.provider_config_id) ?? effectiveConversationProvider;
     if (!provider || !provider.credential_present) { setError('原模型配置已不可用，请先在设置中检查。'); return; }
+    sendingRef.current = true;
     setBusy(true); setError('');
     try {
       const ownership = agentTurnOwnership(messages, agentRun, agentEvents);
-      const retryImages = await Promise.all((ownership.userMessageId ? messageAttachments(ownership.userMessageId) : []).map(async (item) => {
-        if (item.data_url || !item.content_ref) return item;
-        const stored = await window.fielora.workspace.readAttachment({ content_ref: item.content_ref });
-        return { ...item, data_url: stored.data_url, mime_type: stored.mime_type };
-      }));
+      const retryImages = await restoredAgentImages(agentRun.task, agentRun.conversation_id, ownership.userMessageId);
       const started = await window.fielora.agent.start({
         field_id: project.field_id,
         conversation_id: conversation.id,
@@ -1623,10 +1650,8 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
         model_id: agentRun.model_id,
         task: agentRun.task,
         permission: agentRun.permission,
-        max_steps: agentRun.max_steps,
-        attachments: retryImages.filter((item) => item.data_url && item.width && item.height).map((item) => ({
-          id: item.id, filename: item.name, mime_type: item.mime_type, size: item.size, width: item.width!, height: item.height!, source: item.source, data_url: item.data_url!,
-        })),
+        max_steps: null,
+        attachments: agentImageInputs(retryImages),
         active_work_surface: selectedActiveArtifactContext(),
       });
       foregroundAgentRunsRef.current.add(started.id);
@@ -1635,7 +1660,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       setAgentRun(started); setAgentEvents([]); setAgentTools([]); setAgentFileRevisions([]); setMcpRuntime(null); setStreamingOutput(''); setStreamingStep(0);
       scrollToLatestAnswer();
     } catch (reason) { setError(reasonMessage(reason)); }
-    finally { setBusy(false); }
+    finally { sendingRef.current = false; setBusy(false); }
   }
 
   async function pickAttachments() {
@@ -1646,22 +1671,25 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     } catch (reason) { setError(reasonMessage(reason)); }
   }
 
-  async function acceptAttachmentSelection(incoming: WorkspaceAttachmentView[], source: WorkspaceAttachmentView['source'], truncatedCount = 0) {
+  async function acceptAttachmentSelection(incoming: WorkspaceAttachmentView[], source: WorkspaceAttachmentView['source'], truncatedCount = 0, targetScope = composerScope) {
     const normalized = await normalizeAttachmentSelection(incoming, source, (request) => window.fielora.workspace.storeAttachment(request));
-    const unique = normalized.filter((item) => !attachments.some((existing) => existing.id === item.id));
-    const next = [...attachments, ...unique].slice(0, 4);
-    setAttachments(next);
+    let overflow = truncatedCount;
+    updateComposerDraft(targetScope, current => {
+      const unique = normalized.filter((item) => !current.attachments.some((existing) => existing.id === item.id));
+      overflow += Math.max(0, current.attachments.length + unique.length - 4);
+      return { ...current, attachments: [...current.attachments, ...unique].slice(0, 4) };
+    });
     const rejected = attachmentsForCapabilities(normalized, currentModelCapabilities).filter((item) => item.status !== 'READY');
-    const overflow = truncatedCount + Math.max(0, attachments.length + unique.length - 4);
     if (overflow > 0) setError(`一次最多添加 4 个附件，已忽略 ${overflow} 个。`);
     else if (rejected.length > 0) setError(rejected.map((item) => `${item.name}：${item.reason}`).join('；'));
     else setError('');
   }
 
   async function addBrowserAttachments(files: readonly File[], source: 'clipboard' | 'drag_drop') {
+    const targetScope = composerScope;
     try {
       const selection = await loadBrowserAttachments(files, source);
-      await acceptAttachmentSelection(selection.attachments, source, selection.truncated_count);
+      await acceptAttachmentSelection(selection.attachments, source, selection.truncated_count, targetScope);
     } catch (reason) { setError(reasonMessage(reason)); }
   }
 
@@ -1773,6 +1801,29 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     window.requestAnimationFrame(() => composerRef.current?.focus());
   }
 
+  async function historicalInputImages(task: string, conversationId: string, originMessageId?: string | null) {
+    return referencedConversationImages(task, conversationId,
+      await window.fielora.conversation.listMessages({ conversation_id: conversationId }),
+      messageAttachments, content_ref => window.fielora.workspace.readAttachment({ content_ref }), originMessageId);
+  }
+
+  async function restoredAgentImages(task: string, conversationId: string, originMessageId?: string | null) {
+    // Without ownership, only Core may restore its canonical run input blobs.
+    if (!originMessageId) return [];
+    const originals = messageAttachments(originMessageId).filter(item => item.kind === 'IMAGE');
+    if (!originals.length) return historicalInputImages(task, conversationId, originMessageId);
+    return Promise.all(originals.map(async item => {
+      if (item.data_url) return item;
+      if (!item.content_ref) throw new Error('原消息的图片引用已不可用。');
+      return { ...item, ...await window.fielora.workspace.readAttachment({ content_ref: item.content_ref }) };
+    }));
+  }
+
+  function agentImageInputs(images: readonly WorkspaceAttachmentView[]) {
+    return images.map(item => ({ id: item.id, filename: item.name, mime_type: item.mime_type, size: item.size,
+      width: item.width!, height: item.height!, source: item.source, data_url: item.data_url! }));
+  }
+
   async function startQueuedFollowUp(item: QueuedFollowUp) {
     if (!project || !conversation || activeAgentRef.current || !agentRunIsTerminal) return;
     const provider = effectiveConversationProvider;
@@ -1796,8 +1847,8 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       field_id: project.field_id, conversation_id: conversation.id,
       user_message_id: messageId,
       provider_config_id: provider.id, model_id: provider.default_model,
-      task: `${item.content}${selectedHint}`.slice(0, 32_000), permission: item.permission, max_steps: 24,
-      attachments: [],
+      task: `${item.content}${selectedHint}`.slice(0, 32_000), permission: item.permission, max_steps: null,
+      attachments: agentImageInputs(await historicalInputImages(item.content, conversation.id)),
       active_work_surface: selectedActiveArtifactContext(),
     });
     foregroundAgentRunsRef.current.add(started.id);
@@ -1813,8 +1864,13 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
   }
 
   async function send(content: string) {
-    if (!project || !conversation) return;
-    if (activeAgentRef.current) { await queueFollowUp(content); return; }
+    if (!project || sendingRef.current) return;
+    if (activeAgentRef.current) {
+      sendingRef.current = true;
+      try { setError(''); await queueFollowUp(content); }
+      finally { sendingRef.current = false; }
+      return;
+    }
     const provider = effectiveConversationProvider;
     if (!provider || !provider.credential_present) { setError('请先选择已配置凭据的模型服务。'); return; }
     const blockedImage = composerAttachments.find((item) => item.kind === 'IMAGE' && item.status !== 'READY');
@@ -1824,27 +1880,43 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     const readyAttachments = [...readyTextAttachments, ...readyImageAttachments];
     const userText = content.trim() || (readyAttachments.length > 0 ? '请阅读并分析这些附件。' : '');
     if (!userText) return;
+    sendingRef.current = true;
     setBusy(true); setError('');
     try {
-      let activeConversation = conversation;
-      if (conversation.model_id !== provider.default_model) {
+      let activeConversation = conversation ?? await createConversationFor(project, { provider, preserveComposer: true });
+      if (!activeConversation) return;
+      const targetConversationId = activeConversation.id;
+      // Projection can lag behind Core after restart or a status transition.
+      // Check admission before creating a visible, durable user message.
+      const pendingRun = (await window.fielora.agent.list({ conversation_id: targetConversationId }))
+        .find((run) => ['QUEUED', 'RUNNING', 'WAITING_APPROVAL', 'PAUSED'].includes(run.status) && !run.task.startsWith('[SUBAGENT '));
+      if (pendingRun) {
+        if (selectedConversationRef.current !== targetConversationId) return;
+        activeAgentRef.current = { runId: pendingRun.id, conversationId: targetConversationId, output: '', step: 0 };
+        await loadAgentRun(pendingRun);
+        if (selectedConversationRef.current !== targetConversationId) return;
+        await queueFollowUp(content);
+        return;
+      }
+      if (activeConversation.provider_config_id !== provider.id || activeConversation.model_id !== provider.default_model) {
         const synced = await window.fielora.conversation.update({
-          conversation_id: conversation.id, expected_revision: conversation.revision, title: conversation.title,
+          conversation_id: targetConversationId, expected_revision: activeConversation.revision, title: activeConversation.title,
           provider_config_id: provider.id, model_id: provider.default_model,
         });
         activeConversation = synced;
         setConversations((items) => items.map((item) => item.id === synced.id ? synced : item));
       }
+      const runImages = readyImageAttachments.length ? readyImageAttachments : await historicalInputImages(userText, targetConversationId);
       const visibleMessage = readyTextAttachments.length > 0 ? `${userText}\n\n附件：${readyTextAttachments.map((item) => item.name).join('、')}` : userText;
       const userMessage = await window.fielora.conversation.createMessage({
-        conversation_id: conversation.id, role: 'USER', content: visibleMessage, status: 'COMPLETED',
+        conversation_id: targetConversationId, role: 'USER', content: visibleMessage, status: 'COMPLETED',
         provider_config_id: null, model_id: null, invocation_id: null, references: [],
       });
       persistMessageAttachments(userMessage.id, readyImageAttachments);
-      await refreshMessages(conversation.id);
+      await refreshMessages(targetConversationId);
       if (isDefaultConversationTitle(activeConversation.title)) {
         try {
-          const latest = await window.fielora.conversation.get({ conversation_id: conversation.id });
+          const latest = await window.fielora.conversation.get({ conversation_id: targetConversationId });
           const generatedTitle = conversationTitleFromContent(userText);
           if (!isDefaultConversationTitle(generatedTitle)) {
             const titled = await window.fielora.conversation.update({
@@ -1864,24 +1936,21 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
       const attachmentContext = readyTextAttachments.map((item) => `\n<attachment name=${JSON.stringify(item.name)} sha256=${JSON.stringify(item.sha256)}>\n${item.content!.slice(0, 32_000)}\n</attachment>`).join('');
       const task = `${userText}${selectedHint}${attachmentContext}`.slice(0, 32_000);
       const started = await window.fielora.agent.start({
-        field_id: project.field_id, conversation_id: conversation.id,
+        field_id: project.field_id, conversation_id: targetConversationId,
         user_message_id: userMessage.id,
         provider_config_id: provider.id, model_id: provider.default_model,
-        task, permission, max_steps: 24,
-        attachments: readyImageAttachments.map((item) => ({
-          id: item.id, filename: item.name, mime_type: item.mime_type, size: item.size,
-          width: item.width!, height: item.height!, source: item.source, data_url: item.data_url!,
-        })),
+        task, permission, max_steps: null,
+        attachments: agentImageInputs(runImages),
         active_work_surface: selectedActiveArtifactContext(),
       });
       foregroundAgentRunsRef.current.add(started.id);
-      activeAgentRef.current = { runId: started.id, conversationId: conversation.id, output: '', step: 0 };
+      activeAgentRef.current = { runId: started.id, conversationId: targetConversationId, output: '', step: 0 };
       agentRunIdRef.current = started.id; agentEventsRef.current = []; agentToolsRef.current = []; agentFileRevisionsRef.current = [];
       setAgentRun(started); setAgentEvents([]); setAgentTools([]); setAgentFileRevisions([]); setMcpRuntime(null);
-      setStreamingOutput(''); setStreamingStep(0); setPrompt(''); setAttachments([]);
+      setStreamingOutput(''); setStreamingStep(0); clearComposerDraft(composerDraftKey(project.field_id, targetConversationId));
       scrollToLatestAnswer();
     } catch (reason) { setError(reasonMessage(reason)); }
-    finally { setBusy(false); }
+    finally { sendingRef.current = false; setBusy(false); }
   }
 
   useEffect(() => {
@@ -2584,6 +2653,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     busy={busy}
     copied={Boolean(currentTerminalMessage && copiedMessageId === currentTerminalMessage.id)}
     onResume={() => void resumeAgent()}
+    onStop={() => void cancelAgent()}
     onRetry={() => void retryAgent()}
     onReview={() => openAgentReview()}
     onReviewFile={(path) => openAgentReview(path)}
@@ -2598,6 +2668,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     onActivateMcp={(connectionId) => void activateMcpConnection(connectionId)}
   /> : null;
   const visibleMessages = useMemo(() => messages.filter((message) => message.role !== 'ASSISTANT' || !isLegacyTerminalMessage(message.content)), [messages]);
+  const priorAttempts = useMemo(() => previousAgentAttempts(visibleMessages, agentTurn?.userMessageId ?? null, agentTurn?.assistantMessageId ?? null), [visibleMessages, agentTurn]);
   const navigationTurns = useMemo(() => visibleMessages.filter((message) => message.role === 'USER' && !queuedFollowUps.some((item) => item.messageId === message.id)), [visibleMessages, queuedFollowUps]);
 
   return <div className="project-root" data-testid="project-workspace">
@@ -2641,19 +2712,13 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
     >
 
       <section className={`conversation-column${visibleMessages.length === 0 && !streamingOutput ? ' is-empty-conversation' : ''}`} data-surface="content">
-        {!project ? newConversationStart ? <div className="new-conversation-start" data-testid="new-conversation-start"><div><p className="eyebrow">新对话</p><h2>开始一条新对话</h2><p>先选择一个本地文件夹建立 Project，然后即可创建第一条对话。Project 与对话各自独立，不会修改文件夹内容。</p><button className="secondary-button" onClick={() => void addProject()} data-testid="new-conversation-choose-project"><AppIcon name="folder"/>选择 Project 文件夹</button></div></div> : <div className="project-overview" data-testid="project-overview"><header><div><p className="eyebrow">PROJECTS</p><h1>项目</h1><p>本地文件夹、持久对话、文件变更和运行结果。</p></div><button className="secondary-button" onClick={() => void addProject()}><AppIcon name="folder"/>打开文件夹</button></header><div className="project-overview-empty"><h2>还没有项目</h2><p>使用左侧“项目”旁的 ＋ 或上方“打开文件夹”添加第一个本地 Project。</p></div></div> : !conversation ? <div className="project-empty-conversation" data-testid="project-empty-conversation">
-          <div className="project-empty-copy"><h2>{project.title}</h2><p>开始新的工作</p></div>
-          <form className="project-empty-composer" onSubmit={(event) => { event.preventDefault(); void createConversationFor(project); }} data-testid="project-empty-composer">
-            <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述你想完成的任务…" aria-label="新对话内容"/>
-            <div><span>对话会保存在当前 Project</span><button type="submit" disabled={conversationCreatingFor === project.field_id} data-testid="empty-conversation-create">{conversationCreatingFor === project.field_id ? '正在创建…' : '新建对话'}</button></div>
-          </form>
-        </div> : <>
-          <header className="conversation-header conversation-context-header"><div className="conversation-heading"><AppIcon name="folder"/><div className="conversation-title-line"><h2 title={conversation.title}>{conversation.title}</h2><ConversationActionsMenu onRename={() => setConversationDialog({ kind: 'RENAME', value: conversation.title })} onDelete={() => setConversationDialog({ kind: 'DELETE' })}/></div></div></header>
+        {!project ? newConversationStart ? <div className="new-conversation-start" data-testid="new-conversation-start"><div><p className="eyebrow">新对话</p><h2>开始一条新对话</h2><p>先选择一个本地文件夹建立 Project，然后即可创建第一条对话。Project 与对话各自独立，不会修改文件夹内容。</p><button className="secondary-button" onClick={() => void addProject()} data-testid="new-conversation-choose-project"><AppIcon name="folder"/>选择 Project 文件夹</button></div></div> : <div className="project-overview" data-testid="project-overview"><header><div><p className="eyebrow">PROJECTS</p><h1>项目</h1><p>本地文件夹、持久对话、文件变更和运行结果。</p></div><button className="secondary-button" onClick={() => void addProject()}><AppIcon name="folder"/>打开文件夹</button></header><div className="project-overview-empty"><h2>还没有项目</h2><p>使用左侧“项目”旁的 ＋ 或上方“打开文件夹”添加第一个本地 Project。</p></div></div> : <>
+          <header className="conversation-header conversation-context-header"><div className="conversation-heading"><AppIcon name="folder"/><div className="conversation-title-line"><h2 title={conversation?.title ?? '新对话'}>{conversation?.title ?? '新对话'}</h2>{conversation && <ConversationActionsMenu onRename={() => setConversationDialog({ kind: 'RENAME', value: conversation.title })} onDelete={() => setConversationDialog({ kind: 'DELETE' })}/>}</div></div></header>
           <div className="message-list" ref={messageListRef}>
-            {visibleMessages.length === 0 && !streamingOutput ? <div className="conversation-empty"><h3>从这里开始工作</h3><p>描述你想在当前项目中完成的任务。</p></div> : visibleMessages.map((message, index) => {
+            {!conversation || (visibleMessages.length === 0 && !streamingOutput) ? <div className="conversation-empty" data-testid={!conversation ? 'project-empty-conversation' : undefined}><h3>{conversation ? '从这里开始工作' : project.title}</h3><p>{conversation ? '描述你想在当前项目中完成的任务。' : '开始新的工作'}</p></div> : visibleMessages.map((message, index) => {
               const isCurrentAgentAssistant = Boolean(agentRun && agentTurn?.assistantMessageId === message.id);
               if (message.role === 'ASSISTANT' && message.invocation_id) {
-                if (isCurrentAgentAssistant) return null;
+                if (isCurrentAgentAssistant || priorAttempts.some((attempt) => attempt.id === message.id)) return null;
                 const historicalUserMessage = [...visibleMessages.slice(0, index)].reverse().find((item) => item.role === 'USER') ?? null;
                 return <HistoricalAgentTurn onOpenActivityFile={openActivityFile} key={message.id} terminalMessage={message} requestText={historicalUserMessage?.content ?? ''} userMessageId={historicalUserMessage?.id ?? null} copied={copiedMessageId === message.id} onReview={openHistoricalAgentReview} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))} onCopy={() => void copyMessage(message)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/>;
               }
@@ -2662,21 +2727,22 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
               if (queuedFollowUp) return null;
               return <Fragment key={message.id}>
                 <article data-message-id={message.id} className={`message ${message.role.toLowerCase()}${persistedImages.length ? ' has-image-attachments' : ''}`} data-testid={`message-${message.role.toLowerCase()}`}>{persistedImages.length > 0 && <ConversationImageGallery attachments={persistedImages} onOpen={openAttachmentInDock} onContextMenu={openImageContextMenu}/>}<div className="message-content"><MarkdownMessage content={message.content} references={message.references} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))} onCopyError={(reason) => setError(`复制代码失败：${reason}`)}/></div><footer className={`message-actions ${copiedMessageId === message.id ? 'copy-confirmed' : ''}`}><time dateTime={new Date(message.created_at).toISOString()} title={new Date(message.created_at).toLocaleString('zh-CN')}>{messageTimeLabel(message.created_at)}</time>{message.status !== 'COMPLETED' && <span className="message-status">{messageStatusLabel(message.status)}</span>}<button type="button" className={copiedMessageId === message.id ? 'copied' : ''} aria-label={copiedMessageId === message.id ? '消息已复制' : '复制消息'} title={copiedMessageId === message.id ? '已复制' : '复制'} onClick={() => void copyMessage(message)} data-testid="message-copy"><AppIcon name={copiedMessageId === message.id ? 'check' : 'copy'}/>{copiedMessageId === message.id && <span role="status" aria-live="polite">已复制</span>}</button></footer></article>
-                {agentRun && agentTurn?.userMessageId === message.id && currentAgentTurn}
+                {agentRun && agentTurn?.userMessageId === message.id && <>
+                  {priorAttempts.length > 0 && <details className="agent-prior-attempts" data-testid="agent-prior-attempts"><summary>之前的尝试 · {priorAttempts.length} 次<AppIcon name="chevronDown"/></summary>{priorAttempts.map((attempt) => <HistoricalAgentTurn key={attempt.id} terminalMessage={attempt} requestText={message.content} userMessageId={message.id} copied={copiedMessageId === attempt.id} onCopy={() => void copyMessage(attempt)} onCopyError={(reason) => setError(`复制代码失败：${reason}`)} onReview={openHistoricalAgentReview} onOpenReference={(reference) => void openResultReference(reference)} onOpenImage={(preview) => setPreviewAttachment(resultImageAttachment(preview))} onOpenActivityFile={openActivityFile}/>)}</details>}
+                  {currentAgentTurn}
+                </>}
               </Fragment>;
             })}
             {agentProjectionNotice && <p className="agent-projection-notice" role="status" data-testid="agent-projection-notice">{agentProjectionNotice}</p>}
           </div>
-          <ConversationTurnNavigation key={conversation.id} turns={navigationTurns} scrollContainer={messageListRef} onNavigate={() => { atLatestAnswerRef.current = false; setAtLatestAnswer(false); }}/>
+          {conversation && <ConversationTurnNavigation key={conversation.id} turns={navigationTurns} scrollContainer={messageListRef} onNavigate={() => { atLatestAnswerRef.current = false; setAtLatestAnswer(false); }}/>}
           {!atLatestAnswer && <button type="button" className={`latest-answer-button ${agentRun && !agentRunIsTerminal ? 'is-generating' : 'is-complete'}${hasUnseenActivity ? ' has-unseen' : ''}`} aria-label={agentRun && !agentRunIsTerminal ? '跳转到当前任务底部' : '跳转到最新消息'} title={agentRun && !agentRunIsTerminal ? '跳转到当前任务底部' : '跳转到最新消息'} onClick={scrollToLatestAnswer} data-testid="jump-to-latest">
-            {agentRun && !agentRunIsTerminal
-              ? <span className="latest-answer-ellipsis" aria-hidden="true"><i/><i/><i/></span>
-              : <AppIcon name="chevronDown"/>}
+            <AppIcon name="arrowDown"/>
           </button>}
           {queuedFollowUps.length > 0 && <section className="queued-follow-up-stack" aria-label="排队中的追加消息" data-testid="queued-follow-up-stack">
             {queuedFollowUps.map((item, index) => <article className="queued-follow-up-card" key={item.id} data-testid="queued-follow-up-card">
               <div className="queued-follow-up-main"><span className="queued-follow-up-index" aria-hidden="true">{index + 1}</span><strong title={item.content}>{item.content}</strong></div>
-              <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={item.afterRunId}><span aria-hidden="true"/>将在当前任务完成后继续处理</p>
+              <p className="queued-follow-up-status" data-testid="queued-follow-up-status" data-after-run-id={item.afterRunId}><span aria-hidden="true"/>{agentRun?.status === 'PAUSED' ? '当前任务已暂停；继续或停止后处理这条消息' : '将在当前任务结束后继续处理'}</p>
               <div className="queued-follow-up-actions">
                 <button type="button" className="queued-follow-up-adjust" onClick={() => editQueuedFollowUp(item)}><AppIcon name="forward"/><span>调整方向</span></button>
                 <button type="button" aria-label="删除排队消息" title="删除排队消息" onClick={() => removeQueuedFollowUp(item.id)}><AppIcon name="delete"/></button>
@@ -2688,7 +2754,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
               </div>}
             </article>)}
           </section>}
-    <form className="conversation-composer" data-surface="floating" data-testid="conversation-composer" onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={handleComposerDrop} onSubmit={(event) => { event.preventDefault(); void send(prompt); }}>
+    <form className="conversation-composer" data-surface="floating" data-testid="conversation-composer" aria-busy={busy || conversationCreatingFor === project.field_id} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={handleComposerDrop} onSubmit={(event) => { event.preventDefault(); void send(prompt); }}>
             {composerAttachments.length > 0 && <div className="composer-attachments" data-testid="composer-attachments">
               {composerAttachments.filter((attachment) => attachment.kind === 'IMAGE').map((attachment) => <AttachmentThumbnail key={attachment.id} attachment={attachment} variant="composer" onOpen={openAttachmentInDock} onRemove={(id) => setAttachments((items) => items.filter((item) => item.id !== id))} onContextMenu={openImageContextMenu}/>)}
               {composerAttachments.filter((attachment) => attachment.kind === 'TEXT').map((attachment) => <div key={attachment.id} className={`attachment-chip ${attachment.status === 'READY' ? '' : 'unsupported'}`} title={attachment.reason ?? attachment.name}><AppIcon name="file"/><span><strong>{attachment.name}</strong><small>{attachment.status === 'READY' ? `${Math.max(1, Math.ceil(attachment.size / 1024))} KB · 文字 Context` : attachment.reason}</small></span><button type="button" aria-label={`移除 ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((item) => item.id !== attachment.id))}><AppIcon name="close"/></button></div>)}
@@ -2713,7 +2779,7 @@ export function ProjectWorkspace({ onNow, onBrowse, onFields, onSettings, newCon
                 <SelectMenu className="composer-menu-picker permission-picker" value={permission} ariaLabel="权限" testId="composer-permission" placement="top" hideChevron leading={<PermissionIcon permission={permission}/>} options={[{ value: 'READ_ONLY', label: '请求批准', description: '编辑外部文件和使用互联网时始终询问', icon: <PermissionIcon permission="READ_ONLY"/> }, { value: 'REVIEW_CHANGES', label: '帮我批准', description: '仅对检测到的风险操作请求批准', icon: <PermissionIcon permission="REVIEW_CHANGES"/> }, { value: 'FULL_CONTROL', label: '完全访问权限', triggerLabel: '完全访问', description: '可不受限制地访问互联网和你电脑上的任何文件', icon: <PermissionIcon permission="FULL_CONTROL"/>, tone: 'warning' }]} onChange={updatePermission} />
               </div>
               <div className="composer-right-actions">
-                {activeProviders.length > 1 ? <SelectMenu className="composer-menu-picker configured-model-picker" value={conversation?.provider_config_id ?? ''} ariaLabel="模型" testId="conversation-model" placement="top" options={[{ value: '', label: '选择模型' }, ...activeProviders.map((provider) => ({ value: provider.id, label: provider.default_model, description: `${provider.display_name}${provider.credential_present ? '' : ' · 需要凭据'}`, disabled: !provider.credential_present }))]} onChange={(value) => void updateConversationSelection(value)} /> : effectiveConversationProvider && <span className="composer-model-label" title={effectiveConversationProvider.display_name}>{effectiveConversationProvider.default_model}</span>}
+                {activeProviders.length > 1 ? <SelectMenu className="composer-menu-picker configured-model-picker" value={effectiveConversationProvider?.id ?? ''} ariaLabel="模型" testId="conversation-model" placement="top" options={[{ value: '', label: '选择模型' }, ...activeProviders.map((provider) => ({ value: provider.id, label: provider.default_model, description: `${provider.display_name}${provider.credential_present ? '' : ' · 需要凭据'}`, disabled: !provider.credential_present }))]} onChange={(value) => void updateConversationSelection(value)} /> : effectiveConversationProvider && <span className="composer-model-label" title={effectiveConversationProvider.display_name}>{effectiveConversationProvider.default_model}</span>}
                 <TooltipButton type="button" className={`composer-icon-button voice-button ${listening ? 'active' : ''}`} tooltip={listening ? '停止语音输入' : '语音输入'} placement="top" variant="default" onClick={toggleVoiceInput} aria-label={listening ? '停止语音输入' : '开始语音输入'} data-testid="composer-voice"><AppIcon name="microphone"/></TooltipButton>
                 {activeAgentRef.current && prompt.trim() ? <>
                   <TooltipButton type="button" className="composer-icon-button composer-running-stop" tooltip="停止当前任务" placement="top" variant="default" aria-label="停止 Agent" onClick={() => void cancelAgent()} data-testid="stop-agent-secondary"><AppIcon name="stop"/></TooltipButton>

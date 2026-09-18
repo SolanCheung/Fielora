@@ -108,6 +108,21 @@
 /* Codex-like desktop proportions are a product contract, not a theme choice.
  * Stored widths are normalized by WorkspaceSurface/ProjectWorkspace to the
  * same limits before these variables are applied. */
+.desktop-frame { grid-template-rows: var(--fl-layout-titlebar-height) minmax(0, 1fr); }
+
+/* Native caption buttons sit above web content. Keep the entire lightbox,
+ * including its dimmed backdrop, inside the work area below that chrome. */
+.image-preview-backdrop {
+  inset: max(var(--fl-layout-titlebar-height), env(titlebar-area-height, 0px)) 0 0;
+  padding: clamp(12px, 2vw, 30px);
+}
+.image-preview-shell {
+  width: min(1120px, 100%);
+  height: min(820px, 100%);
+  min-width: 0;
+  min-height: 0;
+}
+
 .workspace-surface {
   grid-template-columns: var(--workspace-navigation-width, var(--fl-layout-navigation-default)) 4px minmax(0, 1fr);
 }
@@ -514,16 +529,6 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
 }
 
 /* Empty conversations keep the real Composer in the same reading column. */
-.project-empty-conversation {
-  padding-inline: max(var(--fl-layout-conversation-gutter), calc((100% - var(--fl-layout-conversation-reading)) / 2));
-}
-
-.project-empty-composer {
-  right: 0;
-  left: 0;
-  width: min(calc(100% - 2 * var(--fl-layout-conversation-gutter)), var(--fl-layout-conversation-reading));
-}
-
 .conversation-column.is-empty-conversation .message-list {
   display: grid;
   place-items: center;

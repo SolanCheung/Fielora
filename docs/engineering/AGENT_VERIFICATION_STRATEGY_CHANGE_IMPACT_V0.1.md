@@ -1,0 +1,11 @@
+# Verification strategy correction — 2026-09-13
+
+User correction: a local UI-code change must not automatically become a website startup/login/browser-automation task. Choose evidence appropriate to the requested result; support actual desktop-sized browser viewports when rendered interaction is useful.
+
+Confirmed design defect: requires_browser matched generic words (modal/page/form), changed UI file extensions, or merely using any browser tool. has_fresh_verification also treated historical heuristic flags and references to prior screenshots as permanent browser-only completion requirements. Thus a relevant successful code check could never complete the original task, even when browser work was optional. This decision belongs to Harness verification strategy, not Model intelligence.
+
+Change within the current Core/receipts: treat UI indicators as task context, not an authority to require browser execution. Explicit user browser-verification requests retain that requirement. Otherwise allow current-revision code checks or rendered checks, while rejecting known current failed rendered assertions and failed command checks. A model's optional plan or one browser inspection does not permanently require browser verification. Preserve mandatory input evidence, current-file guards and truthful reporting of verification scope; never call source checks proof of visual equivalence. Legacy heuristic flags remain historical facts and do not override current policy or user intent. No database rewrite or new schema.
+
+Browser resize is bounded, ephemeral per-page desktop emulation in the existing BrowserRuntime. Fit the preview into the dock while preserving a real requested CSS viewport and native input. It must not alter site styles, sessions or permission boundaries.
+
+Validate a small translation/template correction using actual targeted code assertions without a browser, explicit browser acceptance still rejecting code-only completion, current failed rendered assertions not hidden by a command, historical UI flags not creating a resume dead end, and real Electron viewport/click behavior. Deterministic tests do not establish Qwen task completion speed; no Coding Plan automated provider acceptance.

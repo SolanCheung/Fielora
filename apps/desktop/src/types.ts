@@ -29,7 +29,8 @@ import type {
   ConversationView, CreateConversationRequest, ConversationRequest, UpdateConversationRequest,
   ArchiveConversationRequest, ConversationMessageView, CreateConversationMessageRequest,
   ListConversationMessagesRequest,
-  AgentChangedEvent, AgentRunView, StartAgentRunRequest, AgentRunRequest, ListAgentRunsRequest,
+  AgentChangedEvent, AgentRunView, StartAgentRunRequest, AgentRunRequest, ResumeAgentRunRequest, ListAgentRunsRequest,
+  ModelUsageReportRequest, ModelUsageReport,
   AgentEventView, ListAgentEventsRequest, AgentToolCallView, ApprovalView, ResolveAgentApprovalRequest,
   ActivateMcpConnectionRequest, McpConnectionCatalogView, McpConnectionRuntimeView,
   SkillCatalogRequest, SkillCatalogView, LocalPluginRegistryView,
@@ -66,6 +67,10 @@ export type AgentTextDeltaEvent = {
   text_delta: string;
 };
 export type DesktopCoreEvent = DomainEventDTO | ModelInvocationEvent | CaptureChangedEvent | AgentChangedEvent | AgentTextDeltaEvent | {
+  event: 'event.agent.browser';
+  run_id: string;
+  conversation_id: string;
+} | {
   event: 'event.core.health';
   state: HealthDTO['state'];
   error?: string;
@@ -208,11 +213,12 @@ export interface FieloraBridge {
     start(request: StartAgentRunRequest): Promise<AgentRunView>;
     get(request: AgentRunRequest): Promise<AgentRunView>;
     list(request: ListAgentRunsRequest): Promise<AgentRunView[]>;
+    usage(request: ModelUsageReportRequest): Promise<ModelUsageReport>;
     events(request: ListAgentEventsRequest): Promise<AgentEventView[]>;
     toolCalls(request: AgentRunRequest): Promise<AgentToolCallView[]>;
     cancel(request: AgentRunRequest): Promise<AgentRunView>;
     pause(request: AgentRunRequest): Promise<AgentRunView>;
-    resume(request: AgentRunRequest): Promise<AgentRunView>;
+    resume(request: ResumeAgentRunRequest): Promise<AgentRunView>;
     resolveApproval(request: ResolveAgentApprovalRequest): Promise<ApprovalView>;
     mcpConnections(): Promise<McpConnectionCatalogView>;
     mcpRuntime(request: AgentRunRequest): Promise<McpConnectionRuntimeView>;

@@ -1,6 +1,7 @@
 import {
   AppWindow,
   ArrowClockwise,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
@@ -18,6 +19,7 @@ import {
   Columns,
   Copy,
   Cpu,
+  ChartBar,
   Database,
   Desktop,
   DotsThree,
@@ -68,13 +70,14 @@ export type AppIconName =
   | 'compose' | 'conversation' | 'now' | 'scheduled' | 'browse' | 'fields' | 'inbox'
   | 'folder' | 'folderOpen' | 'files' | 'library' | 'file' | 'image' | 'filePlus' | 'objects'
   | 'diff' | 'terminal' | 'terminalPanel' | 'computer' | 'settings' | 'refresh' | 'close'
-  | 'more' | 'models' | 'appearance' | 'extensions' | 'storage' | 'keyboard'
+  | 'more' | 'models' | 'usage' | 'appearance' | 'extensions' | 'storage' | 'keyboard'
   | 'info' | 'environment' | 'branch' | 'commit' | 'changes' | 'openAction' | 'cloud' | 'source' | 'copy' | 'check'
   | 'sort' | 'plus' | 'edit' | 'search' | 'run' | 'pause' | 'delete' | 'chevronDown' | 'panelRight' | 'sidebar'
-  | 'back' | 'forward' | 'focus' | 'unfocus' | 'fileTree' | 'tools' | 'microphone' | 'send' | 'stop'
+  | 'back' | 'forward' | 'arrowDown' | 'focus' | 'unfocus' | 'fileTree' | 'tools' | 'microphone' | 'send' | 'stop'
   | 'permissionAsk' | 'permissionReview' | 'permissionFull' | 'application';
 
 const ICONS: Record<AppIconName, Icon> = {
+  usage: ChartBar,
   compose: PencilSimple,
   conversation: ChatCircle,
   now: Clock,
@@ -96,6 +99,7 @@ const ICONS: Record<AppIconName, Icon> = {
   computer: Desktop,
   settings: Gear,
   refresh: ArrowClockwise,
+  arrowDown: ArrowDown,
   close: X,
   more: DotsThree,
   models: Cpu,

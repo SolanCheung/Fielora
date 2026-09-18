@@ -288,6 +288,7 @@
 .ui-select-popover > button.is-warning .ui-select-check { color: var(--fl-color-text-warning); }
 .permission-picker,
 .permission-picker button { font-family: var(--fl-font-sans); }
+.permission-picker { height: 30px; }
 .select-menu.permission-picker > button {
   min-height: 30px;
   height: 30px;
@@ -383,6 +384,7 @@
   background: transparent;
   box-shadow: none;
 }
+.conversation-composer .composer-footer { align-items: center; }
 .conversation-composer .composer-icon-button {
   color: var(--fl-color-icon);
   opacity: 1;

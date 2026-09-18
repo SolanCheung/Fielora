@@ -181,6 +181,11 @@ export function agentOpeningNarrative(presentation: AgentPresentation): string {
 }
 
 export function toolTitle(name: string): string {
+  if (name === 'browser_server') return '管理开发服务';
+  if (name === 'browser') return '操作浏览器页面';
+  if (name === 'work_plan') return '明确修改范围与验收条件';
+  if (name === 'browser_plan') return '记录页面验收项';
+  if (name === 'browser_verify') return '验证页面行为';
   const labels: Record<string, string> = {
     list_files: '查看项目文件', read_file: '读取文件', search_text: '搜索代码', stat_path: '检查文件信息', run_command: '运行验证',
     create_file: '创建文件', replace_text: '修改文件', apply_patches: '批量修改文件', write_file: '写入文件', delete_file: '删除文件', move_file: '移动文件',
@@ -195,6 +200,11 @@ export function toolDetail(tool: AgentToolCallView): string {
   if (!tool.arguments || typeof tool.arguments !== 'object') return toolTitle(tool.name);
   const values = tool.arguments as Record<string, unknown>;
   let detail = '';
+  if (tool.name === 'browser') {
+    const actions: Record<string, string> = { open: '打开目标页面', inspect: '读取页面内容', reload: '重新加载页面', click: '点击页面控件', fill: '输入表单内容', select: '选择选项', scroll: '滚动至控件', screenshot: '保存页面截图' };
+    return actions[String(values.action)] ?? '操作浏览器页面';
+  }
+  if (tool.name === 'browser_verify' && tool.receipt && typeof tool.receipt === 'object' && 'requirement' in tool.receipt) return String(tool.receipt.requirement).slice(0, 140);
   if (tool.name === 'run_command') detail = [values.program, ...(Array.isArray(values.argv) ? values.argv.slice(0, 5) : [])].filter(Boolean).map(String).join(' ');
   else if (Array.isArray(values.paths)) detail = values.paths.slice(0, 3).map(String).join('、');
   else if (Array.isArray(values.patches)) detail = values.patches.slice(0, 3).map((patch) => patch && typeof patch === 'object' && 'path' in patch ? String((patch as { path: unknown }).path) : '').filter(Boolean).join('、');
@@ -493,8 +503,17 @@ export function buildAgentPresentation(
   tools: readonly AgentToolCallView[],
   now = Date.now(),
 ): AgentPresentation {
-  const finishedAt = run.finished_at ?? (['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status) ? run.updated_at : now);
-  const elapsed = formatElapsed(finishedAt - run.created_at);
+  const finishedAt = run.finished_at ?? (['COMPLETED', 'FAILED', 'CANCELLED', 'PAUSED'].includes(run.status) ? run.updated_at : now);
+  let pausedAt: number | null = null;
+  let pausedMs = 0;
+  for (const event of events) {
+    if (event.kind === 'RUN_PAUSED' && pausedAt === null) pausedAt = event.created_at;
+    if (event.kind === 'RUN_RESUMED' && pausedAt !== null) {
+      pausedMs += Math.max(0, event.created_at - pausedAt); pausedAt = null;
+    }
+  }
+  if (pausedAt !== null) pausedMs += Math.max(0, finishedAt - pausedAt);
+  const elapsed = formatElapsed(Math.max(0, finishedAt - run.created_at - pausedMs));
   const completedMutations = tools.filter((tool) =>
     tool.status === 'COMPLETED' && (tool.effect === 'WORKSPACE_WRITE' || tool.effect === 'DESTRUCTIVE'),
   );
@@ -570,5 +589,39 @@ export function buildAgentPresentation(
     headline, narrative, elapsed, summary, phases, changedFiles, passedVerifications, canonicalPhase: false,
     activeStep: activeStepFor(phases, ['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status)), totalSteps: phases.length,
     primaryChange: primaryChangeFor(tools), outcome: resultOutcome(run, events, changedFiles),
+  };
+}
+
+export function agentPausePresentation(run: AgentRunView): { reason: string; action: string; canResume: boolean } {
+  const exhausted = run.current_step >= run.max_steps;
+  const extra = Math.min(24, 4096 - run.max_steps);
+  if (exhausted && extra <= 0) return { reason: '已达到本任务的累计执行上限。进展已保存，请查看执行记录后新建任务继续。', action: '', canResume: false };
+  const reasons: Record<string, string> = {
+    PROVIDER_PROTOCOL_ERROR: '模型响应异常，自动重试后仍未恢复。已有修改和执行记录已保存，可从中断处继续。',
+    PROVIDER_REQUEST_REJECTED: '模型服务拒绝了请求，具体原因尚未确认。进展已保存，可继续当前步骤；错误状态见执行记录。',
+    PROVIDER_INVALID_MESSAGES: '模型服务拒绝了消息或工具调用的格式。进展已保存，请使用新版客户端继续；持续失败时检查服务兼容性。',
+    PROVIDER_IMAGE_REJECTED: '模型服务无法接收或解析这次图片。请检查图片格式和当前模型的图片能力；原任务与附件仍保留。',
+    PROVIDER_CONTEXT_LIMIT: '模型服务报告上下文超出限制。进展已保存，请检查模型的上下文配置后继续。',
+    AGENT_INPUT_UNAVAILABLE: '原任务的图片附件暂时无法读取，已暂停以避免丢失要求。请恢复附件后继续。',
+    PROVIDER_UNAVAILABLE: '模型服务暂时不可用，进展已保存。服务恢复后可继续当前任务。',
+    PROVIDER_RATE_LIMITED: '模型服务暂时限流，进展已保存。稍后可继续当前任务。',
+    CONTEXT_TOO_LARGE: '当前模型上下文过大，进展已保存。继续时会先整理历史记录。',
+    AGENT_BUDGET_EXHAUSTED: '本轮执行额度已用尽，任务尚未完成。进展和工具回执已保存，可接着处理。',
+    AGENT_NO_PROGRESS: '连续多轮没有新增工具证据，已暂停。继续时会重新核对现状和下一步。',
+    AGENT_REPEATED_ACTIONS: '调整提示后仍在重复相同操作、没有获得新信息，已保存进展并暂停。',
+    AGENT_TIME_BUDGET_EXHAUSTED: '累计模型与工具运行时间达到本轮 60 分钟预算，进展已保存。继续将开启新的资源额度。',
+    AGENT_TOKEN_BUDGET_EXHAUSTED: '多次模型调用的累计用量已达到本轮预算，任务尚未完成。累计用量包含重复输入的上下文，不代表单次上下文大小；进展已保存，继续可开启新的资源额度。',
+    AGENT_ACTION_REQUIRED: '尚无回执证明请求的操作已完成，已保留为未完成状态。',
+    AGENT_REFERENCED_IMAGES_UNAVAILABLE: '历史图片未能读取，任务已暂停。点击继续工作会重新尝试恢复本对话中的原图。',
+    AGENT_REFERENCE_READ_REQUIRED: '指定的参考源码尚未读取，无法完成对照。进展已保存；继续后将读取参考文件并验证目标修改。',
+    AGENT_VERIFICATION_REQUIRED: '尚未通过与需求对应的验证，模型连续未补充检查或修正动作，任务已暂停。进展已保存，可继续完成检查。',
+    AGENT_BROWSER_LOGIN_REQUIRED: '需要你在右侧浏览器完成登录。请勿在对话中发送密码；登录后点击继续工作，Agent 将重新检查页面并接着验证。已有修改已保存，任务尚未完成。',
+    AGENT_BROWSER_OUTCOME_REVIEW_REQUIRED: '之前的浏览器输入缺少可信结果，任务仍未完成，已有修改已保存。为避免重复提交，Agent 没有重放操作；需要先核对该操作在页面中的实际结果。',
+    AGENT_RECOVERY_REQUIRED: '有操作的结果尚不明确，继续前将先核对执行结果。',
+  };
+  return {
+    reason: reasons[run.error_code ?? ''] ?? '工作已暂停，进展已保存。',
+    action: exhausted ? `继续工作（增加 ${extra} 步）` : '继续工作',
+    canResume: true,
   };
 }

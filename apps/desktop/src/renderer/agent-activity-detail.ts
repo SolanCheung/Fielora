@@ -1,4 +1,20 @@
-import type { AgentRunView, AgentToolCallView } from '@fielora/contracts';
+import type { AgentEventView, AgentRunView, AgentToolCallView } from '@fielora/contracts';
+
+export function goalProgressLabel(events: readonly AgentEventView[]): string | null {
+  const latest = [...events].reverse().find(event => event.kind === 'CHECKPOINT_CREATED'
+    && (event.payload as Record<string, unknown>)?.kind === 'GENERAL_WORK_STATE_V1');
+  const goal = (latest?.payload as Record<string, unknown> | undefined)?.goal as Record<string, unknown> | undefined;
+  const labels: Record<string, string> = {
+    UNDERSTANDING: '正在确认任务目标', DIAGNOSING: '正在定位问题', VERIFYING: '正在验证当前修改', AWAITING_VERIFICATION: '修改已保存，等待验证',
+    REPAIRING: '验证未通过，继续修正', READY_TO_FINALIZE: '当前验收已通过，正在整理结果',
+    RECOVERY_REQUIRED: '有操作结果待确认，任务尚未完成',
+  };
+  return typeof goal?.status === 'string' ? labels[goal.status] ?? null : null;
+}
+
+export function shouldShowMcpRuntime(runtime: { connections: readonly unknown[]; diagnostics: readonly { code: string }[] } | null): boolean {
+  return Boolean(runtime && (runtime.connections.length > 0 || runtime.diagnostics.some((item) => item.code !== 'CONFIG_NOT_FOUND')));
+}
 
 export interface ActivityFileLink {
   path: string;
@@ -29,6 +45,10 @@ export function activityToolDescription(tool: AgentToolCallView): string {
   const args = tool.arguments && typeof tool.arguments === 'object' && !Array.isArray(tool.arguments)
     ? tool.arguments as Record<string, unknown> : {};
   const path = typeof args.path === 'string' ? args.path : '';
+  if (tool.name === 'work_plan') {
+    const next = args.next_step as Record<string, unknown> | undefined;
+    return typeof next?.action === 'string' ? next.action : '保留目标与下一步，计划可调整';
+  }
   if (tool.name === 'read_file') {
     const start = Number.isSafeInteger(args.line_start) ? Number(args.line_start) : 1;
     const end = Number.isSafeInteger(args.line_end) ? Number(args.line_end) : null;
@@ -46,6 +66,37 @@ export function activityToolDescription(tool: AgentToolCallView): string {
   return path;
 }
 
+export function activityToolIssue(tool: AgentToolCallView): string | null {
+  const receipt = tool.receipt as Record<string, unknown> | null;
+  if (receipt?.user_action_required === 'LOGIN') return '请在右侧浏览器完成登录，然后继续页面验证。';
+  if (receipt?.error_code === 'BROWSER_LOGIN_NOT_OBSERVED') return '当前页面未观察到登录所需的密码输入框，请重新检查页面。';
+  if (receipt?.error_code === 'BROWSER_SERVER_NOT_TRACKED' || receipt?.error_code === 'BROWSER_SERVER_NOT_STARTED') return '当前任务未关联服务进程；已有服务可能仍在运行，需要检查实际地址。';
+  if (receipt?.error_code === 'BROWSER_NAVIGATION_FAILED') return '目标页面加载失败，未取得可验证的页面内容；这不能证明需要登录。';
+  if (tool.name === 'browser_server' && receipt?.readiness === 'NOT_CHECKED') return '进程已启动，网站地址尚未检查。';
+  if (tool.name === 'browser_server' && receipt?.readiness === 'NOT_LISTENING') return '该地址未接受连接，需要核对开发服务的地址和启动状态。';
+  const labels: Record<string, string> = {
+    AGENT_WORK_EVIDENCE_STALE: '引用对应的文件已变化；这条旧证据需要重新核对。',
+    AGENT_WORK_QUOTE_MISMATCH: '引用未匹配文件内容，未作为已确认事实。',
+    AGENT_WORK_EVIDENCE_REQUIRED: '引用未关联成功的文件读取，未作为已确认事实。',
+    AGENT_WORK_EVIDENCE_RANGE_INVALID: '引用行号超出已读取范围，未作为已确认事实。',
+    AGENT_WORK_SCOPE_MISMATCH: '旧版计划范围曾阻止这次操作；当前版本允许按任务需要调整。',
+    AGENT_WORK_PLAN_REQUIRED: '旧版曾要求先填写计划；当前版本的计划为可选辅助记录。',
+    AGENT_WORK_PLAN_AMENDMENT_REQUIRED: '旧版曾阻止计划更新；当前版本允许修正计划。',
+  };
+  if (tool.error_code && labels[tool.error_code]) return labels[tool.error_code]!;
+  if (tool.name !== 'work_plan') return null;
+  const plan = receipt?.plan as Record<string, unknown> | undefined;
+  const issues = Array.isArray(plan?.evidence_issues) ? plan.evidence_issues : [];
+  return issues.length ? `计划已记录，${issues.length} 条引用未确认为当前证据；任务尚未验证。` : null;
+}
+
+export function browserLoadPauseReason(tools: readonly AgentToolCallView[]): string | null {
+  const last = [...tools].reverse().find(tool => tool.name === 'browser');
+  const receipt = last?.receipt as Record<string, unknown> | null;
+  return receipt && (receipt.error_code === 'BROWSER_NAVIGATION_FAILED' || (receipt.navigation_generation === 0 && receipt.text === ''))
+    ? '目标页面未能加载，尚未完成页面验证。已保留加载失败的记录，可继续排查服务地址与启动状态。' : null;
+}
+
 export function activityNarrativePreview(text: string): string | null {
   if (text.length <= 420 && !text.includes('```') && text.split('\n').length <= 6) return null;
   const paragraph = text.split(/\r?\n\s*\r?\n|```/)[0]?.trim() ?? '';
@@ -56,11 +107,12 @@ export function activityNarrativePreview(text: string): string | null {
 export function activityFailureReason(run: AgentRunView | null): string | null {
   if (run?.status !== 'FAILED' || !run.error_code) return null;
   const labels: Record<string, string> = {
-    AGENT_MAX_STEPS_REACHED: `本轮执行步数已用尽（${run.current_step}/${run.max_steps} 步）`,
+    AGENT_MAX_STEPS_REACHED: run.current_step < run.max_steps ? '旧版局部策略提前结束，任务尚未完成' : '已达到本轮整体执行额度，任务尚未完成',
     AGENT_TEXT_MATCH_FAILED: '待替换内容未能唯一匹配，修改未生效',
     AGENT_FILE_CHANGED: '文件内容已变化，需要重新核对修改',
     PROVIDER_RATE_LIMITED: '模型服务暂时限流',
     PROVIDER_PROTOCOL_ERROR: '模型服务未正确返回响应',
+    PROVIDER_REQUEST_REJECTED: '模型服务拒绝了请求',
     CREDENTIAL_REJECTED: '模型凭据未通过验证',
     AGENT_VERIFICATION_STALE: '当前修改尚未获得有效验证',
   };

@@ -6,7 +6,7 @@ import {
   validateCreateProvider, validateStoreCredential, validateStartModel, validateCreateCapture,
   validateCreateConversation, validateCreateConversationMessage, validateUpdateProject, validateApplyWorkspaceFile,
   validateRunTerminal,
-  validateStartAgent, validateListAgentEvents, validateResolveAgentApproval,
+  validateStartAgent, validateResumeAgent, validateListAgentEvents, validateResolveAgentApproval,
   validateListFileArtifactReviews, validateMarkFileArtifactReviewed, validateUndoFileArtifactRevision,
   validateActivateMcpConnection,
   validateStoreWorkspaceAttachment, validateReadWorkspaceAttachment, validateSaveWorkspaceAttachment,
@@ -136,6 +136,7 @@ test('Rich Result message bridge admits only bounded typed sidecars', () => {
 test('Complete Agent bridge accepts only bounded typed execution and approval payloads', () => {
   const start={field_id:fieldId,conversation_id:fieldId,provider_config_id:fieldId,model_id:'gpt-test',task:'Fix the failing test',permission:'REVIEW_CHANGES',max_steps:24} as const;
   assert.equal(validateStartAgent(start).permission,'REVIEW_CHANGES');
+  assert.equal(validateStartAgent({...start,max_steps:null}).max_steps,null);
   assert.equal(validateStartAgent({...start,user_message_id:fieldId}).user_message_id,fieldId);
   assert.throws(()=>validateStartAgent({...start,user_message_id:'not-an-id'}));
   assert.throws(()=>validateStartAgent({...start,permission:'UNRESTRICTED'}));
@@ -158,6 +159,10 @@ test('multimodal Agent and attachment bridges accept only bounded native image p
   const start = { field_id: fieldId, conversation_id: fieldId, user_message_id: fieldId, provider_config_id: fieldId, model_id: 'qwen3.7-plus', task: '说明图片内容', permission: 'REVIEW_CHANGES', max_steps: 24, attachments: [image] } as const;
   assert.equal(validateStartAgent(start).attachments?.[0]?.source, 'clipboard');
   assert.equal(validateStartAgent(start).attachments?.[0]?.mime_type, 'image/png');
+  assert.deepEqual(validateResumeAgent({ run_id: fieldId }), { run_id: fieldId });
+  assert.equal(validateResumeAgent({ run_id: fieldId, attachments: [image] }).attachments?.[0]?.data_url, image.data_url);
+  assert.throws(() => validateResumeAgent({ run_id: fieldId, attachments: [{ ...image, data_url: 'https://example.com/image.png' }] }));
+  assert.throws(() => validateResumeAgent({ run_id: fieldId, task: 'replace original task' }));
   assert.throws(() => validateStartAgent({ ...start, attachments: [{ ...image, source: 'remote_url' }] }));
   assert.throws(() => validateStartAgent({ ...start, attachments: Array.from({ length: 5 }, () => image) }));
 

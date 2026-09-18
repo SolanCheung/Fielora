@@ -122,6 +122,7 @@
   --fl-density-section-gap: 16px;
 
   /* Stable workbench proportions. Paint layers must not override these values. */
+  --fl-layout-titlebar-height: 44px;
   --fl-layout-navigation-default: 304px;
   --fl-layout-navigation-min: 260px;
   --fl-layout-navigation-max: 360px;

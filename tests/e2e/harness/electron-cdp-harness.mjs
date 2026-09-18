@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
+import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import path from 'node:path';
 
@@ -8,6 +9,12 @@ export class CdpConnection {
     this.socket = new WebSocket(url);
     this.id = 0;
     this.pending = new Map();
+    const disconnected = () => {
+      for (const pending of this.pending.values()) pending.reject(new Error('Electron CDP connection closed'));
+      this.pending.clear();
+    };
+    this.socket.addEventListener('close', disconnected);
+    this.socket.addEventListener('error', disconnected);
   }
 
   async open() {
@@ -25,10 +32,19 @@ export class CdpConnection {
   }
 
   send(method, params = {}) {
+    if (this.socket.readyState !== WebSocket.OPEN) return Promise.reject(new Error('Electron CDP connection is not open'));
     const id = ++this.id;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.socket.send(JSON.stringify({ id, method, params }));
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Electron CDP request timed out: ${method}`));
+      }, 30_000);
+      this.pending.set(id, {
+        resolve: value => { clearTimeout(timer); resolve(value); },
+        reject: error => { clearTimeout(timer); reject(error); },
+      });
+      try { this.socket.send(JSON.stringify({ id, method, params })); }
+      catch (error) { this.pending.get(id)?.reject(error); this.pending.delete(id); }
     });
   }
 
@@ -81,8 +97,13 @@ export async function launchElectron({ root, dataRoot, executablePath = '', args
   const child = executablePath
     ? spawn(executablePath, args, { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     : spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', 'pnpm --filter @fielora/desktop start'], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stdout.on('data', (chunk) => output.push(String(chunk)));
-  child.stderr.on('data', (chunk) => output.push(String(chunk)));
+  const record = chunk => {
+    output.push(String(chunk));
+    if (process.env.FIELORA_E2E_EVIDENCE_DIR) appendFileSync(path.join(process.env.FIELORA_E2E_EVIDENCE_DIR, 'electron-live.log'), String(chunk));
+  };
+  child.stdout.on('data', record);
+  child.stderr.on('data', record);
+  child.on('exit', (code, signal) => record(`\nElectron launcher exit: code=${code} signal=${signal}\n`));
   return { child, output, port };
 }
 
@@ -100,7 +121,9 @@ export async function connectToFieloraApp({ port, output, timeoutMs = 60_000, en
 }
 
 export async function waitForExpression(cdp, expression, { timeoutMs = 20_000, output = [] } = {}) {
-  return pollUntil(async () => await cdp.eval(`Boolean(${expression})`), {
+  // Coerce the resolved value, never the Promise itself: a pending health or
+  // Agent status request is not evidence that its condition has been met.
+  return pollUntil(async () => await cdp.eval(`(async()=>Boolean(await (${expression})))()`), {
     timeoutMs,
     intervalMs: 75,
     errorMessage: () => `wait failed: ${expression}\n${output.join('')}`,

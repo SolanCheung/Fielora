@@ -13,10 +13,10 @@ interface AttachmentThumbnailProps {
 export function AttachmentThumbnail({ attachment, variant, onOpen, onRemove, onContextMenu }: AttachmentThumbnailProps) {
   const ready = attachment.status === 'READY' && Boolean(attachment.data_url);
   return <article className={`attachment-thumbnail is-${variant}${ready ? '' : ' is-unavailable'}`} data-testid={`attachment-thumbnail-${variant}`} data-attachment-id={attachment.id}>
-    <button type="button" className="attachment-thumbnail-image" onClick={() => ready && onOpen(attachment)} onContextMenu={(event) => { event.preventDefault(); if (ready) onContextMenu(event, attachment); }} aria-label={`查看图片 ${attachment.name}`} disabled={!ready}>
+    <button type="button" className="attachment-thumbnail-image" onClick={() => ready && onOpen(attachment)} onContextMenu={(event) => { event.preventDefault(); if (ready) onContextMenu(event, attachment); }} aria-label={`查看图片 ${attachment.name}`} title={attachment.name} disabled={!ready}>
       {attachment.data_url ? <img src={attachment.data_url} alt={attachment.name}/> : <AppIcon name="files"/>}
     </button>
-    <footer><span title={attachment.name}>{attachment.name}</span>{onRemove && <button type="button" aria-label={`移除 ${attachment.name}`} onClick={() => onRemove(attachment.id)}><AppIcon name="close"/></button>}</footer>
+    {onRemove && <button type="button" className="attachment-thumbnail-remove" aria-label={`移除 ${attachment.name}`} onClick={() => onRemove(attachment.id)}><AppIcon name="close"/></button>}
     {attachment.status !== 'READY' && <small>{attachment.reason}</small>}
   </article>;
 }
@@ -57,7 +57,7 @@ export function ImagePreview({ attachment, onClose, onContextMenu }: {
     return () => window.removeEventListener('keydown', close);
   }, [onClose]);
   return <div className="image-preview-backdrop" role="dialog" aria-modal="true" aria-label={`查看图片 ${attachment.name}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} data-testid="image-preview" data-effect="backdrop-dim">
-    <section className="image-preview-shell">
+    <section className="image-preview-shell" onMouseDown={(event) => { if (event.target === event.currentTarget || (event.target instanceof HTMLElement && event.target.classList.contains('image-preview-canvas'))) onClose(); }}>
       <header><span>{attachment.name}</span><div><button type="button" onClick={() => setZoom((value) => Math.max(.5, value - .25))} aria-label="缩小图片">−</button><output>{Math.round(zoom * 100)}%</output><button type="button" onClick={() => setZoom((value) => Math.min(4, value + .25))} aria-label="放大图片">＋</button><button type="button" onClick={onClose} aria-label="关闭图片预览"><AppIcon name="close"/></button></div></header>
       <div className="image-preview-canvas"><img src={attachment.data_url ?? ''} alt={attachment.name} style={{ transform: `scale(${zoom})` }} onContextMenu={onContextMenu ? (event) => { event.preventDefault(); onContextMenu(event, attachment); } : undefined}/></div>
     </section>

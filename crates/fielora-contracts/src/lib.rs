@@ -2606,6 +2606,66 @@ pub struct AgentRunView {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
+pub struct ModelUsageReportRequest {
+    #[ts(type = "number | null")]
+    pub since: Option<i64>,
+    #[ts(type = "number")]
+    pub offset: u32,
+    #[ts(type = "number")]
+    pub limit: u32,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct TaskTokenUsage {
+    #[ts(type = "number")]
+    pub input_tokens: u64,
+    #[ts(type = "number")]
+    pub output_tokens: u64,
+    #[ts(type = "number")]
+    pub reported_calls: u64,
+    #[ts(type = "number")]
+    pub unreported_calls: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ModelUsageTask {
+    pub run_id: AgentRunId,
+    pub conversation_id: ConversationId,
+    pub title: String,
+    pub provider_config_id: ProviderConfigId,
+    pub model_id: String,
+    pub status: AgentRunStatus,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    pub usage: TaskTokenUsage,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ModelUsageGroup {
+    pub provider_config_id: ProviderConfigId,
+    pub model_id: String,
+    pub usage: TaskTokenUsage,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ModelUsageDay {
+    pub date: String,
+    pub usage: TaskTokenUsage,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ModelUsageReport {
+    pub usage: TaskTokenUsage,
+    pub models: Vec<ModelUsageGroup>,
+    pub daily: Vec<ModelUsageDay>,
+    pub tasks: Vec<ModelUsageTask>,
+    pub active: Vec<ModelUsageTask>,
+    #[ts(type = "number")]
+    pub total_tasks: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
 pub struct AgentInputAttachment {
     pub id: String,
     pub filename: String,
@@ -2673,6 +2733,15 @@ pub struct SetArtifactArchiveStateCommandRequest {
 #[serde(deny_unknown_fields)]
 pub struct AgentRunRequest {
     pub run_id: AgentRunId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ResumeAgentRunRequest {
+    pub run_id: AgentRunId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub attachments: Option<Vec<AgentInputAttachment>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

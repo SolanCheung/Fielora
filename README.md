@@ -72,8 +72,22 @@ Codex-like Desktop Foundation Build A+B 已实现为 schema 5 candidate：Projec
 
 Complete Agent 现已实现 Project-scoped 持久 Run、Context、typed file tools、受控命令、Approval、Verification、recovery 与只读 subagent。2026-08-18 的当前优先级进一步收敛为编程、测试和代码版本管理：新增 Always-Ask typed Git stage/unstage/branch/commit/push，文件写入后必须通过真实 test/check/build/lint/typecheck 再进入 Git finalize；Qwen、DeepSeek、Kimi、GLM、MiniMax、Doubao 共用 `china-coding-v1` 行为层和可编辑 Provider presets。已保存 Qwen Key 确认为 Coding Plan 并修正到专用交互 endpoint；自动化 Acceptance 对该类 Key fail-closed。deterministic engineering 已验证，六家真实模型质量仍为 `NOT_PASSED / UNVERIFIED`，不能据此宣称最终好用或 Provider certification。详情见 `docs/product/FIELORA_CHINA_MODEL_OPTIMIZATION_V0.1.md`。
 
+Agent 设计与实现中的错误、失败尝试、修正办法和验证缺口集中维护在
+[`AGENT_DESIGN_IMPLEMENTATION_LESSONS.md`](docs/engineering/AGENT_DESIGN_IMPLEMENTATION_LESSONS.md)。
+后续相关调查、修复、复发与验收随同一 changeset 更新；开始工作时按索引查相关案例，不新增完整历史阅读要求。
+
 ## 开发工作流
 
 日常开发与人工体验长期运行 `pnpm dev`。根据变更范围使用 `pnpm verify:dev:docs`、`verify:dev:ui`、`verify:dev:core` 或 `verify:dev:cross`；任何准备进入 main 的变更运行 `pnpm verify:premerge`。Packaging-sensitive 变更额外执行 targeted packaged smoke；重大 Contract/Schema/Permission/Reality/Verification 变化先形成 `CHANGE IMPACT` 并运行受影响兼容性与 Hero Flow regression。正式阶段仍运行冻结的完整 Phase Gate。精确定义见 `docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md`。
 
 Desktop UI 的唯一 canonical 设计语言是 **Fielora Glass**。System / Light / Dark 只决定明暗外观；产品原则见 `docs/product/FIELORA_DESIGN_LANGUAGE_V0.1.md`，实现 ownership、Cascade、Typography、Phosphor Icon 与共享控件规范见 `docs/architecture/FIELORA_UI_UX_SYSTEM_V0.1.md`。任何受管理 UI/UX 系统样式变更必须在同一 changeset 更新该架构文档，并通过 `pnpm verify:ui-ux`。
+
+## License
+
+Fielora source code and documentation are licensed under the
+[Apache License, Version 2.0](LICENSE), except where a file or directory
+identifies a separate license. See [NOTICE](NOTICE) for project attribution.
+Third-party dependencies and vendored materials retain their original licenses
+and notices.
+
+See [the adoption record](docs/engineering/APACHE_2_0_ADOPTION.md).

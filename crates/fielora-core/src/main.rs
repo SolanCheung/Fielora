@@ -1,4 +1,10 @@
+mod agent_browser;
+mod agent_request_scope;
 mod agent_runtime;
+mod agent_turn_context;
+mod agent_visual_context;
+mod agent_work_plan;
+mod agent_work_state;
 mod build_provenance;
 pub mod idr_acquisition;
 pub mod idr_eval;
@@ -38,7 +44,7 @@ use uuid::Uuid;
 
 const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 const PROTOCOL: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
-const CAPABILITIES: [&str; 91] = [
+const CAPABILITIES: [&str; 92] = [
     "system.build_provenance",
     "field.create",
     "field.list",
@@ -113,6 +119,7 @@ const CAPABILITIES: [&str; 91] = [
     "agent.start",
     "agent.get",
     "agent.list",
+    "agent.usage",
     "agent.events",
     "agent.tool_calls",
     "agent.cancel",
@@ -279,7 +286,8 @@ fn run() -> Result<(), CoreError> {
         async_runtime.handle().clone(),
         paths.config_dir.clone(),
     )
-    .with_content_blob_root(paths.library_dir.clone());
+    .with_content_blob_root(paths.library_dir.clone())
+    .with_browser_bridge();
     let reconciled = handle
         .reconcile_agent_runs(now_ms())
         .map_err(|error| CoreError::Storage(error.to_string()))?;
@@ -512,6 +520,11 @@ fn dispatch_request(
     trace_id: TraceId,
 ) -> Result<(Value, Option<DomainEventDTO>), DomainError> {
     match request.method.as_str() {
+        // Parent/Main only: never exported by the renderer preload bridge.
+        "host.browser.complete" => Ok((
+            json!({"accepted":runtime.agent.complete_browser_request(&request.params)}),
+            None,
+        )),
         "system.hello" => {
             runtime.hello_completed = true;
             serialize(HelloResponse {
@@ -835,6 +848,10 @@ fn dispatch_request(
             let params: ListAgentRunsRequest = parse_params(&request.params)?;
             serialize(runtime.storage.list_agent_runs(params.conversation_id)?)
         }
+        "query.agent.usage" => {
+            let params: ModelUsageReportRequest = parse_params(&request.params)?;
+            serialize(runtime.storage.model_usage_report(params)?)
+        }
         "query.agent.events" => {
             let params: ListAgentEventsRequest = parse_params(&request.params)?;
             serialize(runtime.storage.list_agent_events(params)?)
@@ -852,8 +869,8 @@ fn dispatch_request(
             serialize(runtime.agent.pause(params.run_id)?)
         }
         "command.agent.resume" => {
-            let params: AgentRunRequest = parse_params(&request.params)?;
-            serialize(runtime.agent.resume(params.run_id)?)
+            let params: ResumeAgentRunRequest = parse_params(&request.params)?;
+            serialize(runtime.agent.resume_with_inputs(params)?)
         }
         "command.agent.resolve_approval" => {
             let params: ResolveAgentApprovalRequest = parse_params(&request.params)?;

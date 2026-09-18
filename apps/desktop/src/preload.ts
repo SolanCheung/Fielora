@@ -148,6 +148,7 @@ const bridge: FieloraBridge = {
     start: (request) => ipcRenderer.invoke(channels.agentStart, request),
     get: (request) => ipcRenderer.invoke(channels.agentGet, request),
     list: (request) => ipcRenderer.invoke(channels.agentList, request),
+    usage: (request) => ipcRenderer.invoke(channels.agentUsage, request),
     events: (request) => ipcRenderer.invoke(channels.agentEvents, request),
     toolCalls: (request) => ipcRenderer.invoke(channels.agentToolCalls, request),
     cancel: (request) => ipcRenderer.invoke(channels.agentCancel, request),

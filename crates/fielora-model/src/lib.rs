@@ -287,6 +287,10 @@ pub enum ModelError {
     ProviderUnavailable,
     #[error("PROVIDER_PROTOCOL_ERROR")]
     ProviderProtocolError,
+    #[error("PROVIDER_REQUEST_REJECTED")]
+    ProviderRequestRejected(u16),
+    #[error("{category}")]
+    ProviderRequestInvalid { status: u16, category: &'static str },
     #[error("PROVIDER_RESPONSE_TOO_LARGE")]
     ProviderResponseTooLarge,
     #[error("CONTEXT_TOO_LARGE")]
@@ -300,6 +304,15 @@ pub enum ModelError {
 }
 
 impl ModelError {
+    pub fn http_status(&self) -> Option<u16> {
+        match self {
+            Self::ProviderRequestRejected(status) | Self::ProviderRequestInvalid { status, .. } => {
+                Some(*status)
+            }
+            _ => None,
+        }
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             Self::CredentialRejected => "CREDENTIAL_REJECTED",
@@ -307,6 +320,8 @@ impl ModelError {
             Self::ProviderRateLimited => "PROVIDER_RATE_LIMITED",
             Self::ProviderUnavailable => "PROVIDER_UNAVAILABLE",
             Self::ProviderProtocolError => "PROVIDER_PROTOCOL_ERROR",
+            Self::ProviderRequestRejected(_) => "PROVIDER_REQUEST_REJECTED",
+            Self::ProviderRequestInvalid { category, .. } => category,
             Self::ProviderResponseTooLarge => "PROVIDER_RESPONSE_TOO_LARGE",
             Self::ContextTooLarge => "CONTEXT_TOO_LARGE",
             Self::ContextBlocked => "CONTEXT_BLOCKED",
@@ -418,7 +433,7 @@ impl ModelClient {
             value = response => value.map_err(|_| ModelError::ProviderUnavailable)?,
         };
         trace_provider_status("invoke", response.status());
-        map_status(response.status())?;
+        let response = checked_response(response, &cancellation).await?;
         let mut stream = response.bytes_stream();
         let mut decoder = SseDecoder::default();
         let mut saw_provider_terminal = false;
@@ -500,7 +515,7 @@ impl ModelClient {
             value = response => value.map_err(|_| ModelError::ProviderUnavailable)?,
         };
         trace_provider_status("agent", response.status());
-        map_status(response.status())?;
+        let response = checked_response(response, &cancellation).await?;
         let mut stream = response.bytes_stream();
         let mut decoder = SseDecoder::default();
         let mut accumulator = AgentStreamAccumulator::new(endpoint.kind);
@@ -706,11 +721,16 @@ fn agent_provider_body(endpoint: &ProviderEndpoint, request: &AgentModelRequest)
                     content.extend(images.iter().map(|image| json!({"type":"image_url","image_url":{"url":image.data_url}})));
                     json!({"role":"user","content":content})
                 }
-                AgentModelMessage::Assistant { text, tool_calls } => json!({
-                    "role":"assistant",
-                    "content":if text.is_empty(){Value::Null}else{Value::String(text.clone())},
-                    "tool_calls":tool_calls.iter().map(|call|json!({"id":call.id,"type":"function","function":{"name":call.name,"arguments":call.arguments.to_string()}})).collect::<Vec<_>>()
-                }),
+                AgentModelMessage::Assistant { text, tool_calls } => {
+                    let mut message = json!({"role":"assistant","content":text});
+                    // Ordinary assistant history is text, not an empty tool-call
+                    // exchange. Some compatible providers reject tool_calls: [].
+                    if !tool_calls.is_empty() {
+                        if text.is_empty() { message["content"] = Value::Null; }
+                        message["tool_calls"] = json!(tool_calls.iter().map(|call|json!({"id":call.id,"type":"function","function":{"name":call.name,"arguments":call.arguments.to_string()}})).collect::<Vec<_>>());
+                    }
+                    message
+                },
                 AgentModelMessage::ToolResult { call_id, name, content, .. } => json!({
                     "role":"tool","tool_call_id":call_id,"name":name,"content":content
                 }),
@@ -727,6 +747,10 @@ fn agent_provider_body(endpoint: &ProviderEndpoint, request: &AgentModelRequest)
             });
             let profile = coding_behavior_profile(endpoint, &request.model_id);
             if let Some(object) = body.as_object_mut() {
+                if request.tools.is_empty() {
+                    object.remove("tools");
+                    object.remove("tool_choice");
+                }
                 if profile.family == CodingModelFamily::MiniMax {
                     object.insert(
                         "max_completion_tokens".into(),
@@ -1347,6 +1371,80 @@ fn provider_terminal(kind: ProviderKind, value: &Value) -> bool {
     }
 }
 
+// Error bodies are used only for a bounded, fixed classification. No provider
+// text, reflected prompt, image bytes or credential is retained or displayed.
+fn classify_rejection(status: u16, bytes: &[u8]) -> ModelError {
+    let text = serde_json::from_slice::<Value>(bytes)
+        .ok()
+        .map(|value| {
+            [
+                "/error/code",
+                "/error/type",
+                "/error/param",
+                "/error/message",
+                "/code",
+                "/message",
+            ]
+            .iter()
+            .filter_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase()
+        })
+        .unwrap_or_default();
+    let category = if status == 413
+        || text.contains("context_length")
+        || text.contains("maximum context")
+        || text.contains("context length")
+    {
+        "PROVIDER_CONTEXT_LIMIT"
+    } else if text.contains("image")
+        && ["unsupported", "invalid", "not support", "decode", "format"]
+            .iter()
+            .any(|word| text.contains(word))
+    {
+        "PROVIDER_IMAGE_REJECTED"
+    } else if ["tool_calls", "tool_call_id", "messages", "message role"]
+        .iter()
+        .any(|word| text.contains(word))
+    {
+        "PROVIDER_INVALID_MESSAGES"
+    } else {
+        return ModelError::ProviderRequestRejected(status);
+    };
+    ModelError::ProviderRequestInvalid { status, category }
+}
+
+async fn checked_response(
+    response: reqwest::Response,
+    cancellation: &CancellationToken,
+) -> Result<reqwest::Response, ModelError> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    if !matches!(status.as_u16(), 400 | 413 | 422) {
+        map_status(status)?;
+    }
+    let fallback = ModelError::ProviderRequestRejected(status.as_u16());
+    let read = async {
+        let mut stream = response.bytes_stream();
+        let mut body = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|_| fallback.clone())?;
+            if body.len() + chunk.len() > 32 * 1024 {
+                return Err(fallback.clone());
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Err(classify_rejection(status.as_u16(), &body))
+    };
+    tokio::select! {
+        _ = cancellation.cancelled() => Err(ModelError::InvocationCancelled),
+        result = tokio::time::timeout(std::time::Duration::from_secs(2), read) => result.unwrap_or(Err(fallback)),
+    }
+}
+
 fn map_status(status: StatusCode) -> Result<(), ModelError> {
     match status.as_u16() {
         200..=299 => Ok(()),
@@ -1354,7 +1452,7 @@ fn map_status(status: StatusCode) -> Result<(), ModelError> {
         404 => Err(ModelError::ModelNotAvailable),
         408 | 429 => Err(ModelError::ProviderRateLimited),
         500..=599 => Err(ModelError::ProviderUnavailable),
-        _ => Err(ModelError::ProviderProtocolError),
+        _ => Err(ModelError::ProviderRequestRejected(status.as_u16())),
     }
 }
 
@@ -1749,7 +1847,7 @@ mod tests {
         );
         assert_eq!(
             map_status(StatusCode::BAD_REQUEST),
-            Err(ModelError::ProviderProtocolError)
+            Err(ModelError::ProviderRequestRejected(400))
         );
         assert!(provider_failure(
             ProviderKind::Openai,
@@ -2012,6 +2110,53 @@ mod tests {
             Some(&json!("data:image/png;base64,iVBORw0KGgo="))
         );
         assert!(!body.to_string().contains("附件：screen.png"));
+        let mut follow_up = request.clone();
+        follow_up.messages.insert(
+            0,
+            AgentModelMessage::Assistant {
+                text: "Previous result".into(),
+                tool_calls: vec![],
+            },
+        );
+        let follow_up = agent_provider_body(
+            &ProviderEndpoint {
+                kind: ProviderKind::OpenaiCompatible,
+                base_url: Some("https://coding.dashscope.aliyuncs.com/v1".into()),
+            },
+            &follow_up,
+        );
+        assert_eq!(
+            follow_up.pointer("/messages/1/content"),
+            Some(&json!("Previous result"))
+        );
+        assert!(follow_up.pointer("/messages/1/tool_calls").is_none());
+        assert!(
+            follow_up
+                .pointer("/messages/2/content/1/image_url/url")
+                .is_some()
+        );
+        assert!(follow_up.get("tools").is_none());
+        assert!(follow_up.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn rejected_request_classification_never_retains_provider_text() {
+        let error = classify_rejection(400, br#"{"error":{"message":"messages tool_calls must not be empty; secret-prompt-and-token"}}"#);
+        assert_eq!(error.code(), "PROVIDER_INVALID_MESSAGES");
+        assert_eq!(error.http_status(), Some(400));
+        assert!(!format!("{error:?}").contains("secret-prompt"));
+        assert_eq!(
+            classify_rejection(400, br#"{"error":{"message":"unsupported image format"}}"#).code(),
+            "PROVIDER_IMAGE_REJECTED"
+        );
+        assert_eq!(
+            classify_rejection(413, b"not json").code(),
+            "PROVIDER_CONTEXT_LIMIT"
+        );
+        assert_eq!(
+            classify_rejection(400, br#"{"message":"unknown rejection"}"#),
+            ModelError::ProviderRequestRejected(400)
+        );
     }
 
     #[test]

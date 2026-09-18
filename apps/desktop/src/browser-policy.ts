@@ -35,6 +35,8 @@ export function toBrowserUserMessage(reason: unknown): string {
     if (raw.includes(`${ERROR_PREFIX}${code}`)) return message;
   }
   if (raw.includes('Browse page no longer exists')) return '这个页面已经关闭。';
+  if (raw.includes('ERR_CONNECTION_REFUSED')) return '无法连接此地址，请检查网站或本地服务是否已启动，以及地址和端口是否正确。';
+  if (raw.includes('ERR_NAME_NOT_RESOLVED')) return '找不到这个网站，请检查地址是否正确。';
   return 'Browse 暂时无法完成此操作，请重试。';
 }
 

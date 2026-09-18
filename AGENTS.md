@@ -161,6 +161,16 @@ Development Workflow Hardening 已从稳定 `main@e757d050b97a3f0dd3b6812bccefc1
 
 结合本次故障举例，避免只列术语或文件名；说明随修复一起完成，不增加额外审批或设计仪式。
 
+### 6.2 Agent 错误与解决办法持续记录
+
+专门记录位于 [`docs/engineering/AGENT_DESIGN_IMPLEMENTATION_LESSONS.md`](docs/engineering/AGENT_DESIGN_IMPLEMENTATION_LESSONS.md)。
+
+- Agent 相关设计或修复前，查阅该记录索引和本次相关条目；不要求普通工作通读全部历史。
+- 调查发现新原因、实施修复、撤回错误方案、问题复发或完成真实任务验收时，在同一 changeset 更新对应条目；未修复也记录证据和待查项。没有新事实不制造流水账。
+- 写清现象、已确认原因与推测、Model/Harness/Tools 责任、失败尝试、解决办法、验证证据及未验证范围；保留旧判断被推翻的过程。
+- 分别维护原因、机制修复、原始用户任务的状态。确定性模型替身/工程 PASS 不得写成真实模型已解决原任务；没有实际运行的解决办法标为待验证。
+- 重大决定仍同步 Project Reality、Decisions 与受影响 Spec。记录不增加审批或 Freeze 流程，不改变现有执行授权。
+
 ## 7. UI 约束
 
 默认禁止：永久 AI Sidebar、永久 Field State Dashboard、永久 Agent Activity 面板、五个 Mode 按钮常驻、多等权重 Dashboard 卡片、任意 LLM 生成 React UI、因内部状态多而全部暴露。

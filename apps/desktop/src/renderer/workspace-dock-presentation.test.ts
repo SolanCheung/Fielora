@@ -82,7 +82,7 @@ test('right workspace dock keeps a dynamic resize range and full-width tool view
 });
 
 test('a project can exist without a conversation and exposes a finite creation entry', () => {
-  assert.match(workspace, /data-testid="project-empty-conversation"/);
+  assert.match(workspace, /'project-empty-conversation'/);
   assert.match(workspace, /开始新的工作/);
   assert.match(workspace, /withUiTimeout\(window\.fielora\.conversation\.create/);
   assert.match(workspace, /无法创建新对话/);
@@ -192,7 +192,7 @@ test('terminal inherits the workspace canvas instead of drawing a nested grey pa
   assert.match(workspace, /function TerminalSession/);
   assert.match(styles, /\.right-terminal-view \{[\s\S]*?display: block;[\s\S]*?background: inherit/);
   assert.match(styles, /\.terminal-session \{[\s\S]*?background: transparent;[\s\S]*?var\(--fl-font-agent-mono\)/);
-  assert.match(styles, /\.terminal-prompt input \{[\s\S]*?border: 0; outline: 0;[\s\S]*?background: transparent/);
+  assert.match(styles, /\.terminal-prompt input \{[^}]*border: 0;[^}]*outline: 0;[^}]*background: transparent/);
   assert.doesNotMatch(workspace, /terminal-toolbar|data-testid="run-tests"|data-testid="bottom-terminal-tests"/);
 });
 

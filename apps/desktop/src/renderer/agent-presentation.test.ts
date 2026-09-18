@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AgentEventView, AgentRunView, AgentToolCallView } from '@fielora/contracts';
-import { agentCompletionTimeLabel, agentOpeningNarrative, agentRequestKind, agentTerminalBody, agentTerminalTitle, approvalActionLabel, buildAgentPresentation, buildAgentResultViewModel, stripTerminalHeading } from './agent-presentation.ts';
+import { agentPausePresentation, agentCompletionTimeLabel, agentOpeningNarrative, agentRequestKind, agentTerminalBody, agentTerminalTitle, approvalActionLabel, buildAgentPresentation, buildAgentResultViewModel, stripTerminalHeading } from './agent-presentation.ts';
 
 function run(status: AgentRunView['status'], errorCode: string | null = null): AgentRunView {
   return {
@@ -234,4 +234,25 @@ test('explicit answer-only requests bypass the action lifecycle while real work 
   assert.equal(agentRequestKind('把用户字段改成非必填并运行验证'), 'ACTION');
   assert.equal(agentRequestKind('只修改三处注释文本，不要修改其他文件'), 'ACTION');
   assert.equal(agentRequestKind('搜索并检查这个页面的实现'), 'ACTION');
+});
+
+test('budget pauses expose the explicit allowance and do not promise completion', () => {
+  const paused = { ...run('PAUSED', 'AGENT_BUDGET_EXHAUSTED'), current_step: 64, max_steps: 64 };
+  assert.match(agentPausePresentation(paused).reason, /任务尚未完成/);
+  assert.equal(agentPausePresentation(paused).action, '继续工作（增加 24 步）');
+  assert.equal(agentPausePresentation({ ...paused, current_step: 4096, max_steps: 4096 }).canResume, false);
+  assert.equal(agentPausePresentation(run('PAUSED')).action, '继续工作');
+  assert.match(agentPausePresentation(run('PAUSED', 'AGENT_VERIFICATION_REQUIRED')).reason, /尚未通过/);
+  assert.match(agentPausePresentation(run('PAUSED', 'AGENT_TIME_BUDGET_EXHAUSTED')).reason, /60 分钟/);
+  assert.match(agentPausePresentation(run('PAUSED', 'AGENT_REPEATED_ACTIONS')).reason, /重复相同操作/);
+  assert.match(agentPausePresentation(run('PAUSED', 'AGENT_BROWSER_LOGIN_REQUIRED')).reason, /右侧浏览器完成登录/);
+  assert.match(agentPausePresentation(run('PAUSED', 'AGENT_BROWSER_OUTCOME_REVIEW_REQUIRED')).reason, /没有重放操作/);
+});
+
+test('paused time does not accrue as execution time, including after continuation', () => {
+  const paused = { ...run('PAUSED'), updated_at: 6000 };
+  const events: AgentEventView[] = [{ id: 'pause', run_id: paused.id, sequence: 1, schema_version: 1, kind: 'RUN_PAUSED', payload: {}, created_at: 6000 }];
+  assert.equal(buildAgentPresentation(paused, events, [], 6000).elapsed, buildAgentPresentation(paused, events, [], 66000).elapsed);
+  events.push({ id: 'resume', run_id: paused.id, sequence: 2, schema_version: 1, kind: 'RUN_RESUMED', payload: {}, created_at: 66000 });
+  assert.equal(buildAgentPresentation({ ...paused, status: 'RUNNING' }, events, [], 67000).elapsed, buildAgentPresentation(run('RUNNING'), [], [], 7000).elapsed);
 });

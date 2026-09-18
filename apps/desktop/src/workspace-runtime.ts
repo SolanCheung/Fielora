@@ -20,6 +20,7 @@ interface TerminalRun {
   cancelled: boolean;
   emittedBytes: number;
   truncated: boolean;
+  tail: string;
 }
 
 function digest(bytes: Uint8Array): string {
@@ -72,6 +73,33 @@ function imageMime(relativePath: string, bytes: Uint8Array): WorkspaceImagePrevi
 
 export class WorkspaceRuntime {
   readonly #runs = new Map<string, TerminalRun>();
+  readonly #agentServers = new Set<string>();
+  readonly #terminalResults = new Map<string, { status: string; output: string; exit_code: number | null }>();
+
+  async startAgentServer(root: string, fieldId: string, command: string): Promise<string> {
+    if (this.#agentServers.size >= 4) throw new Error('BROWSER_SERVER_LIMIT');
+    const result = await this.runTerminal(root, fieldId, command);
+    this.#agentServers.add(result.run_id);
+    return result.run_id;
+  }
+
+  agentServerStatus(id: string): { status: string; output: string; exit_code: number | null } {
+    const run = this.#runs.get(id);
+    return run ? { status: 'RUNNING', output: run.tail, exit_code: null } : this.#terminalResults.get(id) ?? { status: 'STOPPED', output: '', exit_code: null };
+  }
+
+  async stopAgentServer(id: string): Promise<void> {
+    if (!this.#agentServers.has(id)) return;
+    const run = this.#runs.get(id);
+    if (run?.child.pid && run.child.exitCode === null) {
+      run.cancelled = true;
+      const pid = run.child.pid;
+      await new Promise<void>((resolve, reject) => execFile('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, error => {
+        if (error && this.#runs.has(id)) reject(new Error('BROWSER_SERVER_STOP_FAILED')); else resolve();
+      }));
+    }
+    this.#agentServers.delete(id);
+  }
   readonly #emit: (event: TerminalEvent) => void;
 
   constructor(emit: (event: TerminalEvent) => void) { this.#emit = emit; }
@@ -221,10 +249,13 @@ export class WorkspaceRuntime {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    const run: TerminalRun = { child, fieldId, cancelled: false, emittedBytes: 0, truncated: false };
+    const run: TerminalRun = { child, fieldId, cancelled: false, emittedBytes: 0, truncated: false, tail: '' };
     this.#runs.set(runId, run);
     this.#emit({ event: 'event.workspace.terminal', run_id: runId, field_id: fieldId, kind: 'STARTED', stream: null, text: null, exit_code: null });
     const output = (stream: 'STDOUT' | 'STDERR', bytes: Buffer): void => {
+      // The display cap must never freeze operational feedback at an old build
+      // message. Keep draining the child and retaining only its bounded tail.
+      run.tail = (run.tail + bytes.toString('utf8')).slice(-8192);
       if (run.emittedBytes >= MAX_TERMINAL_OUTPUT_BYTES) {
         if (!run.truncated) {
           run.truncated = true;
@@ -240,11 +271,16 @@ export class WorkspaceRuntime {
     child.stdout.on('data', (bytes: Buffer) => output('STDOUT', bytes));
     child.stderr.on('data', (bytes: Buffer) => output('STDERR', bytes));
     child.on('error', (error) => {
+      this.#agentServers.delete(runId);
+      this.#terminalResults.set(runId, { status: 'FAILED', output: run.tail, exit_code: null });
       this.#runs.delete(runId);
       this.#emit({ event: 'event.workspace.terminal', run_id: runId, field_id: fieldId, kind: run.cancelled ? 'CANCELLED' : 'FAILED', stream: null, text: run.cancelled ? null : error.message, exit_code: null });
     });
     child.on('close', (code) => {
+      this.#agentServers.delete(runId);
       if (!this.#runs.delete(runId)) return;
+      this.#terminalResults.set(runId, { status: run.cancelled ? 'STOPPED' : code === 0 ? 'COMPLETED' : 'FAILED', output: run.tail, exit_code: code });
+      if (this.#terminalResults.size > 32) this.#terminalResults.delete(this.#terminalResults.keys().next().value!);
       this.#emit({
         event: 'event.workspace.terminal', run_id: runId, field_id: fieldId,
         kind: run.cancelled ? 'CANCELLED' : code === 0 ? 'COMPLETED' : 'FAILED',
@@ -263,7 +299,9 @@ export class WorkspaceRuntime {
   }
 
   dispose(): void {
+    for (const id of this.#agentServers) void this.stopAgentServer(id).catch(() => undefined);
     for (const run of this.#runs.values()) {
+      if ([...this.#agentServers].some(id => this.#runs.get(id) === run)) continue;
       run.cancelled = true;
       run.child.kill();
     }

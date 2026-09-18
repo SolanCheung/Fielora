@@ -1,9 +1,26 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { AgentRunView, AgentToolCallView } from '@fielora/contracts';
-import { activityFailureReason, activityNarrativePreview, activityToolDescription, resolveActivityFileLink } from './agent-activity-detail.ts';
+import type { AgentRunView, AgentToolCallView, AgentEventView } from '@fielora/contracts';
+import { goalProgressLabel, activityFailureReason, activityNarrativePreview, activityToolDescription, activityToolIssue, browserLoadPauseReason, resolveActivityFileLink } from './agent-activity-detail.ts';
 
 const read = { name: 'read_file', status: 'COMPLETED', arguments: { path: 'src/login.js', line_start: 180, line_end: 280 }, receipt: { sha256: 'a'.repeat(64) } } as AgentToolCallView;
+
+test('failed and legacy uncommitted browser loads explain the verification pause', () => {
+  const failed = { ...read, name: 'browser', receipt: { error_code: 'BROWSER_NAVIGATION_FAILED', success: false } } as AgentToolCallView;
+  assert.match(activityToolIssue(failed)!, /不能证明需要登录/);
+  assert.match(browserLoadPauseReason([failed, read])!, /目标页面未能加载/);
+  const loaded = { ...failed, receipt: { success: true, navigation_generation: 1, text: '到账确认' } } as AgentToolCallView;
+  assert.equal(browserLoadPauseReason([failed, loaded]), null);
+  assert.match(browserLoadPauseReason([{ ...failed, receipt: { success: true, navigation_generation: 0, text: '' } }])!, /尚未完成/);
+});
+
+test('plan records explain their next action and evidence issues without implying verification', () => {
+  const plan = { ...read, name: 'work_plan', arguments: { next_step: { action: '对照原图核对当前弹窗' } }, receipt: { plan: { evidence_issues: [{ code: 'AGENT_WORK_QUOTE_MISMATCH' }] } } } as AgentToolCallView;
+  assert.equal(activityToolDescription(plan), '对照原图核对当前弹窗');
+  assert.match(activityToolIssue(plan)!, /1 条引用.*尚未验证/);
+  assert.match(activityToolIssue({ ...plan, error_code: 'AGENT_WORK_SCOPE_MISMATCH' })!, /旧版计划/);
+  assert.equal(activityToolIssue(read), null);
+});
 
 test('adjacent reads and searches remain distinguishable in collapsed operation rows', () => {
   assert.match(activityToolDescription(read), /180–280/);
@@ -20,8 +37,10 @@ test('long analysis has a bounded original-text preview while concise progress s
 
 test('budget failure is explained from the persisted status without inventing a pause', () => {
   const run = { status: 'FAILED', current_step: 24, max_steps: 24, error_code: 'AGENT_MAX_STEPS_REACHED' } as AgentRunView;
-  assert.match(activityFailureReason(run)!, /步数已用尽.*24\/24/);
+  assert.match(activityFailureReason(run)!, /整体执行额度.*尚未完成/);
   assert.equal(activityFailureReason({ ...run, status: 'RUNNING' }), null);
+  assert.match(activityFailureReason({ ...run, current_step: 16, max_steps: 4096 })!, /旧版局部策略.*尚未完成/);
+  assert.ok(!activityFailureReason({ ...run, current_step: 16, max_steps: 4096 })!.includes('额度'));
 });
 
 test('historical file links require same-run successful read evidence and preserve the SHA guard', () => {
@@ -31,4 +50,10 @@ test('historical file links require same-run successful read evidence and preser
   }
   assert.equal(resolveActivityFileLink('fielora-project-file:src/login.js', [{ ...read, status: 'FAILED' }]), null);
   assert.equal(resolveActivityFileLink('fielora-project-file:src/login.js', [{ ...read, receipt: null }]), null);
+});
+
+
+test('saving an edit does not claim that verification is running', () => {
+  const events = [{kind:'CHECKPOINT_CREATED',payload:{kind:'GENERAL_WORK_STATE_V1',goal:{status:'AWAITING_VERIFICATION'}}}] as AgentEventView[];
+  assert.equal(goalProgressLabel(events),'修改已保存，等待验证');
 });

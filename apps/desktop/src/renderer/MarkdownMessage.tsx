@@ -2,6 +2,7 @@ import { createElement, useEffect, useState, type ReactNode } from 'react';
 import type { ResultReference } from '@fielora/contracts';
 import type { ResultImagePreviewView } from '../workspace-types';
 import type { ActivityFileLink } from './agent-activity-detail';
+import { AppIcon } from './ui/Icon';
 
 export interface ActivityFileContext {
   resolve: (target: string) => ActivityFileLink | null;
@@ -9,6 +10,7 @@ export interface ActivityFileContext {
 }
 
 interface MarkdownMessageProps {
+  modernStatusMarkers?: boolean;
   content: string;
   streaming?: boolean;
   onCopyError?: (message: string) => void;
@@ -53,6 +55,7 @@ function firstInlineMatch(value: string): InlineMatch | null {
 }
 
 interface ReferenceRenderContext {
+  modernStatusMarkers?: boolean;
   activityFiles?: ActivityFileContext;
   references: ReadonlyMap<string, ResultReference>;
   onOpenReference?: (reference: ResultReference) => void;
@@ -102,6 +105,8 @@ function InlineResultImage({ reference, context }: { reference: ResultReference 
 }
 
 function renderInline(value: string, keyPrefix: string, context?: ReferenceRenderContext): ReactNode[] {
+  const status = context?.modernStatusMarkers ? /^(?:✅|✔️?|☑️?)\s+(.+)$/u.exec(value) : null;
+  if (status) return [<span className="markdown-status-marker" role="img" aria-label="对勾" key={`${keyPrefix}-status`}><AppIcon name="check"/></span>, ...renderInline(status[1]!, keyPrefix, { ...context!, modernStatusMarkers: false })];
   const result: ReactNode[] = [];
   let remaining = value;
   let sequence = 0;
@@ -264,7 +269,7 @@ function renderMarkdown(content: string, onCopyError?: (message: string) => void
   return blocks;
 }
 
-export function MarkdownMessage({ content, streaming = false, onCopyError, references = [], onOpenReference, onOpenImage, activityFiles }: MarkdownMessageProps) {
-  const context: ReferenceRenderContext = { references: new Map(references.map((reference) => [reference.id, reference])), onOpenReference, onOpenImage, activityFiles };
+export function MarkdownMessage({ content, streaming = false, onCopyError, references = [], onOpenReference, onOpenImage, activityFiles, modernStatusMarkers = false }: MarkdownMessageProps) {
+  const context: ReferenceRenderContext = { references: new Map(references.map((reference) => [reference.id, reference])), onOpenReference, onOpenImage, activityFiles, modernStatusMarkers };
   return <div className={`markdown-body${streaming ? ' is-streaming' : ''}`}>{renderMarkdown(content, onCopyError, context)}</div>;
 }

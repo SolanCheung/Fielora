@@ -17,7 +17,7 @@ const fileTypeIcons = readFileSync(path.join(rendererRoot, 'ui', 'FileTypeIcon.t
 
 test('conversation uses one natural header instead of a duplicate workspace tab strip', () => {
   assert.match(workspace, /className="conversation-header conversation-context-header"/);
-  assert.match(workspace, /className="conversation-heading"><AppIcon name="folder"\/><div className="conversation-title-line"><h2 title=\{conversation\.title\}>\{conversation\.title\}<\/h2><ConversationActionsMenu/);
+  assert.match(workspace, /className="conversation-heading"><AppIcon name="folder"\/><div className="conversation-title-line"><h2 title=\{conversation\?\.title \?\? '新对话'\}>\{conversation\?\.title \?\? '新对话'\}<\/h2>\{conversation && <ConversationActionsMenu/);
   assert.doesNotMatch(workspace, /<small title=\{project\.root_path\}>/);
   assert.doesNotMatch(workspace, /conversation-tab-strip|conversation-workspace-tab|closeConversationTab/);
   assert.doesNotMatch(styles, /\.conversation-tab-strip|\.conversation-workspace-tab/);

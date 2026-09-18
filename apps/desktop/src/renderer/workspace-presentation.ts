@@ -53,6 +53,17 @@ export function agentTurnOwnership(
   return { userMessageId, assistantMessageId: fallbackAssistant?.id ?? null };
 }
 
+export function previousAgentAttempts(messages: readonly ConversationMessageView[], userMessageId: string | null, assistantMessageId: string | null): ConversationMessageView[] {
+  const start = messages.findIndex((message) => message.id === userMessageId);
+  if (start < 0) return [];
+  const attempts: ConversationMessageView[] = [];
+  for (const message of messages.slice(start + 1)) {
+    if (message.role === 'USER' || message.id === assistantMessageId) break;
+    if (message.role === 'ASSISTANT' && message.invocation_id) attempts.push(message);
+  }
+  return attempts;
+}
+
 export type WorkspacePreviewKind = 'TEXT' | 'IMAGE' | 'UNSUPPORTED';
 
 export function workspacePreviewKind(relativePath: string): WorkspacePreviewKind {

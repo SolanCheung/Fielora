@@ -88,6 +88,9 @@ Tab Strip 的“＋”紧跟在 bounded tab lane 的右边，不得被拉伸到 
 
 ## 2. Cascade Ownership
 
+2026-09-15 设置增加模型计费统计，保持 Settings / WorkspaceSurface 的 Pane、导航、滚动与材质 ownership。`styles/model-usage.css` 仅在 features 层管理该页布局；标题、文字、共享 SelectMenu/按钮继续使用既有 type/control tokens。Icon Registry 新增 `usage → ChartBar`。统计图是数据可视化 SVG（不是产品 glyph），使用 emphasis / muted semantic colors 表达输入和输出，并提供数值、图例和键盘可读标签。零数据不生成演示用量。任务列表分页，窄窗表格在自身容器滚动；Light/Dark 共用结构。
+
+
 2026-09-08 Large-directory drag correction: the 300-file trace did not cover the real Project's
 2,759 rendered directory rows (including folders). The subsequent scrollbar review supersedes the width
 hold completely during direct dragging: code, directory rows, filter and native scrollports stay responsive
@@ -248,6 +251,10 @@ Contrast 控件使用无外围输入框的 3px neutral/action track、20px stron
 
 ## 5. Shared Interaction Primitives
 
+图片缩略图不使用卡片边框、灰色底板或内边距，按原图比例展示；不可用状态仍显示原因，键盘焦点仍可辨。放大预览仅保留图片与独立的小型控制条，不绘制包围图片的白色面板；点击图片外的空白处可关闭。暂停任务仍占用当前 Conversation 的任务槽，新消息沿用追加队列，不得当作终态启动第二个任务；排队说明明确等待继续或停止，正式创建消息前须向 Core 核对占用状态。
+
+图片缩略图在 Composer 和 Conversation 中只展示媒体，不常驻重复文件名；文件名保留在可访问名称、悬停提示及图片预览标题中。Composer 的移除按钮置于缩略图右上角，失败原因仍可见。图片 Lightbox 与遮罩共同限定在标题栏下方的 Work Area，复用标题栏高度 token 并避开原生 Window Controls Overlay；缩放、关闭与边缘留白在小窗口中仍完整可用，禁止仅提高网页 z-index 来遮盖原生按钮。
+
 `UiPrimitives.tsx` 是共享交互入口：
 
 - `Button`
@@ -272,6 +279,8 @@ Right Dock 选中标签使用中性 selected 底色与 subtle shadow；Keyboard 
 Project 下的 Conversation 只通过缩进表达层级，不绘制持续的树形竖线；项目标题再次点击仍负责展开/收起，且 hover preview 不改变选择或折叠行为。`项目` 分组标题固定在滚动容器之外，只有其下方 Project/Conversation list 纵向滚动；滚动区上下保留 `8px`、右侧保留额外 inset，Scrollbar 不得贴住分组标题或 Content 接缝。Project expanded 只表达层级展开，不消费 active background/shadow；选择某条 Conversation 时只允许该 Conversation row 显示 selection。
 
 Conversation Composer 在空对话、历史对话和运行中使用同一底部锚点；空状态不得把 Composer 重定位到内容中央。发送/追加按钮固定为 `36px` 圆形，使用 `17px` 粗体 ArrowUp；可用态使用 Fielora emphasis purple 与白色 glyph，禁用态只降低语义对比而不改变轮廓，hover/press 动效必须复用 control motion token。
+
+Composer 底部的添加、权限、语音和发送控件在宽栏与窄栏中始终按垂直中线对齐；权限 Select 外层与触发器保持同为 `30px` 高，避免外层遗留高度使图标偏上。不得用图标位移补偿容器高度错误，窄栏也不得退回底边对齐。
 
 ## 6. Material Contract
 
@@ -368,3 +377,88 @@ Conversation 顶部遵循单行 Header：项目文件夹图标 → 当前 Conver
 以下任一变化都属于结构变化：改变 App Shell / Route composition；增删主要 Pane；改变 Navigation / Conversation / Workspace / Dock / Overlay 的归属关系；改变主要 grid/flex topology；迁移 Resizer ownership；改变 Composer 底部锚点、Conversation Header ownership、Settings shared frame 或 Bottom Terminal/Dock 语义。
 
 遇到上述需求，Agent 必须在实现前暂停，说明变更原因、范围、受影响页面和兼容风险，并获得用户明确批准后才能继续。批准后的结构变化必须在同一 changeset 同步更新本文、`docs/product/FIELORA_DESIGN_LANGUAGE_V0.1.md`、Project Reality、Decisions 与相应回归测试；未获批准时只能提交保持现有结构的校准方案。
+
+2026-09-09 Agent continuation: existing conversation progress summary exposes a
+short pause reason and Continue/Stop actions even when process details are
+collapsed. Exhausted allowances label the explicit extra-step grant; cumulative
+limits do not offer an ineffective resume action. Keep existing conversation
+rail, type scale and expandable execution history; no permanent activity pane.
+
+2026-09-09 New Project conversation repair: a Project with no conversations now
+uses the existing Conversation Header, empty message area and canonical Composer
+with attachments, permission, model, voice and Send. Remove the obsolete
+project-empty-composer form/styles; no new Pane, grid owner or anchor. First Send
+creates/reuses the unsent conversation and sends the captured text/attachments
+once; creation failure keeps the draft. Merely opening a Project still creates
+no Conversation. Model and permission selection survive first-send activation.
+
+2026-09-10 User-authorized Agent presentation repair: keep the current narrative
+and latest operation group in a short fading preview; older progress remains in
+the existing expandable execution history. Approval/pause controls remain outside
+that fold. A single neutral status indicator replaces duplicate context/thinking
+file icons. Use semantic Phosphor group icons, file-type icons in the result list,
+an actual downward arrow for return-to-latest, and separated result actions with
+no decorative separator inside buttons. Absent optional MCP configuration is not
+an error; meaningful connection diagnostics remain accessible. Same Pane owners,
+reading rail, type scale and theme tokens; reduced motion is respected.
+
+Earlier attempts for the same user turn are collapsed before the latest result;
+expansion retains original failure text and file review. Streaming event updates
+must not restart the elapsed-time interval.
+
+2026-09-10 Stable progress refinement: streaming and durable narratives occupy
+one shared slot above operations, reserving two text lines for normal updates.
+Consecutive search/directory/read batches merge across short narrative notes;
+approval, phase and mutation boundaries retain their identity. Expanded batches
+preserve every note and operation in sequence. Search, directory, file reading,
+editing, command and verification use distinct canonical glyphs; a mixed project
+inspection batch uses a folder glyph. Terminal decorative checkmarks use the
+neutral shared Check glyph; persisted/copyable Markdown and code remain intact.
+No new Pane or permanent progress surface; keep reading rail and typography.
+
+
+### Agent browser verification — 2026-09-10
+
+Agent 浏览器检查复用右侧 Browser Tab，不创建常驻活动面板。打开目标页时自动展开，既有文件/终端标签保留。过程摘要使用浏览器/验证语义图标；展开可读到具体验收项。工具调用已返回但断言未通过时，UI 显示未通过状态，不能仅因 ToolCall Completed 使用成功状态。浏览器边界在 Dock 打开位移动画期间连续同步，避免原生页面被裁成零宽；切换为非活动工具时隐藏原生网页。默认页内操作不展示元素引用或内部协议字段。
+
+### Composer drafts and recoverable image tasks — 2026-09-10
+
+Unsent prompt and image attachments are isolated by Project/Conversation and survive conversation switching or workspace remount within the current renderer session. A project new-conversation draft transfers to the created conversation on first send; only that sent draft clears. Late attachment completion updates its originating draft. This is editing state, not a second durable task store; app-exit draft recovery is not promised.
+
+Resume restores original images from persisted message attachments for legacy runs. Pause wording distinguishes cumulative usage from active context size and distinguishes unsupported images, malformed message history and unknown request rejection. Do not claim that compaction ran when it did not change the request. Keep these explanations in the existing pause area without adding a permanent token dashboard.
+
+
+### Goal lifecycle feedback — 2026-09-11
+
+Existing expanded execution history displays the latest receipt-derived task stage: locating the problem, verifying changes, repairing failed checks or preparing the verified result. Keep one live summary and existing foldout; do not add a permanent plan dashboard. Missing historical images pause with a readable explanation. A legacy run ending below its displayed global step limit is described as an old strategy ending early, never as all displayed steps being consumed. Text-only references to prior pictures restore that Conversation's original gallery without duplicating thumbnails in the new user message.
+### Referenced image recovery — 2026-09-11
+
+Retry and Continue resolve images against the originating message, including legacy galleries earlier in the same conversation. A missing-reference notice explains that Continue attempts to restore the original images; it does not immediately require stopping and re-uploading when stored originals may still be available. Filling a pre-execution missing input keeps the same task. Subsequent unrelated galleries must not change its reference.
+
+
+### Scoped work and verification feedback — 2026-09-11
+
+work_plan appears as “明确修改范围与验收条件” in the existing activity foldout. Do not create a permanent plan panel or show evidence ids in ordinary task prose. A saved edit without fresh passing checks is labeled “修改已保存，等待验证”; it must not claim verification is running merely because a write completed. Source facts, tentative interpretations and acceptance remain distinct in the underlying work record.
+
+
+### 2026-09-11 计划恢复纠正
+
+工作计划显示具体下一步，不与“检查了相关信息”重复拼接。已记录的计划与未确认引用分别表达，计划成功不能显示结果验证成功；历史范围/引用错误说明为旧版行为。恢复过程仍使用既有当前活动与折叠历史，不新增常驻面板。
+
+
+### 2026-09-11 浏览器加载与验证阻塞
+
+开发服务进程已启动不等于页面就绪。操作详情解释未检查/未监听状态；导航失败说明目标页面未加载，不能显示为取得页面证据。对旧版无导航、无内容的假成功回执，同样在未验证暂停处提示排查地址和启动状态，不推断用户未登录。不增加永久诊断面板。
+
+
+### Agent 续作时间与进程关联提示（2026-09-11）
+
+执行摘要将耗时标为“累计”，避免重启后短暂续作被误读为重新运行二十多分钟。服务工具未关联进程时提示已有服务可能仍在运行，并引导检查实际地址；不使用“未启动”断言。继续工作保持原任务，新的资源窗口不代表任务通过验收，不增加常驻状态面板。
+
+
+### 登录阻塞的操作交接（2026-09-12）
+
+Agent 经浏览器快照确认需要用户登录时，现有暂停提示明确说明“在右侧浏览器完成登录，登录后继续页面验证”，保留原页面、已修改文件和未完成状态。不得仅显示泛化的预算/未验证提示而让用户猜下一步；不得要求用户在聊天中发送密码。继续恢复同一任务，任务完成仍由原需求对应的检查决定。
+
+
+浏览器输入恢复补充（2026-09-12）：元素被遮挡/引用失效等未发出输入的失败保留明确回执，Agent 重新观察后处理。已发出输入后观察失败只补观察。历史不确定浏览器输入在用户继续后保持暂停和待核对提示，不把“继续”当成允许重复提交或直接宣告整项失败。普通 UI 不展示内部输入阶段枚举。

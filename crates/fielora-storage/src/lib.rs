@@ -6,6 +6,7 @@
 //! Agent layer or an independent source of execution authority.
 
 pub mod idr;
+mod model_usage;
 pub mod sync;
 
 use fielora_contracts::*;
@@ -60,7 +61,11 @@ const MIGRATION_0005_FROZEN_SHA256: &str =
     "b7e1e586b47e50389502677e172741d69463e9518ed32211dfafe0dc910c1547";
 const MIGRATION_0006_FROZEN_SHA256: &str =
     "5257959801424a13426259ce10c9ed2d5037795ec7a3a207171c568bc80dbaae";
-const SCHEMA_VERSION: u32 = 15;
+const SCHEMA_VERSION: u32 = 16;
+const MIGRATION_0016: &str = include_str!("../migrations/0016_agent_continuation_budget.sql");
+const MIGRATION_0016_NAME: &str = "agent_continuation_budget";
+pub const AGENT_CONTINUATION_STEPS: u32 = 24;
+pub const AGENT_CUMULATIVE_STEP_LIMIT: u32 = 4096;
 const LOCAL_USER_NAME: &str = "Local user";
 const SYSTEM_NAME: &str = "Fielora system";
 
@@ -625,8 +630,11 @@ impl StorageHandle {
                 return Err(DomainError::Validation("PROVIDER_DISABLED".into()));
             }
             let model_id = request.model_id.unwrap_or(provider.view.default_model);
-            let max_steps = request.max_steps.unwrap_or(24);
-            if !(1..=64).contains(&max_steps) {
+            let max_steps = request.max_steps.unwrap_or(AGENT_CUMULATIVE_STEP_LIMIT);
+            if request
+                .max_steps
+                .is_some_and(|limit| !(1..=64).contains(&limit))
+            {
                 return Err(DomainError::Validation("AGENT_MAX_STEPS_INVALID".into()));
             }
             let run_id = AgentRunId::new(Uuid::now_v7().to_string());
@@ -636,6 +644,7 @@ impl StorageHandle {
                 "user_message_id": request.user_message_id,
                 "max_steps": max_steps,
                 "task_bytes": request.task.len(),
+                "input_attachment_count": request.attachments.as_ref().map_or(0, Vec::len),
                 "active_work_surface": request.active_work_surface,
             });
             let transaction = connection.transaction().map_err(storage_domain)?;
@@ -696,11 +705,69 @@ impl StorageHandle {
         update: AgentProjectionUpdate,
         now: i64,
     ) -> Result<AgentEventCommit, DomainError> {
+        self.append_agent_event_inner(run_id, kind, payload, update, now, false)
+    }
+
+    /// Called only by the trusted user-resume ingress, never by a model tool.
+    /// Status, allowance and the grant receipt commit in the same transaction.
+    pub fn resume_agent_run(
+        &self,
+        run_id: AgentRunId,
+        now: i64,
+    ) -> Result<AgentEventCommit, DomainError> {
+        self.append_agent_event_inner(
+            run_id,
+            AgentEventKind::RunResumed,
+            serde_json::json!({"reason":"USER_RESUME","recompiled_context":true}),
+            AgentProjectionUpdate {
+                status: Some(AgentRunStatus::Running),
+                ..Default::default()
+            },
+            now,
+            true,
+        )
+    }
+
+    fn append_agent_event_inner(
+        &self,
+        run_id: AgentRunId,
+        kind: AgentEventKind,
+        mut payload: Value,
+        update: AgentProjectionUpdate,
+        now: i64,
+        explicit_resume: bool,
+    ) -> Result<AgentEventCommit, DomainError> {
         let owner = self.local_user.clone();
         request_task(&self.sender, move |connection| {
             let current = get_agent_run(connection, &owner, &run_id)?;
             if current.status.is_terminal() {
                 return Err(DomainError::TerminalResource);
+            }
+            let mut max_steps = current.max_steps;
+            if explicit_resume {
+                if current.status != AgentRunStatus::Paused {
+                    return Err(DomainError::InvalidStateTransition);
+                }
+                // A deliberate continuation grants a new bounded work allowance,
+                // even if verification/repetition paused just before exhaustion.
+                // Automatic recovery never enters this trusted branch.
+                payload["resource_budget_reset"] = serde_json::json!({
+                    "source":"EXPLICIT_USER_RESUME", "previous_pause_reason":current.error_code,
+                });
+                if current.current_step >= max_steps {
+                    if max_steps >= AGENT_CUMULATIVE_STEP_LIMIT {
+                        return Err(DomainError::Validation(
+                            "AGENT_CUMULATIVE_BUDGET_REACHED".into(),
+                        ));
+                    }
+                    max_steps = max_steps
+                        .saturating_add(AGENT_CONTINUATION_STEPS)
+                        .min(AGENT_CUMULATIVE_STEP_LIMIT);
+                    payload["budget_grant"] = serde_json::json!({
+                        "source":"EXPLICIT_USER_RESUME", "previous_max_steps":current.max_steps,
+                        "max_steps":max_steps, "additional_steps":max_steps-current.max_steps,
+                    });
+                }
             }
             let status = update.status.unwrap_or(current.status);
             if !current.status.can_transition_to(status) {
@@ -728,8 +795,8 @@ impl StorageHandle {
                 params![event_id.0,run_id.0,revision_to_domain(sequence)?,wire(&kind),payload_json,now],
             ).map_err(storage_domain)?;
             transaction.execute(
-                "UPDATE agent_runs SET status=?1,current_step=?2,next_sequence=?3,error_code=?4,updated_at=?5,finished_at=?6 WHERE id=?7",
-                params![wire(&status),i64::from(current_step),revision_to_domain(sequence+1)?,update.error_code,now,finished_at,run_id.0],
+                "UPDATE agent_runs SET status=?1,current_step=?2,next_sequence=?3,error_code=?4,updated_at=?5,finished_at=?6,max_steps=?8 WHERE id=?7",
+                params![wire(&status),i64::from(current_step),revision_to_domain(sequence+1)?,update.error_code,now,finished_at,run_id.0,i64::from(max_steps)],
             ).map_err(storage_domain)?;
             transaction.commit().map_err(storage_domain)?;
             Ok(AgentEventCommit {
@@ -4713,8 +4780,42 @@ pub fn apply_migrations(connection: &mut Connection, now: i64) -> Result<(), Sto
     if !migration_exists(connection, 15)? {
         apply_durable_file_artifact_migration(connection, now, MIGRATION_0015, &checksum_0015)?;
     }
+    let checksum_0016 = migration_checksum(MIGRATION_0016);
+    verify_applied_migration(connection, 16, MIGRATION_0016_NAME, &checksum_0016)?;
+    if !migration_exists(connection, 16)? {
+        apply_agent_continuation_migration(connection, now, MIGRATION_0016, &checksum_0016)?;
+    }
     validate_schema(connection)?;
     Ok(())
+}
+
+fn apply_agent_continuation_migration(
+    connection: &mut Connection,
+    now: i64,
+    sql: &str,
+    checksum: &str,
+) -> Result<(), StorageError> {
+    connection.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let result = (|| {
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute_batch(sql)?;
+        let broken: i64 =
+            tx.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })?;
+        if broken != 0 {
+            return Err(StorageError::MigrationIncompatibleData);
+        }
+        tx.execute(
+            "INSERT INTO schema_migrations(version,name,checksum,applied_at) VALUES(16,?1,?2,?3)",
+            params![MIGRATION_0016_NAME, checksum, now],
+        )?;
+        tx.commit()?;
+        Ok(())
+    })();
+    let restored = connection.execute_batch("PRAGMA foreign_keys = ON;");
+    restored?;
+    result
 }
 
 fn apply_durable_file_artifact_migration(
@@ -5266,7 +5367,11 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
             "agent_runs",
             vec![
                 "STATUS IN ('QUEUED', 'RUNNING', 'WAITING_APPROVAL', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED')",
-                "MAX_STEPS BETWEEN 1 AND 64",
+                if migration_exists(connection, 16)? {
+                    "MAX_STEPS BETWEEN 1 AND 4096"
+                } else {
+                    "MAX_STEPS BETWEEN 1 AND 64"
+                },
                 "NEXT_SEQUENCE >= 1",
             ],
         ),
@@ -8561,7 +8666,7 @@ mod tests {
             frozen_migration_checksum(MIGRATION_0006),
             MIGRATION_0006_FROZEN_SHA256
         );
-        assert_eq!(schema_version(), 15);
+        assert_eq!(schema_version(), 16);
     }
 
     #[test]
@@ -8592,7 +8697,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!((profile_before, version), (profile_after, 15));
+        assert_eq!((profile_before, version), (profile_after, 16));
         drop(connection);
         fs::remove_dir_all(&root).unwrap();
 
@@ -8749,7 +8854,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             (version, migration_name.as_str()),
-            (15, MIGRATION_0009_NAME)
+            (16, MIGRATION_0009_NAME)
         );
         assert_eq!(
             artifacts_before,
@@ -9044,7 +9149,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((max_version, assets_table), (15, 1));
+        assert_eq!((max_version, assets_table), (16, 1));
         assert_eq!(
             artifacts_before,
             query_json_rows(
@@ -9268,7 +9373,7 @@ mod tests {
             [&message_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).unwrap();
-        assert_eq!(migrated, (15, "# Existing Markdown".into(), "[]".into()));
+        assert_eq!(migrated, (16, "# Existing Markdown".into(), "[]".into()));
         apply_migrations(&mut connection, 21).unwrap();
         validate_schema(&connection).unwrap();
         drop(connection);
@@ -9315,7 +9420,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(migrated, (15, 1));
+        assert_eq!(migrated, (16, 1));
         apply_migrations(&mut connection, 21).unwrap();
         validate_schema(&connection).unwrap();
         drop(connection);
@@ -9346,6 +9451,167 @@ mod tests {
         assert_eq!(rolled_back, (0, 0));
         drop(rollback);
         fs::remove_dir_all(rollback_root).unwrap();
+    }
+
+    #[test]
+    fn migration_0016_preserves_run_lineage_and_rolls_back_on_failure() {
+        let root = temporary_root();
+        let paths = PlatformPaths::from_root(root.clone()).unwrap();
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let mut connection = open_connection(&paths.database).unwrap();
+        apply_schema_through_14(&mut connection, 1);
+        apply_durable_file_artifact_migration(
+            &mut connection,
+            8,
+            MIGRATION_0015,
+            &migration_checksum(MIGRATION_0015),
+        )
+        .unwrap();
+        let worker =
+            start_pre_migrated_worker(connection, paths.database.clone(), device.clone(), 10);
+        let handle = worker.handle();
+        let (project, conversation, run) = artifact_run_fixture(&handle, &root, 20);
+        let artifact = create_artifact_fixture(
+            &handle,
+            (&project, &conversation, &run),
+            ArtifactType::Document,
+            artifact_content("retained history"),
+            "Retain",
+            30,
+        );
+        drop(worker);
+        let mut connection = open_connection(&paths.database).unwrap();
+        let before = query_json_rows(
+            &connection,
+            "SELECT json_array(id,current_step,max_steps,next_sequence,status) FROM agent_runs ORDER BY id",
+        );
+        let events = query_json_rows(
+            &connection,
+            "SELECT json_array(id,run_id,sequence,payload_json) FROM agent_events ORDER BY id",
+        );
+        let failing = format!("{MIGRATION_0016}\nSELECT * FROM forced_migration_failure;");
+        assert!(
+            apply_agent_continuation_migration(
+                &mut connection,
+                40,
+                &failing,
+                &migration_checksum(&failing)
+            )
+            .is_err()
+        );
+        assert!(!migration_exists(&connection, 16).unwrap());
+        assert_eq!(
+            connection
+                .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,current_step,max_steps,next_sequence,status) FROM agent_runs ORDER BY id"
+            )
+        );
+        apply_migrations(&mut connection, 41).unwrap();
+        assert_eq!(
+            before,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,current_step,max_steps,next_sequence,status) FROM agent_runs ORDER BY id"
+            )
+        );
+        assert_eq!(
+            events,
+            query_json_rows(
+                &connection,
+                "SELECT json_array(id,run_id,sequence,payload_json) FROM agent_events ORDER BY id"
+            )
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        drop(connection);
+        let worker = StorageWorker::start(&paths.database, device, 50).unwrap();
+        let handle = worker.handle();
+        assert_eq!(
+            handle
+                .read_artifact(artifact.artifact.artifact_id, None)
+                .unwrap()
+                .revision
+                .content,
+            artifact.revision.content
+        );
+        let mut allowance = run.max_steps;
+        for now in [60, 70, 80] {
+            handle
+                .append_agent_event(
+                    run.id.clone(),
+                    AgentEventKind::RunPaused,
+                    json!({"reason":"AGENT_BUDGET_EXHAUSTED"}),
+                    AgentProjectionUpdate {
+                        status: Some(AgentRunStatus::Paused),
+                        current_step: Some(allowance),
+                        ..Default::default()
+                    },
+                    now,
+                )
+                .unwrap();
+            let resumed = handle.resume_agent_run(run.id.clone(), now + 1).unwrap();
+            assert_eq!(resumed.run.id, run.id);
+            assert_eq!(resumed.run.current_step, allowance);
+            assert_eq!(resumed.run.max_steps, allowance + 24);
+            assert_eq!(
+                resumed.event.payload["budget_grant"]["source"],
+                "EXPLICIT_USER_RESUME"
+            );
+            assert!(handle.resume_agent_run(run.id.clone(), now + 2).is_err());
+            allowance += 24;
+        }
+        assert!(allowance > 64);
+        handle
+            .append_agent_event(
+                run.id.clone(),
+                AgentEventKind::RunPaused,
+                json!({}),
+                AgentProjectionUpdate {
+                    status: Some(AgentRunStatus::Paused),
+                    ..Default::default()
+                },
+                90,
+            )
+            .unwrap();
+        let ordinary = handle.resume_agent_run(run.id.clone(), 91).unwrap();
+        assert_eq!(ordinary.run.max_steps, allowance);
+        assert!(ordinary.event.payload.get("budget_grant").is_none());
+        assert_eq!(
+            ordinary.event.payload["resource_budget_reset"]["source"],
+            "EXPLICIT_USER_RESUME"
+        );
+        drop(worker);
+        let connection = open_connection(&paths.database).unwrap();
+        connection.execute("UPDATE agent_runs SET status='PAUSED',current_step=4096,max_steps=4096 WHERE id=?1", [&run.id.0]).unwrap();
+        assert!(
+            connection
+                .execute(
+                    "UPDATE agent_runs SET max_steps=4097 WHERE id=?1",
+                    [&run.id.0]
+                )
+                .is_err()
+        );
+        drop(connection);
+        let device = DeviceIdentity::load_or_create(&paths.device_identity).unwrap();
+        let worker = StorageWorker::start(&paths.database, device, 100).unwrap();
+        assert!(
+            matches!(worker.handle().resume_agent_run(run.id, 101), Err(DomainError::Validation(code)) if code == "AGENT_CUMULATIVE_BUDGET_REACHED")
+        );
+        drop(worker);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -9381,7 +9647,7 @@ mod tests {
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).unwrap();
-        assert_eq!(migrated, (15, 1, 1));
+        assert_eq!(migrated, (16, 1, 1));
         assert_eq!(
             revisions_before,
             query_json_rows(

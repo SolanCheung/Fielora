@@ -1,0 +1,1341 @@
+[
+  {
+    "id": "call-1",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "path": "src/directive/popup/finance-popup-directive.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 400,
+      "line_start": 1,
+      "observed_line_end": 372,
+      "path": "src/directive/popup/finance-popup-directive.js",
+      "sha256": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a"
+    },
+    "error_code": null,
+    "created_at": 0,
+    "updated_at": 0
+  },
+  {
+    "id": "call-2",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "path": "src/app/finance-info/finance-info.controller.js",
+      "query": "accountComfirm"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "0370a4b41cb9295a498ffc23dcd62122a35b36485f8881197d542949b66785ab",
+      "matches": 1,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 1,
+    "updated_at": 1
+  },
+  {
+    "id": "call-3",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 1180,
+      "line_start": 1120,
+      "path": "src/app/finance-info/finance-info.controller.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 1180,
+      "line_start": 1120,
+      "observed_line_end": 1180,
+      "path": "src/app/finance-info/finance-info.controller.js",
+      "sha256": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24"
+    },
+    "error_code": null,
+    "created_at": 2,
+    "updated_at": 2
+  },
+  {
+    "id": "call-4",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "到账确认"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24",
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506",
+        "src/app/finance-list/finance-list.html": "7eadf3552263a25da82a636269b7f188f4cce0bcb30efde1308a4380ff2c22da",
+        "src/components/preview-finance/index.js": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd",
+        "src/directive/popup/finance-popup-directive.js": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a",
+        "src/i18n/cn.json": "1a07b4db8439e3653ca4dcfca43c7244465bb595a8fe88d8b9f6bd15ec844233"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "d2efbb240d50b752aa2bca3aa56b79c1f2e55bd33843a1d568fac33d08fe984c",
+      "matches": 13,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 3,
+    "updated_at": 3
+  },
+  {
+    "id": "call-5",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 730,
+      "line_start": 660,
+      "path": "src/app/finance-list/finance-list.controller.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 730,
+      "line_start": 660,
+      "observed_line_end": 730,
+      "path": "src/app/finance-list/finance-list.controller.js",
+      "sha256": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506"
+    },
+    "error_code": null,
+    "created_at": 4,
+    "updated_at": 4
+  },
+  {
+    "id": "call-6",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "客户抬头"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-add/finance-add.controller.js": "81c4f2245ba1f6e5512668ccfff1aa8cc18dee700c19197d5ba90a176194618d",
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24",
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506",
+        "src/app/finance-list/finance-list.html": "7eadf3552263a25da82a636269b7f188f4cce0bcb30efde1308a4380ff2c22da",
+        "src/app/report-finance-achievement-detail/report-finance-achievement-detail.controller.js": "62c30ea16a9b36fa5e9047cd7835e294c9fbb2f70fa0d57d83eb4718547e67b6",
+        "src/backstage/listshow-setting/listshow-setting.controller.js": "b569a4d093a0efb1cdbe49fa2f1a6d8e5c434e289cb3682cae2604f0e44b1a8b",
+        "src/backstage/listshow-setting/listshow-setting.html": "545e92195994cb31565246de859ee85125a9d7aea17592607fc8483e07c05680",
+        "src/components/mail-template-set/index.js": "b81af0e6e69f98b603d211ed11a0515f611d27701ad2f70f1c74fbf1b18af86a",
+        "src/components/preview-finance/index.js": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd",
+        "src/i18n/cn.json": "1a07b4db8439e3653ca4dcfca43c7244465bb595a8fe88d8b9f6bd15ec844233",
+        "src/service/data-transfrom.js": "fb9a6b5c9e12757da3c6a20df8209a51505e8b014bd66681e405cf00932d2faf"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "d302ebbe89e979523630546d0aa4339bfa93c332a8ff5fd9f332a16fd9b5aa0b",
+      "matches": 40,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 5,
+    "updated_at": 5
+  },
+  {
+    "id": "call-7",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "毕业学校"
+    },
+    "receipt": {
+      "files": {
+        "src/service/data-transfrom.js": "fb9a6b5c9e12757da3c6a20df8209a51505e8b014bd66681e405cf00932d2faf"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "f2407b94e54c4e6175b6e601d358e2fbbc04c99e13975a8bec9bca6a2904b88c",
+      "matches": 2,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 6,
+    "updated_at": 6
+  },
+  {
+    "id": "call-8",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "FAILED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "directive.*accountComfirm"
+    },
+    "receipt": {
+      "kind": "TOOL_EXECUTION_FAILED"
+    },
+    "error_code": "AGENT_SEARCH_SYNTAX_AMBIGUOUS",
+    "created_at": 7,
+    "updated_at": 7
+  },
+  {
+    "id": "call-9",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "accountComfirm"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24",
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506",
+        "src/components/preview-finance/index.js": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd",
+        "src/directive/popup/finance-popup-directive.js": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "34af0342460a5415a629c5c7e6a97197973e74edb72a907cf42b7a46f5c61e3a",
+      "matches": 4,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 8,
+    "updated_at": 8
+  },
+  {
+    "id": "call-10",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 1180,
+      "line_start": 1130,
+      "path": "src/components/preview-finance/index.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 1180,
+      "line_start": 1130,
+      "observed_line_end": 1180,
+      "path": "src/components/preview-finance/index.js",
+      "sha256": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd"
+    },
+    "error_code": null,
+    "created_at": 9,
+    "updated_at": 9
+  },
+  {
+    "id": "call-11",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "手机号码"
+    },
+    "receipt": {
+      "files": {
+        "src/app/contact-add/contact-add.html": "cc15d0ad9fb3732c64bfcdcb011408118c2e22c0e22b2ee7907d4ab7bb4d3375",
+        "src/app/excel-import/excel-import.html": "c4808ee8b3c8b1fc5f021b44f699906af53e9b8e4aff12b8b619500c62273f08",
+        "src/app/resume-merge/resume-merge.controller.js": "65eb69f2719cb91423ee883a300598e3c08ef66d19335895436d3a031cc46a89",
+        "src/components/system-update-info/index.html": "96f9a6c8c0e2a4c3ff741f0bf43f0e57ecd199ab47c30ef593c26dfc0ca15bd8",
+        "src/enterprise-certification/enterprise-certification.html": "8088d2aede4c59519d9cbcde3ab635a2ac637216e4cd5fdb223ba1ad324219c2",
+        "src/privacyStatement/privacyStatement.controller.js": "fc6abe27bb6a9d0c020f518d5bd99eea332dc585bedc1658903762fde3d3ce13",
+        "src/service/public-function-service.js": "4b7630e5aef628724b178b141708c7032b74788defe7f1d5cfee32be8866be9f",
+        "src/verify-identity/verify-identity.html": "21e2869a1ed56836e77d51bc35457bdbd6ec23ed2e35ddd9c708fa1a00713112"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "32f05239f4e16a428edc853310a74a03215c272dab7be3c19f538b27dce39623",
+      "matches": 10,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 10,
+    "updated_at": 10
+  },
+  {
+    "id": "call-12",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "path": "src/app/finance-list/finance-list.controller.js",
+      "query": "sFnDirective"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "9e72c55456e7561774e6db7a7c7dbb3a9cb3e6a12a47842cafff62ca15acadbd",
+      "matches": 5,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 11,
+    "updated_at": 11
+  },
+  {
+    "id": "call-13",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "手机号码"
+    },
+    "receipt": {
+      "files": {
+        "src/app/contact-add/contact-add.html": "cc15d0ad9fb3732c64bfcdcb011408118c2e22c0e22b2ee7907d4ab7bb4d3375",
+        "src/app/excel-import/excel-import.html": "c4808ee8b3c8b1fc5f021b44f699906af53e9b8e4aff12b8b619500c62273f08",
+        "src/app/resume-merge/resume-merge.controller.js": "65eb69f2719cb91423ee883a300598e3c08ef66d19335895436d3a031cc46a89",
+        "src/components/system-update-info/index.html": "96f9a6c8c0e2a4c3ff741f0bf43f0e57ecd199ab47c30ef593c26dfc0ca15bd8",
+        "src/enterprise-certification/enterprise-certification.html": "8088d2aede4c59519d9cbcde3ab635a2ac637216e4cd5fdb223ba1ad324219c2",
+        "src/privacyStatement/privacyStatement.controller.js": "fc6abe27bb6a9d0c020f518d5bd99eea332dc585bedc1658903762fde3d3ce13",
+        "src/service/public-function-service.js": "4b7630e5aef628724b178b141708c7032b74788defe7f1d5cfee32be8866be9f",
+        "src/verify-identity/verify-identity.html": "21e2869a1ed56836e77d51bc35457bdbd6ec23ed2e35ddd9c708fa1a00713112"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "32f05239f4e16a428edc853310a74a03215c272dab7be3c19f538b27dce39623",
+      "matches": 10,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 12,
+    "updated_at": 12
+  },
+  {
+    "id": "call-14",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "毕业学校"
+    },
+    "receipt": {
+      "files": {
+        "src/service/data-transfrom.js": "fb9a6b5c9e12757da3c6a20df8209a51505e8b014bd66681e405cf00932d2faf"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "f2407b94e54c4e6175b6e601d358e2fbbc04c99e13975a8bec9bca6a2904b88c",
+      "matches": 2,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 13,
+    "updated_at": 13
+  },
+  {
+    "id": "call-15",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "accountComfirm"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24",
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506",
+        "src/components/preview-finance/index.js": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd",
+        "src/directive/popup/finance-popup-directive.js": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "34af0342460a5415a629c5c7e6a97197973e74edb72a907cf42b7a46f5c61e3a",
+      "matches": 4,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 14,
+    "updated_at": 14
+  },
+  {
+    "id": "call-16",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 730,
+      "line_start": 660,
+      "path": "src/app/finance-list/finance-list.controller.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 730,
+      "line_start": 660,
+      "observed_line_end": 730,
+      "path": "src/app/finance-list/finance-list.controller.js",
+      "sha256": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506"
+    },
+    "error_code": null,
+    "created_at": 15,
+    "updated_at": 15
+  },
+  {
+    "id": "call-17",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "path": "src/directive/popup/finance-popup-directive.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 400,
+      "line_start": 1,
+      "observed_line_end": 372,
+      "path": "src/directive/popup/finance-popup-directive.js",
+      "sha256": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a"
+    },
+    "error_code": null,
+    "created_at": 16,
+    "updated_at": 16
+  },
+  {
+    "id": "call-18",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "fnOpenAccountComfirm"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24",
+        "src/app/finance-info/finance-info.html": "8f93495f4362c94d9a99dfa18393622fe3141a9ad67f0c9d2daff894c2d7842f",
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506",
+        "src/app/finance-list/finance-list.html": "7eadf3552263a25da82a636269b7f188f4cce0bcb30efde1308a4380ff2c22da",
+        "src/components/preview-finance/index.js": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "aaef1b3a1a4b56ec8bfbdb1f4e5037e7ba1c0eb8413f974f44cb59cf7d5188a3",
+      "matches": 9,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 17,
+    "updated_at": 17
+  },
+  {
+    "id": "call-19",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 750,
+      "line_start": 663,
+      "path": "src/app/finance-list/finance-list.controller.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 750,
+      "line_start": 663,
+      "observed_line_end": 750,
+      "path": "src/app/finance-list/finance-list.controller.js",
+      "sha256": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506"
+    },
+    "error_code": null,
+    "created_at": 18,
+    "updated_at": 18
+  },
+  {
+    "id": "call-20",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 1180,
+      "line_start": 1098,
+      "path": "src/app/finance-info/finance-info.controller.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 1180,
+      "line_start": 1098,
+      "observed_line_end": 1180,
+      "path": "src/app/finance-info/finance-info.controller.js",
+      "sha256": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24"
+    },
+    "error_code": null,
+    "created_at": 19,
+    "updated_at": 19
+  },
+  {
+    "id": "call-21",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "path": "src/directive/popup/finance-popup-directive.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 400,
+      "line_start": 1,
+      "observed_line_end": 372,
+      "path": "src/directive/popup/finance-popup-directive.js",
+      "sha256": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a"
+    },
+    "error_code": null,
+    "created_at": 20,
+    "updated_at": 20
+  },
+  {
+    "id": "call-22",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "FAILED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "客户抬头.*毕业学校.*手机号码"
+    },
+    "receipt": {
+      "kind": "TOOL_EXECUTION_FAILED"
+    },
+    "error_code": "AGENT_SEARCH_SYNTAX_AMBIGUOUS",
+    "created_at": 21,
+    "updated_at": 21
+  },
+  {
+    "id": "call-23",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "客户抬头"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-add/finance-add.controller.js": "81c4f2245ba1f6e5512668ccfff1aa8cc18dee700c19197d5ba90a176194618d",
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24",
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506",
+        "src/app/finance-list/finance-list.html": "7eadf3552263a25da82a636269b7f188f4cce0bcb30efde1308a4380ff2c22da",
+        "src/app/report-finance-achievement-detail/report-finance-achievement-detail.controller.js": "62c30ea16a9b36fa5e9047cd7835e294c9fbb2f70fa0d57d83eb4718547e67b6",
+        "src/backstage/listshow-setting/listshow-setting.controller.js": "b569a4d093a0efb1cdbe49fa2f1a6d8e5c434e289cb3682cae2604f0e44b1a8b",
+        "src/backstage/listshow-setting/listshow-setting.html": "545e92195994cb31565246de859ee85125a9d7aea17592607fc8483e07c05680",
+        "src/components/mail-template-set/index.js": "b81af0e6e69f98b603d211ed11a0515f611d27701ad2f70f1c74fbf1b18af86a",
+        "src/components/preview-finance/index.js": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd",
+        "src/i18n/cn.json": "1a07b4db8439e3653ca4dcfca43c7244465bb595a8fe88d8b9f6bd15ec844233",
+        "src/service/data-transfrom.js": "fb9a6b5c9e12757da3c6a20df8209a51505e8b014bd66681e405cf00932d2faf"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "d302ebbe89e979523630546d0aa4339bfa93c332a8ff5fd9f332a16fd9b5aa0b",
+      "matches": 40,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 22,
+    "updated_at": 22
+  },
+  {
+    "id": "call-24",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "path": "src/directive/popup/finance-popup-directive.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 400,
+      "line_start": 1,
+      "observed_line_end": 372,
+      "path": "src/directive/popup/finance-popup-directive.js",
+      "sha256": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a"
+    },
+    "error_code": null,
+    "created_at": 23,
+    "updated_at": 23
+  },
+  {
+    "id": "call-25",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 1180,
+      "line_start": 1098,
+      "path": "src/app/finance-info/finance-info.controller.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 1180,
+      "line_start": 1098,
+      "observed_line_end": 1180,
+      "path": "src/app/finance-info/finance-info.controller.js",
+      "sha256": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24"
+    },
+    "error_code": null,
+    "created_at": 24,
+    "updated_at": 24
+  },
+  {
+    "id": "call-26",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "FAILED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "sFnDirective.*accountComfirm"
+    },
+    "receipt": {
+      "kind": "TOOL_EXECUTION_FAILED"
+    },
+    "error_code": "AGENT_SEARCH_SYNTAX_AMBIGUOUS",
+    "created_at": 25,
+    "updated_at": 25
+  },
+  {
+    "id": "call-27",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "accountComfirm"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24",
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506",
+        "src/components/preview-finance/index.js": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd",
+        "src/directive/popup/finance-popup-directive.js": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "34af0342460a5415a629c5c7e6a97197973e74edb72a907cf42b7a46f5c61e3a",
+      "matches": 4,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 26,
+    "updated_at": 26
+  },
+  {
+    "id": "call-28",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 750,
+      "line_start": 663,
+      "path": "src/app/finance-list/finance-list.controller.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 750,
+      "line_start": 663,
+      "observed_line_end": 750,
+      "path": "src/app/finance-list/finance-list.controller.js",
+      "sha256": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506"
+    },
+    "error_code": null,
+    "created_at": 27,
+    "updated_at": 27
+  },
+  {
+    "id": "call-29",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "path": "src/directive/popup/finance-popup-directive.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 400,
+      "line_start": 1,
+      "observed_line_end": 372,
+      "path": "src/directive/popup/finance-popup-directive.js",
+      "sha256": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a"
+    },
+    "error_code": null,
+    "created_at": 28,
+    "updated_at": 28
+  },
+  {
+    "id": "call-30",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 1180,
+      "line_start": 1098,
+      "path": "src/app/finance-info/finance-info.controller.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 1180,
+      "line_start": 1098,
+      "observed_line_end": 1180,
+      "path": "src/app/finance-info/finance-info.controller.js",
+      "sha256": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24"
+    },
+    "error_code": null,
+    "created_at": 29,
+    "updated_at": 29
+  },
+  {
+    "id": "call-31",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "毕业学校"
+    },
+    "receipt": {
+      "files": {
+        "src/service/data-transfrom.js": "fb9a6b5c9e12757da3c6a20df8209a51505e8b014bd66681e405cf00932d2faf"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "f2407b94e54c4e6175b6e601d358e2fbbc04c99e13975a8bec9bca6a2904b88c",
+      "matches": 2,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 30,
+    "updated_at": 30
+  },
+  {
+    "id": "call-32",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "max_results": 20,
+      "query": "客户抬头"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-add/finance-add.controller.js": "81c4f2245ba1f6e5512668ccfff1aa8cc18dee700c19197d5ba90a176194618d",
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "33f5594d5c5f90ffa4a4e00b29ee125d6ddf5a0c8e095c10e2f21468277a6630",
+      "matches": 20,
+      "truncated": true
+    },
+    "error_code": null,
+    "created_at": 31,
+    "updated_at": 31
+  },
+  {
+    "id": "call-33",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "max_results": 5,
+      "query": "fnSmallEjectLayer"
+    },
+    "receipt": {
+      "files": {
+        "src/app/app.controller.js": "e7f6024854a8cbc135c0a4f24e5fa06d914478956b82b0a57cb98a1228bf998c",
+        "src/app/client-development-chance/client-development-chance.controller.js": "e1e19c5cbf88d9ef764bde07a81396c8de9477ab7ac86e59e6a8fd99fccff01f",
+        "src/app/client-development-clew/client-development-clew.controller.js": "a5469a10f3c65c0326150a0e202a12fbdaa328a9b863a4a78fe7758dd81cc570",
+        "src/app/contact-info/contact-info.controller.js": "936ca40a6c063ec9d310e99c1576ebbf6d36cbf04fc7c4e7e6417d6b62fa260e"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "44759615ea9c59a401aceb1eaa8160ccb1e3a71982a3ece3cfb71b093cf0756a",
+      "matches": 5,
+      "truncated": true
+    },
+    "error_code": null,
+    "created_at": 32,
+    "updated_at": 32
+  },
+  {
+    "id": "call-34",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "FAILED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "max_results": 3,
+      "query": "serPopup.*fnSmallEjectLayer.*function"
+    },
+    "receipt": {
+      "kind": "TOOL_EXECUTION_FAILED"
+    },
+    "error_code": "AGENT_SEARCH_SYNTAX_AMBIGUOUS",
+    "created_at": 33,
+    "updated_at": 33
+  },
+  {
+    "id": "call-35",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "FAILED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "max_results": 3,
+      "query": "fnSmallEjectLayer.*function"
+    },
+    "receipt": {
+      "kind": "TOOL_EXECUTION_FAILED"
+    },
+    "error_code": "AGENT_SEARCH_SYNTAX_AMBIGUOUS",
+    "created_at": 34,
+    "updated_at": 34
+  },
+  {
+    "id": "call-36",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "max_results": 5,
+      "query": "serPopup"
+    },
+    "receipt": {
+      "files": {
+        "src/app/activity/activity.controller.js": "2b8b338fd78f35e7c536a26d1123838c90efa6707be6c56c6fe8e0c7b0c37467",
+        "src/app/app.controller.js": "e7f6024854a8cbc135c0a4f24e5fa06d914478956b82b0a57cb98a1228bf998c"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "22c0875b23f0446e972ffdb8f4d86babd973e7d10e093d32e8c7eca4c8b77cda",
+      "matches": 5,
+      "truncated": true
+    },
+    "error_code": null,
+    "created_at": 35,
+    "updated_at": 35
+  },
+  {
+    "id": "call-37",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "FAILED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "max_results": 5,
+      "query": ".service.*serPopup"
+    },
+    "receipt": {
+      "kind": "TOOL_EXECUTION_FAILED"
+    },
+    "error_code": "AGENT_SEARCH_SYNTAX_AMBIGUOUS",
+    "created_at": 36,
+    "updated_at": 36
+  },
+  {
+    "id": "call-38",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "FAILED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "max_results": 5,
+      "query": "serPopup.*=.*{"
+    },
+    "receipt": {
+      "kind": "TOOL_EXECUTION_FAILED"
+    },
+    "error_code": "AGENT_SEARCH_SYNTAX_AMBIGUOUS",
+    "created_at": 37,
+    "updated_at": 37
+  },
+  {
+    "id": "call-39",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "max_results": 10,
+      "query": "fnSmallEjectLayer"
+    },
+    "receipt": {
+      "files": {
+        "src/app/app.controller.js": "e7f6024854a8cbc135c0a4f24e5fa06d914478956b82b0a57cb98a1228bf998c",
+        "src/app/client-development-chance/client-development-chance.controller.js": "e1e19c5cbf88d9ef764bde07a81396c8de9477ab7ac86e59e6a8fd99fccff01f",
+        "src/app/client-development-clew/client-development-clew.controller.js": "a5469a10f3c65c0326150a0e202a12fbdaa328a9b863a4a78fe7758dd81cc570",
+        "src/app/contact-info/contact-info.controller.js": "936ca40a6c063ec9d310e99c1576ebbf6d36cbf04fc7c4e7e6417d6b62fa260e",
+        "src/app/contact-list/contact-list.controller.js": "0fe2dc5f5eb38a040231cdd538314407549332982a6e81844ac1c8b7df2905c3",
+        "src/app/dynamic/dynamic.controller.js": "1c034937940aa005239c2634052f192b09bf1c1aa95893caf7c5d44579702599"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "7c1802fd8e9b03c37f36e9f9ee1898cede48f9ad74ed912c67aa3213faf26d35",
+      "matches": 10,
+      "truncated": true
+    },
+    "error_code": null,
+    "created_at": 38,
+    "updated_at": 38
+  },
+  {
+    "id": "call-40",
+    "run_id": "receipt-replay",
+    "name": "list_files",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "path": "src/service"
+    },
+    "receipt": {
+      "kind": "FILE_LIST",
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 39,
+    "updated_at": 39
+  },
+  {
+    "id": "call-41",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "path": "src/service/popup-service.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 400,
+      "line_start": 1,
+      "observed_line_end": 400,
+      "path": "src/service/popup-service.js",
+      "sha256": "98b3c7aa83b5d8db4598c6ecfedd371d4841f82a17b20954c1d830a98460224f"
+    },
+    "error_code": null,
+    "created_at": 40,
+    "updated_at": 40
+  },
+  {
+    "id": "call-42",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "max_results": 5,
+      "query": "popup-modal-small"
+    },
+    "receipt": {
+      "files": {
+        "src/service/popup-service.js": "98b3c7aa83b5d8db4598c6ecfedd371d4841f82a17b20954c1d830a98460224f"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "89da3e14e3bfcf86d4647133189b7527ccbdc5e501429c58a072b2e009c40cd7",
+      "matches": 4,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 41,
+    "updated_at": 41
+  },
+  {
+    "id": "call-43",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "FAILED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "max_results": 5,
+      "query": ".directive.*popupModalSmall"
+    },
+    "receipt": {
+      "kind": "TOOL_EXECUTION_FAILED"
+    },
+    "error_code": "AGENT_SEARCH_SYNTAX_AMBIGUOUS",
+    "created_at": 42,
+    "updated_at": 42
+  },
+  {
+    "id": "call-44",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "max_results": 5,
+      "query": "popupModalSmall"
+    },
+    "receipt": {
+      "files": {
+        "src/directive/popup/public-popup-directive.js": "e4472411c535bdc41062deae83ef432872344eaef814a3fba30c38a70d8af18a"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "3d21656908dac33a954a48927699f154222045b6b5a6ad1e7c387d8745543d1a",
+      "matches": 3,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 43,
+    "updated_at": 43
+  },
+  {
+    "id": "call-45",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 850,
+      "line_start": 764,
+      "path": "src/directive/popup/public-popup-directive.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 850,
+      "line_start": 764,
+      "observed_line_end": 850,
+      "path": "src/directive/popup/public-popup-directive.js",
+      "sha256": "e4472411c535bdc41062deae83ef432872344eaef814a3fba30c38a70d8af18a"
+    },
+    "error_code": null,
+    "created_at": 44,
+    "updated_at": 44
+  },
+  {
+    "id": "call-46",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 1180,
+      "line_start": 1098,
+      "path": "src/app/finance-info/finance-info.controller.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 1180,
+      "line_start": 1098,
+      "observed_line_end": 1180,
+      "path": "src/app/finance-info/finance-info.controller.js",
+      "sha256": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24"
+    },
+    "error_code": null,
+    "created_at": 45,
+    "updated_at": 45
+  },
+  {
+    "id": "call-47",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "path": "src/directive/popup/finance-popup-directive.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 400,
+      "line_start": 1,
+      "observed_line_end": 372,
+      "path": "src/directive/popup/finance-popup-directive.js",
+      "sha256": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a"
+    },
+    "error_code": null,
+    "created_at": 46,
+    "updated_at": 46
+  },
+  {
+    "id": "call-48",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "客户抬头"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-add/finance-add.controller.js": "81c4f2245ba1f6e5512668ccfff1aa8cc18dee700c19197d5ba90a176194618d",
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24",
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506",
+        "src/app/finance-list/finance-list.html": "7eadf3552263a25da82a636269b7f188f4cce0bcb30efde1308a4380ff2c22da",
+        "src/app/report-finance-achievement-detail/report-finance-achievement-detail.controller.js": "62c30ea16a9b36fa5e9047cd7835e294c9fbb2f70fa0d57d83eb4718547e67b6",
+        "src/backstage/listshow-setting/listshow-setting.controller.js": "b569a4d093a0efb1cdbe49fa2f1a6d8e5c434e289cb3682cae2604f0e44b1a8b",
+        "src/backstage/listshow-setting/listshow-setting.html": "545e92195994cb31565246de859ee85125a9d7aea17592607fc8483e07c05680",
+        "src/components/mail-template-set/index.js": "b81af0e6e69f98b603d211ed11a0515f611d27701ad2f70f1c74fbf1b18af86a",
+        "src/components/preview-finance/index.js": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd",
+        "src/i18n/cn.json": "1a07b4db8439e3653ca4dcfca43c7244465bb595a8fe88d8b9f6bd15ec844233",
+        "src/service/data-transfrom.js": "fb9a6b5c9e12757da3c6a20df8209a51505e8b014bd66681e405cf00932d2faf"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "d302ebbe89e979523630546d0aa4339bfa93c332a8ff5fd9f332a16fd9b5aa0b",
+      "matches": 40,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 47,
+    "updated_at": 47
+  },
+  {
+    "id": "call-49",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "毕业学校"
+    },
+    "receipt": {
+      "files": {
+        "src/service/data-transfrom.js": "fb9a6b5c9e12757da3c6a20df8209a51505e8b014bd66681e405cf00932d2faf"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "f2407b94e54c4e6175b6e601d358e2fbbc04c99e13975a8bec9bca6a2904b88c",
+      "matches": 2,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 48,
+    "updated_at": 48
+  },
+  {
+    "id": "call-50",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "FAILED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "directive.*accountComfirm"
+    },
+    "receipt": {
+      "kind": "TOOL_EXECUTION_FAILED"
+    },
+    "error_code": "AGENT_SEARCH_SYNTAX_AMBIGUOUS",
+    "created_at": 49,
+    "updated_at": 49
+  },
+  {
+    "id": "call-51",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "accountComfirm"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24",
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506",
+        "src/components/preview-finance/index.js": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd",
+        "src/directive/popup/finance-popup-directive.js": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "34af0342460a5415a629c5c7e6a97197973e74edb72a907cf42b7a46f5c61e3a",
+      "matches": 4,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 50,
+    "updated_at": 50
+  },
+  {
+    "id": "call-52",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "客户抬头"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-add/finance-add.controller.js": "81c4f2245ba1f6e5512668ccfff1aa8cc18dee700c19197d5ba90a176194618d",
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24",
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506",
+        "src/app/finance-list/finance-list.html": "7eadf3552263a25da82a636269b7f188f4cce0bcb30efde1308a4380ff2c22da",
+        "src/app/report-finance-achievement-detail/report-finance-achievement-detail.controller.js": "62c30ea16a9b36fa5e9047cd7835e294c9fbb2f70fa0d57d83eb4718547e67b6",
+        "src/backstage/listshow-setting/listshow-setting.controller.js": "b569a4d093a0efb1cdbe49fa2f1a6d8e5c434e289cb3682cae2604f0e44b1a8b",
+        "src/backstage/listshow-setting/listshow-setting.html": "545e92195994cb31565246de859ee85125a9d7aea17592607fc8483e07c05680",
+        "src/components/mail-template-set/index.js": "b81af0e6e69f98b603d211ed11a0515f611d27701ad2f70f1c74fbf1b18af86a",
+        "src/components/preview-finance/index.js": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd",
+        "src/i18n/cn.json": "1a07b4db8439e3653ca4dcfca43c7244465bb595a8fe88d8b9f6bd15ec844233",
+        "src/service/data-transfrom.js": "fb9a6b5c9e12757da3c6a20df8209a51505e8b014bd66681e405cf00932d2faf"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "d302ebbe89e979523630546d0aa4339bfa93c332a8ff5fd9f332a16fd9b5aa0b",
+      "matches": 40,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 51,
+    "updated_at": 51
+  },
+  {
+    "id": "call-53",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 90,
+      "line_start": 1,
+      "path": "src/directive/popup/finance-popup-directive.js"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 90,
+      "line_start": 1,
+      "observed_line_end": 90,
+      "path": "src/directive/popup/finance-popup-directive.js",
+      "sha256": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a"
+    },
+    "error_code": null,
+    "created_at": 52,
+    "updated_at": 52
+  },
+  {
+    "id": "call-54",
+    "run_id": "receipt-replay",
+    "name": "search_text",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "query": "到账确认"
+    },
+    "receipt": {
+      "files": {
+        "src/app/finance-info/finance-info.controller.js": "e67037668a64dcdff5b19195df82294d9c0486db972528af3533e6d48f61fa24",
+        "src/app/finance-list/finance-list.controller.js": "bfc4992091470ab4ca7791f19906fb4812fd12b05b566dee628463833d684506",
+        "src/app/finance-list/finance-list.html": "7eadf3552263a25da82a636269b7f188f4cce0bcb30efde1308a4380ff2c22da",
+        "src/components/preview-finance/index.js": "83324ba8402fefe6b1f25ac577abe2bbe6e64b33c520d1f5724a517eb125cbfd",
+        "src/directive/popup/finance-popup-directive.js": "04f8d73c310c4316019c5306975f4da67ecd321fd0a9b6df806292db4fad8b8a",
+        "src/i18n/cn.json": "1a07b4db8439e3653ca4dcfca43c7244465bb595a8fe88d8b9f6bd15ec844233"
+      },
+      "kind": "TEXT_SEARCH",
+      "matched_locations_sha256": "d2efbb240d50b752aa2bca3aa56b79c1f2e55bd33843a1d568fac33d08fe984c",
+      "matches": 13,
+      "truncated": false
+    },
+    "error_code": null,
+    "created_at": 53,
+    "updated_at": 53
+  },
+  {
+    "id": "call-55",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 860,
+      "line_start": 830,
+      "path": "src/app/finance-list/finance-list.html"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 860,
+      "line_start": 830,
+      "observed_line_end": 860,
+      "path": "src/app/finance-list/finance-list.html",
+      "sha256": "7eadf3552263a25da82a636269b7f188f4cce0bcb30efde1308a4380ff2c22da"
+    },
+    "error_code": null,
+    "created_at": 54,
+    "updated_at": 54
+  },
+  {
+    "id": "call-56",
+    "run_id": "receipt-replay",
+    "name": "read_file",
+    "effect": "OBSERVE",
+    "status": "COMPLETED",
+    "policy_decision": "ALLOW",
+    "arguments": {
+      "line_end": 1010,
+      "line_start": 980,
+      "path": "src/app/finance-list/finance-list.html"
+    },
+    "receipt": {
+      "kind": "FILE_READ",
+      "line_end": 1010,
+      "line_start": 980,
+      "observed_line_end": 1010,
+      "path": "src/app/finance-list/finance-list.html",
+      "sha256": "7eadf3552263a25da82a636269b7f188f4cce0bcb30efde1308a4380ff2c22da"
+    },
+    "error_code": null,
+    "created_at": 55,
+    "updated_at": 55
+  }
+]

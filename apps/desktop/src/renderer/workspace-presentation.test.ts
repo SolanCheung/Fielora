@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { AgentEventView, AgentRunView, ConversationMessageView } from '@fielora/contracts';
 import {
   agentTurnOwnership,
+  previousAgentAttempts,
   collapseDuplicateUnsentConversations,
   conversationTitleFromContent,
   friendlyFilePreviewFailure,
@@ -14,6 +15,19 @@ import {
   shouldSubmitComposerKey,
   workspacePreviewKind,
 } from './workspace-presentation.ts';
+
+test('continuation folds only earlier attempts of the same user turn, leaving the latest result last', () => {
+  const messages = [
+    { id: 'user-old', role: 'USER' }, { id: 'answer-old', role: 'ASSISTANT', invocation_id: 'old-run' },
+    { id: 'user', role: 'USER' }, { id: 'failed', role: 'ASSISTANT', invocation_id: 'failed-run' },
+    { id: 'success', role: 'ASSISTANT', invocation_id: 'success-run' },
+    { id: 'next-user', role: 'USER' }, { id: 'next-answer', role: 'ASSISTANT', invocation_id: 'next-run' },
+  ] as ConversationMessageView[];
+  assert.deepEqual(previousAgentAttempts(messages, 'user', 'success').map(message => message.id), ['failed']);
+  assert.deepEqual(previousAgentAttempts(messages.slice(0, 4), 'user', null).map(message => message.id), ['failed']);
+  assert.deepEqual(previousAgentAttempts(messages, null, null), []);
+  assert.deepEqual(previousAgentAttempts(messages, 'user-old', 'answer-old'), []);
+});
 
 test('composer sends on Enter but preserves Shift+Enter and IME confirmation', () => {
   assert.equal(shouldSubmitComposerKey({ key: 'Enter', shiftKey: false, isComposing: false }), true);

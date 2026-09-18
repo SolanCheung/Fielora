@@ -59,7 +59,7 @@ export const channels = {
   providerStoreCredential: 'fielora:provider:store-credential', providerDeleteCredential: 'fielora:provider:delete-credential',
   providerRemove: 'fielora:provider:remove', providerProbe: 'fielora:provider:probe', providerList: 'fielora:provider:list', providerGet: 'fielora:provider:get',
   modelStart: 'fielora:model:start', modelCancel: 'fielora:model:cancel',
-  agentStart: 'fielora:agent:start', agentGet: 'fielora:agent:get', agentList: 'fielora:agent:list',
+  agentStart: 'fielora:agent:start', agentGet: 'fielora:agent:get', agentList: 'fielora:agent:list', agentUsage: 'fielora:agent:usage',
   agentEvents: 'fielora:agent:events', agentToolCalls: 'fielora:agent:tool-calls',
   agentCancel: 'fielora:agent:cancel', agentPause: 'fielora:agent:pause', agentResume: 'fielora:agent:resume', agentResolveApproval: 'fielora:agent:resolve-approval',
   agentMcpConnections: 'fielora:agent:mcp-connections', agentMcpRuntime: 'fielora:agent:mcp-runtime', agentActivateMcpConnection: 'fielora:agent:activate-mcp-connection',

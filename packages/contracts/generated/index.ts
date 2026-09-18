@@ -542,6 +542,18 @@ export type VerificationOutcome = "PASS" | "FAIL" | "BLOCKED" | "NOT_RUN";
 
 export type AgentRunView = { id: AgentRunId, field_id: FieldId, conversation_id: ConversationId, provider_config_id: ProviderConfigId, model_id: string, task: string, permission: AgentPermission, status: AgentRunStatus, current_step: number, max_steps: number, next_sequence: number, error_code: string | null, created_at: number, updated_at: number, finished_at: number | null, };
 
+export type ModelUsageReportRequest = { since: number | null, offset: number, limit: number, };
+
+export type TaskTokenUsage = { input_tokens: number, output_tokens: number, reported_calls: number, unreported_calls: number, };
+
+export type ModelUsageTask = { run_id: AgentRunId, conversation_id: ConversationId, title: string, provider_config_id: ProviderConfigId, model_id: string, status: AgentRunStatus, created_at: number, usage: TaskTokenUsage, };
+
+export type ModelUsageGroup = { provider_config_id: ProviderConfigId, model_id: string, usage: TaskTokenUsage, };
+
+export type ModelUsageDay = { date: string, usage: TaskTokenUsage, };
+
+export type ModelUsageReport = { usage: TaskTokenUsage, models: Array<ModelUsageGroup>, daily: Array<ModelUsageDay>, tasks: Array<ModelUsageTask>, active: Array<ModelUsageTask>, total_tasks: number, };
+
 export type AgentInputAttachment = { id: string, filename: string, mime_type: string, size: number, width: number, height: number, source: string, data_url: string, };
 
 export type ActiveArtifactViewMode = "CURRENT" | "HISTORICAL";
@@ -553,6 +565,8 @@ export type StartAgentRunRequest = { field_id: FieldId, conversation_id: Convers
 export type SetArtifactArchiveStateCommandRequest = { field_id: FieldId, conversation_id: ConversationId, provider_config_id: ProviderConfigId, model_id: string | null, artifact_id: ArtifactId, archived: boolean, };
 
 export type AgentRunRequest = { run_id: AgentRunId, };
+
+export type ResumeAgentRunRequest = { run_id: AgentRunId, attachments?: Array<AgentInputAttachment>, };
 
 export type ListAgentRunsRequest = { conversation_id: ConversationId, };
 

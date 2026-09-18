@@ -14,6 +14,7 @@ pub mod mcp;
 pub mod mcp_connections;
 mod plugins;
 pub mod png_admission;
+pub mod reference;
 mod skills;
 mod spreadsheet;
 pub mod web;
@@ -102,6 +103,8 @@ pub enum AgentError {
     ToolNotFound,
     #[error("AGENT_TOOL_ARGUMENTS_INVALID")]
     ToolArgumentsInvalid,
+    #[error("{code}")]
+    WorkGuidance { code: &'static str, detail: String },
     #[error("AGENT_WORKSPACE_ESCAPE")]
     WorkspaceEscape,
     #[error("AGENT_SENSITIVE_PATH_DENIED")]
@@ -252,6 +255,7 @@ impl AgentError {
             Self::InvalidTransition => "AGENT_INVALID_TRANSITION",
             Self::ToolNotFound => "AGENT_TOOL_NOT_FOUND",
             Self::ToolArgumentsInvalid => "AGENT_TOOL_ARGUMENTS_INVALID",
+            Self::WorkGuidance { code, .. } => code,
             Self::WorkspaceEscape => "AGENT_WORKSPACE_ESCAPE",
             Self::SensitivePathDenied => "AGENT_SENSITIVE_PATH_DENIED",
             Self::FileNotFound => "AGENT_FILE_NOT_FOUND",
@@ -326,6 +330,7 @@ impl AgentError {
 
     pub fn model_recovery_message(&self) -> String {
         match self {
+            Self::WorkGuidance { code, detail } => format!("{code}: {detail}"),
             Self::PatchConflict {
                 path,
                 reason,
@@ -351,6 +356,42 @@ impl AgentError {
 
 pub fn valid_run_transition(from: AgentRunStatus, to: AgentRunStatus) -> bool {
     from.can_transition_to(to)
+}
+
+/// Compatibility for one unambiguous model wire-shape error. Never infer a
+/// hash, distribute one hash across files, or resolve conflicting values.
+/// Call before policy and mutation admission so they see the canonical request.
+pub fn normalize_single_patch_hash(name: &str, arguments: &mut Value) -> bool {
+    if name != "apply_patches" {
+        return false;
+    }
+    let Some(root) = arguments.as_object_mut() else {
+        return false;
+    };
+    let Some(hash) = root.get("expected_sha256").cloned() else {
+        return false;
+    };
+    if !hash.as_str().is_some_and(valid_sha256) {
+        return false;
+    }
+    let Some(patches) = root.get_mut("patches").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    if patches.len() != 1 {
+        return false;
+    }
+    let Some(patch) = patches[0].as_object_mut() else {
+        return false;
+    };
+    if patch
+        .get("expected_sha256")
+        .is_some_and(|nested| nested != &hash)
+    {
+        return false;
+    }
+    patch.insert("expected_sha256".into(), hash);
+    root.remove("expected_sha256");
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -645,15 +686,15 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
     vec![
         tool(
             "list_files",
-            "List bounded files below a project-relative directory.",
+            "List bounded files below a project-relative directory, or an absolute directory inside the user-supplied read-only reference scope.",
             AgentToolEffect::Observe,
             json!({"type":"object","properties":{"path":{"type":"string"},"max_depth":{"type":"integer","minimum":1,"maximum":12}},"additionalProperties":false}),
         ),
         tool(
             "read_file",
-            "Read a UTF-8 project file with optional inclusive line bounds.",
+            "Read current UTF-8 source and its whole-file SHA-256. Relative paths mean the target project; absolute paths may read user-supplied reference scopes listed in context. Output defaults to 16 KiB (max_bytes: 256..65536). For JSON, prefer json_pointers, e.g. [\"/12045\",\"/scripts/start\"], to return exact values or explicit missing keys without reading a minified file. Otherwise use inclusive line_start/line_end, or resume a partial result with its next_byte_offset as byte_offset (a whole-file UTF-8 boundary). JSON pointers, line bounds and byte offsets are mutually exclusive modes. A truncated prefix does not establish absence.",
             AgentToolEffect::Observe,
-            json!({"type":"object","properties":{"path":{"type":"string"},"line_start":{"type":"integer","minimum":1},"line_end":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}),
+            json!({"type":"object","properties":{"path":{"type":"string"},"line_start":{"type":"integer","minimum":1},"line_end":{"type":"integer","minimum":1},"byte_offset":{"type":"integer","minimum":0},"max_bytes":{"type":"integer","minimum":256,"maximum":65536},"json_pointers":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"string","maxLength":512}}},"required":["path"],"additionalProperties":false}),
         ),
         tool(
             "file.extract",
@@ -663,19 +704,19 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
         ),
         tool(
             "search_text",
-            "Search one or more literal strings in one bounded repository scan. Use queries for related terms instead of repeating searches.",
+            "Search project text with bounded results. An absolute path can search a user-supplied read-only reference scope listed in context; results identify that source separately. Batch alternatives using queries[]. Plain queries prefer literal matches; if none match, regex-like queries (|, .*, \\s, \\b) use disclosed REGEX_FALLBACK. Set regex:true for explicit Rust regex or literal:true for exact punctuation. These flags are mutually exclusive. Read match_mode, truncation and skipped_files; no match is not proof of absence. Matched locations and file hashes support follow-up reads/guarded edits.",
             AgentToolEffect::Observe,
-            json!({"type":"object","properties":{"query":{"type":"string"},"queries":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":16,"uniqueItems":true},"path":{"type":"string"},"max_results":{"type":"integer","minimum":1,"maximum":200}},"additionalProperties":false}),
+            json!({"type":"object","properties":{"query":{"type":"string"},"queries":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":16,"uniqueItems":true},"literal":{"type":"boolean"},"regex":{"type":"boolean"},"path":{"type":"string"},"max_results":{"type":"integer","minimum":1,"maximum":200}},"additionalProperties":false}),
         ),
         tool(
             "stat_path",
-            "Read bounded metadata for one project-relative file or directory.",
+            "Read bounded metadata for a project-relative path or an absolute path in the user-supplied reference scope.",
             AgentToolEffect::Observe,
             json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}),
         ),
         tool(
             "git_read",
-            "Run one read-only Git operation: status, diff, log, or show.",
+            "Run one read-only Git operation. operation selects the subcommand; args contains only its flags/paths, never git, --no-pager, or another copy of the operation. Examples: {operation:\"diff\",args:[\"--stat\"]}, {operation:\"diff\",args:[\"--\",\"src/page.js\"]}. An argument error says nothing about repository health.",
             AgentToolEffect::Observe,
             json!({"type":"object","properties":{"operation":{"type":"string","enum":["status","diff","log","show"]},"args":{"type":"array","items":{"type":"string"},"maxItems":32}},"required":["operation"],"additionalProperties":false}),
         ),
@@ -765,7 +806,7 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
         ),
         tool(
             "apply_patches",
-            "Apply exact replacements or 1-based inclusive line edits across multiple files as one reviewed, hash-guarded operation. Prefer line_edits for whitespace-heavy HTML or repeated snippets. Each patch must use exactly one edit mode.",
+            "Apply exact replacements or 1-based inclusive line edits across multiple files as one reviewed, hash-guarded operation. Prefer line_edits for whitespace-heavy HTML or repeated snippets. Each patch must use exactly one edit mode and its own expected_sha256. A misplaced root expected_sha256 is normalized only for a single patch with no conflicting hash.",
             AgentToolEffect::WorkspaceWrite,
             json!({
                 "type":"object",
@@ -1318,7 +1359,8 @@ impl ContextCompiler {
             let Ok(text) = String::from_utf8(bytes.clone()) else {
                 continue;
             };
-            let excerpt = truncate_utf8(&text, remaining.min(16 * 1024));
+            let per_file = (self.max_bytes / self.max_files.max(1)).clamp(1024, 16 * 1024);
+            let excerpt = truncate_utf8(&text, remaining.min(per_file));
             if excerpt.is_empty() {
                 continue;
             }
@@ -1961,6 +2003,7 @@ impl<E: ToolExecutor> ToolExecutor for RoutedToolExecutor<E> {
 /// remain in Harness.Execution.
 pub struct ToolRuntime {
     root: PathBuf,
+    reference_paths: Vec<PathBuf>,
     checkpoint_root: PathBuf,
     skill_catalog: SkillCatalog,
     content_blob_store: Option<asset::ContentBlobStore>,
@@ -1983,6 +2026,7 @@ impl ToolRuntime {
         fs::create_dir_all(&checkpoint_root).map_err(|_| AgentError::IoFailed)?;
         Ok(Self {
             root,
+            reference_paths: Vec::new(),
             checkpoint_root,
             skill_catalog,
             content_blob_store: None,
@@ -2410,6 +2454,129 @@ impl ToolRuntime {
         })
     }
 
+    /// Read-only preflight for shared translation edits. Uses the same path and
+    /// patch rules as execution; it never writes or grants workspace authority.
+    pub fn translation_impact(
+        &self,
+        name: &str,
+        arguments: &Value,
+        covered: &[String],
+    ) -> Result<(), AgentError> {
+        let patches = if name == "apply_patches" {
+            arguments["patches"].as_array().cloned().unwrap_or_default()
+        } else if matches!(name, "replace_text" | "write_file") {
+            vec![arguments.clone()]
+        } else {
+            return Ok(());
+        };
+        for patch in patches {
+            let Some(path) = patch["path"].as_str() else {
+                continue;
+            };
+            let relative = normalize_relative(path)?;
+            let is_locale = relative.extension().is_some_and(|ext| ext == "json")
+                && relative.components().any(|part| {
+                    matches!(
+                        part.as_os_str().to_str(),
+                        Some("i18n" | "locale" | "locales" | "translations")
+                    )
+                });
+            if !is_locale {
+                continue;
+            }
+            deny_sensitive(&relative)?;
+            let bytes = fs::read(resolve_existing(&self.root, &relative)?)
+                .map_err(|_| AgentError::FileNotFound)?;
+            if bytes.len() > MAX_FILE_BYTES {
+                return Err(AgentError::FileTooLarge);
+            }
+            if patch["expected_sha256"].as_str() != Some(sha256(&bytes).as_str()) {
+                return Err(AgentError::FileChanged);
+            }
+            let after = match name {
+                "write_file" => patch["content"]
+                    .as_str()
+                    .ok_or(AgentError::ToolArgumentsInvalid)?
+                    .to_owned(),
+                "apply_patches" => reconcile_patch(&bytes, &patch)?,
+                _ => reconcile_replacements(&bytes, &patch)?,
+            };
+            let (Ok(Value::Object(before)), Ok(Value::Object(after))) = (
+                serde_json::from_slice::<Value>(&bytes),
+                serde_json::from_str::<Value>(&after),
+            ) else {
+                continue;
+            };
+            let keys = before
+                .iter()
+                .filter(|(key, value)| value.is_string() && after.get(*key) != Some(*value))
+                .map(|(key, _)| key.clone())
+                .collect::<Vec<_>>();
+            if keys.is_empty() {
+                continue;
+            }
+            let mut consumers = Vec::new();
+            for source in repository_files(&self.root)? {
+                let source_path = relative_text(&source);
+                if covered
+                    .iter()
+                    .any(|path| path.replace('\\', "/") == source_path)
+                    || sensitive_relative(&source)
+                    || !source.extension().is_some_and(|ext| {
+                        matches!(
+                            ext.to_str(),
+                            Some("js" | "ts" | "jsx" | "tsx" | "html" | "vue" | "svelte")
+                        )
+                    })
+                {
+                    continue;
+                }
+                let Ok(bytes) = resolve_existing(&self.root, &source)
+                    .and_then(|p| fs::read(p).map_err(|_| AgentError::IoFailed))
+                else {
+                    continue;
+                };
+                if bytes.len() > MAX_FILE_BYTES {
+                    continue;
+                }
+                let Ok(text) = std::str::from_utf8(&bytes) else {
+                    continue;
+                };
+                if keys.iter().any(|key| {
+                    [
+                        format!("T:{key}"),
+                        format!("T: {key}"),
+                        format!("'{key}'"),
+                        format!("\"{key}\""),
+                    ]
+                    .iter()
+                    .any(|pattern| {
+                        text.match_indices(pattern).any(|(offset, matched)| {
+                            !text[offset + matched.len()..]
+                                .starts_with(|c: char| c.is_alphanumeric() || c == '_')
+                        })
+                    })
+                }) {
+                    consumers.push(source_path);
+                    if consumers.len() >= 16 {
+                        break;
+                    }
+                }
+            }
+            if !consumers.is_empty() {
+                return Err(AgentError::WorkGuidance {
+                    code: "AGENT_SHARED_TRANSLATION_IMPACT",
+                    detail: format!(
+                        "Existing translation keys {} in {path} are also referenced outside the current work_plan scope: {}. No file was written. Prefer fixing the local component binding or adding a dedicated key; do not repurpose a shared key for a local defect. If a global translation change is actually required, inspect affected consumers and amend the work_plan with that evidence and their verification coverage. This is a bounded static reference check, not proof of complete impact coverage.",
+                        serde_json::to_string(&keys).unwrap(),
+                        consumers.join(", ")
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
     fn reconcile_file_delete(&self, arguments: &Value) -> Result<ToolReconciliation, AgentError> {
         let path = arguments
             .get("path")
@@ -2438,6 +2605,15 @@ impl ToolExecutor for ToolRuntime {
             } else {
                 AgentError::Cancelled
             });
+        }
+        if matches!(
+            name,
+            "read_file" | "search_text" | "list_files" | "stat_path"
+        ) && arguments["path"]
+            .as_str()
+            .is_some_and(|p| Path::new(p).is_absolute())
+        {
+            return self.observe_absolute(name, arguments);
         }
         match name {
             "list_files" => self.list_files(arguments),
@@ -2518,6 +2694,9 @@ impl ToolRuntime {
             path: String,
             line_start: Option<usize>,
             line_end: Option<usize>,
+            byte_offset: Option<usize>,
+            max_bytes: Option<usize>,
+            json_pointers: Option<Vec<String>>,
         }
         let args: Args = parse_args(arguments)?;
         let relative = normalize_relative(&args.path)?;
@@ -2527,26 +2706,123 @@ impl ToolRuntime {
         if bytes.len() > MAX_FILE_BYTES {
             return Err(AgentError::FileTooLarge);
         }
-        let text =
-            String::from_utf8(bytes.clone()).map_err(|_| AgentError::BinaryFileUnsupported)?;
-        let start = args.line_start.unwrap_or(1).max(1);
+        let text = std::str::from_utf8(&bytes).map_err(|_| AgentError::BinaryFileUnsupported)?;
+        let limit = args.max_bytes.unwrap_or(16 * 1024);
+        if !(256..=64 * 1024).contains(&limit) {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        if let Some(pointers) = args.json_pointers {
+            if args.line_start.is_some()
+                || args.line_end.is_some()
+                || args.byte_offset.is_some()
+                || pointers.is_empty()
+                || pointers.len() > 32
+                || pointers
+                    .iter()
+                    .any(|p| p.len() > 512 || (!p.is_empty() && !p.starts_with('/')))
+            {
+                return Err(AgentError::ToolArgumentsInvalid);
+            }
+            let document: Value =
+                serde_json::from_str(text).map_err(|_| AgentError::ToolArgumentsInvalid)?;
+            let mut selected = String::new();
+            let mut missing = Vec::new();
+            let mut truncated = false;
+            for pointer in &pointers {
+                let entry = if let Some(value) = document.pointer(pointer) {
+                    json!({"pointer":pointer,"found":true,"value":value})
+                } else {
+                    missing.push(pointer.clone());
+                    json!({"pointer":pointer,"found":false})
+                }
+                .to_string();
+                if selected.len() + entry.len() + 1 > limit {
+                    truncated = true;
+                    selected.push_str(&truncate_utf8(&entry, limit.saturating_sub(selected.len())));
+                    break;
+                }
+                selected.push_str(&entry);
+                selected.push('\n');
+            }
+            return Ok(ToolExecution {
+                receipt: json!({"kind":"JSON_READ","path":relative_text(&relative),"sha256":sha256(&bytes),
+                    "bytes":bytes.len(),"read_mode":"JSON_POINTERS","json_pointers":pointers,"missing_pointers":missing,"truncated":truncated,"output_sha256":sha256(selected.as_bytes())}),
+                observation: bounded_observation(format!(
+                    "JSON values from the current file (not template fallback labels). Missing means that exact pointer is absent.{}\n{selected}",
+                    if truncated {
+                        " Output is partial; request narrower pointers."
+                    } else {
+                        ""
+                    }
+                )),
+            });
+        }
+        let offset = args.byte_offset.unwrap_or(0);
+        if offset > text.len()
+            || !text.is_char_boundary(offset)
+            || args.byte_offset.is_some() && (args.line_start.is_some() || args.line_end.is_some())
+        {
+            return Err(AgentError::ToolArgumentsInvalid);
+        }
+        let start = if args.byte_offset.is_some() {
+            text[..offset].bytes().filter(|b| *b == b'\n').count() + 1
+        } else {
+            args.line_start.unwrap_or(1).max(1)
+        };
         let end = args
             .line_end
             .unwrap_or(start.saturating_add(399))
             .max(start);
         let mut selected = String::new();
-        for (index, line) in text.lines().enumerate() {
+        let mut observed_end = start.saturating_sub(1);
+        let mut file_offset = 0;
+        let mut byte_start = None;
+        let mut byte_end = offset;
+        let mut next = None;
+        for (index, raw_line) in text.split_inclusive('\n').enumerate() {
             let number = index + 1;
+            let line_offset = file_offset;
+            file_offset += raw_line.len();
             if number < start {
                 continue;
             }
-            if number > end || selected.len() >= MAX_READ_BYTES {
+            if number > end {
+                if args.line_end.is_none() {
+                    next = Some(line_offset);
+                }
                 break;
             }
-            selected.push_str(&format!("{number:>6} | {line}\n"));
+            let local_start = offset.saturating_sub(line_offset).min(raw_line.len());
+            let line = &raw_line[local_start..];
+            let prefix = format!("{number:>6} | ");
+            let mut take = line
+                .len()
+                .min(limit.saturating_sub(selected.len() + prefix.len() + 1));
+            while !line.is_char_boundary(take) {
+                take -= 1;
+            }
+            byte_start.get_or_insert(line_offset + local_start);
+            byte_end = line_offset + local_start + take;
+            if take > 0 {
+                selected.push_str(&prefix);
+                selected.push_str(&line[..take]);
+                if !line[..take].ends_with('\n') {
+                    selected.push('\n');
+                }
+            }
+            if take < line.len() {
+                next = Some(byte_end);
+                break;
+            }
+            observed_end = number;
+        }
+        if let Some(next) = next {
+            selected.push_str(&format!("\n[Partial file range; continue with byte_offset={next}, or use json_pointers for JSON keys. Do not infer missing content from this prefix.]"));
         }
         Ok(ToolExecution {
-            receipt: json!({"kind":"FILE_READ","path":relative_text(&relative),"sha256":sha256(&bytes),"bytes":bytes.len(),"line_start":start,"line_end":end}),
+            receipt: json!({"kind":"FILE_READ","path":relative_text(&relative),"sha256":sha256(&bytes),"bytes":bytes.len(),
+                "read_mode":if args.byte_offset.is_some() {"BYTE_RANGE"} else {"LINES"},"line_start":start,"line_end":end,
+                "observed_line_end":observed_end,"byte_start":byte_start.unwrap_or(offset),"byte_end":byte_end,"next_byte_offset":next,"truncated":next.is_some()}),
             observation: bounded_observation(selected),
         })
     }
@@ -2560,16 +2836,22 @@ impl ToolRuntime {
             queries: Vec<String>,
             path: Option<String>,
             max_results: Option<usize>,
+            #[serde(default)]
+            literal: bool,
+            #[serde(default)]
+            regex: bool,
         }
         let args: Args = parse_args(arguments)?;
-        let mut queries = args
+        let mut unique = std::collections::HashSet::new();
+        let queries = args
             .query
             .into_iter()
             .chain(args.queries)
+            .filter(|query| unique.insert(query.clone()))
             .collect::<Vec<_>>();
-        queries.dedup();
         if queries.is_empty()
             || queries.len() > 16
+            || (args.literal && args.regex)
             || queries
                 .iter()
                 .any(|query| query.is_empty() || query.len() > 1024 || query.contains('\0'))
@@ -2578,52 +2860,138 @@ impl ToolRuntime {
         }
         let base = args.path.as_deref().map(normalize_relative).transpose()?;
         let max = args.max_results.unwrap_or(100).clamp(1, 200);
-        let mut results = Vec::new();
-        for relative in repository_files(&self.root)? {
-            if results.len() >= max
-                || sensitive_relative(&relative)
-                || base
-                    .as_ref()
-                    .is_some_and(|base| base.as_os_str() != "." && !relative.starts_with(base))
-            {
-                continue;
-            }
-            let target = resolve_existing(&self.root, &relative)?;
-            let Ok(bytes) = fs::read(&target) else {
-                continue;
-            };
-            if bytes.len() > MAX_READ_BYTES {
-                continue;
-            }
-            let Ok(text) = String::from_utf8(bytes) else {
-                continue;
-            };
-            for (index, line) in text.lines().enumerate() {
-                for query in queries.iter().filter(|query| line.contains(query.as_str())) {
-                    results.push(format!(
-                        "{}:{}:[{}] {}",
-                        relative_text(&relative),
-                        index + 1,
-                        truncate_utf8(query, 80),
-                        truncate_utf8(line, 500)
-                    ));
-                    if results.len() >= max {
-                        break;
-                    }
-                }
-                if results.len() >= max {
-                    break;
-                }
-            }
-        }
+        let mut paths = repository_files(&self.root)?;
+        paths.sort();
+        paths.dedup();
+        let regex_like = |query: &str| {
+            query.contains('|')
+                || query.contains(".*")
+                || query.contains("\\s")
+                || query.contains("\\b")
+        };
+        let may_fallback = !args.literal && !args.regex && queries.iter().any(|q| regex_like(q));
+        let mut mode = if args.regex { "REGEX" } else { "LITERAL" };
         let digests = queries
             .iter()
             .map(|query| sha256(query.as_bytes()))
             .collect::<Vec<_>>();
-        Ok(ToolExecution {
-            receipt: json!({"kind":"TEXT_SEARCH","query_sha256":digests.first(),"query_sha256s":digests,"query_count":queries.len(),"matches":results.len(),"truncated":results.len()>=max}),
-            observation: bounded_observation(results.join("\n")),
-        })
+        loop {
+            let patterns = queries.iter().map(|query| {
+                if mode == "REGEX" || (mode == "REGEX_FALLBACK" && regex_like(query)) {
+                    regex::RegexBuilder::new(query).size_limit(1024 * 1024)
+                        .dfa_size_limit(1024 * 1024).nest_limit(32).build().map(Some)
+                        .map_err(|_| AgentError::WorkGuidance {
+                            code: "AGENT_SEARCH_PATTERN_INVALID",
+                            detail: "Invalid or over-complex regex. Use literal:true for punctuation, or simplify the pattern; look-around/backreferences are unsupported. This is NOT evidence of missing code.".into(),
+                        })
+                } else { Ok(None) }
+            }).collect::<Result<Vec<_>, AgentError>>()?;
+            let mut results = Vec::new();
+            let mut locations = Vec::new();
+            let mut matched_files = std::collections::BTreeMap::new();
+            let mut skipped = std::collections::BTreeMap::<&str, usize>::new();
+            let mut scanned_bytes = 0usize;
+            let mut scanned_files = 0usize;
+            let mut capped = false;
+            'files: for relative in &paths {
+                if base
+                    .as_ref()
+                    .is_some_and(|base| base.as_os_str() != "." && !relative.starts_with(base))
+                {
+                    continue;
+                }
+                if sensitive_relative(relative) {
+                    *skipped.entry("policy").or_default() += 1;
+                    continue;
+                }
+                let target = resolve_existing(&self.root, relative)?;
+                let size = match fs::metadata(&target) {
+                    Ok(meta) if meta.is_file() => meta.len(),
+                    _ => {
+                        *skipped.entry("unreadable").or_default() += 1;
+                        continue;
+                    }
+                };
+                if size > MAX_FILE_BYTES as u64 {
+                    *skipped.entry("file_size").or_default() += 1;
+                    continue;
+                }
+                if scanned_bytes.saturating_add(size as usize) > 64 * 1024 * 1024 {
+                    capped = true;
+                    break;
+                }
+                let Ok(bytes) = fs::read(&target) else {
+                    *skipped.entry("unreadable").or_default() += 1;
+                    continue;
+                };
+                scanned_bytes += bytes.len();
+                if bytes.len() > MAX_FILE_BYTES || bytes.contains(&0) {
+                    *skipped.entry("binary_or_size").or_default() += 1;
+                    continue;
+                }
+                let Ok(text) = std::str::from_utf8(&bytes) else {
+                    *skipped.entry("encoding").or_default() += 1;
+                    continue;
+                };
+                scanned_files += 1;
+                for (index, line) in text.lines().enumerate() {
+                    for (query, pattern) in queries.iter().zip(&patterns) {
+                        let hits: Box<dyn Iterator<Item = (usize, usize)> + '_> = match pattern {
+                            Some(pattern) => {
+                                Box::new(pattern.find_iter(line).map(|m| (m.start(), m.end())))
+                            }
+                            None => Box::new(
+                                line.match_indices(query.as_str())
+                                    .map(|(start, value)| (start, start + value.len())),
+                            ),
+                        };
+                        for (start, end) in hits {
+                            if results.len() == max {
+                                capped = true;
+                                break 'files;
+                            }
+                            let path = relative_text(relative);
+                            matched_files
+                                .entry(path.clone())
+                                .or_insert_with(|| sha256(&bytes));
+                            locations.push(
+                            json!({"path":path,"line":index+1,"byte_start":start,"byte_end":end}),
+                        );
+                            results.push(format!(
+                                "{}:{}:[{}] {}",
+                                relative_text(relative),
+                                index + 1,
+                                truncate_utf8(query, 80),
+                                search_match_excerpt(line, start, end)
+                            ));
+                        }
+                    }
+                }
+            }
+            if results.is_empty() && mode == "LITERAL" && may_fallback {
+                mode = "REGEX_FALLBACK";
+                continue;
+            }
+            let header = if mode == "REGEX_FALLBACK" {
+                "No literal hits; regex-like queries were evaluated as bounded regular expressions. match_mode=REGEX_FALLBACK. Use literal:true if operator characters are intentional.\n"
+            } else {
+                ""
+            };
+            let body = if results.is_empty() {
+                "No matches in the scanned eligible files. Check skipped_files, scope and truncation before inferring absence. A missing source literal does not prove a missing rendered label: resolve the actual translation/filter lookup when applicable.".into()
+            } else {
+                results.join("\n")
+            };
+            return Ok(ToolExecution {
+                receipt: json!({"kind":"TEXT_SEARCH","match_mode":mode,"query_sha256":digests.first(),
+                    "query_sha256s":digests,"query_count":queries.len(),"matches":results.len(),
+                    "matched_locations_sha256":sha256(serde_json::to_string(&locations).unwrap().as_bytes()),
+                    "matched_locations":locations,"files":matched_files,"truncated":capped,
+                    "scanned_files":scanned_files,"scanned_bytes":scanned_bytes,"skipped_files":skipped,
+                    "scope":"ELIGIBLE_PROJECT_FILES","file_size_limit":MAX_FILE_BYTES}),
+                observation: bounded_observation(format!("{header}{body}")),
+            });
+        }
     }
 
     fn stat_path(&self, arguments: &Value) -> Result<ToolExecution, AgentError> {
@@ -2684,6 +3052,17 @@ impl ToolRuntime {
             })
         {
             return Err(AgentError::ToolArgumentsInvalid);
+        }
+        if args.args.first().is_some_and(|first| {
+            first == &args.operation || first == "git" || first == "--no-pager"
+        }) {
+            return Err(AgentError::WorkGuidance {
+                code: "AGENT_GIT_ARGUMENTS_INVALID",
+                detail: format!(
+                    "operation already selects git {}. Pass only operation flags or paths in args, e.g. {{\"operation\":\"diff\",\"args\":[\"--stat\"]}}. Use -- before a path named like a Git command. No Git process ran; do not infer a broken or uninitialized repository.",
+                    args.operation
+                ),
+            });
         }
         let mut argv = vec!["--no-pager".to_owned(), args.operation];
         argv.extend(args.args);
@@ -3090,9 +3469,15 @@ impl ToolRuntime {
             line_edits: usize,
             expected_sha256: String,
         }
-        let args: Args = parse_args(arguments)?;
+        let invalid = || {
+            AgentError::WorkGuidance {
+            code: "AGENT_TOOL_ARGUMENTS_INVALID",
+            detail: "apply_patches expects {patches:[{path,expected_sha256,line_edits:[{start_line,end_line,new_text}]}]}; line_edits is an ARRAY inside EACH patch, not at the root. Alternative: replacements:[{old_text,new_text,replace_all?}] inside each patch, never both modes. Line numbers are inclusive, start at 1. Supply the actual current SHA-256 from read_file. No write occurred; correct the argument shape once, not the repository or plan.".into(),
+        }
+        };
+        let args: Args = parse_args(arguments).map_err(|_| invalid())?;
         if args.patches.is_empty() || args.patches.len() > 16 {
-            return Err(AgentError::ToolArgumentsInvalid);
+            return Err(invalid());
         }
         let mut seen = HashSet::new();
         let mut prepared = Vec::new();
@@ -3114,12 +3499,12 @@ impl ToolRuntime {
                         || edit.new_text.len() > MAX_FILE_BYTES
                 })
             {
-                return Err(AgentError::ToolArgumentsInvalid);
+                return Err(invalid());
             }
             let relative = normalize_relative(&patch.path)?;
             deny_sensitive(&relative)?;
             if !seen.insert(relative.clone()) {
-                return Err(AgentError::ToolArgumentsInvalid);
+                return Err(invalid());
             }
             let target = resolve_existing(&self.root, &relative)?;
             let before = fs::read(&target).map_err(|_| AgentError::FileNotFound)?;
@@ -3226,7 +3611,7 @@ impl ToolRuntime {
                 return Err(AgentError::FileTooLarge);
             }
             if after.as_bytes() == before {
-                return Err(AgentError::ToolArgumentsInvalid);
+                return Err(invalid());
             }
             prepared.push(PreparedPatch {
                 relative,
@@ -3239,7 +3624,7 @@ impl ToolRuntime {
             });
         }
         if prepared.is_empty() {
-            return Err(AgentError::ToolArgumentsInvalid);
+            return Err(invalid());
         }
         let mut receipts = Vec::new();
         let mut written = Vec::new();
@@ -3860,6 +4245,26 @@ fn read_bounded<R: Read>(mut reader: R, limit: usize) -> Result<(Vec<u8>, bool),
     Ok((stored, truncated))
 }
 
+fn search_match_excerpt(line: &str, hit: usize, hit_end: usize) -> String {
+    if line.len() <= 500 {
+        return line.into();
+    }
+    let mut start = hit.saturating_sub(180);
+    while !line.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = (hit_end.min(hit.saturating_add(320)) + 180).min(line.len());
+    while !line.is_char_boundary(end) {
+        end += 1;
+    }
+    format!(
+        "{}{}{}",
+        if start > 0 { "…" } else { "" },
+        &line[start..end],
+        if end < line.len() { "…" } else { "" }
+    )
+}
+
 fn bounded_observation(value: String) -> String {
     truncate_utf8(&redact_output(&value), MAX_OBSERVATION_BYTES)
 }
@@ -3875,9 +4280,10 @@ fn truncate_utf8(value: &str, max_bytes: usize) -> String {
     format!("{}\n[Fielora truncated output]", &value[..end])
 }
 
-fn redact_output(value: &str) -> String {
+/// Shared output redaction for native tools and Harness-owned historical excerpts.
+pub fn redact_output(value: &str) -> String {
     value
-        .lines()
+        .split_inclusive('\n')
         .map(|line| {
             let lower = line.to_ascii_lowercase();
             if [
@@ -3890,21 +4296,29 @@ fn redact_output(value: &str) -> String {
             .iter()
             .any(|marker| lower.contains(marker))
             {
-                return "[REDACTED SENSITIVE LINE]".to_owned();
+                let newline = if line.ends_with("\r\n") {
+                    "\r\n"
+                } else if line.ends_with('\n') {
+                    "\n"
+                } else {
+                    ""
+                };
+                return format!("[REDACTED SENSITIVE LINE]{newline}");
             }
-            line.split_whitespace()
-                .map(|token| {
+            // Preserve source indentation and whitespace inside JSON strings.
+            // Normalizing whitespace here corrupts exact-text edit evidence.
+            line.split_inclusive(char::is_whitespace)
+                .map(|part| {
+                    let token = part.trim_end_matches(char::is_whitespace);
                     if secret_like(token) {
-                        "[REDACTED]"
+                        format!("[REDACTED]{}", &part[token.len()..])
                     } else {
-                        token
+                        part.to_owned()
                     }
                 })
-                .collect::<Vec<_>>()
-                .join(" ")
+                .collect::<String>()
         })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect::<String>()
 }
 
 fn secret_like(value: &str) -> bool {
@@ -4063,6 +4477,129 @@ mod tests {
         fs::write(root.join("src/lib.rs"), "pub fn answer() -> i32 { 41 }\n").unwrap();
         fs::write(root.join("README.md"), "Agent fixture\n").unwrap();
         (root, artifacts)
+    }
+
+    #[test]
+    fn regex_fallback_and_git_syntax_do_not_masquerade_as_missing_code_or_repository() {
+        let (root, artifacts) = fixture();
+        fs::write(
+            root.join("src/bank.js"),
+            "const bankAccount = []; // 开户行\n",
+        )
+        .unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let cancel = CommandCancellation::default();
+        let bad = runtime
+            .execute(
+                "search_text",
+                &json!({"query":"bankAccount|开户行"}),
+                false,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(bad.receipt["match_mode"], "REGEX_FALLBACK");
+        assert_eq!(bad.receipt["matches"], 2);
+        let batch = runtime
+            .execute(
+                "search_text",
+                &json!({"queries":["bankAccount","开户行"]}),
+                false,
+                &cancel,
+            )
+            .unwrap();
+        let single = runtime
+            .execute(
+                "search_text",
+                &json!({"query":"bankAccount"}),
+                false,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(
+            batch.receipt["matched_locations"].as_array().unwrap().len(),
+            2
+        );
+        assert_eq!(
+            single.receipt["matched_locations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            batch.receipt["matched_locations"][0],
+            single.receipt["matched_locations"][0]
+        );
+        assert!(batch.receipt["files"]["src/bank.js"].is_string());
+        let literal = runtime
+            .execute(
+                "search_text",
+                &json!({"query":"bankAccount|开户行", "literal":true}),
+                false,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(literal.receipt["matches"], 0);
+        let bad_git = runtime
+            .execute(
+                "git_read",
+                &json!({"operation":"diff","args":["--no-pager","diff","--stat"]}),
+                false,
+                &cancel,
+            )
+            .unwrap_err();
+        assert_eq!(bad_git.code(), "AGENT_GIT_ARGUMENTS_INVALID");
+        assert!(
+            Command::new("git")
+                .arg("init")
+                .current_dir(&root)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        let valid = runtime
+            .execute(
+                "git_read",
+                &json!({"operation":"diff","args":["--stat"]}),
+                false,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(valid.receipt["exit_code"], 0);
+        fs::remove_dir_all(root).unwrap();
+        let _ = fs::remove_dir_all(artifacts);
+    }
+
+    #[test]
+    fn shared_translation_preflight_preserves_unrelated_consumers() {
+        let (root, artifacts) = fixture();
+        fs::create_dir(root.join("i18n")).unwrap();
+        let original = r#"{"12044":"搜索"}"#;
+        fs::write(root.join("i18n/cn.json"), original).unwrap();
+        fs::write(root.join("src/calendar.html"), "{{T:12044}}").unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let edit = json!({"path":"i18n/cn.json","expected_sha256":sha256(original.as_bytes()),"replacements":[{"old_text":"搜索","new_text":"到账后剩余金额"}]});
+        let error = runtime
+            .translation_impact("replace_text", &edit, &["i18n/cn.json".into()])
+            .unwrap_err();
+        assert_eq!(error.code(), "AGENT_SHARED_TRANSLATION_IMPACT");
+        assert!(error.model_recovery_message().contains("src/calendar.html"));
+        assert_eq!(
+            fs::read_to_string(root.join("i18n/cn.json")).unwrap(),
+            original
+        );
+        // A declared global change is allowed through this preflight. Its
+        // result still requires checks; scope declaration is not verification.
+        runtime
+            .translation_impact(
+                "replace_text",
+                &edit,
+                &["i18n/cn.json".into(), "src/calendar.html".into()],
+            )
+            .unwrap();
+        fs::remove_dir_all(root).unwrap();
+        let _ = fs::remove_dir_all(artifacts);
     }
 
     struct FixtureExternalProvider {
@@ -4558,6 +5095,117 @@ mod tests {
     }
 
     #[test]
+    fn search_returns_the_matching_translation_from_a_minified_dictionary() {
+        let (root, artifacts) = fixture();
+        let line = format!(
+            "{{\"padding\":\"{}\",\"10416\":\"客户抬头\",\"12042\":\"毕业学校\",\"tail\":\"{}\"}}",
+            "无关内容".repeat(2000),
+            "尾部".repeat(2000)
+        );
+        fs::write(root.join("cn.json"), &line).unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let result = runtime
+            .search_text(&json!({"queries":["客户抬头", "毕业学校"]}))
+            .unwrap();
+        assert!(result.observation.contains("\"10416\":\"客户抬头\""));
+        assert!(result.observation.contains("\"12042\":\"毕业学校\""));
+        assert!(result.observation.len() < 2000);
+        assert_eq!(result.receipt["matches"], 2);
+        let fallback = runtime
+            .search_text(&json!({"query":"serPopup.*function"}))
+            .unwrap();
+        assert_eq!(fallback.receipt["match_mode"], "REGEX_FALLBACK");
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).ok();
+    }
+
+    #[test]
+    fn search_regex_recovers_real_query_shapes_without_losing_literal_semantics() {
+        let (root, artifacts) = fixture();
+        fs::write(root.join("popup.js"), "angular.module('root').directive('accountComfirm', function() {});\nserPopup.fnSmallEjectLayer = function() {};\nconst exact = 'a.*b';\n").unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        for query in [
+            "directive.*accountComfirm",
+            "serPopup.*fnSmallEjectLayer.*function",
+            "fnSmallEjectLayer.*function",
+        ] {
+            let result = runtime.search_text(&json!({"query":query})).unwrap();
+            assert_eq!(result.receipt["match_mode"], "REGEX_FALLBACK");
+            assert_eq!(result.receipt["matches"], 1);
+            assert!(result.observation.contains("REGEX_FALLBACK"));
+            assert!(result.receipt["matched_locations"][0]["byte_start"].is_number());
+        }
+        let literal = runtime.search_text(&json!({"query":"a.*b"})).unwrap();
+        assert_eq!(literal.receipt["match_mode"], "LITERAL");
+        let exact = runtime
+            .search_text(&json!({"query":"directive.*accountComfirm","literal":true}))
+            .unwrap();
+        assert_eq!(exact.receipt["matches"], 0);
+        assert_eq!(exact.receipt["match_mode"], "LITERAL");
+        let alternatives = runtime
+            .search_text(&json!({"query":"accountComfirm|fnSmallEjectLayer","regex":true}))
+            .unwrap();
+        assert_eq!(alternatives.receipt["matches"], 2);
+        for query in ["(", "(?=lookaround)", "(a{10000}){10000}"] {
+            assert_eq!(
+                runtime
+                    .search_text(&json!({"query":query,"regex":true}))
+                    .unwrap_err()
+                    .code(),
+                "AGENT_SEARCH_PATTERN_INVALID"
+            );
+        }
+        assert!(
+            runtime
+                .search_text(&json!({"query":"a","literal":true,"regex":true}))
+                .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).ok();
+    }
+
+    #[test]
+    fn search_reports_bounds_and_large_minified_matches_with_actual_coordinates() {
+        let (root, artifacts) = fixture();
+        let body = format!(
+            "{{\"padding\":\"{}\",\"12045\":\"Excel导出\",\"12046\":\"正在导出\"}}",
+            "x".repeat(300_000)
+        );
+        fs::write(root.join("dictionary.json"), &body).unwrap();
+        fs::write(root.join("oversize.txt"), "x".repeat(MAX_FILE_BYTES + 1)).unwrap();
+        fs::write(root.join(".env"), "API_KEY=secret-only-hit").unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let result = runtime
+            .search_text(&json!({"queries":["Excel.*导出","正在导出"],"regex":true}))
+            .unwrap();
+        assert_eq!(result.receipt["matches"], 2);
+        assert!(result.observation.contains("\"12045\":\"Excel导出\""));
+        assert!(result.observation.len() < 1600);
+        assert_eq!(result.receipt["skipped_files"]["file_size"], 1);
+        assert!(
+            result.receipt["matched_locations"][0]["byte_start"]
+                .as_u64()
+                .unwrap()
+                > 300_000
+        );
+        assert_eq!(
+            result.receipt["files"]["dictionary.json"],
+            sha256(body.as_bytes())
+        );
+        let cap = runtime
+            .search_text(&json!({"queries":["Excel导出","正在导出"],"max_results":1}))
+            .unwrap();
+        assert_eq!(cap.receipt["truncated"], true);
+        let secret = runtime
+            .search_text(&json!({"query":"secret-only-hit"}))
+            .unwrap();
+        assert_eq!(secret.receipt["matches"], 0);
+        assert!(!secret.observation.contains("API_KEY"));
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).ok();
+    }
+
+    #[test]
     fn repository_context_index_reuses_and_incrementally_invalidates_entries() {
         let (root, artifacts) = fixture();
         let index = artifacts.join("repository-index");
@@ -4610,6 +5258,166 @@ mod tests {
             read.receipt.get("path"),
             Some(&json!("src/组件/用户 详情.tsx"))
         );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).ok();
+    }
+
+    #[test]
+    fn source_observations_preserve_exact_whitespace_without_losing_redaction() {
+        let source = "  const text = 'a  b';\r\n\treturn  text;\n";
+        assert_eq!(redact_output(source), source);
+        assert_eq!(
+            redact_output("\tapi_key=secret\r\n  sk-abcdefghijklmnopqrstuv  safe\n"),
+            "[REDACTED SENSITIVE LINE]\r\n  [REDACTED]  safe\n"
+        );
+        let (root, artifacts) = fixture();
+        fs::write(root.join("src/lib.rs"), source).unwrap();
+        fs::write(root.join("spacing.json"), r#"{"name":"a  b\tc"}"#).unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let cancel = CommandCancellation::default();
+        let read = runtime
+            .execute("read_file", &json!({"path":"src/lib.rs"}), false, &cancel)
+            .unwrap();
+        assert!(read.observation.contains(" |   const text = 'a  b';\r\n"));
+        let exact = runtime
+            .execute(
+                "read_file",
+                &json!({"path":"spacing.json","json_pointers":["/name"]}),
+                false,
+                &cancel,
+            )
+            .unwrap();
+        let entry: Value = serde_json::from_str(exact.observation.lines().nth(1).unwrap()).unwrap();
+        assert_eq!(entry["value"], "a  b\tc");
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).ok();
+    }
+
+    #[test]
+    fn minified_json_search_reports_every_occurrence_and_precise_values() {
+        let (root, artifacts) = fixture();
+        let document =
+            json!({"padding":"填充".repeat(12000),"12045":"Excel导出","12046":"正在导出，请稍候！",
+            "11985":"开户银行","a/b":{"~key":null},"duplicate":"Excel导出"})
+            .to_string();
+        fs::write(root.join("cn.json"), &document).unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let cancel = CommandCancellation::default();
+        let search = |args| {
+            runtime
+                .execute("search_text", &args, false, &cancel)
+                .unwrap()
+        };
+        let all = search(
+            json!({"path":"cn.json","query":"Excel导出|正在导出，请稍候！|开户银行","regex":true}),
+        );
+        assert_eq!(all.receipt["matches"], 4);
+        assert_eq!(all.receipt["truncated"], false);
+        assert!(all.observation.contains("开户银行"));
+        let repeated = search(json!({"path":"cn.json","query":"Excel导出","literal":true}));
+        assert_eq!(repeated.receipt["matches"], 2);
+        let capped = search(
+            json!({"path":"cn.json","query":"Excel导出|正在导出，请稍候！|开户银行","regex":true,"max_results":3}),
+        );
+        assert_eq!(capped.receipt["matches"], 3);
+        assert_eq!(capped.receipt["truncated"], true);
+        let exact = runtime.execute("read_file", &json!({"path":"cn.json","json_pointers":["/12045","/12046","/11985","/missing","/a~1b/~0key"]}),false,&cancel).unwrap();
+        assert_eq!(exact.receipt["sha256"], sha256(document.as_bytes()));
+        assert_eq!(exact.receipt["missing_pointers"], json!(["/missing"]));
+        assert_eq!(exact.receipt["truncated"], false);
+        assert!(exact.observation.len() < 1200);
+        assert!(!exact.observation.contains("填充"));
+        let values = exact
+            .observation
+            .lines()
+            .skip(1)
+            .map(|s| serde_json::from_str::<Value>(s).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(values[0]["value"], "Excel导出");
+        assert_eq!(values[1]["value"], "正在导出，请稍候！");
+        assert_eq!(values[3]["found"], false);
+        assert_eq!(values[4]["found"], true);
+        assert!(values[4]["value"].is_null());
+        let partial = runtime
+            .execute(
+                "read_file",
+                &json!({"path":"cn.json","json_pointers":[""],"max_bytes":256}),
+                false,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(partial.receipt["truncated"], true);
+        assert!(partial.observation.len() < 600);
+        for args in [
+            json!({"path":"cn.json","json_pointers":["/12045"],"line_start":1}),
+            json!({"path":"cn.json","json_pointers":[]}),
+            json!({"path":"cn.json","json_pointers":["12045"]}),
+        ] {
+            assert_eq!(
+                runtime
+                    .execute("read_file", &args, false, &cancel)
+                    .unwrap_err(),
+                AgentError::ToolArgumentsInvalid
+            );
+        }
+        fs::write(root.join(".env"), "{}").unwrap();
+        assert_eq!(
+            runtime
+                .execute(
+                    "read_file",
+                    &json!({"path":".env","json_pointers":[""]}),
+                    false,
+                    &cancel
+                )
+                .unwrap_err(),
+            AgentError::SensitivePathDenied
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(artifacts).ok();
+    }
+
+    #[test]
+    fn long_source_reads_are_bounded_and_resume_without_skipping_utf8_bytes() {
+        let (root, artifacts) = fixture();
+        let source = format!("{}\r\nlast line\n", "中".repeat(24000));
+        fs::write(root.join("large.txt"), &source).unwrap();
+        fs::write(root.join("empty.txt"), "").unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let cancel = CommandCancellation::default();
+        let read = |args| runtime.execute("read_file", &args, false, &cancel).unwrap();
+        let first = read(json!({"path":"large.txt"}));
+        assert_eq!(first.receipt["truncated"], true);
+        assert!(first.observation.len() < 17 * 1024);
+        assert_eq!(first.receipt["observed_line_end"], 0);
+        let mut offset = first.receipt["next_byte_offset"].as_u64().unwrap();
+        assert!(source.is_char_boundary(offset as usize));
+        while offset < (source.len() as u64) {
+            let part = read(json!({"path":"large.txt","byte_offset":offset}));
+            assert_eq!(part.receipt["byte_start"], offset);
+            assert_eq!(part.receipt["sha256"], first.receipt["sha256"]);
+            let end = part.receipt["byte_end"].as_u64().unwrap();
+            assert!(end > offset);
+            assert!(source.is_char_boundary(end as usize));
+            offset = end;
+        }
+        let eof = read(json!({"path":"large.txt","byte_offset":source.len()}));
+        assert_eq!(eof.receipt["truncated"], false);
+        assert!(eof.observation.is_empty());
+        assert!(read(json!({"path":"empty.txt"})).observation.is_empty());
+        assert_eq!(
+            runtime
+                .execute(
+                    "read_file",
+                    &json!({"path":"large.txt","byte_offset":1}),
+                    false,
+                    &cancel
+                )
+                .unwrap_err(),
+            AgentError::ToolArgumentsInvalid
+        );
+        let lines = read(json!({"path":"large.txt","line_start":2,"line_end":2}));
+        assert!(lines.observation.contains("last line"));
+        assert_eq!(lines.receipt["byte_start"], 72002);
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(artifacts).ok();
     }
@@ -5050,6 +5858,96 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(artifacts).unwrap();
         fs::remove_dir_all(bare).unwrap();
+    }
+
+    #[test]
+    fn malformed_patch_explains_structure_without_mutating_files() {
+        let root =
+            std::env::temp_dir().join(format!("fielora-patch-shape-{}", uuid::Uuid::now_v7()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("popup.html"), "<label>wrong</label>\n").unwrap();
+        let runtime = ToolRuntime::new(&root, &root.join("artifacts")).unwrap();
+        let cancel = CommandCancellation::default();
+        let hash = sha256(&fs::read(root.join("popup.html")).unwrap());
+        let bad = json!({"patches":[{"path":"popup.html","expected_sha256":hash,"line_edits":{"start_line":1,"end_line":1,"new_text":"<label>right</label>"}}]});
+        let error = runtime
+            .execute("apply_patches", &bad, true, &cancel)
+            .unwrap_err();
+        assert_eq!(error.code(), "AGENT_TOOL_ARGUMENTS_INVALID");
+        assert!(
+            error
+                .model_recovery_message()
+                .contains("ARRAY inside EACH patch")
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("popup.html")).unwrap(),
+            "<label>wrong</label>\n"
+        );
+        let good = json!({"patches":[{"path":"popup.html","expected_sha256":hash,"line_edits":[{"start_line":1,"end_line":1,"new_text":"<label>right</label>"}]}]});
+        runtime
+            .execute("apply_patches", &good, true, &cancel)
+            .unwrap();
+        assert!(
+            fs::read_to_string(root.join("popup.html"))
+                .unwrap()
+                .contains("right")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn single_patch_wire_hash_preserves_guards_and_rejects_ambiguity() {
+        let hash = "a".repeat(64);
+        let patch =
+            json!({"path":"app.js","line_edits":[{"start_line":2,"end_line":2,"new_text":""}]});
+        let mut single = json!({"expected_sha256":hash,"patches":[patch.clone()]});
+        assert!(normalize_single_patch_hash("apply_patches", &mut single));
+        assert!(single.get("expected_sha256").is_none());
+        assert_eq!(single["patches"][0]["expected_sha256"], hash);
+        assert_eq!(single["patches"][0]["line_edits"], patch["line_edits"]);
+        assert!(!normalize_single_patch_hash("apply_patches", &mut single));
+        for mut bad in [
+            json!({"expected_sha256":hash,"patches":[patch.clone(),patch.clone()]}),
+            json!({"expected_sha256":hash,"patches":[{"expected_sha256":"b".repeat(64),"path":"app.js"}]}),
+            json!({"expected_sha256":"invalid","patches":[patch.clone()]}),
+        ] {
+            let original = bad.clone();
+            assert!(!normalize_single_patch_hash("apply_patches", &mut bad));
+            assert_eq!(bad, original);
+        }
+        let (root, artifacts) = fixture();
+        fs::write(root.join("app.js"), "exports.ok = true;\n}\n").unwrap();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        assert!(
+            runtime
+                .execute(
+                    "apply_patches",
+                    &single,
+                    true,
+                    &CommandCancellation::default()
+                )
+                .is_err()
+        );
+        assert!(
+            fs::read_to_string(root.join("app.js"))
+                .unwrap()
+                .contains('}')
+        );
+        let mut valid = json!({"expected_sha256":sha256(&fs::read(root.join("app.js")).unwrap()),"patches":[patch]});
+        assert!(normalize_single_patch_hash("apply_patches", &mut valid));
+        runtime
+            .execute(
+                "apply_patches",
+                &valid,
+                true,
+                &CommandCancellation::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("app.js")).unwrap(),
+            "exports.ok = true;\n"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

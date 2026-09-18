@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { shouldShowMcpRuntime } from './agent-activity-detail.ts';
+
+test('optional MCP absence is quiet but configuration and connection failures remain visible', () => {
+  assert.equal(shouldShowMcpRuntime(null), false);
+  assert.equal(shouldShowMcpRuntime({ connections: [], diagnostics: [] }), false);
+  assert.equal(shouldShowMcpRuntime({ connections: [], diagnostics: [{ code: 'CONFIG_NOT_FOUND' }] }), false);
+  assert.equal(shouldShowMcpRuntime({ connections: [], diagnostics: [{ code: 'CONFIG_INVALID' }] }), true);
+  assert.equal(shouldShowMcpRuntime({ connections: [], diagnostics: [{ code: 'CONFIG_NOT_FOUND' }, { code: 'PROCESS_UNAVAILABLE' }] }), true);
+  assert.equal(shouldShowMcpRuntime({ connections: [{ activation_state: 'ACTIVATION_FAILED' }], diagnostics: [] }), true);
+});
 
 const rendererRoot = new URL('./', import.meta.url);
 const desktopRoot = new URL('../', import.meta.url);
@@ -18,7 +28,7 @@ test('MCP Settings stays passive while activation belongs to current AgentRun de
   assert.match(mcpSettings, /credential_missing_count/);
   assert.doesNotMatch(mcpSettings, /credential_ref|GITHUB_TOKEN/);
   assert.doesNotMatch(mcpSettings, /activateMcpConnection|spawn|execFile|list_tools/);
-  assert.match(turn, /MCP for this run/);
+  assert.match(turn, /外部工具连接/);
   assert.match(workspace, /activateMcpConnection\(\{ run_id: agentRun\.id, connection_id: connectionId \}\)/);
   assert.doesNotMatch(workspace, /activateMcpConnection\([^)]*(?:command|args|digest|executable)/s);
 });

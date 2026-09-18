@@ -13,7 +13,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "UNLICENSED"
+license = "Apache-2.0"
 
 [workspace.dependencies]
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
@@ -35,6 +35,7 @@ lopdf = { version = "=0.44.0", default-features = false }
 office_oxide = { version = "=0.1.8", default-features = false }
 png = { version = "=0.18.1", default-features = false }
 quick-xml = { version = "=0.41.0", default-features = false }
+regex = "=1.12.2"
 zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
 yaml_serde = { version = "=0.10.7", default-features = false, features = ["std"] }

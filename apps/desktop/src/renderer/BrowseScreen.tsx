@@ -82,7 +82,7 @@ export function BrowsePanel({ browser, onSaveToLibrary, onOpenBrowserSettings, w
       nativeViewVisibleRef.current = false;
       void browser.hide();
     };
-    if (menuOpen || host.closest('[hidden]')) {
+    if (menuOpen || host.closest('[hidden]') || (workspaceTabHostId && !workspaceActive)) {
       hideNativeView();
       return;
     }
@@ -127,11 +127,14 @@ export function BrowsePanel({ browser, onSaveToLibrary, onOpenBrowserSettings, w
       window.clearTimeout(settleTimer);
       settleTimer = window.setTimeout(syncBounds, 50);
     };
-    const transitionHost = host.closest<HTMLElement>('.utility-launcher');
+    const transitionHost = host.closest<HTMLElement>('.project-layout, .utility-launcher');
+    // Dock opening uses ancestor transforms: the viewport's size stays constant,
+    // so ResizeObserver alone misses its movement from outside the window.
+    const settleUntil = performance.now() + 600;
     let transitionFrame: number | null = null;
     const syncTransitionFrame = () => {
       syncBounds();
-      if (transitionHost?.getAnimations().some((animation) => animation.playState === 'running')) {
+      if (performance.now() < settleUntil || transitionHost?.getAnimations().some((animation) => animation.playState === 'running')) {
         transitionFrame = window.requestAnimationFrame(syncTransitionFrame);
         return;
       }
@@ -166,7 +169,7 @@ export function BrowsePanel({ browser, onSaveToLibrary, onOpenBrowserSettings, w
       transitionHost?.removeEventListener('transitioncancel', finishTransitionSync);
       hideNativeView();
     };
-  }, [browser, menuOpen]);
+  }, [browser, menuOpen, workspaceActive, workspaceTabHostId]);
 
   useEffect(() => {
     if (!menuOpen) return;

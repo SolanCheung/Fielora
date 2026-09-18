@@ -12,6 +12,7 @@ lopdf.workspace = true
 office_oxide.workspace = true
 png.workspace = true
 quick-xml.workspace = true
+regex.workspace = true
 reqwest.workspace = true
 rmcp.workspace = true
 scraper.workspace = true

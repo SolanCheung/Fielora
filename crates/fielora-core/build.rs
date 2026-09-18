@@ -44,6 +44,9 @@ fn main() {
         .expect("workspace root");
     let core = [
         "crates/fielora-core/src/agent_runtime.rs",
+        "crates/fielora-core/src/agent_turn_context.rs",
+        "crates/fielora-core/src/agent_request_scope.rs",
+        "crates/fielora-core/src/agent_work_state.rs",
         "crates/fielora-agent/src/lib.rs",
         "crates/fielora-model/src/lib.rs",
     ];

@@ -31,12 +31,12 @@
       "bytes": 2973
     },
     "README.md": {
-      "sha256": "492ea5791a0e6d79bec1e7ea68fdf8d411f119daf662ce1b0f4f18b06241a868",
-      "bytes": 13411
+      "sha256": "474f34b20ee68243223038ee3412dc5993fcae3ce29f5dcf43344709d37a9244",
+      "bytes": 14147
     },
     "AGENTS.md": {
-      "sha256": "b565d3990ab8c0f1e17be8fd1fb99962009422b23db3fe441fa4cc8357902482",
-      "bytes": 24140
+      "sha256": "92fbb0b032d35b3274d0b34aae29ec58f55958624815853abd8d95f8648760ff",
+      "bytes": 25193
     },
     "docs/context/00_CONVERSATION_INDEX.md": {
       "sha256": "6e0836ba596c315d50cf1af8e2fe6b914f6642215e04a6e21b3d26b910433850",
@@ -47,12 +47,12 @@
       "bytes": 12955
     },
     "docs/context/02_PROJECT_REALITY.md": {
-      "sha256": "541f254b310e2a181ba5cfc93679c142898bcc1f7e29a7f4ef820b4d5f936328",
-      "bytes": 247280
+      "sha256": "fb60b8779177d441a603adc50b60e61d2deccabcd7c5f68ec0149bc1370c58ad",
+      "bytes": 298087
     },
     "docs/context/03_DECISIONS.md": {
-      "sha256": "cce904075d9380a180c25fd43bde4af6d5ce1a23327ab950e66c94118dda45c7",
-      "bytes": 121996
+      "sha256": "87e424dedc81560823ad311f223b69e9a333c39b11451fdf3adc41e5677a7c09",
+      "bytes": 140728
     },
     "docs/context/04_REJECTED_DEFERRED.md": {
       "sha256": "0b4f9bd00ad5b9a198e4f3a6523503aaacbf8b5630aaa5d029577ee08abbc160",
@@ -79,8 +79,8 @@
       "bytes": 15839
     },
     "docs/architecture/FIELORA_V0.1_AGENT_ARCHITECTURE_SPEC.md": {
-      "sha256": "08c1350a507730543f50316d6b54675ed46b2e17773fd480b191682fdbff5649",
-      "bytes": 43870
+      "sha256": "fc21648e20816a5d2c13472da1973852369975e9bd3933c25c0d6435388fa9c9",
+      "bytes": 86650
     },
     "docs/architecture/FIELORA_IDR_V2_DESIGN_CANDIDATE.md": {
       "sha256": "5c390ed9f03013de0d8e277089d6900f7163f26b26fc73943a93e97054dad0a6",
@@ -231,8 +231,8 @@
       "bytes": 7452
     },
     "docs/engineering/DEVELOPMENT_WORKFLOW_V0.1.md": {
-      "sha256": "e21f20a8557afd59ee2d411ca57328374bac69c80f9fe24917f3a5a89d56a585",
-      "bytes": 8414
+      "sha256": "ad74983bf02acf5df65c26e2784dcb9dc06ad404a8255cfaf9950240eb64518e",
+      "bytes": 9001
     },
     "artifacts/workflow/DEVELOPMENT_WORKFLOW_HARDENING_REPORT.md": {
       "sha256": "b5c7f0406034afff6ba65cc499544054948483f6842fcbdca565aaad5ef23e11",
@@ -377,6 +377,22 @@
     "docs/product/RAPID_DESKTOP_EXECUTION_V0.1.md": {
       "sha256": "54f14733a05587fb2019671c2e562bb1cd930091584bb70bbe2e490aeb536ee0",
       "bytes": 5318
+    },
+    "docs/engineering/AGENT_DESIGN_IMPLEMENTATION_LESSONS.md": {
+      "sha256": "9273a0df821b6c0716b6d2e4e699b892eaa9817c3d94e33dbbea5ffc7564280a",
+      "bytes": 39073
+    },
+    "LICENSE": {
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    "NOTICE": {
+      "sha256": "1ba032cd968f08451f121df1a051c210e97374c115c58aaec0e85e94780933cd",
+      "bytes": 207
+    },
+    "docs/engineering/APACHE_2_0_ADOPTION.md": {
+      "sha256": "710584efd600abfe78b7bb16cd4d617a1580516d97f0a619e98d71dc71377d92",
+      "bytes": 1653
     }
   }
 }

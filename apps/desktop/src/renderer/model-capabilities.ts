@@ -22,6 +22,8 @@ const multimodalQwen: CapabilitySet = { textInput: true, imageInput: true, video
 
 /** Exact registry entries follow provider model IDs; Composer never branches on a model string. */
 export const modelCapabilityRegistry: Readonly<Record<string, CapabilitySet>> = {
+  // Deterministic desktop regression model; Core substitutes it only under FIELORA_E2E.
+  '__fielora_agent_fixture_images__': { ...multimodalQwen, videoInput: false },
   'qwen3.7-plus': multimodalQwen,
   'qwen3.7-plus-2026-05-26': multimodalQwen,
   'qwen3.6-plus': multimodalQwen,

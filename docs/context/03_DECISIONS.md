@@ -308,3 +308,92 @@
 | D-301 | 用户指出拖动时滚动条冻结，因此 supersede D-300 的 direct-drag 内容宽度 hold：代码/目录/筛选框/原生 scrollport 均实时跟随 Pane。大目录使用现有模型的可视窗口、字体感知行高与原生 spacer 滚动；文件 Surface 复用 CodeMirror 6 可视范围排版，统一软换行/语法/行号/选择/撤销，保留 CRLF、既有主题与审阅写入流程。现有 click-driven 裁切动画、右缘收起及同手势恢复保持。2500 文件+400 长代码、真实 Project、原生 scrollbar 边缘、编辑写入撤销与打包重启已验证；不新增 Pane/IDE 产品入口/Core/Agent/FIPC/Schema | CONFIRMED / LIVE SCROLLPORTS + VIEWPORT RENDERING / PACKAGED REGRESSION VERIFIED / HUMAN FEEL REVIEW PENDING |
 
 | D-302 | 用户要求优化工作区信息菜单及标签交互。菜单明确区分任务 Review 与 Git 工作区计数，静态显示分支/上游，终端操作使用与实际 read 命令一致的标签；准备提交/推送分别生成保留原文的 Composer 草稿，不自动执行，不改变 Harness 权限。来源统一 FileTypeIcon。Tab 使用中性选中底色/阴影与完整 inset 焦点，方向键/Home/End 切换，滚轮横移不改变活动文件，渐隐只在实际溢出边缘出现；不增加 Pane/Runtime/Contract。打包 Electron 原生输入与菜单动作已验证 | CONFIRMED / WORKSPACE INFO + TAB INTERACTION / PACKAGED UI VERIFIED |
+
+| D-303 | 用户授权补齐 General Agent 并随修复解释 Model/Harness/Tools 职责。保留初始 1–64 步限额（默认 24）；耗尽保存工作并暂停，显式继续给同一 Run 原子追加最多 24 步，累计上限 4096。工具证据停滞触发重新规划/暂停，模型判断单独标为未验证；实现请求没有操作或当前版本验证不得仅凭文字完成。Migration 0016 仅扩展累计预算，保留原事件/回执/权限/lineage；不宣称语义收敛、General no-change、后台长任务或 Aegis 已完成 | CONFIRMED / GENERAL_AGENT_LOOP_V2 / CORE + CROSS + DEVELOPMENT/PACKAGED DESKTOP VERIFIED / REAL MODEL ACCEPTANCE PENDING |
+
+| D-304 | 用户拒绝把固定 24 步检查点作为默认人工续接边界。General V3 默认按整体资源预算持续运行，沿用 4096 累计防失控上限；显式小预算及历史 Run 不自动扩张。累计模型/工具时间与 token 预算从既有事件恢复，耗尽后显式续额；自动整理过长历史并保留完整工具交换，重复操作提示改策略后仍持续重复才暂停。取代 D-303 的默认暂停及六轮无成功证据即停策略；不把资源预算、工具成功或整理检查点视为目标完成，不新增 Runtime/Schema/权限权威 | CONFIRMED / GENERAL_AGENT_LOOP_V3 / CROSS + DEVELOPMENT/PACKAGED DESKTOP VERIFIED / REAL MODEL ACCEPTANCE PENDING |
+
+| D-305 | 新项目首条对话入口复用既有 Header、消息区和完整 Composer，删除遗留创建表单。打开项目不自动创建 Conversation；首次发送创建或复用未发送对话，保留已输入文本、附件及所选模型/权限，并防止并发提交重复创建。沿用既有 Pane、阅读列、Agent 启动和权限机制；属于 Conversation UI 状态衔接修复 | CONFIRMED / NEW PROJECT FIRST SEND / UI + DEVELOPMENT/PACKAGED DESKTOP VERIFIED |
+
+
+| D-306 | 用户要求修复过程堆积、重复图标、无配置 MCP 提示及“继续完成”重头开始。基于既有 Harness 补齐模型失败的完整交换整理、有限重试后暂停、同 Run 恢复，以及历史 FAILED 的显式关联续接；历史回执只提供已知事实，完成仍要求当前文件版本验证。HTTP 拒绝单独记录脱敏状态。界面保留小型当前进度、折叠历史及始终可见的批准/继续；旧尝试置于最新结果之前。无新 Schema/Runtime/权限权威；历史约 121 KB 上下文只是故障相关线索，真实供应商原因未确定 | CONFIRMED / RECOVERY + PROGRESS PROJECTION / CROSS + DEVELOPMENT/PACKAGED DESKTOP VERIFIED / REAL MODEL ACCEPTANCE PENDING |
+
+| D-307 | 用户要求消除进度跳动、零碎折叠及无验证完成。复用现有 Harness 固定目标 Project 身份、补齐修改意图识别并将同项目/同任务历史作为未验证线索；修改目标仅阅读不得成功，现有功能可经绑定已读文件版本的当前检查后无修改完成，检查期间变化使回执失效。界面固定流式/落盘说明顺序、合并连续检查并保留原始序列，结果装饰符使用共享中性图标。无新 Schema/权限/Runtime；命令与版本检查不替代业务验收充分性 | CONFIRMED / GOAL GUARD + STABLE PROGRESS / CROSS + DEVELOPMENT/PACKAGED DESKTOP VERIFIED / REAL MODEL ACCEPTANCE PENDING |
+
+| D-308 | 用户授权补齐 Agent 内置浏览器操作与实际页面验收；复用 Model + Harness + Tools、BrowserRuntime、权限审批和现有证据存储。Main 专用 nonce FIPC 不暴露到 preload，网页无特权桥。浏览器操作成功与按用例验证成功分开；开发服务复用 WorkspaceRuntime 并受控启停，启动不记为验证；目标 URL、当前版本、全部用例覆盖及最新失败共同约束完成，构建不替代 UI 验收。限定 DOM 操作与截图，不声称视觉等价或生产交易验证。同步修复 Dock 位移动画下原生浏览器零宽问题 | CONFIRMED / BOUNDED BROWSER TOOLS + CASE VERIFICATION / CROSS + DEVELOPMENT/PACKAGED DESKTOP VERIFIED / REAL MODEL AND BUSINESS ACCEPTANCE PENDING |
+
+| D-309 | 用户报告截图拒绝、草稿丢失、重复搜索及改错字段。沿用现有 Model + Harness + Tools 修复普通 assistant 可选字段、固定错误分类、图片输入持久化与续跑恢复、按会话隔离草稿、命中位置搜索片段及较早有界整理。Resume 增加可选原图附件，旧 Run 可由历史消息恢复，已有原图必须一致；仅用现有内容 Blob/Checkpoint，无新 Schema/权限权威。降低自动上下文、保留观察与原始目标，不提高累计预算，不把压缩或代码写入当完成。历史 HTTP 400 原因未确认，真实模型/业务验收另行说明 | CONFIRMED / INPUT CONTINUITY + TOOL OBSERVABILITY / VALIDATION IN DELIVERY ARTIFACT |
+
+
+## D310 — 策略边界不再充当任务终点（2026-09-11）
+
+用户明确要求 Agent 认识任务是否解决，未解决时持续推进，同时清楚约束进程与结束。沿用 Model + Harness + Tools：Harness 的共享循环负责推进、恢复、当前证据核验和有理由的暂停，Model 负责提出诊断/动作和验收覆盖，Tools 提供实际回执。Focused 的 16 步终止撤销；Fast Edit 尝试失败升级到同一 Run，不能重做已确认副作用或悄悄建立新任务。
+
+无工具输出不是自动完成。动作和验收不足先继续；没有新动作的连续相同结束提议才暂停。验证失败继续修正，当前版本和各项最新检查控制完成，旧通过不能盖住新失败。浏览器计划用于 UI 可检查验收；语义覆盖与真实供应商质量必须单独说明，不能把 fixture PASS 泛化为真实业务完成。
+
+历史图片引用属于 Conversation 输入连续性，沿用现有附件 Blob/Checkpoint；找不到原图明确暂停。默认整体资源边界与用户停止保留，界面必须区分整体额度、局部策略、停滞和输入缺失。
+
+共享工具目录还移除了旧的中国模型固定白名单/16 工具裁剪；Qwen 等行为配置可以提供提示和协议兼容，不能因此失去浏览器、已激活工具或核验能力。启动与暂停竞态也被修正：排队阶段暂停沿用同一运行控制信号，不会被随后启动覆盖。
+
+## D311 — 图片恢复覆盖所有任务入口并受原消息边界约束（2026-09-11）
+
+普通发送、重试、继续工作必须保持同一图片上下文语义。已确认 retry 只查看当前文字消息的附件，未恢复旧图库，导致零图片、零模型调用的暂停。恢复查找以原消息为时间边界，防止后来同对话的其他图片污染旧任务。已有 Run 输入仍不可替换；仅缺图保护在任何模型/工具执行前暂停的 Run 可以补齐被引用输入并继续同一任务。复用已有输入 Blob 和 Checkpoint，不新增状态系统或权限。截图/画廊可见性与实际模型输入均需分别验证。
+
+
+## D312 — 用已观察的证据约束修改范围，并推动目标验证（2026-09-11）
+
+用户授权修复 Agent 在局部界面迁移中扩大范围、忽视现有实现、误改共享翻译和搜索空转的问题。选择在既有 Model + Harness + Tools 中加入 work_plan 工具及写入前反馈，不增加第二套 Runtime、持久状态或权限模型。源代码原文与其模型解释分开，范围修订要求新读取证据与理由；全部计划仍是待核验提案。
+
+保留当前资源预算，不用提高步数掩盖推理偏离。目标完成仍需当前版本的实际核验；计划和 Git diff 不能代替结果检查。共享资源预检是有边界的静态检查，不宣称理解全部业务依赖；模型仍负责正确解释需求，真实模型质量需要后续实际使用验证。
+
+| D-313 | 真实运行证明强制 work_plan、逐字引用与整文件证据过期检查制造重复规划循环，并未防止客户抬头等需求漂移。撤销模型计划作为直接编辑前提和文件白名单；保留可选计划、可刷新且分离解释的源事实、共享翻译影响与现有权限/写入哈希/结果核验。续作优先按原始任务和图片核对已有修改，不补齐错误新增功能的依赖。此条修正 D-312 的强制计划部分，无新 Schema/Runtime、无预算扩大；真实模型语义能力仍需单独验收 | CONFIRMED / ADVISORY PLAN + RESUME RECONCILIATION / VALIDATION RECORDED IN DELIVERY |
+
+| D-314 | 实际失败导航被返回 success=true，且模型把任意启动参数猜成端口、把空白页猜成登录。浏览器主文档失败必须作为失败回执；进程存活、回环端口监听、文档加载、可见内容和结果验证分别表达。恢复检查真实配置与工具状态，不把无证据的登录推测当成用户阻塞。保留密码限制、现有导航/权限、结果核验与资源预算；不宣称工具改进已证明模型理解正确 | CONFIRMED / BROWSER LOAD REALITY + TARGETED RECOVERY |
+
+
+| D-315 | 实际续作因上一暂停不是预算错误而携带近耗尽额度，四次调用后再次暂停。每次明确用户继续开启新的有界时间/token窗口并持久记录，自动恢复和模型不能续额，累计步骤/历史用量/未验证义务保留。恢复历史启动命令与真实浏览器事实，进程未跟踪不能推导服务停止；只检查外部本地监听而不接管。续作提示去重，旧模型计划不再作为用户验收条件，仍不宣称模型已正确理解业务 | CONFIRMED / EXPLICIT RESUME ALLOWANCE + OPERATIONAL CONTINUITY |
+
+
+| D-316 | 确认终端显示截断冻结了服务最新日志，页面 load 完成也早于 SPA 内容。显示上限与实时观察尾部解耦；只读页面等待有界内容稳定并校验身份。登录交接使用现有 browser 工具和 RunPaused，必须有 Host 再核验的可见密码输入，不能凭空白页/模型文字推定。用户完成登录后显式继续同一任务并重新观察；工具成功、登录或源码一致均不能替代需求验证。无新状态系统、无新增权限或预算，真实模型理解仍需实际验收 | CONFIRMED / LIVE OBSERVATIONS + EVIDENCED LOGIN HANDOFF |
+
+
+| D-317 | 浏览器动作风险与输入是否发出分离。固定 DOM 预检返回结构化错误，Host 记录原生输入阶段；未发出输入的失败不能冒充未知外部副作用，发出后的观察失败不能触发重放。保留真正未知输入的诊断与未完成义务，未知只读观察可以重试，历史未知浏览器输入不因点击继续而直接 FAILED。观察包含链接地址和视口命中事实，支持窄侧栏导航。完整 Windows computer use 仍未实现；使用真实 Electron 导航回归检验已接通的浏览器工具，不把能力目录或 fixture 当真实模型完成证明 | CONFIRMED / INPUT DELIVERY + OBSERVATION RECOVERY / CROSS + DEVELOPMENT/PACKAGED BROWSER + PACKAGED GOAL LIFECYCLE VERIFIED |
+
+
+| D-318 | 真实运行中的搜索/读取重复不能只用泛化提示处理。搜索支持有界正则并披露匹配模式，字面量命中及显式 literal 保持；扫描遗漏不等于代码不存在。Harness 按版本/实际命中位置追踪新信息，以具体工具事实恢复诊断；模型输入去重完整观察交换并保留最新结果，压缩不将旧模型猜测当事实。原始要求/图片、写入防冲突和结果核验保持，不用更高额度、强制计划或重复次数上限代替推进任务。fixture/回执重放只证明工具与上下文机制，不证明真实模型语义收敛 | CONFIRMED / SEARCH USABILITY + DISTINCT OBSERVATION CONTINUITY / DEVELOPMENT + PACKAGED ENGINEERING VERIFIED / REAL MODEL ACCEPTANCE NOT RUN |
+
+
+| D-319 | 浏览器截图保存成功不等于模型看到了图片。仅将归属当前任务且通过完整性校验的最新截图加入既有多模态输入，标明为观察、与用户原始目标图片区分；同源框架文字/图标 title/具体参数错误是可操作反馈，不能只返回泛化错误再要求重复搜索。允许明确无歧义的单补丁根哈希格式归一化，保持原 SHA、范围、内容与策略裁决，冲突和多文件猜测禁止。模型的反复判断仍不构成需求；不把工具修复等同真实模型业务验收 | CONFIRMED / VISUAL INPUT + ACTIONABLE TOOL FEEDBACK / VALIDATION IN DELIVERY |
+| D-320 | 浏览器工具必须覆盖实际 CSS 空图标，回归不能用有文字的 button 替代。快照身份属于输入新鲜度，不是进展；进展依据可观察内容、控件状态与真实像素变化。健康观察不再自动要求下一次 inspect，压缩必须保留实际观察而非只保留模型判断。真实回执回放与桌面夹具证明这些机制，不代替真实模型解决原任务的验收。 | CONFIRMED / OBSERVATION CONVERGENCE / VALIDATION IN DELIVERY |
+
+| D-321 | 2026-09-13 | 验证方式服从用户要求的结果，不服从 UI 关键词或工具使用历史。局部标签/翻译/绑定改动允许以当前代码的针对性检查收尾；布局/交互与明确浏览器验收才进入页面路径。旧启发式 browser_verification_required 不构成用户授权或永久验收条件。保留真实失败与当前版本约束，源码检查不代表视觉一致。浏览器采用现有 Runtime 中有界临时桌面视口、缩放预览和对应原生输入坐标，避免窄侧栏限制非自适应站点。此次撤销上一轮诊断提示中“UI 必须检查运行页面”的设计，不新增第二套状态/权限/证据。 | CONFIRMED / VERIFICATION STRATEGY CORRECTED / VALIDATION IN DELIVERY |
+
+
+| D-322 | 2026-09-13 | 工具观察必须以实际命中与读取范围为单位：同一压缩行可含多个独立事实，不可只返回首个命中而标记完整；大文件默认有界并提供精确 JSON 值或续读位置；脱敏保留原始缩进、空白和换行，避免破坏精确编辑证据。压缩/去重保留不同查询结果与字节范围，模型推测不覆盖实际字典/过滤器事实。浏览器视口可在既有 Run 页面首次 open 前配置，配置不算页面观察或任务验证。保持共享翻译与写入哈希约束，不以加额度掩盖无效诊断。 | CONFIRMED / PRECISE SOURCE OBSERVATION / VALIDATION IN DELIVERY |
+
+
+| D-323 | 2026-09-14 | 截图可用性不能冒充浏览器输入权限或输入能力。当前页面/代次、可见控件命中与 Chromium 输入确认约束原生点击；PNG 捕获属于观察和需要图像的验证流程，不再作为每次点击的前置门槛。保持遮挡/过期/未知结果保护，输入执行不等于任务结果已验证。 | CONFIRMED / INPUT AND OBSERVATION SEPARATED / VALIDATION IN DELIVERY |
+
+| D-324 | 2026-09-14 | Windows 宿主禁用 CalculateNativeWinOcclusion，解决此环境中可见宿主的内嵌网页变成 hidden、截图与真实输入失效。保留其他启动标志、显式页/窗口隐藏、默认后台节流和网页内目标遮挡检查。原生运行时对照与完整桌面回归证明该兼容修正；不将 Chromium 输入确认当作结果，不从宿主 CDP 空白区域推断原生网页像素，不以此证明真实模型完成原业务任务。覆盖窗口时的绘制功耗尚未测量。 | CONFIRMED / WINDOWS HOST VISIBILITY / VALIDATION IN DELIVERY |
+
+
+| D-325 | 2026-09-14 | 用户明确指定参考项目源码时，读取参考实现是实际可执行能力，而不是提示词中的建议。由 RunCreated 绑定的用户消息提供范围；目录可在最近既有项目边界读取依赖，精确文件不扩展，模型/附件/计划不能 self-grant。原始比较目录的读取覆盖与参考项目授权范围分开；工具来源与目标身份明确，参考读取不授予写入权限或语义验证权。服务器存活不推出监听/编译/页面就绪。不通过加额度掩盖无法访问证据。 | CONFIRMED / REFERENCE SOURCE ACCESS / VALIDATION IN DELIVERY |
+
+| D-326 | 2026-09-14 | 用户要求专门记录 Agent 设计实现错误与解决办法，并持续更新。固定入口为 docs/engineering/AGENT_DESIGN_IMPLEMENTATION_LESSONS.md；后续相关调查、修复、错误方案撤回、复发和真实任务验收随同一 changeset 更新。保留现象、证据、已确认原因/推测、Model/Harness/Tools 责任、失败尝试和可复用原则，分别记录机制与原任务结果。按需查阅相关案例，不增加全量阅读或审批；工程/模型替身 PASS 不能关闭真实解题缺口。 | CONFIRMED / LIVING AGENT LESSONS RECORD |
+
+## Apache-2.0 开源决定（2026-09-15）
+
+用户授权 IDR 与 Fielora 正式采用 Apache License 2.0；统一完整协议、README 和包许可元数据，保留第三方声明与既有产品、安全及验收边界。历史版本许可不由本次决定追溯改写。见 [APACHE_2_0_ADOPTION.md](../engineering/APACHE_2_0_ADOPTION.md)。
+
+## 模型任务用量与估算费用（2026-09-15）
+
+按用户要求新增设置统计。归账来自既有 Run 固定 provider/model 与不可变用量回执；Composer 切换只决定下次发送，不迁移旧消耗。采用 owner-scoped Core 只读汇总、日期筛选与任务分页，单价是本地展示偏好，费用标为估算且币种分别合计。缺失用量不是零，真实流式/失败调用未返回的 token 不伪造；不建第二套 Runtime、账单事实库或 Migration。验证见 artifacts/model-usage-statistics/DELIVERY.md。
+
+
+## 当前请求与历史任务的边界（2026-09-17）
+
+用户授权采用现有持久账本 + 每次调用上下文投影 + 按需历史证据检索。当前回答完成与历史实现完成分离；历史要求不自动续期，完整执行访问不能推出本次修改意图。保留主模型处理语义，不增加常驻分类 Agent、强制计划或第二套状态。历史查询限制同一 Project/Conversation 与原消息时间边界，回执不提升为当前验证或文件权限。记录输入来源与实际结束判定以便审计；现存动作启发式不是语义保证。真实模型回归与工程替身结果分别报告。
+
+## 访问确认的执行约束（2026-09-18）
+
+用户授权修复“询问能否读取却继续旧修改”的复发。独立访问确认只需文件观察和来源匹配的当前回执；能力 preset 不续期旧任务，持续工具提案不能阻止已成立的访问回答结束。执行前复查限制，旧 ALLOW/Approval 不绕过本轮范围。采用有界访问确认流程，不把动作关键词的 false 当作所有自然语言请求的写入硬开关；不增加分类 Agent、强制计划或模型自授权限。混合实施请求保留正常能力。工程验证和真实模型验收分别报告。

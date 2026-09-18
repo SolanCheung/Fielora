@@ -1,7 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AgentEventKind, AgentEventView, AgentToolCallView } from '@fielora/contracts';
-import { buildConversationActivityProjection, reconcileLiveNarrative } from './agent-activity-projection.ts';
+import { buildConversationActivityProjection, compactActivityHistory, currentActivityPreview, reconcileLiveNarrative } from './agent-activity-projection.ts';
+
+test('adjacent observations combine into one group, preserve every note and distinguish tools without crossing approval', () => {
+  const names = ['search_text','list_files','read_file'];
+  const tools = names.map((name,index)=>tool(`t${index}`,name,'OBSERVE','COMPLETED',{path:'src'}));
+  const events = tools.flatMap((item,index)=>[event(index*3+1,'ASSISTANT_NARRATIVE',{step:index+1,text:`Finding ${index+1}`}),event(index*3+2,'TOOL_PROPOSED',{tool_call_id:item.id})]);
+  const raw = buildConversationActivityProjection(events,tools);
+  const compact = compactActivityHistory(raw);
+  assert.equal(compact.filter(item=>item.kind==='GROUP').length,1);
+  const group = compact.find(item=>item.kind==='GROUP')!;
+  assert.deepEqual(group.entries.map(entry=>entry.activityKind),['SEARCH','DIRECTORY','INSPECT']);
+  assert.equal(group.notes?.length,3);
+  const barrier = {id:'pause',kind:'PHASE' as const,sequence:3,occurredAt:3,phase:'PAUSED' as const,title:'Paused'};
+  assert.equal(compactActivityHistory([...raw.slice(0,2),barrier,...raw.slice(2)]).filter(item=>item.kind==='GROUP').length,2);
+  assert.equal(raw.length,6);
+});
 
 function event(sequence: number, kind: AgentEventKind, payload: Record<string, unknown> = {}): AgentEventView {
   return { id: `event-${sequence}`, run_id: 'run-1', sequence, schema_version: 1, kind, payload, created_at: sequence * 1_000 };
@@ -10,6 +25,24 @@ function event(sequence: number, kind: AgentEventKind, payload: Record<string, u
 function tool(id: string, name: string, effect: AgentToolCallView['effect'], status: AgentToolCallView['status'], argumentsValue: Record<string, unknown>, receipt: Record<string, unknown> | null = null): AgentToolCallView {
   return { id, run_id: 'run-1', name, effect, status, policy_decision: 'ALLOW', arguments: argumentsValue, receipt, error_code: status === 'FAILED' ? 'FIXTURE_FAILED' : null, created_at: 1_000, updated_at: 30_000 };
 }
+
+test('live preview replaces older findings while preserving the full expandable history', () => {
+  const events = Array.from({ length: 40 }, (_, index) => event(index + 1, 'ASSISTANT_NARRATIVE', { step:index + 1, text:`Finding ${index + 1}` }));
+  const history = buildConversationActivityProjection(events, []);
+  const preview = currentActivityPreview(history, '');
+  assert.equal(preview.length, 1);
+  assert.equal(preview[0]?.kind, 'NARRATIVE');
+  assert.equal(preview[0]?.kind === 'NARRATIVE' && preview[0].text, 'Finding 40');
+  assert.equal(history.length, 40);
+  assert.deepEqual(currentActivityPreview(history, 'Finding 41 streaming'), []);
+});
+
+test('a completed browser call with failed assertions is presented as failed', () => {
+  const history = buildConversationActivityProjection([event(1, 'TOOL_PROPOSED', { tool_call_id: 'check' }), event(2, 'TOOL_COMPLETED', { tool_call_id: 'check' })], [tool('check', 'browser_verify', 'NETWORK', 'COMPLETED', {}, { verification_eligible: true, success: false })]);
+  const group = history.find(item => item.kind === 'GROUP');
+  assert.ok(group && group.kind === 'GROUP');
+  assert.equal(group.entries[0]?.status, 'FAILED');
+});
 
 test('narrative is the activity boundary and the real event sequence is never regrouped by activity type', () => {
   const tools = [
