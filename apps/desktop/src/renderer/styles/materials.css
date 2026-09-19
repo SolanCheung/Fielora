@@ -11,6 +11,27 @@
   background: var(--fl-surface-content);
 }
 
+/* Conversation and tool panes sample one workspace paint, including gradients. */
+.conversation-column,
+.right-workspace-dock[data-surface="content"] {
+  background-attachment: fixed;
+  background-position: 0 0;
+  background-size: 100vw 100vh;
+}
+
+/* Tool containers are transparent; content objects and diff annotations retain
+ * their own semantic fills. Do not let nested viewers repaint the workspace. */
+.right-workspace-dock :is(.right-dock-active-view, .right-dock-view, .right-dock-home,
+  .diff-workspace, .diff-view, .agent-review, .workspace-blank,
+  .dock-resource-layout, .dock-resource-content, .dock-resource-file-tree,
+  .file-editor, .dock-code-editor-surface, .dock-markdown-preview, .dock-image-preview,
+  .file-unsupported-preview, .workspace-file-tool, .file-tree,
+  .right-terminal-view, .terminal-session, .browse-panel, .browse-content,
+  .browse-viewport, .browse-empty, .artifact-surface, .artifact-surface-header,
+  .artifact-history, .artifact-presentation, .artifact-presentation > nav, .artifact-diagram) {
+  background: transparent;
+}
+
 [data-surface="chrome"] {
   border-color: var(--fl-effect-boundary);
   background: var(--fl-surface-chrome);

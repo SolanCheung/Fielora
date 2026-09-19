@@ -46,6 +46,7 @@ fn main() {
         "crates/fielora-core/src/agent_runtime.rs",
         "crates/fielora-core/src/agent_image_history.rs",
         "crates/fielora-core/src/agent_turn_context.rs",
+        "crates/fielora-core/src/agent_user_input.rs",
         "crates/fielora-core/src/agent_request_intent.rs",
         "crates/fielora-core/src/agent_request_scope.rs",
         "crates/fielora-core/src/agent_work_state.rs",

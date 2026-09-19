@@ -921,7 +921,7 @@ pub fn coding_tool_catalog() -> Vec<ToolSpec> {
         ),
         tool(
             "run_command",
-            "Run one program with an argv array in the project. Shell command strings are not accepted.",
+            "Run an installed OS executable with an argv array in the project. Tool IDs such as web.search/web.fetch are NOT executables; call an exposed tool directly. Shell command strings are not accepted. On Windows do not assume bash exists; inspect the executable or use an available native program. Do not repeat a missing executable with different search terms.",
             AgentToolEffect::Process,
             json!({"type":"object","properties":{"program":{"type":"string"},"argv":{"type":"array","items":{"type":"string"},"maxItems":128},"cwd":{"type":"string"},"timeout_ms":{"type":"integer","minimum":1000,"maximum":900000}},"required":["program","argv"],"additionalProperties":false}),
         ),
@@ -1949,10 +1949,22 @@ impl<E: ToolExecutor> ToolExecutor for RoutedToolExecutor<E> {
             .iter()
             .find(|spec| spec.definition.name == name)
             .ok_or(AgentError::ToolNotFound)?;
+        if name == "run_command" {
+            reject_tool_program(arguments, &self.catalog)?;
+        }
         if spec.source.source_kind == ToolSourceKind::Builtin {
-            return self
-                .builtin
-                .execute(name, arguments, authorization_confirmed, cancellation);
+            let result =
+                self.builtin
+                    .execute(name, arguments, authorization_confirmed, cancellation)?;
+            return if name == "capability_status" {
+                project_capability_catalog(result, &self.catalog, |provider_id| {
+                    self.providers
+                        .get(provider_id)
+                        .is_some_and(|p| p.availability() == ToolProviderAvailability::Available)
+                })
+            } else {
+                Ok(result)
+            };
         }
         let provider = self
             .providers
@@ -3317,7 +3329,7 @@ impl ToolRuntime {
             "artifact_export":{"status":"AVAILABLE","tool":"artifact.export","formats":["DOCX","PPTX","SVG","XLSX"],"effect":"WORKSPACE_WRITE","persistence":["REQUEST_SCOPED","DURABLE_REVISION"],"presentation_png_assets":"DURABLE_EXACT_SNAPSHOT_CONTAIN","verification":"STRUCTURAL_AND_SEMANTIC_ROUNDTRIP_ONLY"},
             "markdown":{"status":"AVAILABLE","path":"create_file/write_file plus verification"},
             "csv":{"status":"AVAILABLE","path":"bounded UTF-8 file tools; formula-aware XLSX is not implied"},
-            "web_research":{"status":"AVAILABLE","tools":["web.search","web.fetch"],"effect":"NETWORK","authority":"UNTRUSTED_WEB_CONTENT","limitations":["no download-to-workspace tool","no browser fallback","no deep research runtime"]},
+            "web_research":{"status":"UNSUPPORTED_CAPABILITY","tools":[],"reason":"No Web provider is registered in the built-in executor; routed execution reports the actual admitted catalog.","effect":"NETWORK","authority":"UNTRUSTED_WEB_CONTENT","limitations":["no download-to-workspace tool","no browser fallback","no deep research runtime"]},
             "web_download":{"status":"UNSUPPORTED_CAPABILITY","reason":"the current single-effect Tool contract cannot honestly represent one operation requiring both NETWORK and WORKSPACE_WRITE authority"},
             "archive":{"status":"UNSUPPORTED_CAPABILITY","reason":"safe zip preview/extraction adapter is not installed in this build"},
             "docx_pdf":{"status":"PARTIAL","reason":"bounded one-shot DOCX export and DOCX/PDF extraction are available; PDF export, editing, preview, and visual verification remain unsupported"},
@@ -3846,6 +3858,7 @@ impl ToolRuntime {
             timeout_ms: Option<u64>,
         }
         let args: Args = parse_args(arguments)?;
+        reject_tool_program(arguments, &coding_tool_catalog())?;
         if args.program.is_empty()
             || args.program.len() > 512
             || args.program.contains('\0')
@@ -3882,7 +3895,9 @@ impl ToolRuntime {
         use std::os::windows::process::CommandExt;
         #[cfg(windows)]
         command.creation_flags(0x08000000);
-        let mut child = command.spawn().map_err(|_| AgentError::IoFailed)?;
+        let mut child = command
+            .spawn()
+            .map_err(|error| command_spawn_error(&args.program, error.kind()))?;
         let job = ProcessJob::assign(&child)?;
         let stdout = child.stdout.take().ok_or(AgentError::IoFailed)?;
         let stderr = child.stderr.take().ok_or(AgentError::IoFailed)?;
@@ -4336,6 +4351,78 @@ fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+fn reject_tool_program(arguments: &Value, catalog: &[ToolSpec]) -> Result<(), AgentError> {
+    let program = arguments["program"].as_str().unwrap_or_default();
+    if catalog.iter().any(|s| s.definition.name == program)
+        || matches!(program, "web.search" | "web.fetch")
+    {
+        return Err(AgentError::WorkGuidance {
+            code: "AGENT_TOOL_IS_NOT_PROGRAM",
+            detail: format!(
+                "{} is an Agent tool ID, not an OS executable. Call it directly only if exposed in the current tool catalog. If absent, use capability_status or configured MCP discovery; report the unavailable capability or request the missing source. No process was started and no network policy was bypassed.",
+                redact_output(program)
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn command_spawn_error(program: &str, kind: std::io::ErrorKind) -> AgentError {
+    let (code, detail) = match kind {
+        std::io::ErrorKind::NotFound => (
+            "AGENT_PROGRAM_NOT_FOUND",
+            "Executable not found. Check the program and PATH/platform. Changing arguments will not install a missing executable; do not retry it with another URL or search query.",
+        ),
+        std::io::ErrorKind::PermissionDenied => (
+            "AGENT_PROGRAM_ACCESS_DENIED",
+            "The OS denied starting this executable. Do not treat this as a network or source-repository failure.",
+        ),
+        _ => (
+            "AGENT_PROGRAM_START_FAILED",
+            "The OS could not start this executable. Check executable availability and format before retrying. This is not a remote URL response.",
+        ),
+    };
+    AgentError::WorkGuidance {
+        code,
+        detail: format!(
+            "{}: {detail} No process result or remote response exists.",
+            redact_output(program)
+        ),
+    }
+}
+
+fn project_capability_catalog(
+    mut result: ToolExecution,
+    catalog: &[ToolSpec],
+    available: impl Fn(&str) -> bool,
+) -> Result<ToolExecution, AgentError> {
+    let mut capabilities: Value =
+        serde_json::from_str(&result.observation).map_err(|_| AgentError::IoFailed)?;
+    let web = ["web.search", "web.fetch"]
+        .iter()
+        .filter_map(|name| catalog.iter().find(|s| s.definition.name == *name))
+        .collect::<Vec<_>>();
+    let usable = web
+        .iter()
+        .filter(|s| {
+            s.source.source_kind == ToolSourceKind::Builtin || available(&s.source.provider_id)
+        })
+        .map(|s| s.definition.name.clone())
+        .collect::<Vec<_>>();
+    capabilities["web_research"] = json!({"status":if web.is_empty(){"UNSUPPORTED_CAPABILITY"}else if usable.is_empty(){"UNAVAILABLE"}else if usable.len()==2{"AVAILABLE"}else{"PARTIAL"},"tools":usable,"availability_basis":"CURRENT_ADMITTED_TOOL_CATALOG","credentials_and_remote_service_verified":false,"grants_authority":false,"effect":"NETWORK","authority":"UNTRUSTED_WEB_CONTENT","reason":if web.is_empty(){"No web.search/web.fetch provider is registered for this invocation. Tool IDs are not terminal programs. Ask for a verified source or use explicitly configured capabilities; do not invent repositories."}else{"Only listed operations are currently exposed. Authentication, network reachability and policy still apply."}});
+    let inventory = catalog.iter().map(|s|json!({"name":s.definition.name,"effect":s.effect,"provider_id":s.source.provider_id,"available":s.source.source_kind==ToolSourceKind::Builtin||available(&s.source.provider_id)})).collect::<Vec<_>>();
+    capabilities["tool_catalog"] = json!(inventory);
+    capabilities["execution_environment"] =
+        json!({"os":std::env::consts::OS,"tool_ids_are_programs":false});
+    result.receipt["availability_basis"] = json!("CURRENT_ADMITTED_TOOL_CATALOG");
+    result.receipt["web_research"] = capabilities["web_research"].clone();
+    result.receipt["tool_catalog"] = capabilities["tool_catalog"].clone();
+    result.observation = bounded_observation(
+        serde_json::to_string_pretty(&capabilities).map_err(|_| AgentError::IoFailed)?,
+    );
+    Ok(result)
+}
+
 fn sanitized_command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
     command.env_clear();
@@ -4467,6 +4554,71 @@ mod tests {
     #[cfg(not(any(windows, unix)))]
     fn create_directory_link(_link: &Path, _target: &Path) {
         panic!("directory-link invariant test is unsupported on this platform");
+    }
+
+    #[test]
+    fn capability_catalog_and_command_failures_are_truthful() {
+        let (root, artifacts) = fixture();
+        let runtime = ToolRuntime::new(&root, &artifacts).unwrap();
+        let cancel = CommandCancellation::default();
+        let base = runtime
+            .execute("capability_status", &json!({}), false, &cancel)
+            .unwrap();
+        let mut catalog = coding_tool_catalog();
+        let absent = project_capability_catalog(base.clone(), &catalog, |_| true).unwrap();
+        assert_eq!(
+            absent.receipt["web_research"]["status"],
+            "UNSUPPORTED_CAPABILITY"
+        );
+        for name in ["web.search", "web.fetch"] {
+            let mut spec = catalog[0].clone();
+            spec.definition.name = name.into();
+            spec.source.source_kind = ToolSourceKind::Mcp;
+            spec.source.provider_id = "test.web".into();
+            catalog.push(spec);
+        }
+        let available = project_capability_catalog(base.clone(), &catalog, |_| true).unwrap();
+        assert_eq!(available.receipt["web_research"]["status"], "AVAILABLE");
+        assert_eq!(
+            available.receipt["web_research"]["credentials_and_remote_service_verified"],
+            false
+        );
+        let unavailable = project_capability_catalog(base, &catalog, |_| false).unwrap();
+        assert_eq!(unavailable.receipt["web_research"]["status"], "UNAVAILABLE");
+        assert_eq!(
+            runtime
+                .execute(
+                    "run_command",
+                    &json!({"program":"web.search","argv":["archify"]}),
+                    true,
+                    &cancel
+                )
+                .unwrap_err()
+                .code(),
+            "AGENT_TOOL_IS_NOT_PROGRAM"
+        );
+        assert_eq!(
+            runtime
+                .execute(
+                    "run_command",
+                    &json!({"program":"fielora-nonexistent-test-executable","argv":[]}),
+                    true,
+                    &cancel
+                )
+                .unwrap_err()
+                .code(),
+            "AGENT_PROGRAM_NOT_FOUND"
+        );
+        assert_eq!(
+            command_spawn_error("test", std::io::ErrorKind::PermissionDenied).code(),
+            "AGENT_PROGRAM_ACCESS_DENIED"
+        );
+        assert_eq!(
+            command_spawn_error("test", std::io::ErrorKind::InvalidData).code(),
+            "AGENT_PROGRAM_START_FAILED"
+        );
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(artifacts);
     }
 
     fn fixture() -> (PathBuf, PathBuf) {

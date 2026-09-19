@@ -48,6 +48,72 @@ pub fn turn(
             usage:Some(ModelUsage {input_tokens:Some(100),output_tokens:Some(30)}),
         });
     }
+    if task == "安装澄清回归样例" {
+        let answered = data["user_clarifications"]["accepted_answers"]
+            .as_array()
+            .is_some_and(|a| {
+                a.len() == 1
+                    && a[0]["answer"]
+                        .as_str()
+                        .is_some_and(|s| s.contains("fixture-approved-source"))
+            });
+        let calls = match step {
+            1 => vec![("capability_status", json!({}))],
+            2 => {
+                if !format!("{:?}", request.messages).contains("UNSUPPORTED_CAPABILITY") {
+                    return Err(ModelError::ProviderProtocolError);
+                }
+                vec![(
+                    "run_command",
+                    json!({"program":"web.search","argv":["archify"]}),
+                )]
+            }
+            3 => vec![(
+                "run_command",
+                json!({"program":"fielora-missing-executable-fixture","argv":[]}),
+            )],
+            4 => vec![
+                (
+                    "request_user_input",
+                    json!({"question":"请提供 Archify 的可信来源（仓库链接或 SKILL.md）。"}),
+                ),
+                (
+                    "create_file",
+                    json!({"path":"must-not-exist.txt","content":"BAD"}),
+                ),
+            ],
+            5 if answered => vec![(
+                "create_file",
+                json!({"path":"clarified.txt","content":"fixture-approved-source"}),
+            )],
+            6 if answered => vec![(
+                "run_command",
+                json!({"program":"node","argv":["verify-clarification.cjs"]}),
+            )],
+            _ if answered => vec![],
+            _ => return Err(ModelError::ProviderProtocolError),
+        };
+        return Ok(AgentModelTurn {
+            text: if calls.is_empty() {
+                "已根据补充信息完成测试文件并通过校验；这不是实际 Archify 安装。".into()
+            } else {
+                "检查工具与必要来源。".into()
+            },
+            tool_calls: calls
+                .into_iter()
+                .enumerate()
+                .map(|(i, (name, arguments))| AgentModelToolCall {
+                    id: format!("clarification-{step}-{i}"),
+                    name: name.into(),
+                    arguments,
+                })
+                .collect(),
+            usage: Some(ModelUsage {
+                input_tokens: Some(100),
+                output_tokens: Some(30),
+            }),
+        });
+    }
     if data["current_request"] != task
         || !request
             .tools

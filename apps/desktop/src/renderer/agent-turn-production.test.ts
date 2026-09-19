@@ -20,7 +20,7 @@ const layoutStyles = readFileSync(path.join(rendererRoot, 'styles/layout.css'), 
 
 test('production conversation has one turn-owned agent presentation path', () => {
   assert.match(workspace, /<AgentTurn/);
-  assert.match(workspace, /agentTurn\?\.userMessageId === message\.id/);
+  assert.match(workspace, /agentDisplayAnchor === message\.id/);
   assert.match(workspace, /agentRunIdRef\.current = started\.id; agentEventsRef\.current = \[\]; agentToolsRef\.current = \[\]/);
   assert.match(workspace, /agentRunIdRef\.current !== run\.id && activeRunId !== run\.id/);
   assert.match(turn, /data-agent-turn="true"/);
@@ -113,7 +113,7 @@ test('single create review removes the duplicate file row and small modify uses 
 
 test('action execution starts with a factual preparation state and never invents model progress', () => {
   assert.match(turn, /activityItems\.length === 0/);
-  assert.match(turn, /data-execution-stage=\{thinking \? 'THINKING' : 'ACTIVE'\}/);
+  assert.match(turn, /data-execution-stage=\{run.status === 'PAUSED' \? 'PAUSED'.*thinking \? 'THINKING' : 'ACTIVE'\}/);
   assert.doesNotMatch(turn, /正在准备任务上下文/);
   assert.match(projection, /event\.kind !== 'ASSISTANT_NARRATIVE'/);
   assert.doesNotMatch(projection, /text_delta[^\n]*Narrative/);

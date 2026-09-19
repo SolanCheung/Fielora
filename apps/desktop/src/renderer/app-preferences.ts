@@ -16,7 +16,13 @@ export type CodeFontSize = 11 | 12 | 13 | 14 | 15 | 16 | 17;
 export type ReducedMotionPreference = 'SYSTEM' | 'REDUCE' | 'FULL';
 export type AdvancedColorKey = 'accent' | 'canvas' | 'sidebar' | 'surface' | 'foreground' | 'border';
 export type AdvancedColorOverrides = Partial<Record<AdvancedColorKey, string>>;
-export interface BackgroundGradientOverride { from: string; to: string }
+// Legacy from/to remain top-left/top-right; missing bottomLeft inherits from.
+export interface BackgroundGradientOverride { from: string; to: string; bottomLeft?: string }
+
+export function threeCenterGradient({ from, to, bottomLeft = from }: BackgroundGradientOverride): string {
+  // Chrome consumes this token as background-image, so every layer must be an image.
+  return `radial-gradient(ellipse 80% 75% at 0% 100%, ${bottomLeft} 0%, transparent 100%), radial-gradient(ellipse 80% 75% at 0% 0%, ${from} 0%, transparent 100%), radial-gradient(ellipse 80% 75% at 100% 0%, ${to} 0%, transparent 100%), linear-gradient(112deg, ${from}, ${to})`;
+}
 
 export interface AppearancePreferences {
   /** Persisted field name retained for UI preference compatibility. This is an appearance mode, not a Theme ID. */
@@ -119,7 +125,7 @@ function normalizeAdvancedColors(value: unknown): AdvancedColorOverrides {
 function normalizeGradient(value: unknown): BackgroundGradientOverride | null {
   const input = record(value);
   if (!input || !isHexColor(input.from) || !isHexColor(input.to)) return null;
-  return { from: input.from.toUpperCase(), to: input.to.toUpperCase() };
+  return { from: input.from.toUpperCase(), to: input.to.toUpperCase(), bottomLeft: isHexColor(input.bottomLeft) ? input.bottomLeft.toUpperCase() : input.from.toUpperCase() };
 }
 
 function normalizeAppearance(value: unknown, legacy?: Record<string, unknown>): AppearancePreferences {
@@ -270,7 +276,7 @@ export function applyAppPreferences(target: HTMLElement, preferences: AppPrefere
   const sidebar = appearance.sidebarBackgroundOverride;
   const sidebarGradient = appearance.sidebarBackgroundGradientOverride;
   const sidebarPaint = sidebarGradient
-    ? `linear-gradient(112deg, ${sidebarGradient.from} 0%, ${sidebarGradient.to} 100%)`
+    ? threeCenterGradient(sidebarGradient)
     : sidebar;
   setOrRemove(target, '--fl-sidebar-background', null);
   setOrRemove(target, '--fl-brand-chrome-canvas', sidebarPaint);
@@ -279,10 +285,10 @@ export function applyAppPreferences(target: HTMLElement, preferences: AppPrefere
   const workspace = appearance.workspaceBackgroundOverride;
   const workspaceGradient = appearance.workspaceBackgroundGradientOverride;
   const workspacePaint = workspaceGradient
-    ? `linear-gradient(135deg, ${workspaceGradient.from} 0%, ${workspaceGradient.to} 100%)`
+    ? threeCenterGradient(workspaceGradient)
     : workspace;
   const workspaceBase = workspaceGradient
-    ? `color-mix(in srgb, ${workspaceGradient.from} 50%, ${workspaceGradient.to})`
+    ? `color-mix(in srgb, color-mix(in srgb, ${workspaceGradient.from} 50%, ${workspaceGradient.to}) 66.67%, ${workspaceGradient.bottomLeft ?? workspaceGradient.from})`
     : workspace;
   setOrRemove(target, '--fl-surface-content', workspacePaint);
   setOrRemove(target, '--fl-color-surface', workspaceBase);
@@ -290,6 +296,13 @@ export function applyAppPreferences(target: HTMLElement, preferences: AppPrefere
   const customContrast = appearance.surfaceContrast !== defaultAppearancePreferences.surfaceContrast;
   const customNeutrals = workspaceBase !== null || customContrast;
   const contrast = appearance.surfaceContrast;
+  // 42 is the standard code fill; lower values approach the workspace,
+  // higher values increase separation without recoloring other neutral controls.
+  setOrRemove(target, '--fl-color-code-background', customContrast
+    ? (contrast < defaultAppearancePreferences.surfaceContrast
+      ? `color-mix(in srgb, var(--fl-color-code-background-base) ${(contrast / defaultAppearancePreferences.surfaceContrast * 100).toFixed(2)}%, var(--fl-color-surface))`
+      : `color-mix(in srgb, var(--fl-color-text-strong) ${((contrast - defaultAppearancePreferences.surfaceContrast) / (100 - defaultAppearancePreferences.surfaceContrast) * 20).toFixed(2)}%, var(--fl-color-code-background-base))`)
+    : null);
   const neutralProperties: Array<[string, number]> = [
     ['--fl-color-surface-raised', 1 + contrast * 0.015],
     ['--fl-color-surface-subtle', contrast * 0.11],

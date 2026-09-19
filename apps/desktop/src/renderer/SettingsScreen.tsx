@@ -6,7 +6,7 @@ import { AppearanceSettings } from './AppearanceSettings';
 import { ModelUsageSettings } from './ModelUsageSettings';
 import type { SelectedUsageModel } from './model-usage';
 import { AppIcon, type AppIconName } from './ui';
-import { SelectMenu, SettingsToggle } from './UiPrimitives';
+import { Button, SelectMenu, SettingsToggle } from './UiPrimitives';
 import {
   persistWorkspaceNavigationWidth,
   readWorkspaceNavigationWidth,
@@ -157,7 +157,7 @@ export function SettingsScreen({ preferences, onChange, onBack, initialCategory 
       {category === 'MODELS' && <div className="settings-section" data-testid="settings-models">
         <header><p>模型</p><h1>模型与服务</h1></header>
         <section className="settings-card settings-provider-card">
-          <div className="settings-card-heading"><span><strong>已配置服务</strong><small>API Key 继续存放在 Windows Credential Manager。</small></span><button className="settings-primary-action" onClick={() => window.dispatchEvent(new CustomEvent('fielora:open-provider-setup'))} data-testid="manage-providers">添加模型服务</button></div>
+          <div className="settings-card-heading"><span><strong>已配置服务</strong><small>API Key 继续存放在 Windows Credential Manager。</small></span><Button variant="secondary" onClick={() => window.dispatchEvent(new CustomEvent('fielora:open-provider-setup'))} data-testid="manage-providers">添加模型服务</Button></div>
           {providerError && <p className="error">{providerError}</p>}
           {activeProviders.length === 0 ? <p className="settings-empty">尚未配置模型服务。点击“添加模型服务”填写协议、Base URL、API Key 和 Model ID。</p> : <div className="settings-provider-list">{activeProviders.map((provider) => <article key={provider.id}>
             <span><strong>{provider.display_name}</strong><small>{provider.provider_kind} · {provider.default_model}</small><small>{provider.base_url ?? '官方服务地址'}</small></span>

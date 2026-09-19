@@ -57,6 +57,7 @@ try {
     const project=await window.fieloraTest.createProject({title:'图片与草稿回归',goal:null,root_path:${JSON.stringify(projectRoot)}});
     const make=title=>window.fielora.conversation.create({field_id:project.field_id,title,provider_config_id:provider.id,model_id:provider.default_model});
     const first=await make('保留图片草稿'),second=await make('另一个对话');
+    for(const c of [first,second]) await window.fielora.conversation.createMessage({conversation_id:c.id,role:'USER',content:c.title,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[]});
     return {provider,project,first,second};
   })()`);
   await cdp.eval('window.__draftReload=true');await cdp.send('Page.reload');

@@ -2741,6 +2741,9 @@ pub struct ResumeAgentRunRequest {
     pub run_id: AgentRunId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub user_message_id: Option<MessageId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub attachments: Option<Vec<AgentInputAttachment>>,
 }
 

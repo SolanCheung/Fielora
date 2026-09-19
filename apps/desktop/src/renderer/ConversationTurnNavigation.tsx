@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import { TooltipButton } from './UiPrimitives';
 
 interface ConversationTurnNavigationProps {
-  turns: readonly { id: string; content: string }[];
+  turns: readonly { id: string; content: string; preview?: string }[];
   scrollContainer: RefObject<HTMLDivElement | null>;
   onNavigate: () => void;
 }
@@ -11,6 +11,19 @@ export function ConversationTurnNavigation({ turns, scrollContainer, onNavigate 
   const markersRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [activeId, setActiveId] = useState('');
+  const hoveredMarker = useRef<HTMLButtonElement | null>(null);
+  const focusedMarker = useRef<HTMLButtonElement | null>(null);
+  const emphasizedMarker = useRef<HTMLButtonElement | null>(null);
+
+  // Transient pointer feedback should not reconcile every turn and its tooltip.
+  // CSS handles the neighboring wave from one marker attribute, without layout reads.
+  function updateEmphasis() {
+    const next = hoveredMarker.current ?? focusedMarker.current;
+    if (next === emphasizedMarker.current) return;
+    emphasizedMarker.current?.removeAttribute('data-wave-active');
+    next?.setAttribute('data-wave-active', 'true');
+    emphasizedMarker.current = next;
+  }
 
   useEffect(() => {
     const list = scrollContainer.current;
@@ -64,8 +77,14 @@ export function ConversationTurnNavigation({ turns, scrollContainer, onNavigate 
     <div className="conversation-turn-markers" ref={markersRef}>
       {turns.map((turn, index) => {
         const label = `第 ${index + 1} 轮：${turn.content.replace(/\s+/g, ' ').trim().slice(0, 72) || '附件消息'}`;
-        return <TooltipButton key={turn.id} className="conversation-turn-marker" tooltip={label} variant="default" placement="right" aria-label={label} aria-current={activeId === turn.id ? 'location' : undefined} data-turn-id={turn.id}
+        const preview = <span className="conversation-turn-preview"><strong>{turn.content.trim().slice(0, 200) || '附件消息'}</strong>{turn.preview && <span>{turn.preview.trim().slice(0, 500)}</span>}</span>;
+        return <TooltipButton key={turn.id} className="conversation-turn-marker" tooltip={preview} variant="card" placement="right" aria-label={label} aria-current={activeId === turn.id ? 'location' : undefined} data-turn-id={turn.id}
+          onPointerEnter={(event) => { hoveredMarker.current = event.currentTarget; updateEmphasis(); }}
+          onPointerLeave={() => { hoveredMarker.current = null; updateEmphasis(); }}
+          onFocus={(event) => { if (event.currentTarget.matches(':focus-visible')) { focusedMarker.current = event.currentTarget; updateEmphasis(); } }}
+          onBlur={() => { focusedMarker.current = null; updateEmphasis(); }}
           onKeyDown={(event) => {
+            if (event.key === 'Escape') { hoveredMarker.current = null; focusedMarker.current = null; updateEmphasis(); }
             const direction = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
             if (!direction && event.key !== 'Home' && event.key !== 'End') return;
             event.preventDefault();

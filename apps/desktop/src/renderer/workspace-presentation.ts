@@ -44,6 +44,8 @@ export function agentTurnOwnership(
   const userMessageId = messages.some((message) => message.id === recordedUserId && message.role === 'USER')
     ? recordedUserId
     : fallbackUser?.id ?? null;
+  // A clarification is an assistant message, but never a task completion.
+  if (!['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status)) return { userMessageId, assistantMessageId: null };
   const exactAssistant = messages.find((message) => message.role === 'ASSISTANT' && message.invocation_id === run.id) ?? null;
   if (exactAssistant) return { userMessageId, assistantMessageId: exactAssistant.id };
   const nextUser = messages.find((message) => message.role === 'USER' && message.created_at > run.created_at);
@@ -104,17 +106,12 @@ export function conversationTitleFromContent(content: string, maximumLength = 24
     : concise;
 }
 
-export function collapseDuplicateUnsentConversations<T extends { id: string }>(
+// Navigation visibility never removes conversations or composer drafts.
+export function sentConversations<T extends { id: string }>(
   conversations: readonly T[],
   unsentIds: ReadonlySet<string>,
 ): T[] {
-  let retainedDraft = false;
-  return conversations.filter((conversation) => {
-    if (!unsentIds.has(conversation.id)) return true;
-    if (retainedDraft) return false;
-    retainedDraft = true;
-    return true;
-  });
+  return conversations.filter((conversation) => !unsentIds.has(conversation.id));
 }
 
 export function parseFileProposal(output: string): FileProposal | null {
@@ -146,4 +143,17 @@ export function reviewDiff(relativePath: string, before: string, after: string):
   for (let index = prefix; index < right.length - suffix; index += 1) lines.push(`+${right[index] ?? ''}`);
   for (let index = 0; index < Math.min(3, suffix); index += 1) lines.push(` ${left[left.length - suffix + index] ?? ''}`);
   return lines.join('\n');
+}
+
+// Visual placement may advance through a clarification while original task ownership stays fixed.
+export function agentTurnDisplayAnchor(messages: readonly ConversationMessageView[], events: readonly AgentEventView[], fallback: string | null): string | null {
+  for (const event of [...events].reverse()) {
+    const payload = event.payload as Record<string, unknown> | null;
+    if (!payload || typeof payload !== 'object') continue;
+    const question = event.kind === 'RUN_PAUSED' && payload.reason === 'AGENT_USER_INPUT_REQUIRED';
+    const answer = event.kind === 'CHECKPOINT_CREATED' && payload.kind === 'USER_INPUT_RECEIVED';
+    const id = question ? payload.question_message_id : answer ? payload.user_message_id : null;
+    if (typeof id === 'string' && messages.some(m => m.id === id && m.role === (question ? 'ASSISTANT' : 'USER'))) return id;
+  }
+  return fallback;
 }

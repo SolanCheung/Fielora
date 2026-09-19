@@ -15,7 +15,7 @@ export class ComposerDraftStore {
     else this.drafts.delete(key);
   }
   move(from: string, to: string): void {
-    if (from === to) return;
+    if (from === to || !this.drafts.has(from)) return;
     this.write(to, this.read(from)); this.drafts.delete(from);
   }
 }

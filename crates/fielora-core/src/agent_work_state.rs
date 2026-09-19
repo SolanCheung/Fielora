@@ -52,6 +52,14 @@ impl WorkProgress {
                         receipt.unwrap()["matched_locations_sha256"],
                         receipt.unwrap()["files"]
                     ])
+                } else if tool.name == "run_command"
+                    && matches!(
+                        tool.error_code.as_deref(),
+                        Some("AGENT_TOOL_IS_NOT_PROGRAM" | "AGENT_PROGRAM_NOT_FOUND")
+                    )
+                {
+                    // Different queries cannot make a nonexistent executable available.
+                    json!([tool.name, tool.arguments["program"], tool.error_code])
                 } else {
                     json!([
                         tool.name,
@@ -477,6 +485,14 @@ pub(crate) fn recovery_instruction(code: &str) -> Option<&'static str> {
         ),
         "AGENT_FILE_CHANGED" | "AGENT_STALE_SHA" => Some(
             "The file changed. Read only the affected range and its current hash, then rebuild the edit against that evidence; never reuse a stale guard.",
+        ),
+        "AGENT_TOOL_IS_NOT_PROGRAM" => Some(
+            "A tool ID was passed as an OS executable. Use the actual admitted tool directly or inspect capability_status. If unavailable, request the missing source with request_user_input. Do not retry the same fake executable with another query or guess a repository.",
+        ),
+        "AGENT_PROGRAM_NOT_FOUND"
+        | "AGENT_PROGRAM_ACCESS_DENIED"
+        | "AGENT_PROGRAM_START_FAILED" => Some(
+            "No process started. Inspect the precise launch failure and available Windows executables. Do not retry a missing program with changed arguments, treat this as a remote URL response, or invent sources. Ask for required information with request_user_input if needed.",
         ),
         "AGENT_COMMAND_FAILED" | "AGENT_VERIFICATION_REQUIRED" => Some(
             "Inspect the failed check and repair its cause. A command invocation is not a passing verification; verify the current workspace again.",
@@ -1306,6 +1322,17 @@ mod tests {
                 |m| matches!(m,AgentModelMessage::ToolResult {call_id,..} if call_id=="call-27")
             )
         );
+    }
+
+    #[test]
+    fn changing_queries_does_not_turn_missing_programs_into_progress() {
+        let mut tools = Vec::new();
+        let mut progress = WorkProgress::default();
+        for i in 0..5 {
+            tools.push(serde_json::from_value(json!({"id":format!("tool-{i}"),"run_id":"run","name":"run_command","effect":"PROCESS","status":"FAILED","policy_decision":"ALLOW","arguments":{"program":"web.search","argv":[format!("query-{i}")]},"receipt":null,"error_code":"AGENT_TOOL_IS_NOT_PROGRAM","created_at":i,"updated_at":i})).unwrap());
+            progress.observe(&tools);
+        }
+        assert_eq!(progress.stalled_turns, 4);
     }
 
     #[test]

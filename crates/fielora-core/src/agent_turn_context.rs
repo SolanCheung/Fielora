@@ -131,6 +131,7 @@ impl TurnContext {
         messages: &mut Vec<AgentModelMessage>,
         current: &AgentRunView,
         interpretation: Option<crate::agent_request_intent::Intent>,
+        user_input: Value,
     ) {
         remove_projection(messages);
         let access_question = crate::agent_request_scope::access_question(
@@ -144,9 +145,10 @@ impl TurnContext {
             "historical_execution_index":self.index,"historical_messages_omitted":self.omitted_messages,
             "historical_outcomes_are_not_current_verification":true,
             "current_request_interpretation":interpretation,
+            "user_clarifications":user_input,
             "interpretation_is_permission_or_verification":false,
             "current_request_constraint": if access_question { Some("ACCESS_CONFIRMATION: confirm the supplied local path with list_files or read_file. No comparison, implementation, process, delegation or older task continuation. The Harness finishes from the current source-specific receipt.") } else { None }
-        }),format_args!("{}\n{}", GUIDANCE, crate::agent_request_intent::GUIDANCE))));
+        }),format_args!("{}\n{}\n{}", GUIDANCE, crate::agent_request_intent::GUIDANCE, crate::agent_user_input::GUIDANCE))));
     }
 
     pub fn manifest(&self, current: &AgentRunView) -> Value {
@@ -387,8 +389,8 @@ mod tests {
         foreign.conversation_id = ConversationId::new("foreign");
         assert!(!eligible(&current, &foreign, Some(&source)));
         let mut messages = vec![AgentModelMessage::User("Task:\ncurrent".into())];
-        context.refresh(&mut messages, &current, None);
-        context.refresh(&mut messages, &current, None);
+        context.refresh(&mut messages, &current, None, json!({}));
+        context.refresh(&mut messages, &current, None, json!({}));
         assert_eq!(messages.len(), 2);
         assert!(
             matches!(messages.last(),Some(AgentModelMessage::User(t)) if t.contains("为什么这次没有改成功"))

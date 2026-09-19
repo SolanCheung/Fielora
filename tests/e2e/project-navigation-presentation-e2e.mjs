@@ -36,6 +36,7 @@ try {
     const titles=['主题打磨','UI 优化和 Agent 交互方式优化','对话样式优化','Agent 框架修改','扩展能力','桌面视觉校准','多模型设置','工作区标签','命令与终端','文件审阅','Artifact 预览','浏览器布局','权限交互','长任务状态','截图证据','主题注册表','图标灰度','字体层级','Composer 密度','项目导航','设置页','最终验收'];
     const conversations=[];
     for(const title of titles) conversations.push(await window.fielora.conversation.create({field_id:project.field_id,title,provider_config_id:null,model_id:null}));
+    for(const c of conversations) await window.fielora.conversation.createMessage({conversation_id:c.id,role:'USER',content:c.title,status:'COMPLETED',provider_config_id:null,model_id:null,invocation_id:null,references:[]});
     return{projectId:project.field_id};
   })()`);
   await cdp.eval('location.reload()');

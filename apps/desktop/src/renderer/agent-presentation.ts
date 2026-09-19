@@ -593,6 +593,7 @@ export function buildAgentPresentation(
 }
 
 export function agentPausePresentation(run: AgentRunView): { reason: string; action: string; canResume: boolean } {
+  if (run.error_code === 'AGENT_USER_INPUT_REQUIRED') return { reason: '需要你补充信息。请在输入框回答上方问题，发送后将继续当前任务；任务尚未完成。', action: '', canResume: false };
   const exhausted = run.current_step >= run.max_steps;
   const extra = Math.min(24, 4096 - run.max_steps);
   if (exhausted && extra <= 0) return { reason: '已达到本任务的累计执行上限。进展已保存，请查看执行记录后新建任务继续。', action: '', canResume: false };

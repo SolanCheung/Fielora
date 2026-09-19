@@ -253,9 +253,9 @@ button:disabled { opacity: .55; cursor: wait; }
 .markdown-body .markdown-inline-image figcaption span::before { content: '· '; }
 .markdown-body blockquote { margin: 12px 0; padding: 2px 0 2px 14px; border-left: 3px solid var(--fl-color-border); color: var(--fl-color-text-muted); }
 .markdown-body hr { margin: 20px 0; border: 0; border-top: 1px solid var(--fl-color-border-soft); }
-.markdown-body :not(pre) > code { padding: 2px 5px; border: 1px solid var(--fl-color-border-soft); border-radius: 5px; color: var(--fl-color-text); background: var(--fl-color-surface-subtle); font-family: var(--fl-font-agent-mono); font-size: var(--fl-font-size-agent-meta); font-weight: var(--fl-font-weight-regular); line-height: 1.4; }
-.markdown-code-block { margin: 13px 0 16px; overflow: hidden; border: 1px solid var(--fl-color-border-soft); border-radius: 10px; background: var(--fl-color-surface-subtle); }
-.markdown-code-block > header { min-height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 9px 0 13px; border-bottom: 1px solid var(--fl-color-border-soft); color: var(--fl-color-text-muted); background: var(--fl-color-surface-hover); font-size: var(--fl-font-size-agent-meta); font-weight: var(--fl-font-weight-regular); line-height: 1; }
+.markdown-body :not(pre) > code { padding: 2px 5px; border: 1px solid var(--fl-color-border-soft); border-radius: 5px; color: var(--fl-color-text); background: var(--fl-color-code-background); font-family: var(--fl-font-agent-mono); font-size: var(--fl-font-size-agent-meta); font-weight: var(--fl-font-weight-regular); line-height: 1.4; }
+.markdown-code-block { margin: 13px 0 16px; overflow: hidden; border: 1px solid var(--fl-color-border-soft); border-radius: 10px; background: var(--fl-color-code-background); }
+.markdown-code-block > header { min-height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 9px 0 13px; border-bottom: 1px solid var(--fl-color-border-soft); color: var(--fl-color-text-muted); background: var(--fl-color-code-background); font-size: var(--fl-font-size-agent-meta); font-weight: var(--fl-font-weight-regular); line-height: 1; }
 .markdown-code-block > header button { min-height: 25px; padding: 4px 7px; border: 0; border-radius: 6px; color: var(--fl-color-text-muted); background: transparent; font-size: var(--fl-font-size-agent-button); font-weight: var(--fl-font-weight-medium); }
 .markdown-code-block > header button:hover { color: var(--fl-color-text-strong); background: var(--fl-color-surface-active); }
 .markdown-code-block pre { margin: 0; padding: 13px 15px 15px; overflow: auto; white-space: pre; }
@@ -343,7 +343,6 @@ button:disabled { opacity: .55; cursor: wait; }
 .agent-live-files > div > button:disabled { opacity: 1; cursor: default; }
 .agent-live-files > div > button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--fl-font-agent-mono); font-size: var(--fl-font-size-agent-meta); font-weight: var(--fl-font-weight-regular); }
 .agent-live-files > p { margin: 4px 5px 0; color: var(--fl-color-text-subtle); font-size: var(--fl-font-size-agent-meta); font-weight: var(--fl-font-weight-regular); }
-.agent-resume-action { min-height: 28px; margin: 12px 0 0 24px; padding: 0; border: 0; color: var(--fl-color-link); background: transparent; font-size: var(--fl-font-size-agent-execution); font-weight: 500; }
 .agent-turn-approval { max-width: 650px; margin: 3px 0 3px 17px; color: var(--fl-color-text); }
 .agent-turn-approval > p { margin: 0 0 10px; font-size: var(--fl-font-size-agent-body); font-weight: var(--fl-font-weight-regular); line-height: var(--fl-line-height-agent-body); }
 .agent-turn-approval > p + p { color: var(--fl-color-text-muted); }

@@ -16,6 +16,10 @@
 }
 
 .ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fl-space-2);
   min-height: var(--fl-control-md);
   padding: 7px 13px;
   border: 0;
@@ -33,6 +37,64 @@
 .ui-button--danger { color: var(--fl-color-text-on-accent); background: var(--fl-color-danger); }
 .ui-button--ghost { color: var(--fl-color-text-muted); background: transparent; }
 .ui-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Settings controls share a solid neutral surface, distinct from read-only paths.
+   Keep this in the component layer so feature-level button rules cannot recolor it. */
+.settings-content {
+  --fl-settings-control: var(--fl-surface-overlay-solid);
+  --fl-settings-control-hover: color-mix(in srgb, var(--fl-color-text-strong) 4%, var(--fl-settings-control));
+  --fl-settings-control-pressed: color-mix(in srgb, var(--fl-color-text-strong) 8%, var(--fl-settings-control));
+}
+.settings-content :is(.ui-select > button, .appearance-color-value, .appearance-mode-control,
+  input:not([type="range"]):not([type="checkbox"]):not([type="color"]):not(.appearance-color-hex), textarea) {
+  background: var(--fl-settings-control);
+  border-color: var(--fl-color-border);
+}
+.settings-content :is(.ui-button--secondary, .appearance-footer button,
+  .settings-provider-list button, .settings-card-heading > button:not(.settings-primary-action),
+  .settings-plugin-summary button, .settings-plugin-add > button:not(.settings-primary-action),
+  .settings-extension-details-disclosure > summary) {
+  color: var(--fl-color-text);
+  background: var(--fl-settings-control);
+  border: 1px solid var(--fl-color-border);
+}
+.settings-content :is(.ui-button--secondary, .ui-button--ghost, .appearance-footer button,
+  .settings-provider-list button, .settings-card-heading > button:not(.settings-primary-action),
+  .settings-plugin-summary button, .settings-plugin-add > button:not(.settings-primary-action),
+  .settings-extension-details-disclosure > summary, .ui-select > button,
+  .appearance-mode-control button):hover:not(:disabled) {
+  color: var(--fl-color-text-strong);
+  background: var(--fl-settings-control-hover);
+}
+.settings-content :is(.ui-button--secondary, .ui-button--ghost, .appearance-footer button,
+  .settings-provider-list button, .settings-card-heading > button:not(.settings-primary-action),
+  .settings-plugin-summary button, .settings-plugin-add > button:not(.settings-primary-action),
+  .settings-extension-details-disclosure > summary, .ui-select > button,
+  .appearance-mode-control button):active:not(:disabled) {
+  background: var(--fl-settings-control-pressed);
+}
+.settings-content .appearance-mode-control button[aria-checked="true"] {
+  background: var(--fl-settings-control);
+  box-shadow: inset 0 0 0 1px var(--fl-color-border), var(--fl-shadow-control);
+}
+.settings-content :is(.settings-primary-action, .ui-button--primary) {
+  color: var(--fl-action-primary-foreground);
+  background: var(--fl-action-primary);
+  border-color: transparent;
+}
+.settings-content :is(.settings-primary-action, .ui-button--primary):hover:not(:disabled) {
+  color: var(--fl-action-primary-foreground);
+  background: var(--fl-action-primary-hover);
+}
+.settings-content :is(.settings-primary-action, .ui-button--primary):active:not(:disabled) {
+  color: var(--fl-action-primary-foreground);
+  background: var(--fl-action-primary-pressed);
+}
+.settings-content :is(button, summary):focus-visible {
+  outline: 2px solid var(--fl-color-focus);
+  outline-offset: 2px;
+}
+.settings-content button:disabled { opacity: .5; cursor: not-allowed; }
 
 .ui-icon-button,
 .ui-toolbar-action {
@@ -106,6 +168,12 @@
   text-overflow: clip;
   white-space: normal;
 }
+.ui-tooltip--card:has(.conversation-turn-preview) { background: var(--fl-surface-overlay-solid); width: min(400px, calc(100vw - 16px)); max-width: min(400px, calc(100vw - 16px)); }
+.conversation-turn-preview { display: grid; gap: var(--fl-space-2); font-size: var(--fl-type-body-size); line-height: var(--fl-type-body-line-height); }
+.conversation-turn-preview > * { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.conversation-turn-preview strong { -webkit-line-clamp: 2; color: var(--fl-color-text-strong); font-weight: var(--fl-font-weight-semibold); }
+.conversation-turn-preview > span { -webkit-line-clamp: 3; color: var(--fl-color-text-muted); white-space: pre-line; }
+
 .sidebar-hover-preview { display: grid; gap: 10px; }
 .sidebar-hover-preview > span { min-width: 0; display: flex; align-items: center; gap: var(--fl-space-2); }
 .sidebar-hover-preview > span:first-child { justify-content: space-between; }

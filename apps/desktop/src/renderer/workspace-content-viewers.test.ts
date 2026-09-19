@@ -41,7 +41,7 @@ test('chat review actions open or activate file-specific diff tabs in the existi
 test('selected project title toggles its conversation branch and hides the absolute path from the primary row', () => {
   assert.match(workspace, /const \[collapsedProjectIds, setCollapsedProjectIds\]/);
   assert.match(workspace, /aria-expanded=\{item\.field_id === projectId && !collapsedProjectIds\.has\(item\.field_id\)\}/);
-  assert.match(workspace, /!collapsedProjectIds\.has\(item\.field_id\) && <div className="conversation-section"/);
+  assert.match(workspace, /!collapsedProjectIds\.has\(item\.field_id\) && sidebarConversations\.length > 0 && <div className="conversation-section"/);
   assert.match(workspace, /<TooltipButton className="project-item" tooltip=\{<span className="sidebar-hover-preview"/);
   assert.match(workspace, /<small>\{item\.root_path \|\| '本地项目'\}<\/small>/);
   assert.doesNotMatch(workspace, /className="project-item" title=\{item\.root_path\}/);

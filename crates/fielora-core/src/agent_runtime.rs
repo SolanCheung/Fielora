@@ -1826,6 +1826,7 @@ impl AgentCoordinator {
         catalog.push(crate::agent_work_plan::catalog());
         catalog.push(crate::agent_turn_context::catalog());
         catalog.push(crate::agent_request_intent::catalog());
+        catalog.push(crate::agent_user_input::catalog());
         if self.browser_bridge.is_some() {
             catalog.extend(crate::agent_browser::catalog());
         }
@@ -2396,6 +2397,7 @@ impl AgentCoordinator {
         catalog.push(crate::agent_work_plan::catalog());
         catalog.push(crate::agent_turn_context::catalog());
         catalog.push(crate::agent_request_intent::catalog());
+        catalog.push(crate::agent_user_input::catalog());
         if self.browser_bridge.is_some() {
             catalog.extend(crate::agent_browser::catalog());
         }
@@ -3785,6 +3787,19 @@ impl AgentCoordinator {
                 return Err(DomainError::Validation("AGENT_INPUT_MISMATCH".into()));
             }
         }
+        if let Some(id) = request.user_message_id {
+            let receipt = crate::agent_user_input::accept(&self.storage, &run, &id)?;
+            if !crate::agent_user_input::receipts(&self.storage, &run)?.contains(&receipt) {
+                append_event(
+                    &self.storage,
+                    &self.sender,
+                    run.id.clone(),
+                    AgentEventKind::CheckpointCreated,
+                    receipt,
+                    AgentProjectionUpdate::default(),
+                )?;
+            }
+        }
         self.resume(request.run_id)
     }
 
@@ -3792,6 +3807,11 @@ impl AgentCoordinator {
         let run = self.storage.get_agent_run(run_id.clone())?;
         if run.status != AgentRunStatus::Paused {
             return Err(DomainError::InvalidStateTransition);
+        }
+        if crate::agent_user_input::pending(&self.storage, &run)?.is_some() {
+            return Err(DomainError::Validation(
+                crate::agent_user_input::REQUIRED.into(),
+            ));
         }
         let stalled = matches!(
             run.error_code.as_deref(),
@@ -5115,6 +5135,9 @@ impl AgentCoordinator {
             {
                 return;
             }
+            if self.pause_for_user_input(&prepared, &cancellation) {
+                return;
+            }
             crate::agent_turn_context::remove_projection(&mut messages);
             if task_class != AgentTaskClass::FastEdit {
                 let facts = match self.storage.list_agent_tool_calls(run_id.clone()) {
@@ -5327,7 +5350,25 @@ impl AgentCoordinator {
             {
                 return;
             }
-            turn_context.refresh(&mut messages, &prepared.run, request_intent);
+            let user_input_context =
+                match crate::agent_user_input::context(&self.storage, &prepared.run) {
+                    Ok(context) => context,
+                    Err(_) => {
+                        fail_run(
+                            &self.storage,
+                            &self.sender,
+                            run_id,
+                            "AGENT_USER_INPUT_READ_FAILED",
+                        );
+                        return;
+                    }
+                };
+            turn_context.refresh(
+                &mut messages,
+                &prepared.run,
+                request_intent,
+                user_input_context,
+            );
             let request = AgentModelRequest {
                 model_id: prepared.run.model_id.clone(),
                 system: self.ingress_system_prompt_for_run(
@@ -5570,7 +5611,7 @@ impl AgentCoordinator {
                         text: turn.text,
                         tool_calls: vec![],
                     });
-                    messages.push(AgentModelMessage::User(format!("The CURRENT request may have unresolved obligations. If action words refer to an earlier task, quoted material, or a question, use record_request_intent with answer_only and an exact quote from the current request; do not edit just to satisfy a lexical hint. Mixed explanation plus requested implementation still needs actions and verification. Resolve only actual current obligations; do not renew an older implementation merely because it remains unfinished. An explanation may finish independently of that older task. Current obligations: {remaining}. Unread explicitly supplied reference paths: {missing_references:?}. Use read_file/search_text with their absolute paths; do not infer reference behavior from the target project. A stopped model response or successful edit is not completion. Preserve the requested controls and original images. Test the affected current view; retain failed checks and fix the cause. If an external dependency truly blocks progress, explain the specific blocker rather than repeating a completion claim.")));
+                    messages.push(AgentModelMessage::User(format!("The CURRENT request may have unresolved obligations. If a required source/fact is missing, call request_user_input to show a concrete question and pause; do not repeat guesses or claim success. If action words refer to an earlier task, quoted material, or a question, use record_request_intent with answer_only and an exact quote from the current request; do not edit just to satisfy a lexical hint. Mixed explanation plus requested implementation still needs actions and verification. Resolve only actual current obligations; do not renew an older implementation merely because it remains unfinished. An explanation may finish independently of that older task. Current obligations: {remaining}. Unread explicitly supplied reference paths: {missing_references:?}. Use read_file/search_text with their absolute paths; do not infer reference behavior from the target project. A stopped model response or successful edit is not completion. Preserve the requested controls and original images. Test the affected current view; retain failed checks and fix the cause. If an external dependency truly blocks progress, explain the specific blocker rather than repeating a completion claim.")));
                     continue;
                 }
                 let content = if turn.text.trim().is_empty() {
@@ -5630,14 +5671,16 @@ impl AgentCoordinator {
             let all_observe = !access_question
                 && !turn.tool_calls.is_empty()
                 && turn.tool_calls.iter().all(|proposed| {
-                    !matches!(proposed.name.as_str(), "delegate_readonly" | "work_plan")
-                        && catalog.iter().any(|spec| {
-                            spec.definition.name == proposed.name
-                                && spec.effect == AgentToolEffect::Observe
-                                && tools
-                                    .iter()
-                                    .any(|definition| definition.name == proposed.name)
-                        })
+                    !matches!(
+                        proposed.name.as_str(),
+                        "delegate_readonly" | "work_plan" | "request_user_input"
+                    ) && catalog.iter().any(|spec| {
+                        spec.definition.name == proposed.name
+                            && spec.effect == AgentToolEffect::Observe
+                            && tools
+                                .iter()
+                                .any(|definition| definition.name == proposed.name)
+                    })
                 });
             if all_observe {
                 let mut pending = Vec::new();
@@ -5832,6 +5875,9 @@ impl AgentCoordinator {
                             &executed,
                         );
                         messages.push(executed.message);
+                        if self.pause_for_user_input(&prepared, &cancellation) {
+                            return;
+                        }
                         if access_question
                             && self.finish_access_question(&prepared, step, false, &cancellation)
                         {
@@ -5968,6 +6014,87 @@ impl AgentCoordinator {
                 return Ok(());
             }
         }
+    }
+
+    fn pause_for_user_input(
+        &self,
+        prepared: &PreparedRun,
+        cancellation: &ExecutionCancellation,
+    ) -> bool {
+        if self.pause_at_boundary(&prepared.run.id, cancellation, "USER_INPUT_BOUNDARY") {
+            return true;
+        }
+        let question = match crate::agent_user_input::pending(&self.storage, &prepared.run) {
+            Ok(Some(question)) => question,
+            Ok(None) => return false,
+            Err(_) => {
+                fail_run(
+                    &self.storage,
+                    &self.sender,
+                    prepared.run.id.clone(),
+                    "AGENT_USER_INPUT_READ_FAILED",
+                );
+                return true;
+            }
+        };
+        let content = format!(
+            "需要补充信息：\n\n{}",
+            question.receipt.as_ref().unwrap()["question"]
+                .as_str()
+                .unwrap_or_default()
+        );
+        let messages = match self
+            .storage
+            .list_conversation_messages(prepared.run.conversation_id.clone())
+        {
+            Ok(messages) => messages,
+            Err(_) => {
+                fail_run(
+                    &self.storage,
+                    &self.sender,
+                    prepared.run.id.clone(),
+                    "AGENT_USER_INPUT_READ_FAILED",
+                );
+                return true;
+            }
+        };
+        let message = messages.into_iter().find(|m| {
+            m.role == ConversationMessageRole::Assistant
+                && m.invocation_id.is_none()
+                && m.created_at >= question.updated_at
+                && m.content == content
+        });
+        let message = match message.map(Ok).unwrap_or_else(|| {
+            self.storage.create_conversation_message(
+                CreateConversationMessageRequest {
+                    conversation_id: prepared.run.conversation_id.clone(),
+                    role: ConversationMessageRole::Assistant,
+                    content,
+                    status: ConversationMessageStatus::Completed,
+                    provider_config_id: Some(prepared.run.provider_config_id.clone()),
+                    model_id: Some(prepared.run.model_id.clone()),
+                    invocation_id: None,
+                    references: vec![],
+                },
+                now_ms(),
+            )
+        }) {
+            Ok(message) => message,
+            Err(_) => {
+                fail_run(
+                    &self.storage,
+                    &self.sender,
+                    prepared.run.id.clone(),
+                    "AGENT_USER_INPUT_PERSIST_FAILED",
+                );
+                return true;
+            }
+        };
+        if append_event(&self.storage, &self.sender, prepared.run.id.clone(), AgentEventKind::RunPaused,
+            json!({"reason":crate::agent_user_input::REQUIRED,"safe_boundary":"TOOL_RECEIPTS_PERSISTED","remaining_required_work":true,"question_message_id":message.id,"question_tool_call_id":question.id}),
+            AgentProjectionUpdate { status: Some(AgentRunStatus::Paused), error_code: Some(crate::agent_user_input::REQUIRED.into()), ..Default::default() }
+        ).is_err() { fail_run(&self.storage, &self.sender, prepared.run.id.clone(), "AGENT_PAUSE_PERSIST_FAILED"); }
+        true
     }
 
     fn pause_general_work(&self, run_id: &AgentRunId, reason: &str) {
@@ -7774,7 +7901,7 @@ impl AgentCoordinator {
         let name = tool.name.clone();
         let arguments = tool.arguments.clone();
         let command_cancellation = cancellation.command.clone();
-        let providers = self.tool_providers.as_ref().clone();
+        let providers = self.providers_for_run(&tool.run_id);
         let storage = self.storage.clone();
         let durable_run_id = tool.run_id.clone();
         let durable_conversation_id = prepared.run.conversation_id.clone();
@@ -7794,6 +7921,8 @@ impl AgentCoordinator {
             crate::agent_turn_context::read(&self.storage, &prepared.run, &arguments)
         } else if name == crate::agent_request_intent::TOOL {
             crate::agent_request_intent::record(&prepared.run.id, &prepared.run.task, &arguments)
+        } else if name == crate::agent_user_input::TOOL {
+            crate::agent_user_input::record(&prepared.run, &arguments)
         } else {
             tokio::task::spawn_blocking(move || {
                 let mut runtime =
@@ -9993,6 +10122,8 @@ impl AgentCoordinator {
             crate::agent_turn_context::read(&self.storage, &prepared.run, &arguments)
         } else if name == crate::agent_request_intent::TOOL {
             crate::agent_request_intent::record(&prepared.run.id, &prepared.run.task, &arguments)
+        } else if name == crate::agent_user_input::TOOL {
+            crate::agent_user_input::record(&prepared.run, &arguments)
         } else if let Some(bridge) = self
             .browser_bridge
             .as_ref()
@@ -11253,13 +11384,22 @@ fn reference_task(storage: &StorageHandle, prepared: &PreparedRun) -> String {
     else {
         return String::new();
     };
-    storage
+    let mut source = storage
         .list_conversation_messages(prepared.run.conversation_id.clone())
         .unwrap_or_default()
         .into_iter()
         .find(|m| m.id.0 == id && m.role == ConversationMessageRole::User)
         .map(|m| m.content)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if let Ok(context) = crate::agent_user_input::context(storage, &prepared.run) {
+        for answer in context["accepted_answers"].as_array().into_iter().flatten() {
+            if let Some(text) = answer["answer"].as_str() {
+                source.push('\n');
+                source.push_str(text);
+            }
+        }
+    }
+    source
 }
 
 fn unread_references(paths: &[PathBuf], tools: &[AgentToolCallView]) -> Vec<String> {

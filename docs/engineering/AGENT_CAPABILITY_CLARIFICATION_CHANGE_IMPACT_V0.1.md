@@ -1,0 +1,13 @@
+# Capability truth and clarification continuity — 2026-09-18
+
+Flow: an installation needs a verified source. Show only the actual tool catalog, explain invocation failures, ask for the missing source, persist the question, and resume the same unfinished Run from the user's explicitly submitted answer.
+
+Changes: project capability_status from the admitted catalog rather than claiming an unregistered Web adapter exists. Reject tool IDs passed as OS program names without rerouting around Network policy; distinguish spawn-not-found/access/start failures. Add a native Observe request_user_input tool using existing ToolCall/Conversation/Event persistence. Pause with AGENT_USER_INPUT_REQUIRED rather than declaring success or swallowing the question. Add optional user_message_id to existing agent.resume, validating same-conversation USER/COMPLETED, nonempty, after the pending question. Bind the accepted answer to the question in the existing checkpoint ledger and reproject it after restart/compaction. Ordinary later messages remain excluded. No schema migration or second runtime.
+
+Authority: capability exposure is not permission, credential validity or successful execution. A question is not completion or verification. Answers do not reset unknown effects, write verification, prior failures, budgets or original task identity. Preserve original attachments. Accepted explicit user answer paths may enter the existing reference-path extraction, with the same read-only boundary as original user wording. No arbitrary history becomes a filesystem grant. Cancelling remains available; a resume without an answer must not silently continue a pending question.
+
+UI: show the persisted question; existing composer submits a text answer to the paused Run, not the follow-up queue. Disable empty Continue for this pause reason. Source/credentials uncertainty must be expressed as such, not guessed repositories or a request to paste secrets.
+
+Validation: absent/present catalog and live provider availability, wrong tool-as-program and missing executable, question+mutation in one model turn stops before mutation, same-run answer after full restart, foreign/stale/assistant/replayed answer rejection, old Run/history isolation, no answer auto-completion, bounded file-action fixture and verification (not actual skill installation). Cross lane and serial dev/packaged desktop tests. Deterministic fixture is not real Qwen or real Archify acceptance; no real Coding Plan automation.
+
+Rollback: revert additive protocol/tool/renderer changes; old event payloads remain valid. Existing resume callers omit the optional field; new clients remain compatible with old stored Runs. No credentials or external package installed for this repair.

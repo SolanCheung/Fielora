@@ -4,6 +4,7 @@ mod agent_request_intent;
 mod agent_request_scope;
 mod agent_runtime;
 mod agent_turn_context;
+mod agent_user_input;
 mod agent_visual_context;
 mod agent_work_plan;
 mod agent_work_state;

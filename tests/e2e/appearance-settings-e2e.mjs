@@ -156,7 +156,7 @@ try {
   await cdp.eval(`(()=>{for(const [id,value] of [['appearance-workspace-background-from-hex','#FFFDF8'],['appearance-workspace-background-to-hex','#EEF7FF']]){const input=document.querySelector('[data-testid="'+id+'"]');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));}})()`);
   await wait(cdp, `document.documentElement.style.getPropertyValue('--fl-surface-content').includes('#FFFDF8') && document.documentElement.style.getPropertyValue('--fl-surface-content').includes('#EEF7FF')`);
   const workspaceGradient = await cdp.eval(`JSON.parse(localStorage.getItem('fielora.ui.preferences.v2')).appearance.workspaceBackgroundGradientOverride`);
-  assert.deepEqual(workspaceGradient, { from: '#FFFDF8', to: '#EEF7FF' });
+  assert.deepEqual(workspaceGradient, { from: '#FFFDF8', to: '#EEF7FF', bottomLeft: '#F7F2FC' });
   await captureScreenshot(cdp, path.join(visualReview, 'appearance-gradient-picker-light-1440.png'));
 
   await cdp.eval(`document.querySelector('[data-testid="appearance-reduced-motion"]').click()`);

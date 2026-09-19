@@ -1011,7 +1011,7 @@ button[type="submit"]:disabled { background: var(--fl-action-primary-disabled); 
   box-sizing: border-box;
   min-height: 58px;
   display: grid;
-  grid-template-columns: minmax(250px, 1fr) minmax(360px, 420px);
+  grid-template-columns: minmax(180px, 1fr) minmax(360px, 420px);
   align-items: center;
   gap: 28px;
   padding: 7px 2px;
@@ -1081,11 +1081,14 @@ button[type="submit"]:disabled { background: var(--fl-action-primary-disabled); 
 .appearance-color-picker-button { cursor: pointer; }
 .appearance-color-picker-button:hover { border-color: color-mix(in srgb, var(--fl-color-text-strong) 24%, transparent); }
 .appearance-color-picker-button:focus-visible { outline: 2px solid var(--fl-action-primary); outline-offset: 2px; }
-.appearance-gradient-editor { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr); align-items: center; gap: 5px; }
-.appearance-gradient-editor > i { color: var(--fl-color-text-subtle); font-size: var(--fl-font-size-caption); font-style: normal; text-align: center; }
-.appearance-gradient-editor .appearance-color-value { grid-template-columns: 14px minmax(42px, 1fr) 24px; gap: 5px; padding-inline: 7px 4px; }
-.appearance-gradient-editor .appearance-color-swatch { width: 13px; height: 13px; }
-.appearance-gradient-editor .appearance-color-picker-button { width: 22px; height: 22px; border-radius: 6px; }
+.appearance-customization-card .appearance-color-controls:has(.appearance-gradient-editor) { grid-template-columns: 84px minmax(0, 1fr); align-items: end; gap: var(--fl-space-2); }
+.appearance-color-controls:has(.appearance-gradient-editor) > .ui-select > button { padding-inline: 6px; gap: var(--fl-space-1); }
+.appearance-gradient-editor { min-width: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: center; gap: 6px; }
+.appearance-gradient-center { min-width: 0; display: grid; gap: var(--fl-space-1); }
+.appearance-gradient-center > small { color: var(--fl-color-text-subtle); font-size: var(--fl-font-size-caption); }
+.appearance-gradient-editor .appearance-color-value { grid-template-columns: minmax(0, 1fr) 20px; gap: 3px; padding-inline: 5px; }
+.appearance-gradient-editor .appearance-color-swatch { display: none; }
+.appearance-gradient-editor .appearance-color-picker-button { width: 20px; height: 20px; border-radius: 6px; }
 
 .appearance-color-popover {
   position: fixed;
@@ -1144,10 +1147,18 @@ button[type="submit"]:disabled { background: var(--fl-action-primary-disabled); 
   .appearance-color-controls,
   .appearance-paired-controls,
   .appearance-contrast-row > label { width: 100%; }
-  .appearance-gradient-editor { grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr); }
+  .appearance-gradient-editor { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
-.agent-pause-notice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--fl-space-2); margin-bottom: var(--fl-space-3); }
+.agent-pause-notice { display: grid; gap: var(--fl-space-3); margin-bottom: var(--fl-space-3); }
+.agent-pause-actions { display: flex; flex-wrap: wrap; gap: var(--fl-space-2); }
+.agent-resume-action { min-height: 34px; margin: 0; padding: var(--fl-space-1) var(--fl-space-3); border: 1px solid var(--fl-color-border); border-radius: var(--fl-radius-control); color: var(--fl-color-text); background: var(--fl-color-surface); font: inherit; cursor: pointer; }
+.agent-resume-action:hover { background: var(--fl-color-surface-hover); }
+.agent-resume-action.is-primary { color: var(--fl-color-accent); border-color: var(--fl-color-accent); }
+.agent-resume-action:focus-visible { outline: 2px solid var(--fl-color-focus); outline-offset: 2px; }
+.agent-turn.is-paused { margin-bottom: var(--fl-space-5); }
+.agent-status-indicator.is-idle { display: inline-flex; align-items: center; border: 0; border-radius: 0; }
+.agent-status-indicator.is-idle .shell-icon { width: 12px; height: 12px; }
 .agent-pause-notice p { flex-basis: 100%; margin: 0 0 var(--fl-space-1); color: var(--fl-color-text-muted); font-size: var(--fl-type-body-size); }
 
 /* One changing progress preview; durable history is opened explicitly. */

@@ -281,7 +281,7 @@ function durableRunPhase(events: readonly AgentEventView[]): string {
 
 function currentRunStateLabel(run: AgentRunView, events: readonly AgentEventView[], tools: readonly AgentToolCallView[], thinking: boolean): string {
   if (run.status === 'WAITING_APPROVAL') return '等待批准';
-  if (run.status === 'PAUSED') return '已暂停';
+  if (run.status === 'PAUSED') return run.error_code === 'AGENT_USER_INPUT_REQUIRED' ? '等待你的回答' : '已暂停';
   if (thinking) return '正在思考';
   const phase = durableRunPhase(events);
   if (phase === 'VERIFY') return '正在验证';
@@ -293,8 +293,9 @@ function currentRunStateLabel(run: AgentRunView, events: readonly AgentEventView
   return '正在执行';
 }
 
-function AgentProgressSummary({ run, presentation, events, tools, review, thinking, detailsOpen, onToggleDetails, onResume, onStop, onReviewFile, mcpRuntime, mcpBusyConnectionId, onActivateMcp, history }: {
+function AgentProgressSummary({ run, busy, presentation, events, tools, review, thinking, detailsOpen, onToggleDetails, onResume, onStop, onReviewFile, mcpRuntime, mcpBusyConnectionId, onActivateMcp, history }: {
   history: ReactNode;
+  busy: boolean;
   run: AgentRunView;
   presentation: AgentPresentation;
   events: AgentEventView[];
@@ -317,7 +318,7 @@ function AgentProgressSummary({ run, presentation, events, tools, review, thinki
     : presentation.changedFiles > 0 ? `${presentation.changedFiles} 个文件已修改` : '';
   const statusLabel = currentRunStateLabel(run, events, tools, thinking);
   const detailId = `agent-run-details-${run.id}`;
-  return <div className={`agent-progress-summary${detailsOpen ? ' is-expanded' : ''}${thinking ? ' is-thinking' : ''}`} data-testid="agent-execution-status" data-execution-stage={thinking ? 'THINKING' : 'ACTIVE'} data-layout="conversation-stream">
+  return <div className={`agent-progress-summary${detailsOpen ? ' is-expanded' : ''}${thinking ? ' is-thinking' : ''}`} data-testid="agent-execution-status" data-execution-stage={run.status === 'PAUSED' ? 'PAUSED' : run.status === 'WAITING_APPROVAL' ? 'WAITING_APPROVAL' : thinking ? 'THINKING' : 'ACTIVE'} data-layout="conversation-stream">
     {detailsOpen && <div className="agent-run-details" id={detailId} data-testid="agent-run-details">
       {history}
       <CurrentRunMcp runtime={mcpRuntime ?? null} busyConnectionId={mcpBusyConnectionId} onActivate={onActivateMcp}/>
@@ -325,11 +326,13 @@ function AgentProgressSummary({ run, presentation, events, tools, review, thinki
     </div>}
     {run.status === 'PAUSED' && <div className="agent-pause-notice" data-testid="agent-pause-notice">
       <p>{(run.error_code === 'AGENT_VERIFICATION_REQUIRED' ? browserLoadPauseReason(tools) : null) ?? agentPausePresentation(run).reason}</p>
-      {onResume && agentPausePresentation(run).canResume && <button type="button" className="agent-resume-action" onClick={onResume}>{agentPausePresentation(run).action}</button>}
-      {onStop && <button type="button" className="agent-resume-action" onClick={onStop}>停止任务</button>}
+      <div className="agent-pause-actions" aria-busy={busy}>
+      {onResume && agentPausePresentation(run).canResume && <button type="button" className="agent-resume-action is-primary" disabled={busy} onClick={onResume}>{agentPausePresentation(run).action}</button>}
+      {onStop && <button type="button" className="agent-resume-action" disabled={busy} onClick={onStop}>停止任务</button>}
+      </div>
     </div>}
     <button type="button" className="agent-progress-summary-trigger" onClick={onToggleDetails} aria-expanded={detailsOpen} aria-controls={detailId} data-testid="agent-progress-summary">
-      <span className={`agent-status-indicator${run.status === 'RUNNING' ? ' is-active' : ''}`} aria-hidden="true"/><strong>{statusLabel}</strong>
+      <span className={`agent-status-indicator${run.status === 'RUNNING' ? ' is-active' : ' is-idle'}`} aria-hidden="true">{run.status !== 'RUNNING' && <AppIcon name="pause"/>}</span><strong>{statusLabel}</strong>
       <span>· 累计 {presentation.elapsed}</span>{changeSummary && <span>· {changeSummary}</span>}<AppIcon name="chevronDown"/>
     </button>
   </div>;
@@ -450,17 +453,17 @@ export function AgentTurn({
   const activityFiles = useMemo<ActivityFileContext>(() => ({ resolve: (target) => resolveActivityFileLink(target, tools), open: onOpenActivityFile }), [tools, onOpenActivityFile]);
   const activityItems = useMemo(() => buildConversationActivityProjection(events, tools), [events, tools]);
   const liveNarrative = useMemo(() => {
-    if (terminal || answerOnly) return '';
+    if (terminal || answerOnly || run?.status !== 'RUNNING') return '';
     return reconcileLiveNarrative(activityItems, streamingContent, streamingStep);
-  }, [activityItems, answerOnly, streamingContent, streamingStep, terminal]);
+  }, [activityItems, answerOnly, streamingContent, streamingStep, terminal, run?.status]);
   const status = terminalStatus(run, terminalMessage);
   const canExpand = Boolean(run && (activityItems.length || events.length || tools.length));
   const partial = Boolean(status === 'FAILED' && presentation && presentation.changedFiles > 0);
   const messageId = terminalMessage?.id ?? `agent-turn-${run?.id ?? 'historical'}`;
-  const thinking = Boolean(run && !terminal && activityItems.length === 0 && !liveNarrative);
+  const thinking = Boolean(run?.status === 'RUNNING' && !terminal && activityItems.length === 0 && !liveNarrative);
 
   return <section
-    className={`message assistant agent-turn${answerOnly ? ' agent-answer' : ''}${terminal ? ' is-terminal' : ' is-running'}`}
+    className={`message assistant agent-turn${answerOnly ? ' agent-answer' : ''}${terminal ? ' is-terminal' : run?.status === 'PAUSED' ? ' is-paused' : ' is-running'}`}
     data-message-id={messageId}
     data-testid="message-assistant"
     data-agent-turn="true"
@@ -475,9 +478,9 @@ export function AgentTurn({
       )}
     </div>}
     {!answerOnly && !terminal && run && presentation && <>
-      {!detailsOpen && <LiveActivityPreview items={activityItems} tools={tools} liveNarrative={liveNarrative} activityFiles={activityFiles}/>}
+      {!detailsOpen && run.status !== 'PAUSED' && <LiveActivityPreview items={activityItems} tools={tools} liveNarrative={liveNarrative} activityFiles={activityFiles}/>}
       {approval && onDecision && <AgentApproval tool={tools.find((tool) => tool.id === approval.tool_call_id) ?? null} summary={approvalSummary} busy={busy} onDecision={onDecision} onToggleSteps={() => setDetailsOpen(true)}/>}
-      <AgentProgressSummary run={run} presentation={presentation} events={events} tools={tools} review={review} thinking={thinking} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen((value) => !value)} onResume={onResume} onStop={onStop} onReviewFile={onReviewFile} mcpRuntime={mcpRuntime} mcpBusyConnectionId={mcpBusyConnectionId} onActivateMcp={onActivateMcp} history={<CompletedActivityHistory events={events} items={activityItems} tools={tools} activityFiles={activityFiles}/>}/>
+      <AgentProgressSummary run={run} busy={busy} presentation={presentation} events={events} tools={tools} review={review} thinking={thinking} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen((value) => !value)} onResume={onResume} onStop={onStop} onReviewFile={onReviewFile} mcpRuntime={mcpRuntime} mcpBusyConnectionId={mcpBusyConnectionId} onActivateMcp={onActivateMcp} history={<CompletedActivityHistory events={events} items={activityItems} tools={tools} activityFiles={activityFiles}/>}/>
     </>}
     {!answerOnly && terminal && status && (
       <AgentTerminalResult run={run} status={status} message={terminalMessage} presentation={presentation} tools={tools} canExpand={canExpand} partial={partial} review={review} executionDetail={run && presentation ? <CompletedActivityHistory events={events} items={activityItems} tools={tools} activityFiles={activityFiles}/> : null} onRetry={onRetry} onReview={onReview} onReviewFile={onReviewFile} onOpenReference={onOpenReference} onOpenImage={onOpenImage}/>

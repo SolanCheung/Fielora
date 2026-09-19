@@ -3,8 +3,9 @@ import test from 'node:test';
 import type { AgentEventView, AgentRunView, ConversationMessageView } from '@fielora/contracts';
 import {
   agentTurnOwnership,
+  agentTurnDisplayAnchor,
   previousAgentAttempts,
-  collapseDuplicateUnsentConversations,
+  sentConversations,
   conversationTitleFromContent,
   friendlyFilePreviewFailure,
   hasUserMessage,
@@ -53,12 +54,14 @@ test('the first user request produces a compact content-derived conversation tit
   assert.equal(isDefaultConversationTitle('代码重构计划'), false);
 });
 
-test('only one unsent draft remains visible without deleting real conversations', () => {
+test('unsent drafts are hidden from navigation without mutating the page collection', () => {
   const conversations = [{ id: 'draft-new' }, { id: 'sent' }, { id: 'draft-old' }];
   assert.deepEqual(
-    collapseDuplicateUnsentConversations(conversations, new Set(['draft-new', 'draft-old'])),
-    [{ id: 'draft-new' }, { id: 'sent' }],
+    sentConversations(conversations, new Set(['draft-new', 'draft-old'])),
+    [{ id: 'sent' }],
   );
+  assert.deepEqual(conversations.map(item => item.id), ['draft-new', 'sent', 'draft-old']);
+  assert.deepEqual(sentConversations(conversations, new Set()), conversations);
 });
 
 test('file proposal accepts one bounded relative replacement', () => {
@@ -90,7 +93,7 @@ test('agent activity and terminal response remain owned by their exact user turn
     { id: 'user-2', role: 'USER', content: 'second', created_at: 30, invocation_id: null },
     { id: 'assistant-2', role: 'ASSISTANT', content: 'second result', created_at: 40, invocation_id: 'run-2' },
   ] as unknown as ConversationMessageView[];
-  const run = { id: 'run-2', created_at: 31 } as unknown as AgentRunView;
+  const run = { id: 'run-2', created_at: 31, status: 'COMPLETED' } as unknown as AgentRunView;
   const events = [{ kind: 'RUN_CREATED', payload: { user_message_id: 'user-2' } }] as unknown as AgentEventView[];
   assert.deepEqual(agentTurnOwnership(messages, run, events), { userMessageId: 'user-2', assistantMessageId: 'assistant-2' });
 });
@@ -103,4 +106,18 @@ test('workspace preview routes images away from the text reader and hides raw IP
   assert.equal(message.includes('fielora:'), false);
   assert.equal(message.includes('Binary files'), false);
   assert.match(message, /不支持.*预览/);
+});
+
+test('a persisted clarification does not replace the paused execution with a terminal answer', () => {
+  const messages = [{ id: 'user', role: 'USER', created_at: 10 }, { id: 'question', role: 'ASSISTANT', created_at: 25, invocation_id: null }] as unknown as ConversationMessageView[];
+  const run = { id: 'run', created_at: 20, status: 'PAUSED' } as AgentRunView;
+  assert.deepEqual(agentTurnOwnership(messages, run, []), { userMessageId: 'user', assistantMessageId: null });
+});
+
+test('clarification display follows the question then the accepted answer without changing original ownership', () => {
+  const messages = [{ id: 'user', role: 'USER' }, { id: 'question', role: 'ASSISTANT' }, { id: 'answer', role: 'USER' }] as ConversationMessageView[];
+  const events = [{ kind: 'RUN_PAUSED', payload: { reason: 'AGENT_USER_INPUT_REQUIRED', question_message_id: 'question' } }] as AgentEventView[];
+  assert.equal(agentTurnDisplayAnchor(messages, events, 'user'), 'question');
+  events.push({ kind: 'CHECKPOINT_CREATED', payload: { kind: 'USER_INPUT_RECEIVED', user_message_id: 'answer' } } as AgentEventView);
+  assert.equal(agentTurnDisplayAnchor(messages, events, 'user'), 'answer');
 });

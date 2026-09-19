@@ -37,7 +37,10 @@
 .usage-table strong { font-weight: 500; margin-bottom: 6px; }
 .usage-pagination { justify-content: flex-end; padding: 14px 0; }
 .usage-rate-fields { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
-.usage-rate-fields label { display: flex; flex-direction: column; gap: 8px; font-size: var(--fl-font-size-meta); flex: 1 1 160px; }
-.usage-rate-fields input { width: 100%; min-width: 0; }
+.usage-rate-fields label { display: flex; flex-direction: column; gap: 8px; font-size: var(--fl-font-size-meta); flex: 1 1 160px; min-width: 0; margin: 0; }
+.usage-rate-fields input { width: 100%; min-width: 0; padding-block: 7px; }
+.usage-rate-fields input,
+.usage-rate-fields > .ui-select > button,
+.usage-rate-fields > .ui-button { height: var(--fl-control-lg); }
 .usage-rates > .select-menu { max-width: 100%; }
 .usage-note { margin-top: 20px; line-height: 1.7; }

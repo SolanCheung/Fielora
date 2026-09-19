@@ -434,7 +434,7 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
   left: 2px;
   display: flex;
   align-items: center;
-  width: 24px;
+  width: min(40px, calc(var(--fl-layout-conversation-gutter) - 4px));
   pointer-events: none;
 }
 
@@ -451,10 +451,10 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
 .conversation-turn-marker {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 24px;
+  justify-content: flex-start;
+  width: 100%;
   min-height: 16px;
-  padding: 7px 0;
+  padding: 7px 0 7px 8px;
   border: 0;
   border-radius: var(--fl-radius-control);
   background: transparent;
@@ -462,22 +462,42 @@ body[data-sidebar-collapsed="true"] .project-layout.workspace-open.dock-focused 
 }
 
 .conversation-turn-marker > span {
-  width: 6px;
+  flex: 0 1 32px;
+  min-width: 0;
+  width: 32px;
   height: 2px;
-  background: var(--fl-color-text-muted);
-  opacity: .45;
+  background: var(--fl-color-text-strong);
+  opacity: var(--turn-marker-opacity, .28);
+  transform: scaleX(var(--turn-marker-scale, .1875));
+  transform-origin: left center;
+  will-change: transform, opacity;
+  transition: transform var(--fl-duration-normal) var(--fl-ease-standard), opacity var(--fl-duration-normal) var(--fl-ease-standard);
 }
 
 .conversation-turn-marker[aria-current] > span {
-  width: 10px;
-  background: var(--fl-color-text-strong);
-  opacity: 1;
+  opacity: var(--turn-marker-opacity, .4);
 }
 
-.conversation-turn-marker:hover > span,
-.conversation-turn-marker:focus-visible > span {
-  width: 10px;
-  opacity: 1;
+.conversation-turn-marker[data-wave-active] { --turn-marker-scale: 1; --turn-marker-opacity: 1; }
+.conversation-turn-marker:has(+ .conversation-turn-marker[data-wave-active]),
+.conversation-turn-marker[data-wave-active] + .conversation-turn-marker {
+  --turn-marker-scale: .75; --turn-marker-opacity: .88;
+}
+.conversation-turn-marker:has(+ .conversation-turn-marker + .conversation-turn-marker[data-wave-active]),
+.conversation-turn-marker[data-wave-active] + .conversation-turn-marker + .conversation-turn-marker {
+  --turn-marker-scale: .5625; --turn-marker-opacity: .76;
+}
+.conversation-turn-marker:has(+ .conversation-turn-marker + .conversation-turn-marker + .conversation-turn-marker[data-wave-active]),
+.conversation-turn-marker[data-wave-active] + .conversation-turn-marker + .conversation-turn-marker + .conversation-turn-marker {
+  --turn-marker-scale: .375; --turn-marker-opacity: .64;
+}
+.conversation-turn-marker:has(+ .conversation-turn-marker + .conversation-turn-marker + .conversation-turn-marker + .conversation-turn-marker[data-wave-active]),
+.conversation-turn-marker[data-wave-active] + .conversation-turn-marker + .conversation-turn-marker + .conversation-turn-marker + .conversation-turn-marker {
+  --turn-marker-scale: .25; --turn-marker-opacity: .52;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-turn-marker > span { transition: none; }
 }
 
 .message.assistant,

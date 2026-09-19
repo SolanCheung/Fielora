@@ -23,4 +23,6 @@ test('first send moves the project draft to its created conversation without lea
   const from = composerDraftKey('p', ''); const to = composerDraftKey('p', 'created');
   store.write(from, { prompt: '开始工作', attachments: [] }); store.move(from, to);
   assert.equal(store.read(to).prompt, '开始工作'); assert.equal(store.read(from).prompt, '');
+  store.move(from, to);
+  assert.equal(store.read(to).prompt, '开始工作', 'an absent source must never clear an existing draft');
 });

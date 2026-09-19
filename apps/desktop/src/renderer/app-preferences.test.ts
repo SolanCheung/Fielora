@@ -142,6 +142,22 @@ test('contrast helper remains deterministic', () => {
   assert.equal(colorContrast('#FFFFFF', '#FFFFFF'), 1);
 });
 
+test('code fill follows contrast and resetting restores the theme baseline', () => {
+  const properties = new Map<string, string>();
+  const target = { dataset: {} as DOMStringMap, style: { colorScheme: '', setProperty: (name: string, value: string) => { properties.set(name, value); }, removeProperty: (name: string) => { properties.delete(name); return ''; } } } as unknown as HTMLElement;
+  for (const themePreference of ['LIGHT', 'DARK'] as const) {
+    const preferences = normalizeAppPreferences({ appearance: { ...defaultAppearancePreferences, themePreference, surfaceContrast: 0 } });
+    applyAppPreferences(target, preferences);
+    assert.equal(properties.get('--fl-color-code-background'), 'color-mix(in srgb, var(--fl-color-code-background-base) 0.00%, var(--fl-color-surface))');
+    preferences.appearance.surfaceContrast = 100;
+    applyAppPreferences(target, preferences);
+    assert.equal(properties.get('--fl-color-code-background'), 'color-mix(in srgb, var(--fl-color-text-strong) 20.00%, var(--fl-color-code-background-base))');
+    preferences.appearance.surfaceContrast = defaultAppearancePreferences.surfaceContrast;
+    applyAppPreferences(target, preferences);
+    assert.equal(properties.has('--fl-color-code-background'), false);
+  }
+});
+
 test('legacy visual customization data remains readable but cannot replace the official design language', () => {
   const storage = memoryStorage({ 'fielora.ui.preferences.v2': JSON.stringify({
     version: 2,
@@ -178,18 +194,27 @@ test('background gradients normalize and resolve without entering neutral color 
       workspaceBackgroundGradientOverride: { from: '#fcfdfe', to: '#eef7ff' },
     },
   });
-  assert.deepEqual(preferences.appearance.sidebarBackgroundGradientOverride, { from: '#E8DEFA', to: '#FFEEF4' });
-  assert.deepEqual(preferences.appearance.workspaceBackgroundGradientOverride, { from: '#FCFDFE', to: '#EEF7FF' });
+  assert.deepEqual(preferences.appearance.sidebarBackgroundGradientOverride, { from: '#E8DEFA', to: '#FFEEF4', bottomLeft: '#E8DEFA' });
+  assert.deepEqual(preferences.appearance.workspaceBackgroundGradientOverride, { from: '#FCFDFE', to: '#EEF7FF', bottomLeft: '#FCFDFE' });
   const properties = new Map<string, string>();
   const target = { dataset: {} as DOMStringMap, style: { colorScheme: '', setProperty: (name: string, value: string) => { properties.set(name, value); }, removeProperty: (name: string) => { properties.delete(name); return ''; } } } as unknown as HTMLElement;
   applyAppPreferences(target, preferences, { prefersDark: false, prefersReducedMotion: false, supportsBackdrop: true });
-  assert.match(properties.get('--fl-brand-chrome-canvas') ?? '', /linear-gradient\(112deg, #E8DEFA/);
+  assert.match(properties.get('--fl-brand-chrome-canvas') ?? '', /radial-gradient\(ellipse 80% 75% at 0% 100%, #E8DEFA/);
   assert.equal(properties.get('--fl-brand-chrome-caption'), '#FFEEF4');
-  assert.match(properties.get('--fl-surface-content') ?? '', /linear-gradient\(135deg, #FCFDFE/);
+  assert.match(properties.get('--fl-surface-content') ?? '', /radial-gradient\(ellipse 80% 75% at 0% 100%, #FCFDFE/);
   assert.match(properties.get('--fl-color-surface') ?? '', /color-mix\(in srgb, #FCFDFE 50%, #EEF7FF\)/);
   assert.equal(resolveTitlebarCaption(preferences.appearance, 'LIGHT'), '#FFEEF4');
   assert.equal(resolveTitlebarCaption(defaultAppearancePreferences, 'LIGHT'), '#FFEFF2');
   assert.equal(resolveTitlebarCaption(defaultAppearancePreferences, 'DARK'), '#2B2229');
+});
+
+test('three-center colors persist independently and invalid legacy additions fall back safely', () => {
+  const appearance = { ...defaultAppearancePreferences, sidebarBackgroundGradientOverride: { from: '#e8defa', to: '#ffeef4', bottomLeft: '#d5ffee' } };
+  const configured = normalizeAppPreferences({ appearance });
+  assert.deepEqual(configured.appearance.sidebarBackgroundGradientOverride, { from: '#E8DEFA', to: '#FFEEF4', bottomLeft: '#D5FFEE' });
+  assert.deepEqual(normalizeAppPreferences(JSON.parse(JSON.stringify(configured))), configured);
+  const invalid = normalizeAppPreferences({ appearance: { ...appearance, sidebarBackgroundGradientOverride: { ...appearance.sidebarBackgroundGradientOverride, bottomLeft: 'url(https://invalid)' } } });
+  assert.equal(invalid.appearance.sidebarBackgroundGradientOverride?.bottomLeft, '#E8DEFA');
 });
 
 test('resetting appearance can preserve non-appearance preferences', () => {
